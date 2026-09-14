@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import packingRoutes from './server/packingRoutes';
@@ -278,14 +279,22 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // 🚀 Vite Middleware (Dev) vs Static Dist (Production)
 // -------------------------------------------------------------
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+  const isProduction = process.env.NODE_ENV === 'production' || (hasDist && process.env.FORCE_DEV !== 'true');
+
+  if (!isProduction) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: {
+          ignored: ['**/server/**', '**/dist/**', '**/*.db*', '**/db_store.json', '**/uploads/**']
+        }
+      },
       appType: 'spa'
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -293,7 +302,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT} (${isProduction ? 'Production Static Build' : 'Vite Dev Mode'})`);
   });
 }
 

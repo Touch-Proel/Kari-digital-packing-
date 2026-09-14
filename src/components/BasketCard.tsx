@@ -857,6 +857,7 @@ export function BasketCard({
                       <div className="flex items-center gap-1.5">
                         {/* Qty Pill with Pencil: e.g. x1 ✏️ */}
                         <button
+                          type="button"
                           onClick={e => handleToggleQuickQty(item.product_code, e)}
                           className="bg-[#061226] border border-slate-700 hover:border-cyan-400 text-cyan-300 font-mono font-bold text-xs px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all active:scale-95 shadow-sm"
                           title="ចុចដើម្បីកែប្រែចំនួន"
@@ -868,6 +869,7 @@ export function BasketCard({
                         {/* Delete Button with 2-click confirm */}
                         {deleteConfirmCode === item.product_code ? (
                           <button
+                            type="button"
                             onClick={e => handleExecuteDelete(item, e)}
                             className="bg-rose-600 hover:bg-rose-500 text-white px-2 py-0.5 rounded-lg text-[10px] font-black animate-pulse shadow active:scale-95"
                             title="ចុចម្តងទៀតដើម្បីលុបមុខនេះចោល"
@@ -876,6 +878,7 @@ export function BasketCard({
                           </button>
                         ) : (
                           <button
+                            type="button"
                             onClick={e => handleDeleteClick(item, e)}
                             className="w-6 h-6 rounded-lg bg-rose-950/40 hover:bg-rose-900 border border-rose-800/70 text-rose-400 hover:text-rose-200 flex items-center justify-center text-xs font-bold transition-all active:scale-95"
                             title="ដកមុខនេះចេញពីកន្ត្រក"
@@ -896,6 +899,7 @@ export function BasketCard({
                       {/* Stepper buttons */}
                       <div className="flex items-center bg-slate-950 border border-slate-700 rounded-lg p-0.5">
                         <button
+                          type="button"
                           onClick={e => handleStepQty(item, -1, e)}
                           className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white font-black text-sm flex items-center justify-center"
                         >
@@ -905,6 +909,7 @@ export function BasketCard({
                           {item.quantity}
                         </span>
                         <button
+                          type="button"
                           onClick={e => handleStepQty(item, 1, e)}
                           className="w-6 h-6 rounded bg-sky-900 hover:bg-sky-800 text-sky-200 font-black text-sm flex items-center justify-center"
                         >
@@ -918,6 +923,7 @@ export function BasketCard({
                       {[1, 2, 3, 4, 5, 6, 8, 10, 12, 20].map(n => (
                         <button
                           key={n}
+                          type="button"
                           onClick={e => handleDirectSetQty(item.product_code, n, e)}
                           className={`px-2 py-1 rounded-lg font-mono font-black text-xs transition-all active:scale-95 ${
                             item.quantity === n
@@ -943,6 +949,7 @@ export function BasketCard({
                           }}
                         />
                         <button
+                          type="button"
                           onClick={() => setActiveQuickQtyCode(null)}
                           className="text-slate-400 hover:text-white text-xs px-2 py-1 rounded-lg bg-slate-800"
                         >
@@ -983,6 +990,7 @@ export function BasketCard({
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <button
+                      type="button"
                       onClick={e => handleSmartCut(unm, detected?.code || '', detected?.qty || 1, e)}
                       className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(245,158,11,0.35)] hover:shadow-[0_0_16px_rgba(245,158,11,0.5)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                       title={detected ? `កាត់ [${detected.code} x${detected.qty}] ចូលកន្ត្រក` : 'វាយកូដកាត់ចូលកន្ត្រក'}
@@ -991,6 +999,7 @@ export function BasketCard({
                       <span>កាត់ចូល</span>
                     </button>
                     <button
+                      type="button"
                       onClick={e => handleDismissComment(unm, e)}
                       className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-all"
                       title="បិទមិនបង្ហាញក្នុងបញ្ជី N/A (នៅតែរក្សាទុកក្នុងប្រវត្តិខមិន)"
@@ -1015,6 +1024,7 @@ export function BasketCard({
                       : `➕ បញ្ចូលកូដទំនិញចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id}`}
                   </span>
                   <button
+                    type="button"
                     onClick={() => {
                       setIsAddingManualCode(false);
                       setManualCommentSource('');
@@ -1047,6 +1057,7 @@ export function BasketCard({
                     />
                   </div>
                   <button
+                    type="button"
                     onClick={executeManualAddCode}
                     className="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black text-xs px-3.5 py-2 rounded-xl active:scale-95 shadow transition-all whitespace-nowrap"
                   >
@@ -1057,6 +1068,7 @@ export function BasketCard({
             ) : (
               /* Button matching Capture.PNG: + ថែមកូដទំនិញថ្មីដោយដៃចូលកន្ត្រក #... */
               <button
+                type="button"
                 onClick={e => {
                   e.stopPropagation();
                   setIsAddingManualCode(true);
