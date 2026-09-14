@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision } from './db';
 import { Product } from './types';
 
@@ -54,8 +55,13 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
   }
 }
 
-// 2. Download and save Telegram photo to public/uploads
-async function downloadTelegramPhoto(token: string, fileId: string, codeHint: string): Promise<string | undefined> {
+// 2. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
+async function downloadTelegramPhoto(
+  token: string,
+  fileId: string,
+  codeHint: string,
+  dateHint?: string | number
+): Promise<string | undefined> {
   try {
     const fileInfoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
     const fileInfo = await fileInfoRes.json();
@@ -69,19 +75,43 @@ async function downloadTelegramPhoto(token: string, fileId: string, codeHint: st
     if (!imgRes.ok) return undefined;
 
     const arrayBuf = await imgRes.arrayBuffer();
-    const buffer = Buffer.from(arrayBuf);
+    const rawBuffer = Buffer.from(arrayBuf);
 
     const uploadDir = path.join(process.cwd(), 'public', 'uploads');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
 
-    const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_-]/g, '') : 'tg';
-    const ext = path.extname(filePath) || '.jpg';
-    const filename = `tg_${Date.now()}_${safeCode}_${Math.random().toString(36).slice(2, 6)}${ext}`;
+    // Format Date YYYYMMDD (e.g. 20260914)
+    let d = new Date();
+    if (dateHint) {
+      if (typeof dateHint === 'number') {
+        d = new Date(dateHint > 10000000000 ? dateHint : dateHint * 1000);
+      } else {
+        const parsed = new Date(dateHint);
+        if (!isNaN(parsed.getTime())) d = parsed;
+      }
+    }
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}${mm}${dd}`;
+
+    const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
+    const filename = `${safeCode}_${dateStr}.jpg`;
     const localSavePath = path.join(uploadDir, filename);
 
-    fs.writeFileSync(localSavePath, buffer);
+    // Crop to 500x500 Square HD Center Crop using Sharp
+    const processedBuffer = await sharp(rawBuffer)
+      .rotate() // auto-orient based on EXIF orientation
+      .resize(500, 500, {
+        fit: 'cover',
+        position: 'center'
+      })
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toBuffer();
+
+    fs.writeFileSync(localSavePath, processedBuffer);
     return `/uploads/${filename}`;
   } catch (err) {
     console.error('[Telegram Photo Download Error]:', err);
@@ -294,7 +324,7 @@ export async function fetchTelegramStockUpdates(options: {
 
     // 3. Parse all retrieved messages
     const newlyParsedMap = new Map<string, TelegramItemParsed>();
-    const photoToDownloadMap = new Map<string, { fileId: string; code: string }>();
+    const photoToDownloadMap = new Map<string, { fileId: string; code: string; messageDate?: string }>();
 
     for (const u of allUpdates) {
       const msg = u.message || u.channel_post || u.edited_message;
@@ -341,7 +371,7 @@ export async function fetchTelegramStockUpdates(options: {
         });
 
         if (photoFileId) {
-          photoToDownloadMap.set(item.code, { fileId: photoFileId, code: item.code });
+          photoToDownloadMap.set(item.code, { fileId: photoFileId, code: item.code, messageDate });
         }
       }
     }
@@ -352,9 +382,9 @@ export async function fetchTelegramStockUpdates(options: {
     for (let i = 0; i < downloadEntries.length; i += concurrency) {
       const chunk = downloadEntries.slice(i, i + concurrency);
       await Promise.all(
-        chunk.map(async ([code, { fileId }]) => {
+        chunk.map(async ([code, { fileId, messageDate }]) => {
           try {
-            const url = await downloadTelegramPhoto(token, fileId, code);
+            const url = await downloadTelegramPhoto(token, fileId, code, messageDate);
             const item = newlyParsedMap.get(code);
             if (item && url) {
               item.image_url = url;
@@ -477,7 +507,23 @@ export function bulkImportStockItems(
       }
       if (it.name && it.name !== `កូដ ${cleanCode}`) existing.name = it.name.trim();
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
-      if (it.image_file) existing.image_file = it.image_file;
+      if (it.image_file) {
+        existing.image_file = it.image_file;
+        // Cascade image only to unpicked pending invoices of the currently active live session
+        for (const inv of invoices) {
+          if (
+            inv.live_id === activeLiveId &&
+            inv.status === 'Pending' &&
+            inv.packing_stage === 'UNPICKED'
+          ) {
+            for (const orderItem of inv.items) {
+              if (orderItem.product_code.toUpperCase() === cleanCode) {
+                orderItem.image_file = it.image_file;
+              }
+            }
+          }
+        }
+      }
       updatedCount++;
     } else {
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;

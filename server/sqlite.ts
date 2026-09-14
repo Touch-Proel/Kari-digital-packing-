@@ -105,6 +105,7 @@ function initTables(db: Database) {
       price REAL,
       is_packed INTEGER DEFAULT 0,
       item_comment TEXT,
+      image_file TEXT,
       FOREIGN KEY(invoice_id) REFERENCES invoices(invoice_id)
     );
 
@@ -201,8 +202,8 @@ export async function persistToSqlite(data: {
 
     const stmtItem = db.prepare(`
       INSERT INTO invoice_items (
-        invoice_id, product_id, product_code, product_name, quantity, price, is_packed, item_comment
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        invoice_id, product_id, product_code, product_name, quantity, price, is_packed, item_comment, image_file
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
     `);
 
     // Group live sessions statistics
@@ -258,7 +259,8 @@ export async function persistToSqlite(data: {
             it.quantity || 1,
             it.price || 0,
             it.is_packed ? 1 : 0,
-            it.item_comment || ''
+            it.item_comment || '',
+            it.image_file || ''
           ]);
         }
       }

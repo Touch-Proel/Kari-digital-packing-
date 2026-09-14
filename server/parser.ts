@@ -400,7 +400,8 @@ export function parseAndAllocateComment(
         quantity: qtyToTake,
         price: prod.price,
         is_packed: false,
-        item_comment: rawText
+        item_comment: rawText,
+        image_file: prod.image_file || ''
       });
     }
 

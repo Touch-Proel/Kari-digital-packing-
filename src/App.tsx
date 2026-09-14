@@ -20,6 +20,7 @@ import { FacebookAuthModal } from './components/Modals/FacebookAuthModal';
 import { ImageZoomModal } from './components/Modals/ImageZoomModal';
 import { ReceiptModal } from './components/Modals/ReceiptModal';
 import { DatabaseModal } from './components/Modals/DatabaseModal';
+import { ManageLiveSessionsModal } from './components/Modals/ManageLiveSessionsModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -98,6 +99,7 @@ export default function App() {
 
   const [isFbModalOpen, setIsFbModalOpen] = useState(false);
   const [isDatabaseModalOpen, setIsDatabaseModalOpen] = useState(false);
+  const [isManageLiveModalOpen, setIsManageLiveModalOpen] = useState(false);
   const [isCommentStreamOpen, setIsCommentStreamOpen] = useState(false);
 
   const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
@@ -161,6 +163,34 @@ export default function App() {
       localStorage.setItem('checkedItemsState', JSON.stringify(next));
       return next;
     });
+  };
+
+  // Immediate Optimistic Update for 0ms Smoothness (No Lag)
+  const handleOptimisticItemUpdate = (invoiceId: number, code: string, targetQty: number) => {
+    setInvoices(prev =>
+      prev.map(inv => {
+        if (inv.invoice_id !== invoiceId) return inv;
+        const cleanCode = code.toUpperCase();
+        let updatedItems = [...inv.items];
+        const idx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanCode);
+        if (idx !== -1) {
+          if (targetQty <= 0) {
+            updatedItems.splice(idx, 1);
+          } else {
+            updatedItems[idx] = { ...updatedItems[idx], quantity: targetQty };
+          }
+        }
+        const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+        const ship = inv.is_free_shipping ? 0 : (inv.shipping_fee || (inv.zone === 'PROVINCE' ? 2.0 : 1.25));
+        const total = subtotal + ship;
+        return {
+          ...inv,
+          items: updatedItems,
+          subtotal_amount: subtotal,
+          total_amount: total
+        };
+      })
+    );
   };
 
   // Data Fetching: Invoices with 0ms revision check
@@ -464,6 +494,7 @@ export default function App() {
             showToast(`🎥 ប្តូរវគ្គ Live៖ ${id.length > 10 ? id.slice(-8) : id}`);
           }}
           onCreateLiveSession={handleCreateNewLiveSession}
+          onOpenManageLiveModal={() => setIsManageLiveModalOpen(true)}
           onOpenPickingModal={() => setIsPickingModalOpen(true)}
           onToggleCommentStream={() => setIsCommentStreamOpen(!isCommentStreamOpen)}
           isStreamOpen={isCommentStreamOpen}
@@ -555,6 +586,7 @@ export default function App() {
                 myPackerName={packerName}
                 checkedState={checkedState}
                 productMap={productMap}
+                activeLiveId={selectedLiveId}
                 onToggleItemCheck={handleToggleItemCheck}
                 onOpenQCModal={i => {
                   setQcInvoice(i);
@@ -564,7 +596,7 @@ export default function App() {
                 onOpenZoomModal={(c, n, img, pr, sq) => {
                   setZoomCode(c);
                   setZoomName(n);
-                  setZoomImageUrl(img || productMap[c.toUpperCase()]?.image_file);
+                  setZoomImageUrl(img);
                   setZoomPrice(pr);
                   setZoomStockQty(sq);
                   setIsZoomModalOpen(true);
@@ -573,6 +605,7 @@ export default function App() {
                   fetchInvoices();
                   fetchStock();
                 }}
+                onOptimisticItemUpdate={handleOptimisticItemUpdate}
                 onShowToast={showToast}
               />
             ))
@@ -722,6 +755,24 @@ export default function App() {
           setSearchQuery(selectedDate);
           showToast(`📅 បានជ្រើសរើសផ្ទៀងផ្ទាត់កាលបរិច្ឆេទ៖ ${selectedDate}`);
         }}
+      />
+
+      <ManageLiveSessionsModal
+        isOpen={isManageLiveModalOpen}
+        onClose={() => setIsManageLiveModalOpen(false)}
+        liveSessions={liveSessions}
+        activeLiveId={selectedLiveId}
+        onSelectLiveId={id => {
+          handleSelectLiveSession(id);
+          showToast(`🎥 បានប្តូរទៅកាន់វគ្គ Live៖ ${id.length > 10 ? id.slice(-8) : id}`);
+        }}
+        onCreateNewLive={handleCreateNewLiveSession}
+        onRefreshLiveSessions={() => {
+          fetchLiveSessions();
+          fetchInvoices();
+          fetchStock();
+        }}
+        onShowToast={showToast}
       />
     </div>
   );

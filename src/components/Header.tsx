@@ -12,6 +12,7 @@ interface HeaderProps {
   selectedLiveId: string;
   onSelectLiveId: (id: string) => void;
   onCreateLiveSession?: () => void;
+  onOpenManageLiveModal?: () => void;
   onOpenPickingModal: () => void;
   onToggleCommentStream: () => void;
   isStreamOpen: boolean;
@@ -32,6 +33,7 @@ export function Header({
   selectedLiveId,
   onSelectLiveId,
   onCreateLiveSession,
+  onOpenManageLiveModal,
   onOpenPickingModal,
   onToggleCommentStream,
   isStreamOpen,
@@ -113,18 +115,20 @@ export function Header({
 
       {/* Bottom Row: Tools & Selectors */}
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-1.5 items-center">
-        {/* Live Session Selector + Quick New Live Button */}
+        {/* Live Session Selector + Quick New Live & Manage Buttons */}
         <div className="flex gap-1 min-w-0">
           <select
             value={selectedLiveId}
             onChange={e => {
               if (e.target.value === '__NEW_LIVE__') {
                 onCreateLiveSession?.();
+              } else if (e.target.value === '__MANAGE_LIVE__') {
+                onOpenManageLiveModal?.();
               } else {
                 onSelectLiveId(e.target.value);
               }
             }}
-            className="bg-slate-950/90 text-sky-400 border border-sky-600/40 px-2 py-1.5 rounded-xl text-xs font-bold outline-none truncate flex-1 shadow-inner focus:border-cyan-400"
+            className="bg-slate-950/90 text-sky-400 border border-sky-600/40 px-2 py-1.5 rounded-xl text-xs font-bold outline-none truncate flex-1 shadow-inner focus:border-cyan-400 cursor-pointer"
           >
             <option value="">🌐 គ្រប់ Live (ទាំងអស់)</option>
             {liveSessions.map(session => {
@@ -144,6 +148,9 @@ export function Header({
             {onCreateLiveSession && (
               <option value="__NEW_LIVE__">➕ បង្កើត Live ថ្មី...</option>
             )}
+            {onOpenManageLiveModal && (
+              <option value="__MANAGE_LIVE__">⚙️ គ្រប់គ្រង / លុប Live...</option>
+            )}
           </select>
 
           {onCreateLiveSession && (
@@ -154,6 +161,16 @@ export function Header({
             >
               <span>➕</span>
               <span className="hidden sm:inline">Live ថ្មី</span>
+            </button>
+          )}
+
+          {onOpenManageLiveModal && (
+            <button
+              onClick={onOpenManageLiveModal}
+              className="px-2 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-cyan-300 text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm"
+              title="គ្រប់គ្រង ឬលុបវគ្គ Live ចាស់ៗ/តេស្ត"
+            >
+              <span>⚙️</span>
             </button>
           )}
         </div>

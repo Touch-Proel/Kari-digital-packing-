@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import net from 'net';
 import https from 'https';
 import {
@@ -126,7 +127,24 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
   } else {
     if (name) prod.name = name.trim();
     if (cost_price !== undefined) prod.cost_price = Number(cost_price);
-    if (image_file !== undefined) prod.image_file = image_file || '';
+    if (image_file !== undefined) {
+      const imgVal = image_file || '';
+      prod.image_file = imgVal;
+      // Cascade image ONLY to the currently ACTIVE live session and ONLY unpicked pending invoices
+      for (const inv of invoices) {
+        if (
+          inv.live_id === activeLiveId &&
+          inv.status === 'Pending' &&
+          inv.packing_stage === 'UNPICKED'
+        ) {
+          for (const it of inv.items) {
+            if (it.product_code.toUpperCase() === cleanCode) {
+              it.image_file = imgVal;
+            }
+          }
+        }
+      }
+    }
 
     // If user changed the code itself
     if (new_code && String(new_code).trim().toUpperCase() !== cleanCode) {
@@ -195,7 +213,7 @@ router.post('/delete_product', (req: Request, res: Response) => {
 });
 
 // POST /api/upload_product_image
-router.post('/upload_product_image', (req: Request, res: Response) => {
+router.post('/upload_product_image', async (req: Request, res: Response) => {
   try {
     const { code, image_data } = req.body;
     if (!image_data) {
@@ -235,9 +253,27 @@ router.post('/upload_product_image', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Invalid image format' });
     }
 
-    const filename = `prod_${cleanCode}_${Date.now()}.${ext}`;
+    // Format Date YYYYMMDD (e.g. 20260914)
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}${mm}${dd}`;
+
+    const filename = `${cleanCode}_${dateStr}.jpg`;
     const filePath = path.join(uploadDir, filename);
-    fs.writeFileSync(filePath, fileBuffer);
+
+    // Process image to 500x500 Square HD Center Crop using Sharp
+    const processedBuffer = await sharp(fileBuffer)
+      .rotate()
+      .resize(500, 500, {
+        fit: 'cover',
+        position: 'center'
+      })
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toBuffer();
+
+    fs.writeFileSync(filePath, processedBuffer);
 
     const publicUrl = `/uploads/${filename}`;
 
@@ -246,8 +282,22 @@ router.post('/upload_product_image', (req: Request, res: Response) => {
       const targetProd = products.find(p => p.code.toUpperCase() === String(code).trim().toUpperCase());
       if (targetProd) {
         targetProd.image_file = publicUrl;
-        bumpDataRevision();
       }
+      // Cascade to unpicked pending baskets in the active live session only
+      for (const inv of invoices) {
+        if (
+          inv.live_id === activeLiveId &&
+          inv.status === 'Pending' &&
+          inv.packing_stage === 'UNPICKED'
+        ) {
+          for (const orderItem of inv.items) {
+            if (orderItem.product_code.toUpperCase() === cleanCode) {
+              orderItem.image_file = publicUrl;
+            }
+          }
+        }
+      }
+      bumpDataRevision();
     }
 
     res.json({
@@ -597,7 +647,8 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
       quantity: addQty,
       price: prod.price,
       is_packed: false,
-      item_comment: comment_text || ''
+      item_comment: comment_text || '',
+      image_file: prod.image_file || ''
     });
   }
 
@@ -847,6 +898,58 @@ router.post('/create_live_session', (req: Request, res: Response) => {
     success: true,
     message: `បានបង្កើត និងប្តូរទៅកាន់វគ្គ Live ថ្មី៖ ${newId}`,
     live_id: newId
+  });
+});
+
+// POST /api/delete_live_session - Delete a live session and all associated baskets
+router.post('/delete_live_session', (req: Request, res: Response) => {
+  const { live_id } = req.body;
+  if (!live_id) {
+    return res.status(400).json({ success: false, error: 'Missing live_id' });
+  }
+
+  const cleanLiveId = String(live_id).trim();
+
+  // Remove invoices for this live session
+  const initialInvoiceCount = invoices.length;
+  for (let i = invoices.length - 1; i >= 0; i--) {
+    if (invoices[i].live_id === cleanLiveId) {
+      invoices.splice(i, 1);
+    }
+  }
+  const deletedInvoicesCount = initialInvoiceCount - invoices.length;
+
+  // Remove raw comments associated with this live session
+  for (let i = rawComments.length - 1; i >= 0; i--) {
+    if (rawComments[i].live_id === cleanLiveId) {
+      rawComments.splice(i, 1);
+    }
+  }
+
+  // If the deleted session was currently the activeLiveId, switch to another remaining session
+  if (activeLiveId === cleanLiveId) {
+    const remainingLiveIds = Array.from(new Set(invoices.map(i => i.live_id))).filter(Boolean);
+    if (remainingLiveIds.length > 0) {
+      setActiveLiveId(remainingLiveIds[0]);
+    } else {
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+      setActiveLiveId(`LIVE_${dateStr}_${timeStr}`);
+    }
+  }
+
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  console.log(`[Live Session Deleted] Deleted live #${cleanLiveId.slice(-8)} with ${deletedInvoicesCount} invoices.`);
+
+  res.json({
+    success: true,
+    message: `បានលុបវគ្គ Live #${cleanLiveId.slice(-8)} (សរុប ${deletedInvoicesCount} កន្ត្រក) ជោគជ័យ!`,
+    deleted_live_id: cleanLiveId,
+    deleted_baskets_count: deletedInvoicesCount,
+    active_live_id: activeLiveId
   });
 });
 

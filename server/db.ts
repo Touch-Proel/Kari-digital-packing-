@@ -444,6 +444,46 @@ export async function loadDatabaseFromDisk() {
       recalculateInvoice(inv);
     });
 
+    // Normalize all existing product image filenames to [CODE]_[YYYYMMDD].jpg
+    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+    const now = new Date();
+    const defaultDateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+
+    products.forEach(p => {
+      if (p.image_file && p.image_file.startsWith('/uploads/')) {
+        const oldFilename = path.basename(p.image_file);
+        if (oldFilename.startsWith('tg_') || oldFilename.startsWith('prod_')) {
+          const safeCode = p.code ? p.code.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
+          const newFilename = `${safeCode}_${defaultDateStr}.jpg`;
+          const oldPath = path.join(uploadDir, oldFilename);
+          const newPath = path.join(uploadDir, newFilename);
+
+          if (fs.existsSync(oldPath)) {
+            try {
+              fs.renameSync(oldPath, newPath);
+            } catch (e) {
+              // ignore
+            }
+          }
+          p.image_file = `/uploads/${newFilename}`;
+        }
+      }
+    });
+
+    invoices.forEach(inv => {
+      if (inv.items && Array.isArray(inv.items)) {
+        inv.items.forEach(it => {
+          if (it.image_file && it.image_file.startsWith('/uploads/')) {
+            const oldFilename = path.basename(it.image_file);
+            if (oldFilename.startsWith('tg_') || oldFilename.startsWith('prod_')) {
+              const safeCode = it.product_code ? it.product_code.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
+              it.image_file = `/uploads/${safeCode}_${defaultDateStr}.jpg`;
+            }
+          }
+        });
+      }
+    });
+
     // Persist normalized data to disk and SQLite
     saveDatabaseToDisk();
   } catch (err) {

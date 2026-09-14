@@ -18,6 +18,7 @@ export interface OrderItem {
   price: number;
   is_packed: boolean;
   item_comment?: string;
+  image_file?: string;
 }
 
 export type PackingStage = 'UNPICKED' | 'STAGED' | 'DISPATCHED';

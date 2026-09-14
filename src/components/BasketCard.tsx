@@ -9,11 +9,13 @@ interface BasketCardProps {
   myPackerName: string;
   checkedState: Record<string, boolean>;
   productMap?: Record<string, Product>;
+  activeLiveId?: string;
   onToggleItemCheck: (invId: number, code: string) => void;
   onOpenQCModal: (inv: Invoice) => void;
   onOpenReceiptModal: (inv: Invoice) => void;
   onOpenZoomModal: (code: string, name: string, imageUrl?: string, price?: number, stockQty?: number) => void;
   onDataChanged: () => void;
+  onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
@@ -23,11 +25,13 @@ export function BasketCard({
   myPackerName,
   checkedState,
   productMap,
+  activeLiveId,
   onToggleItemCheck,
   onOpenQCModal,
   onOpenReceiptModal,
   onOpenZoomModal,
   onDataChanged,
+  onOptimisticItemUpdate,
   onShowToast
 }: BasketCardProps) {
   const [isOpen, setIsOpen] = useState(true);
@@ -301,6 +305,12 @@ export function BasketCard({
       return;
     }
 
+    // Instant 0ms Optimistic UI Update & Sound (No lag)
+    playPureTone(delta > 0 ? 880 : 660, 0.04);
+    if (onOptimisticItemUpdate) {
+      onOptimisticItemUpdate(invoice.invoice_id, it.product_code, targetQty);
+    }
+
     try {
       const res = await fetch('/api/set_item_qty_direct', {
         method: 'POST',
@@ -313,15 +323,16 @@ export function BasketCard({
       });
       const data = await res.json();
       if (data.success) {
-        playPureTone(delta > 0 ? 880 : 660, 0.04);
         onShowToast(`✅ [${it.product_code}] ចំនួន៖ ${targetQty}`);
         onDataChanged();
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចកែប្រែបានទេ'}`, 'error');
+        onDataChanged(); // Revert from server
       }
     } catch (err) {
       onShowToast('⚠️ មានបញ្ហាបណ្តាញ WiFi!', 'error');
+      onDataChanged();
     }
   };
 
@@ -330,6 +341,12 @@ export function BasketCard({
     e.stopPropagation();
     setActiveQuickQtyCode(null);
     if (newQty < 0) return;
+
+    // Instant 0ms Optimistic UI Update & Sound (No lag)
+    playPureTone(900, 0.04);
+    if (onOptimisticItemUpdate) {
+      onOptimisticItemUpdate(invoice.invoice_id, code, newQty);
+    }
 
     try {
       const res = await fetch('/api/set_item_qty_direct', {
@@ -343,15 +360,16 @@ export function BasketCard({
       });
       const data = await res.json();
       if (data.success) {
-        playPureTone(900, 0.04);
         onShowToast(newQty === 0 ? `🗑️ បានលុបកូដ [${code}]` : `✅ [${code}] ចំនួន៖ ${newQty}`);
         onDataChanged();
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចកែបានទេ'}`, 'error');
+        onDataChanged();
       }
     } catch (err) {
       onShowToast('⚠️ មានបញ្ហាបណ្តាញ!', 'error');
+      onDataChanged();
     }
   };
 
@@ -380,6 +398,11 @@ export function BasketCard({
     setDeleteConfirmCode(null);
     playWarningBuzzer();
 
+    // Instant 0ms Optimistic Delete from Basket UI
+    if (onOptimisticItemUpdate) {
+      onOptimisticItemUpdate(invoice.invoice_id, it.product_code, 0);
+    }
+
     try {
       const res = await fetch('/api/set_item_qty_direct', {
         method: 'POST',
@@ -396,9 +419,11 @@ export function BasketCard({
         onDataChanged();
       } else {
         onShowToast(`⚠️ ${data.message || 'មិនអាចលុបបានទេ'}`, 'error');
+        onDataChanged();
       }
     } catch (e) {
       onShowToast('Error deleting item', 'error');
+      onDataChanged();
     }
   };
 
@@ -749,7 +774,14 @@ export function BasketCard({
             {invoice.items.map((item, idx) => {
               const isChecked = !!checkedState[`${invoice.invoice_id}_${item.product_code}`];
               const prod = productMap ? productMap[item.product_code.toUpperCase()] : undefined;
-              const displayImage = prod?.image_file;
+              // Session-Isolated Image:
+              // 1. If this specific item has an image snapshot from this order, use it.
+              // 2. If no image snapshot exists, ONLY fallback to productMap if this invoice is from the currently active live.
+              //    Past live orders will NOT pull new live images even if codes match!
+              const isCurrentLiveOrder = !activeLiveId || invoice.live_id === activeLiveId;
+              const displayImage = (item.image_file && item.image_file.trim() !== '')
+                ? item.image_file
+                : (isCurrentLiveOrder && invoice.packing_stage === 'UNPICKED' ? prod?.image_file : undefined);
               const noteText = item.item_comment || (invoice.comments && invoice.comments[0]) || '';
 
               return (
