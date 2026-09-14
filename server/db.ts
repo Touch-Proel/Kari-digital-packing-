@@ -10,6 +10,7 @@ import {
   AppSettings,
   FacebookPage
 } from './types';
+import { persistToSqlite, loadFromSqlite } from './sqlite';
 
 let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;
@@ -29,8 +30,19 @@ export function saveDatabaseToDisk() {
       activeFacebookPage
     };
     fs.writeFileSync(DB_FILE_PATH, JSON.stringify(payload, null, 2), 'utf8');
+
+    // Also persist to binary SQLite database pos.db
+    persistToSqlite({
+      activeLiveId,
+      settings,
+      products,
+      invoices,
+      customers,
+      packerLogs,
+      activeFacebookPage
+    }).catch(err => console.error('[SQLite] Persist error:', err));
   } catch (err) {
-    console.error('Failed to save db_store.json:', err);
+    console.error('Failed to save database:', err);
   }
 }
 
@@ -340,9 +352,38 @@ export function recalculateInvoice(inv: Invoice) {
   inv.total_amount = Number((itemsSum + finalShipping).toFixed(2));
 }
 
-export function loadDatabaseFromDisk() {
+export async function loadDatabaseFromDisk() {
   try {
-    if (fs.existsSync(DB_FILE_PATH)) {
+    // 1. Try loading from SQLite pos.db first
+    const sqliteData = await loadFromSqlite();
+    if (sqliteData && sqliteData.invoices && sqliteData.invoices.length > 0) {
+      if (sqliteData.invoices) {
+        invoices.length = 0;
+        invoices.push(...sqliteData.invoices);
+      }
+      if (sqliteData.products && sqliteData.products.length > 0) {
+        products.length = 0;
+        products.push(...sqliteData.products);
+      }
+      if (sqliteData.activeLiveId) {
+        activeLiveId = sqliteData.activeLiveId;
+      }
+      if (sqliteData.activeFacebookPage) {
+        activeFacebookPage = sqliteData.activeFacebookPage;
+      }
+      if (sqliteData.customers && sqliteData.customers.length > 0) {
+        customers.length = 0;
+        customers.push(...sqliteData.customers);
+      }
+      if (sqliteData.packerLogs && sqliteData.packerLogs.length > 0) {
+        packerLogs.length = 0;
+        packerLogs.push(...sqliteData.packerLogs);
+      }
+      if (sqliteData.settings) {
+        Object.assign(settings, sqliteData.settings);
+      }
+      console.log(`[SQLite Loaded] Loaded ${invoices.length} invoices, ${products.length} products from pos.db`);
+    } else if (fs.existsSync(DB_FILE_PATH)) {
       const raw = fs.readFileSync(DB_FILE_PATH, 'utf8');
       const parsed = JSON.parse(raw);
       if (parsed.invoices && Array.isArray(parsed.invoices) && parsed.invoices.length > 0) {
@@ -370,48 +411,48 @@ export function loadDatabaseFromDisk() {
       if (parsed.settings) {
         Object.assign(settings, parsed.settings);
       }
-      // Strictly enforce shipping fee $2.0 flat across all orders
-      settings.default_shipping_fee = 2.0;
-      settings.free_ship_threshold = 0;
-      settings.bulk_discount_qty = 0;
-      settings.bulk_discount_amount = 0;
-
-      // Sanitize products and invoice item names to use កូដ [CODE] instead of ទំនិញកូដ [CODE]
-      products.forEach(p => {
-        if (p.name && p.name.startsWith('ទំនិញកូដ')) {
-          p.name = p.name.replace(/^ទំនិញកូដ\s*/, 'កូដ ');
-        }
-      });
-
-      // Migrate all loaded invoices to ensure shipping fee is strictly $2.00 flat, discounts removed, and item names cleaned
-      invoices.forEach(inv => {
-        inv.is_free_ship = false;
-        (inv as any).discount_amount = 0;
-        if (!inv.shipping_fee || inv.shipping_fee <= 0 || inv.shipping_fee === 2.5) {
-          inv.shipping_fee = 2.0;
-        }
-        if (inv.items && Array.isArray(inv.items)) {
-          inv.items.forEach(it => {
-            if (it.product_name && it.product_name.startsWith('ទំនិញកូដ')) {
-              it.product_name = it.product_name.replace(/^ទំនិញកូដ\s*/, 'កូដ ');
-            }
-          });
-        }
-        recalculateInvoice(inv);
-      });
-
-      // Persist the migrated data to disk
-      saveDatabaseToDisk();
-
-      console.log(`[DB Loaded] Successfully loaded and normalized ${invoices.length} invoices, ${products.length} products from disk.`);
+      console.log(`[JSON Loaded] Loaded ${invoices.length} invoices, ${products.length} products from db_store.json`);
     }
+
+    // Strictly enforce shipping fee $2.0 flat across all orders
+    settings.default_shipping_fee = 2.0;
+    settings.free_ship_threshold = 0;
+    settings.bulk_discount_qty = 0;
+    settings.bulk_discount_amount = 0;
+
+    // Sanitize products and invoice item names to use កូដ [CODE] instead of ទំនិញកូដ [CODE]
+    products.forEach(p => {
+      if (p.name && p.name.startsWith('ទំនិញកូដ')) {
+        p.name = p.name.replace(/^ទំនិញកូដ\s*/, 'កូដ ');
+      }
+    });
+
+    // Migrate all loaded invoices to ensure shipping fee is strictly $2.00 flat, discounts removed, and item names cleaned
+    invoices.forEach(inv => {
+      inv.is_free_ship = false;
+      (inv as any).discount_amount = 0;
+      if (!inv.shipping_fee || inv.shipping_fee <= 0 || inv.shipping_fee === 2.5) {
+        inv.shipping_fee = 2.0;
+      }
+      if (inv.items && Array.isArray(inv.items)) {
+        inv.items.forEach(it => {
+          if (it.product_name && it.product_name.startsWith('ទំនិញកូដ')) {
+            it.product_name = it.product_name.replace(/^ទំនិញកូដ\s*/, 'កូដ ');
+          }
+        });
+      }
+      recalculateInvoice(inv);
+    });
+
+    // Persist normalized data to disk and SQLite
+    saveDatabaseToDisk();
   } catch (err) {
-    console.error('Failed to load db_store.json:', err);
+    console.error('Failed to load database on startup:', err);
   }
 }
 
 // Load from disk on startup
-loadDatabaseFromDisk();
+loadDatabaseFromDisk().catch(err => console.error(err));
 
 // Calculate on start
 invoices.forEach(recalculateInvoice);

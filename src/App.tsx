@@ -19,6 +19,7 @@ import { PackerModal } from './components/Modals/PackerModal';
 import { FacebookAuthModal } from './components/Modals/FacebookAuthModal';
 import { ImageZoomModal } from './components/Modals/ImageZoomModal';
 import { ReceiptModal } from './components/Modals/ReceiptModal';
+import { DatabaseModal } from './components/Modals/DatabaseModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -96,6 +97,7 @@ export default function App() {
   const [mySessionPacks, setMySessionPacks] = useState(0);
 
   const [isFbModalOpen, setIsFbModalOpen] = useState(false);
+  const [isDatabaseModalOpen, setIsDatabaseModalOpen] = useState(false);
   const [isCommentStreamOpen, setIsCommentStreamOpen] = useState(false);
 
   const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
@@ -449,6 +451,7 @@ export default function App() {
           onOpenFbModal={() => setIsFbModalOpen(true)}
           dispatchedCount={dispatchedCount}
           onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
+          onOpenDatabaseModal={() => setIsDatabaseModalOpen(true)}
           packerName={packerName}
           onOpenPackerHistory={() => {
             setPackerModalMode('history');
@@ -709,6 +712,15 @@ export default function App() {
         onStagePackSuccess={() => {
           fetchInvoices();
           fetchPackerStats();
+        }}
+      />
+
+      <DatabaseModal
+        isOpen={isDatabaseModalOpen}
+        onClose={() => setIsDatabaseModalOpen(false)}
+        onSelectDateFilter={selectedDate => {
+          setSearchQuery(selectedDate);
+          showToast(`📅 បានជ្រើសរើសផ្ទៀងផ្ទាត់កាលបរិច្ឆេទ៖ ${selectedDate}`);
         }}
       />
     </div>

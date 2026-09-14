@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import net from 'net';
+import https from 'https';
 import {
   invoices,
   products,
@@ -15,8 +17,10 @@ import {
   bumpDataRevision,
   getDataRevision,
   recalculateInvoice,
-  saveDatabaseToDisk
+  saveDatabaseToDisk,
+  activeFacebookPage
 } from './db';
+import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
 import { parseAndAllocateComment } from './parser';
 import { sendFacebookReply } from './fbAuth';
 import {
@@ -917,7 +921,8 @@ router.post('/telegram/fetch_stock', async (req: Request, res: Response) => {
   const result = await fetchTelegramStockUpdates({
     token: activeToken,
     defaultQty: Number(default_qty || 200),
-    markRead: !!mark_read
+    markRead: !!mark_read,
+    clearCache: !!req.body.clear_cache
   });
 
   if (!result.success) {
@@ -1020,39 +1025,12 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
   const dateStr = now.toLocaleDateString('km-KH', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-  // Format Plain Text for RawBT Thermal ESC/POS printing
-  const rawbtLines: string[] = [
-    '================================',
-    '       LIVE ORDER RECEIPT       ',
-    '================================',
-    `កន្ត្រក / BASKET: #${invoice.basket_no || invoice.invoice_id}`,
-    `កាលបរិច្ឆេទ: ${dateStr} ${timeStr}`,
-    '--------------------------------',
-    `អតិថិជន: ${invoice.facebook_name}`,
-    `ទូរស័ព្ទ: ${invoice.phone_number || '(គ្មាន)'}`,
-    `ទីតាំង: ${invoice.address || '(គ្មាន)'}`,
-    `តំបន់: ${invoice.location_label || (invoice.location_zone === 'PP' ? 'ភ្នំពេញ' : 'តាមខេត្ត')}`,
-    '--------------------------------',
-    'មុខទំនិញ          ចំនួន  តម្លៃ  សរុប',
-    '--------------------------------',
-    ...invoice.items.map(it => {
-      const codePart = `កូដ [${it.product_code}]`.padEnd(14, ' ').slice(0, 14);
-      const qtyPart = `x${it.quantity}`.padStart(5, ' ');
-      const pricePart = `$${it.price.toFixed(2)}`.padStart(6, ' ');
-      const totalPart = `$${(it.price * it.quantity).toFixed(2)}`.padStart(7, ' ');
-      return `${codePart} ${qtyPart} ${pricePart} ${totalPart}`;
-    }),
-    '--------------------------------',
-    `សរុបទំនិញ (${totalQty} មុខ): $${subtotal.toFixed(2)}`,
-    `ថ្លៃដឹក: $${(invoice.shipping_fee || 2.0).toFixed(2)}`,
-    `សរុបត្រូវទូទាត់: $${invoice.total_amount.toFixed(2)} (${rielTotal} ៛)`,
-    `ស្ថានភាព: ${invoice.status === 'Paid' ? 'PAID (បង់រួច)' : 'UNPAID (រង់ចាំបង់)'}`,
-    '================================',
-    '      អរគុណសម្រាប់ការគាំទ្រ!    ',
-    '================================\n\n\n'
-  ];
-  const rawbtBase64 = Buffer.from(rawbtLines.join('\n')).toString('base64');
-  const rawbtIntentUrl = `intent:${rawbtBase64}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;S.browser_fallback_url=https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter;end;`;
+  const phoneText = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : '';
+  const addressText = invoice.address && !invoice.address.includes('មិនទាន់មាន') ? invoice.address : '';
+  const locationBadge = invoice.location_label || (invoice.location_zone === 'PP' ? 'ភ្នំពេញ' : 'តាមខេត្ត');
+  const avatarUrl = invoice.picture_url || (invoice.facebook_user_id && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE'].includes(invoice.facebook_user_id)
+    ? `https://graph.facebook.com/v21.0/${invoice.facebook_user_id}/picture?type=square&width=120&height=120`
+    : null);
 
   const itemsHtml = invoice.items.map(it => {
     const custom = (it.product_name || '')
@@ -1065,22 +1043,33 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
     const hasCustom = custom && custom !== 'ទំនិញ';
 
     return `
-      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; font-size: 13px; line-height: 1.25; color: #000; font-weight: 800;">
-        <span style="width: 48%; word-break: break-word; color: #000;">
-          <span style="font-family: 'JetBrains Mono', monospace; font-weight: 900; color: #000;">[${it.product_code}]</span>
-          ${hasCustom ? `<span style="margin-left: 2px; font-weight: 800; color: #000;">${custom}</span>` : ''}
-        </span>
-        <span style="font-weight: 900; width: 14%; text-align: center; font-size: 14px; font-family: 'JetBrains Mono', monospace; color: #000;">x${it.quantity}</span>
-        <span style="width: 18%; text-align: right; color: #000; font-family: 'JetBrains Mono', monospace; font-weight: 800;">$${it.price.toFixed(2)}</span>
-        <span style="font-weight: 900; width: 20%; text-align: right; color: #000; font-family: 'JetBrains Mono', monospace;">$${(it.price * it.quantity).toFixed(2)}</span>
+      <div style="display: flex; flex-direction: column; font-size: 17px; line-height: 1.3; color: #000; margin-bottom: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; font-weight: 800;">
+          <span style="width: 48%; word-break: break-word; color: #000; display: flex; align-items: baseline; gap: 4px;">
+            <span style="border: 2px solid #000; border-radius: 3px; width: 16px; height: 16px; display: inline-block; flex-shrink: 0;"></span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 900; font-size: 20px; color: #000;">[${it.product_code}]</span>
+            ${hasCustom ? `<span style="margin-left: 4px; font-weight: 800; color: #000; font-size: 15px;">${custom}</span>` : ''}
+          </span>
+          <span style="font-weight: 900; width: 16%; text-align: center; font-size: 24px; font-family: 'JetBrains Mono', monospace; color: #000;">x${it.quantity}</span>
+          <span style="width: 18%; text-align: right; color: #000; font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 16px;">$${it.price.toFixed(2)}</span>
+          <span style="font-weight: 900; width: 18%; text-align: right; color: #000; font-family: 'JetBrains Mono', monospace; font-size: 19px;">$${(it.price * it.quantity).toFixed(2)}</span>
+        </div>
+        ${it.item_comment ? `<div style="font-size: 14px; color: #000; font-weight: 800; margin-left: 24px; margin-top: 2px;">↳ Note: "${it.item_comment}"</div>` : ''}
       </div>
-      ${it.item_comment ? `<div style="font-size: 11px; color: #000; font-weight: 800; margin-left: 6px; margin-bottom: 2px;">↳ "${it.item_comment}"</div>` : ''}
     `;
   }).join('');
 
-  const phoneText = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : '';
-  const addressText = invoice.address && !invoice.address.includes('មិនទាន់មាន') ? invoice.address : '';
-  const locationBadge = invoice.location_label || (invoice.location_zone === 'PP' ? 'ភ្នំពេញ' : 'តាមខេត្ត');
+  const plainReceiptLines = [
+    `កន្ត្រក #${invoice.basket_no || invoice.invoice_id} | ${invoice.facebook_name}`,
+    `ទូរស័ព្ទ: ${phoneText || 'គ្មាន'}`,
+    `ទីតាំង: ${locationBadge} ${addressText ? ' - ' + addressText : ''}`,
+    `--------------------------------`,
+    ...invoice.items.map(it => `[${it.product_code}] x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`),
+    `--------------------------------`,
+    `សរុប: $${invoice.total_amount.toFixed(2)} (${rielTotal} ៛)`,
+    `អ្នកវេចខ្ចប់: ${invoice.staged_by || 'Counter'}`
+  ].join('\n');
+  const plainReceiptBase64 = Buffer.from(plainReceiptLines, 'utf8').toString('base64');
 
   const html = `
     <!DOCTYPE html>
@@ -1162,64 +1151,65 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
           }
           .guide-box strong { color: #38bdf8; }
 
-          /* Ultra-Compact High-Contrast Thermal 80mm Slip */
+          /* High-Contrast Full 80mm Thermal Slip */
           .receipt {
             background: #ffffff;
             color: #000000;
             width: 100%;
-            max-width: 350px;
-            padding: 8px 10px;
-            border-radius: 6px;
-            box-shadow: 0 6px 24px rgba(0,0,0,0.6);
-            font-size: 12.5px;
+            max-width: 480px;
+            padding: 14px 14px 20px 14px;
+            border-radius: 8px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.7);
+            font-size: 16px;
             border: 2px solid #000000;
             font-weight: 800;
+            line-height: 1.35;
           }
 
           /* Force all print text to pure pitch-black and bold */
           .receipt * {
             color: #000000 !important;
             font-weight: 800;
-            -webkit-text-stroke: 0.12px #000;
+            -webkit-text-stroke: 0.15px #000;
           }
 
           .header-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 2px solid #000000;
-            padding-bottom: 3px;
-            margin-bottom: 4px;
+            border-bottom: 3px solid #000000;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
           }
           .basket-title {
-            font-size: 26px;
+            font-size: 38px;
             font-weight: 900;
             font-family: 'JetBrains Mono', monospace;
             line-height: 1;
             color: #000000;
           }
           .zone-pill {
-            font-size: 12.5px;
+            font-size: 16px;
             font-weight: 900;
-            border: 1.8px solid #000000;
-            padding: 1px 7px;
+            border: 2px solid #000000;
+            padding: 2px 8px;
             border-radius: 4px;
             color: #000000;
           }
           .datetime-tag {
-            font-size: 10.5px;
-            font-weight: 800;
+            font-size: 13px;
+            font-weight: 900;
             color: #000000;
             text-align: right;
-            line-height: 1.2;
+            line-height: 1.25;
           }
 
           .customer-row {
-            border-bottom: 1.5px dashed #000000;
-            padding-bottom: 3px;
-            margin-bottom: 4px;
-            font-size: 12.5px;
-            line-height: 1.3;
+            border-bottom: 2px dashed #000000;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
+            font-size: 17px;
+            line-height: 1.35;
             color: #000000;
           }
 
@@ -1227,24 +1217,24 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
             display: flex;
             justify-content: space-between;
             font-weight: 900;
-            font-size: 12px;
+            font-size: 16px;
             color: #000000;
-            border-bottom: 1.5px solid #000000;
-            padding-bottom: 2px;
-            margin-bottom: 4px;
+            border-bottom: 2.5px solid #000000;
+            padding-bottom: 4px;
+            margin-bottom: 8px;
           }
 
           .totals-section {
-            border-top: 1.5px dashed #000000;
-            padding-top: 3px;
-            margin-top: 3px;
+            border-top: 2px dashed #000000;
+            padding-top: 6px;
+            margin-top: 8px;
             line-height: 1.35;
           }
           .total-box {
-            border: 2px solid #000000;
-            padding: 3px 6px;
-            border-radius: 4px;
-            margin-top: 3px;
+            border: 3px solid #000000;
+            padding: 6px 10px;
+            border-radius: 6px;
+            margin-top: 6px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1253,10 +1243,20 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
 
           .footer-note {
             text-align: center;
-            font-size: 11px;
+            font-size: 15px;
             font-weight: 900;
-            margin-top: 4px;
-            padding-top: 3px;
+            margin-top: 10px;
+            padding-top: 6px;
+            color: #000000;
+          }
+
+          .cut-line {
+            text-align: center;
+            font-size: 13px;
+            font-weight: 800;
+            margin-top: 8px;
+            border-top: 1px dashed #000000;
+            padding-top: 6px;
             color: #000000;
           }
 
@@ -1278,7 +1278,7 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
               box-shadow: none !important;
               border: none !important;
               border-radius: 0 !important;
-              padding: 2mm 3mm !important;
+              padding: 2mm 2mm 26mm 2mm !important;
               margin: 0 !important;
               width: 80mm !important;
               max-width: 80mm !important;
@@ -1288,25 +1288,25 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
             }
             .receipt * {
               color: #000000 !important;
-              -webkit-text-stroke: 0.15px #000 !important;
+              -webkit-text-stroke: 0.18px #000 !important;
             }
           }
         </style>
       </head>
       <body>
         <div class="control-panel">
-          <div class="control-title">🖨️ បញ្ជាព្រីនវិក្កយបត្រ (ក្បាល/កន្ទុយខ្លី ខ្មៅដិតច្បាស់)</div>
+          <div class="control-title">🖨️ បញ្ជាព្រីនវិក្កយបត្រ 80mm (កាត់ក្រដាស & ចេញពេញ)</div>
           
-          <!-- Direct Browser / AirPrint Print -->
-          <button class="btn btn-primary" onclick="window.print()">
-            <span>🖨️</span>
-            <span>ចុចព្រីន (Print Receipt / AirPrint)</span>
+          <!-- Print Agent Direct Print with Auto-Cut -->
+          <button class="btn btn-primary" id="agent-btn" onclick="printWithAgent()">
+            <span>🏪</span>
+            <span id="agent-btn-text">ព្រីនតាម Shop Agent (កាត់ក្រដាសស្វ័យប្រវត្តិ)</span>
           </button>
 
-          <!-- RawBT 1-Tap Direct Graphic Image Print -->
-          <button class="btn btn-rawbt" id="rawbt-btn" onclick="printWithRawBtImage()">
-            <span>⚡</span>
-            <span id="rawbt-btn-text">ព្រីនត្រង់ទៅ RawBT (រូបភាពច្បាស់ 100%)</span>
+          <!-- Direct Browser / AirPrint Print -->
+          <button class="btn btn-secondary" onclick="window.print()">
+            <span>🖨️</span>
+            <span>ចុចព្រីនផ្ទាល់ (Browser / AirPrint)</span>
           </button>
 
           <!-- Copy Text -->
@@ -1316,17 +1316,28 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
           </button>
 
           <div class="guide-box">
-            <strong>💡 ដើម្បីកុំឱ្យចេញ Link វេបសាយ (1/1 https://...) ៖</strong><br>
-            ក្នុងផ្ទាំង Print សូមដោះធីក (Uncheck) <strong>«Headers and footers / ក្បាលទំព័រនិងបាតកថា»</strong> នោះវានឹងកាត់ក្បាលកន្ទុយយ៉ាងស្អាត មិនខាតក្រដាស!<br>
-            <strong>⚡ RawBT ៖</strong> ចុចប៊ូតុងបៃតង វានឹង Render ជារូបភាពខ្មៅដិត 100% អក្សរខ្មែរស្អាត មិនរញ៉េរញ៉ៃ!
+            <strong>✂️ បញ្ជាកាត់ក្រដាសស្វ័យប្រវត្តិ (Auto-Cut) ៖</strong><br>
+            ប៊ូតុងពណ៌ខៀវ «ព្រីនតាម Shop Agent» នឹងបញ្ជូនកិច្ចការព្រីនទៅកាន់ Print Agent ក្នុងហាង ហើយកាត់ក្រដាសស្វ័យប្រវត្តិភ្លាម!<br>
+            <strong>💡 ពេលព្រីន Browser ៖</strong> សូមដោះធីក (Uncheck) <strong>«Headers and footers»</strong> ដើម្បីកុំឱ្យខាតក្រដាស។
           </div>
         </div>
 
-        <!-- Thermal Receipt Slip (Ultra-Compact, Pure Black Bold) -->
+        <!-- Thermal Receipt Slip (High-Contrast, Pure Black Bold) -->
         <div class="receipt" id="receipt-slip">
-          <!-- Compact Header: Basket + Zone + Date/Time in 1 Line -->
+          <!-- 1. Store Header (Matching Python main_window / print_manager) -->
+          <div style="text-align: center; border-bottom: 3px solid #000; padding-bottom: 6px; margin-bottom: 8px;">
+            <div style="font-size: 24px; font-weight: 900; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 1px; color: #000;">
+              KARI ARNETT BOUTIQUE
+            </div>
+            <div style="font-size: 13px; font-weight: 900; color: #000; text-transform: uppercase; letter-spacing: 0.5px;">
+              PREMIUM LIVE FULFILLMENT
+            </div>
+          </div>
+
+          <!-- 2. Basket / Invoice No + Zone + Date/Time -->
           <div class="header-row">
             <div style="display: flex; align-items: baseline; gap: 6px;">
+              <span style="font-size: 14px; font-weight: 900;">វិក្កយបត្រ ៖</span>
               <span class="basket-title">#${invoice.basket_no || invoice.invoice_id}</span>
               <span class="zone-pill">${locationBadge}</span>
             </div>
@@ -1336,53 +1347,80 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
             </div>
           </div>
 
-          <!-- Customer Info: Compact 1-2 lines, pure black bold -->
-          <div class="customer-row">
-            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-              <span>👤 <strong>${invoice.facebook_name}</strong></span>
-              ${phoneText ? `<span>📞 <strong>${phoneText}</strong></span>` : ''}
+          <!-- 3. Customer Info (with Profile Avatar next to customer info) -->
+          <div class="customer-row" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div style="flex: 1;">
+              <div>
+                <span style="font-size: 14px; font-weight: 800;">អតិថិជន ៖ </span>
+                <strong style="font-size: 19px; font-weight: 900;">${invoice.facebook_name}</strong>
+              </div>
+              ${phoneText ? `
+                <div style="margin-top: 2px;">
+                  <span style="font-size: 14px; font-weight: 800;">ទូរស័ព្ទ  ៖ </span>
+                  <strong style="font-size: 19px; font-weight: 900; font-family: 'JetBrains Mono', monospace;">${phoneText}</strong>
+                </div>
+              ` : ''}
+              ${addressText ? `<div style="margin-top: 3px; font-size: 15px;">📍 ${addressText}</div>` : ''}
             </div>
-            ${addressText ? `<div style="margin-top: 1px;">📍 ${addressText}</div>` : ''}
+            ${avatarUrl ? `
+              <div style="width: 60px; height: 60px; border-radius: 50%; border: 2.5px solid #000; overflow: hidden; flex-shrink: 0;">
+                <img src="${avatarUrl}" alt="" style="width: 100%; height: 100%; object-fit: cover;" crossorigin="anonymous" />
+              </div>
+            ` : ''}
           </div>
 
-          <!-- Items Table: Tight, Bold -->
+          <!-- 4. Items Table: Checklist with Checkboxes [ ] -->
           <div class="table-header">
-            <span style="width: 48%;">មុខទំនិញ</span>
-            <span style="width: 14%; text-align: center;">ចំនួន</span>
+            <span style="width: 48%;">📋 បញ្ជីទំនិញ (PACKING LIST)</span>
+            <span style="width: 16%; text-align: center;">ចំនួន</span>
             <span style="width: 18%; text-align: right;">តម្លៃ</span>
-            <span style="width: 20%; text-align: right;">សរុប</span>
+            <span style="width: 18%; text-align: right;">សរុប</span>
           </div>
 
           ${itemsHtml}
 
-          <!-- Compact Totals & Tail -->
+          <!-- 5. Totals Section -->
           <div class="totals-section">
-            <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: #000;">
-              <span>ទំនិញ (${totalQty} មុខ): <strong>$${subtotal.toFixed(2)}</strong></span>
-              <span>ថ្លៃដឹក: <strong>$${(invoice.shipping_fee || 0).toFixed(2)}</strong></span>
+            <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 800; color: #000;">
+              <span>ចំនួនសរុប ៖</span>
+              <strong>${totalQty} ឈុត</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 800; color: #000; margin-top: 2px;">
+              <span>តម្លៃទំនិញ ៖</span>
+              <strong>$${subtotal.toFixed(2)}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 800; color: #000; margin-top: 2px;">
+              <span>សេវាដឹក ៖</span>
+              <strong>${invoice.shipping_fee === 0 ? 'FREE SHIPPING' : '+$' + (invoice.shipping_fee || 2.0).toFixed(2)}</strong>
             </div>
 
             <div class="total-box">
-              <div>
-                <span style="font-size: 13px; font-weight: 900;">សរុប ៖</span>
-                <span style="font-size: 21px; font-weight: 900; font-family: 'JetBrains Mono', monospace; line-height: 1;">$${invoice.total_amount.toFixed(2)}</span>
-                <span style="font-size: 11px; font-weight: 800; margin-left: 2px;">(${rielTotal}៛)</span>
+              <div style="display: flex; align-items: baseline; gap: 6px;">
+                <span style="font-size: 16px; font-weight: 900;">TOTAL :</span>
+                <span style="font-size: 28px; font-weight: 900; font-family: 'JetBrains Mono', monospace; line-height: 1;">$${invoice.total_amount.toFixed(2)}</span>
+                <span style="font-size: 14px; font-weight: 800; margin-left: 3px;">(${rielTotal} R)</span>
               </div>
-              <span style="font-size: 12px; font-weight: 900; border: 1.5px solid #000; padding: 1px 6px; border-radius: 3px;">
+              <span style="font-size: 14px; font-weight: 900; border: 2px solid #000; padding: 2px 8px; border-radius: 4px;">
                 ${invoice.status === 'Paid' ? '✅ PAID' : '⏳ UNPAID'}
               </span>
             </div>
           </div>
 
-          <!-- 1-Line Compact Footer -->
-          <div class="footer-note">
-            🙏 អរគុណសម្រាប់ការគាំទ្រ! (#${invoice.basket_no || invoice.invoice_id})
+          <!-- 6. Store Policy Footer (Matching Python print_manager) -->
+          <div class="footer-note" style="line-height: 1.35;">
+            <div>អរគុណចំពោះការគាំទ្រ KARI ARNETT!</div>
+            <div style="font-size: 13px; font-weight: 800;">ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ</div>
+          </div>
+
+          <!-- 7. Cut Marker -->
+          <div class="cut-line">
+            - - - - - - - - - - [ កាត់ត្រង់នេះ ✂️ ] - - - - - - - - - -
           </div>
         </div>
 
         <script>
           function copyReceiptText() {
-            const txt = atob('${rawbtBase64}');
+            const txt = atob('${plainReceiptBase64}');
             navigator.clipboard.writeText(txt).then(function() {
               document.getElementById('copy-label').innerText = '✅ បានចម្លងរួចរាល់!';
               setTimeout(function() {
@@ -1393,32 +1431,118 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
             });
           }
 
-          async function printWithRawBtImage() {
+          // ESC/POS Raster image converter for 80mm thermal with auto-cut
+          function canvasToEscPos(canvas) {
+            const width = canvas.width;
+            const height = canvas.height;
+            const ctx = canvas.getContext('2d');
+            const imgData = ctx.getImageData(0, 0, width, height);
+            const data = imgData.data;
+
+            const widthBytes = Math.ceil(width / 8);
+            const rasterBytes = [];
+
+            for (let y = 0; y < height; y++) {
+              for (let b = 0; b < widthBytes; b++) {
+                let byteVal = 0;
+                for (let bit = 0; bit < 8; bit++) {
+                  const x = b * 8 + bit;
+                  if (x < width) {
+                    const idx = (y * width + x) * 4;
+                    const r = data[idx];
+                    const g = data[idx + 1];
+                    const bVal = data[idx + 2];
+                    const a = data[idx + 3];
+                    const luminance = a < 128 ? 255 : (0.299 * r + 0.587 * g + 0.114 * bVal);
+                    if (luminance < 165) {
+                      byteVal |= (1 << (7 - bit));
+                    }
+                  }
+                }
+                rasterBytes.push(byteVal);
+              }
+            }
+
+            const commands = [];
+            // Init printer
+            commands.push(0x1B, 0x40);
+            // Center alignment
+            commands.push(0x1B, 0x61, 0x01);
+            // Raster command GS v 0
+            const xL = widthBytes & 0xFF;
+            const xH = (widthBytes >> 8) & 0xFF;
+            const yL = height & 0xFF;
+            const yH = (height >> 8) & 0xFF;
+            commands.push(0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH);
+
+            for (let i = 0; i < rasterBytes.length; i++) {
+              commands.push(rasterBytes[i]);
+            }
+
+            // Feed 5 lines past printhead
+            commands.push(0x1B, 0x64, 0x05);
+            // Auto-Cut commands (GS V 66 0 & GS V 0)
+            commands.push(0x1D, 0x56, 0x42, 0x00);
+            commands.push(0x1D, 0x56, 0x00);
+
+            return new Uint8Array(commands);
+          }
+
+          function uint8ToBase64(bytes) {
+            let binary = '';
+            const len = bytes.byteLength;
+            for (let i = 0; i < len; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            return window.btoa(binary);
+          }
+
+          async function printWithAgent() {
             const el = document.getElementById('receipt-slip');
-            const btnText = document.getElementById('rawbt-btn-text');
+            const btnText = document.getElementById('agent-btn-text');
             if (!el) return;
 
             try {
-              btnText.innerText = '⚡ កំពុង Render រូបភាព...';
+              btnText.innerText = '⚡ កំពុង Render & បង្កើតកូដកាត់ក្រដាស...';
               
-              // Stage pack on backend
-              fetch('/api/stage_pack', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ invoice_id: ${invoice.invoice_id}, packer_name: 'RawBT' }),
-                keepalive: true
-              });
-
               if (typeof html2canvas !== 'undefined') {
+                // 576 dots is exact 80mm thermal printable width at 203 DPI (72mm)
                 const canvas = await html2canvas(el, {
-                  scale: 2,
+                  width: 576,
+                  scale: 1,
                   backgroundColor: '#ffffff',
                   useCORS: true,
                   logging: false
                 });
-                const base64Data = canvas.toDataURL('image/png').replace(/^data:image\\/png;base64,/, '');
-                btnText.innerText = '✅ បានបញ្ជូនទៅ RawBT!';
-                window.location.href = 'rawbt:data:image/png;base64,' + base64Data;
+
+                const escPosBytes = canvasToEscPos(canvas);
+                const b64 = uint8ToBase64(escPosBytes);
+
+                btnText.innerText = '📡 កំពុងបញ្ជូនទៅ Shop Print Agent...';
+
+                const res = await fetch('/api/print_agent/job', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    invoice_id: ${invoice.invoice_id},
+                    basket_no: '${invoice.basket_no || invoice.invoice_id}',
+                    customer_name: '${invoice.facebook_name || ''}',
+                    escpos_base64: b64,
+                    packer_name: 'Shop Agent Web'
+                  })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                  if (data.is_agent_online) {
+                    btnText.innerText = '✅ បានព្រីនតាម Shop Agent រួចរាល់!';
+                  } else {
+                    btnText.innerText = '⚠️ បញ្ជូនចូល Queue រួច (Agent Offline)';
+                    alert('⚠️ Print Agent ក្នុងហាងមិនទាន់បើកដំណើរការ (Offline)។ សូមបើក pos-agent.js លើកុំព្យូទ័រហាង ឬប្រើប្រាស់ Browser Print!');
+                  }
+                } else {
+                  window.print();
+                }
               } else {
                 window.print();
               }
@@ -1427,8 +1551,8 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
               window.print();
             } finally {
               setTimeout(function() {
-                btnText.innerText = 'ព្រីនត្រង់ទៅ RawBT (រូបភាពច្បាស់ 100%)';
-              }, 3000);
+                btnText.innerText = 'ព្រីនតាម Shop Agent (កាត់ក្រដាសស្វ័យប្រវត្តិ)';
+              }, 3500);
             }
           }
 
@@ -1447,6 +1571,539 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
+});
+
+// -------------------------------------------------------------
+// 🌐 Direct Wi-Fi / LAN Network POS Printing Endpoint (Port 9100)
+// -------------------------------------------------------------
+function isPrivateLanIp(ip: string): boolean {
+  const clean = ip.trim();
+  return /^192\.168\./.test(clean) || /^10\./.test(clean) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(clean) || clean === '127.0.0.1' || clean === 'localhost';
+}
+
+// POST /api/print_lan
+router.post('/print_lan', async (req: Request, res: Response) => {
+  try {
+    const { invoice_id, printer_ip, printer_port = 9100, escpos_base64, packer_name } = req.body;
+
+    if (!printer_ip || !String(printer_ip).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'សូមបញ្ចូលអាសយដ្ឋាន IP ម៉ាស៊ីនព្រីន (ឧ. 192.168.0.200)'
+      });
+    }
+
+    const cleanIp = String(printer_ip).trim();
+    const port = parseInt(String(printer_port || 9100), 10);
+    const isPrivate = isPrivateLanIp(cleanIp);
+
+    if (invoice_id) {
+      const invId = Number(invoice_id);
+      const inv = invoices.find(i => i.invoice_id === invId || i.basket_no === invId);
+      if (inv && (inv.packing_stage === 'UNPICKED' || !inv.packing_stage)) {
+        inv.packing_stage = 'STAGED';
+        inv.staged_by = packer_name || 'POS Wi-Fi/LAN';
+        inv.staged_at = new Date().toISOString();
+        bumpDataRevision();
+      }
+    }
+
+    let buffer: Buffer;
+    if (escpos_base64) {
+      buffer = Buffer.from(escpos_base64, 'base64');
+    } else {
+      // Basic ESC/POS fallback test slip
+      const init = Buffer.from([0x1B, 0x40, 0x1B, 0x61, 0x01]);
+      const content = Buffer.from(`\n=== POS NETWORK TEST ===\nPRINTER: ${cleanIp}:${port}\nDATE: ${new Date().toLocaleString()}\n\n`, 'utf8');
+      const cut = Buffer.from([0x1D, 0x56, 0x42, 0x00, 0x1D, 0x56, 0x00]);
+      buffer = Buffer.concat([init, content, cut]);
+    }
+
+    const socket = new net.Socket();
+    socket.setTimeout(2500);
+
+    await new Promise<void>((resolve, reject) => {
+      socket.connect(port, cleanIp, () => {
+        socket.write(buffer, () => {
+          socket.end();
+          resolve();
+        });
+      });
+      socket.on('error', (err) => {
+        socket.destroy();
+        reject(err);
+      });
+      socket.on('timeout', () => {
+        socket.destroy();
+        if (isPrivate) {
+          reject(new Error(`ម៉ាស៊ីនមេ Online (Cloud) មិនអាចបាញ់ចូល IP ក្នុងផ្ទះ/ហាង ${cleanIp}:${port} បានឡើយ (Private LAN Network)។ សូមប្រើប្រាស់ជម្រើស «⚡ Bluetooth POS» (ភ្ជាប់ទូរស័ព្ទផ្ទាល់ 1-Tap) ឬ «🖨️ AirPrint» ឬ «📱 RawBT (Wi-Fi 192.168.0.200)»!`));
+        } else {
+          reject(new Error(`ភ្ជាប់ទៅកាន់ម៉ាស៊ីនព្រីន ${cleanIp}:${port} ហួសពេលកំណត់ (Timeout)! សូមពិនិត្យមើល IP និងសេវា Wi-Fi!`));
+        }
+      });
+    });
+
+    return res.json({
+      success: true,
+      message: `បានព្រីន និងបញ្ជាកាត់ក្រដាសទៅម៉ាស៊ីន Wi-Fi ${cleanIp}:${port} ជោគជ័យ!`
+    });
+  } catch (err: any) {
+    const cleanIp = String(req.body.printer_ip || '').trim();
+    const isPrivate = isPrivateLanIp(cleanIp);
+    if (isPrivate) {
+      console.warn('[Print LAN Notice]: Cloud server cannot reach local private IP:', cleanIp);
+    } else {
+      console.error('[Print LAN Error]:', err?.message || err);
+    }
+    return res.status(200).json({
+      success: false,
+      isCloudPrivateIp: isPrivate,
+      error: err?.message || 'មិនអាចភ្ជាប់ទៅកាន់ម៉ាស៊ីនព្រីនតាម Wi-Fi/LAN បានទេ!'
+    });
+  }
+});
+
+// POST /api/test_lan_printer
+router.post('/test_lan_printer', async (req: Request, res: Response) => {
+  try {
+    const { printer_ip, printer_port = 9100 } = req.body;
+    if (!printer_ip) {
+      return res.status(400).json({ success: false, error: 'Printer IP ត្រូវបានទាមទារ!' });
+    }
+
+    const cleanIp = String(printer_ip).trim();
+    const port = parseInt(String(printer_port || 9100), 10);
+    const isPrivate = isPrivateLanIp(cleanIp);
+
+    const init = Buffer.from([0x1B, 0x40, 0x1B, 0x61, 0x01]);
+    const content = Buffer.from(
+      `\n================================\n` +
+      `      KARI ARNETT BOUTIQUE      \n` +
+      `    POS NETWORK PRINTER TEST    \n` +
+      `================================\n` +
+      `IP   : ${cleanIp}:${port}\n` +
+      `TIME : ${new Date().toLocaleTimeString()}\n` +
+      `STATUS: CONNECTED OK!\n` +
+      `================================\n\n\n`,
+      'utf8'
+    );
+    const cut = Buffer.from([0x1D, 0x56, 0x42, 0x00, 0x1D, 0x56, 0x00]);
+    const buffer = Buffer.concat([init, content, cut]);
+
+    const socket = new net.Socket();
+    socket.setTimeout(2500);
+
+    await new Promise<void>((resolve, reject) => {
+      socket.connect(port, cleanIp, () => {
+        socket.write(buffer, () => {
+          socket.end();
+          resolve();
+        });
+      });
+      socket.on('error', (err) => {
+        socket.destroy();
+        reject(err);
+      });
+      socket.on('timeout', () => {
+        socket.destroy();
+        if (isPrivate) {
+          reject(new Error(`ម៉ាស៊ីនមេ Online (Cloud) មិនអាចបាញ់ចូល IP ក្នុងផ្ទះ/ហាង ${cleanIp}:${port} បានឡើយ (Private LAN Network)។ សូមប្រើប្រាស់ជម្រើស «⚡ Bluetooth POS» (ភ្ជាប់ទូរស័ព្ទផ្ទាល់ 1-Tap) ឬ «🖨️ AirPrint» ឬ «📱 RawBT (Wi-Fi)»!`));
+        } else {
+          reject(new Error(`Timeout connecting to ${cleanIp}:${port}`));
+        }
+      });
+    });
+
+    return res.json({
+      success: true,
+      message: `ម៉ាស៊ីនព្រីន ${cleanIp}:${port} ភ្ជាប់បានជោគជ័យ!`
+    });
+  } catch (err: any) {
+    const cleanIp = String(req.body.printer_ip || '').trim();
+    const isPrivate = isPrivateLanIp(cleanIp);
+    if (isPrivate) {
+      console.warn('[Test LAN Notice]: Cloud server cannot reach local private IP:', cleanIp);
+    } else {
+      console.error('[Test LAN Error]:', err?.message || err);
+    }
+    return res.status(200).json({
+      success: false,
+      isCloudPrivateIp: isPrivate,
+      error: err?.message || 'បរាជ័យក្នុងការតេស្តម៉ាស៊ីនព្រីន Network'
+    });
+  }
+});
+
+// -------------------------------------------------------------
+// 🏪 SHOP PRINT AGENT BACKEND (Cloud Relay for Store Thermal Printers)
+// -------------------------------------------------------------
+interface AgentPrintJob {
+  id: string;
+  invoice_id: number;
+  basket_no: string;
+  customer_name: string;
+  escpos_base64: string;
+  created_at: number;
+  status: 'PENDING' | 'PRINTED' | 'FAILED';
+  error?: string;
+}
+
+let agentHeartbeat: {
+  agent_name: string;
+  printer_target: string;
+  last_seen: number;
+} | null = null;
+
+let pendingAgentJobs: AgentPrintJob[] = [];
+const waitingAgentPollers: Array<(jobs: AgentPrintJob[]) => void> = [];
+
+// GET /api/print_agent/status - Check if shop agent is currently online
+router.get('/print_agent/status', (_req: Request, res: Response) => {
+  const isOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat.last_seen < 65000);
+  res.json({
+    success: true,
+    online: isOnline,
+    agent: isOnline ? agentHeartbeat : null,
+    pending_count: pendingAgentJobs.length,
+    last_seen_seconds_ago: agentHeartbeat ? Math.round((Date.now() - agentHeartbeat.last_seen) / 1000) : null
+  });
+});
+
+// POST /api/print_agent/heartbeat - Sent by the local pos-agent.js running in store
+router.post('/print_agent/heartbeat', (req: Request, res: Response) => {
+  const { agent_name = 'Store PC', printer_target = '192.168.0.200:9100' } = req.body || {};
+  agentHeartbeat = {
+    agent_name: String(agent_name),
+    printer_target: String(printer_target),
+    last_seen: Date.now()
+  };
+  res.json({ success: true, timestamp: Date.now(), pending: pendingAgentJobs.length });
+});
+
+// POST /api/print_agent/job - Enqueue print job from mobile phone or web UI
+router.post('/print_agent/job', (req: Request, res: Response) => {
+  try {
+    const { invoice_id, basket_no, customer_name, escpos_base64, packer_name } = req.body || {};
+
+    if (!escpos_base64) {
+      return res.status(400).json({ success: false, error: 'ទិន្នន័យ ESC/POS base64 ត្រូវបានទាមទារ!' });
+    }
+
+    // Auto stage invoice (UNPICKED -> STAGED)
+    if (invoice_id) {
+      const invId = Number(invoice_id);
+      const inv = invoices.find(i => i.invoice_id === invId || i.basket_no === invId);
+      if (inv && (inv.packing_stage === 'UNPICKED' || !inv.packing_stage)) {
+        inv.packing_stage = 'STAGED';
+        inv.staged_by = packer_name || 'Shop Print Agent';
+        inv.staged_at = new Date().toISOString();
+        bumpDataRevision();
+      }
+    }
+
+    const job: AgentPrintJob = {
+      id: 'job_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      invoice_id: Number(invoice_id || 0),
+      basket_no: String(basket_no || invoice_id || ''),
+      customer_name: String(customer_name || ''),
+      escpos_base64: String(escpos_base64),
+      created_at: Date.now(),
+      status: 'PENDING'
+    };
+
+    // If there is an agent currently waiting in long-poll, dispatch immediately!
+    if (waitingAgentPollers.length > 0) {
+      const poller = waitingAgentPollers.shift();
+      if (poller) {
+        poller([job]);
+      }
+    } else {
+      pendingAgentJobs.push(job);
+      // Keep max 20 jobs
+      if (pendingAgentJobs.length > 20) {
+        pendingAgentJobs.shift();
+      }
+    }
+
+    // Also broadcast to zero-auth ntfy.sh relay for instant shop reception
+    try {
+      const ntfyReq = https.request('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
+        method: 'POST',
+        headers: {
+          'Title': `Basket #${job.basket_no} - ${job.customer_name}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      ntfyReq.on('error', () => {});
+      ntfyReq.write(JSON.stringify({
+        basket_no: job.basket_no,
+        customer_name: job.customer_name,
+        escpos_base64: job.escpos_base64
+      }));
+      ntfyReq.end();
+    } catch {}
+
+    const isOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat.last_seen < 30000);
+
+    return res.json({
+      success: true,
+      job_id: job.id,
+      is_agent_online: isOnline,
+      message: isOnline
+        ? `✅ បានបញ្ជូនទៅកាន់ Shop Print Agent (${agentHeartbeat?.printer_target || 'Printer'}) ជោគជ័យ!`
+        : `⚠️ បានដាក់ចូលជួរ (Queue) ប៉ុន្តែ Print Agent ក្នុងហាងហាក់ដូចជាមិនទាន់បើក (Offline)`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Failed to enqueue print job' });
+  }
+});
+
+// GET /api/print_agent/poll - Long-poll endpoint for pos-agent.js
+router.get('/print_agent/poll', (req: Request, res: Response) => {
+  // Update heartbeat on poll
+  if (agentHeartbeat) {
+    agentHeartbeat.last_seen = Date.now();
+  }
+
+  // If there are pending jobs, return immediately
+  if (pendingAgentJobs.length > 0) {
+    const jobs = [...pendingAgentJobs];
+    pendingAgentJobs = [];
+    return res.json({ success: true, jobs });
+  }
+
+  // Long-poll: wait up to 12 seconds for new jobs
+  let hasResponded = false;
+  const timeoutId = setTimeout(() => {
+    if (!hasResponded) {
+      hasResponded = true;
+      // Remove this poller callback
+      const idx = waitingAgentPollers.indexOf(deliverJobs);
+      if (idx !== -1) waitingAgentPollers.splice(idx, 1);
+      res.json({ success: true, jobs: [] });
+    }
+  }, 12000);
+
+  const deliverJobs = (jobs: AgentPrintJob[]) => {
+    if (!hasResponded) {
+      hasResponded = true;
+      clearTimeout(timeoutId);
+      res.json({ success: true, jobs });
+    }
+  };
+
+  waitingAgentPollers.push(deliverJobs);
+
+  req.on('close', () => {
+    hasResponded = true;
+    clearTimeout(timeoutId);
+    const idx = waitingAgentPollers.indexOf(deliverJobs);
+    if (idx !== -1) waitingAgentPollers.splice(idx, 1);
+  });
+});
+
+// POST /api/print_agent/ack - Acknowledge completion of a job
+router.post('/print_agent/ack', (req: Request, res: Response) => {
+  const { job_id, status = 'PRINTED', error } = req.body || {};
+  console.log(`[Shop Agent Job Ack]: ${job_id} -> ${status} ${error ? '(' + error + ')' : ''}`);
+  res.json({ success: true });
+});
+
+// GET /api/print_agent/download_script - Download pos-agent.js with auto-configured server URL
+router.get('/print_agent/download_script', (req: Request, res: Response) => {
+  try {
+    const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
+    const protocol = (String(host).includes('run.app') || req.headers['x-forwarded-proto'] === 'https') ? 'https' : (req.protocol || 'https');
+    const serverUrl = `${protocol}://${host}`;
+
+    const filePath = path.join(process.cwd(), 'pos-agent.js');
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send('pos-agent.js not found');
+    }
+
+    let content = fs.readFileSync(filePath, 'utf8');
+    // Replace default server URL with the caller's actual cloud URL
+    content = content.replace(
+      /SERVER_URL = process\.argv\[3\] \|\| process\.env\.SERVER_URL \|\| '.*?';/,
+      `SERVER_URL = process.argv[3] || process.env.SERVER_URL || '${serverUrl}';`
+    );
+
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="pos-agent.js"');
+    res.send(content);
+  } catch (err: any) {
+    res.status(500).send('Error generating agent script: ' + err.message);
+  }
+});
+
+// GET /api/print_agent/download_python - Download pos_agent.py with auto-configured server URL
+router.get('/print_agent/download_python', (req: Request, res: Response) => {
+  try {
+    const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
+    const protocol = (String(host).includes('run.app') || req.headers['x-forwarded-proto'] === 'https') ? 'https' : (req.protocol || 'https');
+    const serverUrl = `${protocol}://${host}`;
+
+    const filePath = path.join(process.cwd(), 'pos_agent.py');
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send('pos_agent.py not found');
+    }
+
+    let content = fs.readFileSync(filePath, 'utf8');
+    content = content.replace(
+      /DEFAULT_SERVER_URL = ".*?"/,
+      `DEFAULT_SERVER_URL = "${serverUrl}"`
+    );
+
+    res.setHeader('Content-Type', 'text/x-python; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="pos_agent.py"');
+    res.send(content);
+  } catch (err: any) {
+    res.status(500).send('Error generating Python script: ' + err.message);
+  }
+});
+
+// GET /api/print_agent/download_bat - Download 1-Click Windows Launcher Batch File
+router.get('/print_agent/download_bat', (_req: Request, res: Response) => {
+  const batContent = `@echo off
+chcp 65001 >nul
+title KARI ARNETT POS - SHOP PRINT AGENT (XP-80C)
+color 0A
+cls
+echo =========================================================================
+echo    🏪 KARI ARNETT POS - SHOP PRINT AGENT (1-CLICK LAUNCHER)
+echo =========================================================================
+echo.
+echo [1/2] ឆែក Python ក្នុងកុំព្យូទ័រ...
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] មិនទាន់មាន Python ក្នុងកុំព្យូទ័រទេ!
+    echo សូមដំឡើង Python ពី https://www.python.org/downloads/ រួចបើកម្ដងទៀត។
+    pause
+    exit /b 1
+)
+
+echo [2/2] កំពុងដំណើរការ Print Agent សម្រាប់ USB XP-80C...
+echo.
+python "%~dp0pos_agent.py" usb
+pause
+`;
+  res.setHeader('Content-Type', 'application/x-bat');
+  res.setHeader('Content-Disposition', 'attachment; filename="START_PRINT_AGENT.bat"');
+  res.send(batContent);
+});
+
+// -------------------------------------------------------------
+// 🗄️ SQLite Database Backup & Historical Verification Endpoints
+// -------------------------------------------------------------
+
+// GET /api/db/backup - Download raw SQLite pos.db file
+router.get('/db/backup', async (_req: Request, res: Response) => {
+  try {
+    await persistToSqlite({
+      activeLiveId,
+      settings,
+      products,
+      invoices,
+      customers,
+      packerLogs,
+      activeFacebookPage
+    });
+    const buffer = getSqliteDatabaseBuffer();
+    if (!buffer) {
+      return res.status(404).send('SQLite database not initialized yet.');
+    }
+    const filename = `pos_backup_${new Date().toISOString().split('T')[0]}.db`;
+    res.setHeader('Content-Type', 'application/x-sqlite3');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err: any) {
+    res.status(500).send('Error downloading SQLite database: ' + err.message);
+  }
+});
+
+// GET /api/history/dates - Get list of live stream dates for historical verification
+router.get('/history/dates', (_req: Request, res: Response) => {
+  const dateMap = new Map<string, { date: string; live_ids: Set<string>; total_invoices: number; total_revenue: number; staged_count: number; verified_count: number; paid_count: number }>();
+
+  invoices.forEach(inv => {
+    const rawDate = inv.created_at || new Date().toISOString();
+    const dateStr = rawDate.includes('T') ? rawDate.split('T')[0] : rawDate.split(' ')[0];
+
+    const current = dateMap.get(dateStr) || {
+      date: dateStr,
+      live_ids: new Set<string>(),
+      total_invoices: 0,
+      total_revenue: 0,
+      staged_count: 0,
+      verified_count: 0,
+      paid_count: 0
+    };
+
+    if (inv.live_id) current.live_ids.add(inv.live_id);
+    current.total_invoices += 1;
+    current.total_revenue += Number(inv.total_amount || 0);
+    if (inv.packing_stage === 'STAGED') current.staged_count += 1;
+    if (inv.packing_stage === 'DISPATCHED') current.verified_count += 1;
+    if (inv.status === 'Paid') current.paid_count += 1;
+
+    dateMap.set(dateStr, current);
+  });
+
+  const datesList = Array.from(dateMap.values())
+    .map(d => ({
+      ...d,
+      live_ids: Array.from(d.live_ids),
+      total_revenue: Number(d.total_revenue.toFixed(2))
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  res.json({
+    success: true,
+    total_dates: datesList.length,
+    dates: datesList
+  });
+});
+
+// GET /api/history/invoices - Filter invoices by specific date (e.g. ?date=2026-09-14)
+router.get('/history/invoices', (req: Request, res: Response) => {
+  const { date, live_id } = req.query;
+
+  let filtered = invoices;
+
+  if (date && typeof date === 'string') {
+    filtered = filtered.filter(inv => {
+      const invDate = (inv.created_at || '').split('T')[0].split(' ')[0];
+      return invDate === date;
+    });
+  }
+
+  if (live_id && typeof live_id === 'string') {
+    filtered = filtered.filter(inv => inv.live_id === live_id);
+  }
+
+  res.json({
+    success: true,
+    filter_date: date || null,
+    filter_live_id: live_id || null,
+    count: filtered.length,
+    total_revenue: Number(filtered.reduce((sum, inv) => sum + (inv.total_amount || 0), 0).toFixed(2)),
+    invoices: filtered
+  });
+});
+
+// GET /api/db/stats - Return database engine info
+router.get('/db/stats', (_req: Request, res: Response) => {
+  const dbBuffer = getSqliteDatabaseBuffer();
+  res.json({
+    engine: 'SQLite 3 (via sql.js + WAL Persistence)',
+    db_file: 'server/pos.db',
+    file_size_bytes: dbBuffer ? dbBuffer.length : 0,
+    total_invoices: invoices.length,
+    total_products: products.length,
+    total_customers: customers.length,
+    total_packer_logs: packerLogs.length,
+    active_live_id: activeLiveId
+  });
 });
 
 export default router;

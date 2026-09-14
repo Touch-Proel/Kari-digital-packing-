@@ -5,6 +5,7 @@ interface HeaderProps {
   onOpenFbModal: () => void;
   dispatchedCount: number;
   onOpenDispatchModal: () => void;
+  onOpenDatabaseModal?: () => void;
   packerName: string;
   onOpenPackerHistory: () => void;
   liveSessions: { live_id: string; created_at: string; basket_count?: number }[];
@@ -24,6 +25,7 @@ export function Header({
   onOpenFbModal,
   dispatchedCount,
   onOpenDispatchModal,
+  onOpenDatabaseModal,
   packerName,
   onOpenPackerHistory,
   liveSessions,
@@ -73,6 +75,18 @@ export function Header({
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span className="truncate max-w-[85px]">{activePage ? activePage.name : 'FB Page'}</span>
           </button>
+
+          {/* SQLite Database & Date History Button */}
+          {onOpenDatabaseModal && (
+            <button
+              onClick={onOpenDatabaseModal}
+              className="px-2 py-1 rounded-xl text-[11px] font-black border bg-cyan-950/70 border-cyan-500/60 text-cyan-300 hover:bg-cyan-900 flex items-center gap-1 transition-all shadow-sm active:scale-95 cursor-pointer"
+              title="ពិនិត្យទិន្នន័យ SQLite, ទាញយក Backup .db និងផ្ទៀងផ្ទាត់កន្ត្រកតាមថ្ងៃ"
+            >
+              <span>🗄️</span>
+              <span className="hidden sm:inline">SQLite DB</span>
+            </button>
+          )}
 
           {/* Dispatched Count Pill */}
           <button

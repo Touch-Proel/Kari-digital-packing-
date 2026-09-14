@@ -43,6 +43,10 @@ export interface Invoice {
   packing_stage: PackingStage;
   staged_by?: string;
   staged_at?: string;
+  verified_by?: string;
+  verified_at?: string;
+  paid_by?: string;
+  paid_at?: string;
   msg_status: 'SENT' | 'UNSENT' | 'FAILED';
   msg_error?: string;
   is_locked?: boolean;

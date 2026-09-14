@@ -93,12 +93,13 @@ async function downloadTelegramPhoto(token: string, fileId: string, codeHint: st
 export function parseLinesForStockItems(rawText: string, defaultQty: number = 200): Array<{ code: string; price: number; name?: string }> {
   if (!rawText || !rawText.trim()) return [];
 
-  const lines = rawText.split(/[\r\n;,]+/);
+  // Support splitting by newlines, semicolons, commas, pipes, and slashes
+  const lines = rawText.split(/[\r\n;,|/]+/);
   const items: Array<{ code: string; price: number; name?: string }> = [];
 
   for (const line of lines) {
     let trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (!trimmed) continue;
 
     // Remove bot commands (e.g. /stock, /add@Pitoubot_bot) and bot mentions (e.g. @Pitoubot_bot)
     trimmed = trimmed
@@ -106,17 +107,20 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
       .replace(/@[a-zA-Z0-9_]+\b/gi, ' ')
       .trim();
 
+    // Strip leading hashtags (e.g. #100=3.7 or #A1: 4$) - DO NOT skip lines with hashtags!
+    trimmed = trimmed.replace(/^#+/, '').trim();
+
     if (!trimmed) continue;
 
     // Pattern 1: [កូដ] <code> [= / : / - / x] [តម្លៃ] <price> [$ / usd] [name]
-    // Examples: 100=3.7, 95=4, 99=1.5, A12: 4.5$, 100=3.7 អាវយឺត, កូដ 100 តម្លៃ 3.7$
+    // Examples: 100=3.7, 95=4, 99=1.5, 105: 4.5$, 100=3.7 អាវយឺត, កូដ 100 តម្លៃ 3.7$
     const pat1 = /(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?/i;
     const m1 = trimmed.match(pat1);
     if (m1) {
       const code = m1[1].trim().toUpperCase();
       const price = parseFloat(m1[2]);
       const name = m1[3]?.trim();
-      if (code && !isNaN(price) && price > 0) {
+      if (code && !isNaN(price) && price >= 0) {
         items.push({ code, price, name });
         continue;
       }
@@ -130,7 +134,7 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
       const code = m2[1].trim().toUpperCase();
       const price = parseFloat(m2[2]);
       const name = m2[3]?.trim();
-      if (code && !isNaN(price) && price > 0) {
+      if (code && !isNaN(price) && price >= 0) {
         items.push({ code, price, name });
         continue;
       }
@@ -143,7 +147,7 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
       const code = m3[1].trim().toUpperCase();
       const price = parseFloat(m3[2]);
       const name = m3[3]?.trim();
-      if (code && !isNaN(price) && price > 0) {
+      if (code && !isNaN(price) && price >= 0) {
         items.push({ code, price, name });
         continue;
       }
@@ -156,22 +160,44 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
       const code = m4[1].trim().toUpperCase();
       const price = parseFloat(m4[2]);
       const name = m4[3]?.trim();
-      // Heuristic: price is usually < 1000 for clothing/general items in USD
-      if (code && !isNaN(price) && price > 0 && price < 2000) {
+      // Heuristic: price is usually < 2000 for clothing/general items in USD
+      if (code && !isNaN(price) && price >= 0 && price < 2000) {
         items.push({ code, price, name });
         continue;
       }
+    }
+
+    // Pattern 5: Standalone Code without explicit price (e.g. "100", "A05", "កូដ 100")
+    // When a photo is sent with just the code as caption
+    const pat5 = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,10})$/i;
+    const m5 = trimmed.match(pat5);
+    if (m5) {
+      const code = m5[1].trim().toUpperCase();
+      // Look up if product exists to keep its price, else default to 0 or 5
+      const existing = products.find(p => p.code.toUpperCase() === code);
+      const price = existing?.price || 5.0;
+      items.push({ code, price, name: existing?.name || `កូដ ${code}` });
+      continue;
     }
   }
 
   return items;
 }
 
+// In-memory cache of scanned items to prevent losing data after Telegram offset acknowledgement
+export let cachedTelegramItems: TelegramItemParsed[] = [];
+
+export function clearScannedTelegramCache() {
+  cachedTelegramItems = [];
+}
+
 // 4. Fetch and Parse stock updates from Telegram via Bot Token Only
+// Upgraded with Multi-Page Loop Pagination (bypasses Telegram's 100 updates hard limit)
 export async function fetchTelegramStockUpdates(options: {
   token?: string;
   defaultQty?: number;
   markRead?: boolean;
+  clearCache?: boolean;
   limit?: number;
 }): Promise<{
   success: boolean;
@@ -193,52 +219,84 @@ export async function fetchTelegramStockUpdates(options: {
     };
   }
 
+  if (options.clearCache) {
+    cachedTelegramItems = [];
+  }
+
   // 1. Verify Bot Token
   const botRes = await testTelegramBotToken(token);
   if (!botRes.success || !botRes.bot) {
     return {
       success: false,
-      items: [],
+      items: cachedTelegramItems,
       messagesScanned: 0,
-      totalFound: 0,
+      totalFound: cachedTelegramItems.length,
       error: botRes.error || 'Bot Token មិនត្រឹមត្រូវ'
     };
   }
 
   const defaultQty = options.defaultQty || 200;
-  const limit = options.limit || 100;
 
   try {
-    // 2. Fetch updates from Telegram
-    const updatesRes = await fetch(
-      `https://api.telegram.org/bot${token}/getUpdates?limit=${limit}&allowed_updates=["message","channel_post","edited_message"]`
-    );
-    const updatesData = await updatesRes.json();
-
-    if (!updatesData.ok || !Array.isArray(updatesData.result)) {
-      let desc = updatesData.description || 'បរាជ័យក្នុងការទាញ getUpdates ពី Telegram';
-      if (desc.includes('Conflict: terminated by other getUpdates request')) {
-        desc = '⚠️ ជាន់គ្នាជាមួយកម្មវិធីផ្សេង (Conflict) ៖ Bot នេះកំពុងមានកម្មវិធីផ្សេង (ដូចជាប្រព័ន្ធ Attendance ឬ Server ផ្សេង) បើកដំណើរការទទួលសារស្របពេលគ្នា។ Telegram អនុញ្ញាតឱ្យតែ ១ កម្មវិធីគត់ទទួលសារពី Bot ក្នុងពេលតែមួយ។ សូមបង្កើត Bot ថ្មីមួយផ្សេងទៀតក្នុង @BotFather សម្រាប់តែស្តុក!';
-      }
-      return {
-        success: false,
-        bot: botRes.bot,
-        items: [],
-        messagesScanned: 0,
-        totalFound: 0,
-        error: desc
-      };
-    }
-
-    const updates = updatesData.result;
-    const parsedItemsMap = new Map<string, TelegramItemParsed>();
+    // 2. Fetch updates from Telegram using Loop Pagination
+    // Telegram Bot API getUpdates has a HARD CEILING of 100 updates per request!
+    // To scan hundreds or thousands of products (not just 99/100), we loop with offset.
+    const maxPages = 30; // Scans up to 3,000 Telegram updates
+    const allUpdates: any[] = [];
+    let currentOffset: number | undefined = undefined;
     let highestUpdateId = 0;
 
-    for (const u of updates) {
-      if (u.update_id && u.update_id > highestUpdateId) {
-        highestUpdateId = u.update_id;
+    for (let page = 0; page < maxPages; page++) {
+      const url = currentOffset !== undefined
+        ? `https://api.telegram.org/bot${token}/getUpdates?offset=${currentOffset}&limit=100&allowed_updates=["message","channel_post","edited_message"]`
+        : `https://api.telegram.org/bot${token}/getUpdates?limit=100&allowed_updates=["message","channel_post","edited_message"]`;
+
+      const updatesRes = await fetch(url);
+      const updatesData = await updatesRes.json();
+
+      if (!updatesData.ok || !Array.isArray(updatesData.result)) {
+        if (page === 0) {
+          let desc = updatesData.description || 'បរាជ័យក្នុងការទាញ getUpdates ពី Telegram';
+          if (desc.includes('Conflict: terminated by other getUpdates request')) {
+            desc = '⚠️ ជាន់គ្នាជាមួយកម្មវិធីផ្សេង (Conflict) ៖ Bot នេះកំពុងមានកម្មវិធីផ្សេង (ដូចជាប្រព័ន្ធ Attendance ឬ Server ផ្សេង) បើកដំណើរការទទួលសារស្របពេលគ្នា។ Telegram អនុញ្ញាតឱ្យតែ ១ កម្មវិធីគត់ទទួលសារពី Bot ក្នុងពេលតែមួយ។ សូមបង្កើត Bot ថ្មីមួយផ្សេងទៀតក្នុង @BotFather សម្រាប់តែស្តុក!';
+          }
+          return {
+            success: false,
+            bot: botRes.bot,
+            items: cachedTelegramItems,
+            messagesScanned: 0,
+            totalFound: cachedTelegramItems.length,
+            error: desc
+          };
+        }
+        break;
       }
 
+      const batch = updatesData.result;
+      if (batch.length === 0) {
+        break;
+      }
+
+      for (const u of batch) {
+        if (u.update_id && u.update_id > highestUpdateId) {
+          highestUpdateId = u.update_id;
+        }
+        allUpdates.push(u);
+      }
+
+      currentOffset = highestUpdateId + 1;
+
+      // If Telegram returned fewer than 100 in this batch, all pending updates have been retrieved
+      if (batch.length < 100) {
+        break;
+      }
+    }
+
+    // 3. Parse all retrieved messages
+    const newlyParsedMap = new Map<string, TelegramItemParsed>();
+    const photoToDownloadMap = new Map<string, { fileId: string; code: string }>();
+
+    for (const u of allUpdates) {
       const msg = u.message || u.channel_post || u.edited_message;
       if (!msg) continue;
 
@@ -256,34 +314,24 @@ export async function fetchTelegramStockUpdates(options: {
       const parsedLines = parseLinesForStockItems(rawText, defaultQty);
       if (parsedLines.length === 0) continue;
 
-      // If photo exists, download the highest resolution photo or image document
-      let downloadedImageUrl: string | undefined = undefined;
+      // Record photo candidate for each code
+      let photoFileId: string | undefined = undefined;
       if (hasPhoto) {
-        let fileIdToDownload: string | undefined = undefined;
         if (isPhoto) {
           const largestPhoto = msg.photo[msg.photo.length - 1];
-          fileIdToDownload = largestPhoto?.file_id;
+          photoFileId = largestPhoto?.file_id;
         } else if (msg.document?.file_id) {
-          fileIdToDownload = msg.document.file_id;
-        }
-
-        if (fileIdToDownload) {
-          const firstCode = parsedLines[0]?.code || 'item';
-          downloadedImageUrl = await downloadTelegramPhoto(token, fileIdToDownload, firstCode);
+          photoFileId = msg.document.file_id;
         }
       }
 
-      // Add each parsed item
       for (let i = 0; i < parsedLines.length; i++) {
         const item = parsedLines[i];
-        const finalImg = (i === 0 || !parsedItemsMap.has(item.code)) ? downloadedImageUrl : undefined;
-
-        parsedItemsMap.set(item.code, {
+        newlyParsedMap.set(item.code, {
           code: item.code,
           name: item.name || `កូដ ${item.code}`,
           price: item.price,
           stock_qty: defaultQty,
-          image_url: finalImg,
           chat_id: msg.chat?.id,
           chat_title: chatTitle,
           sender_name: senderName,
@@ -291,17 +339,54 @@ export async function fetchTelegramStockUpdates(options: {
           original_text: rawText,
           message_id: msg.message_id
         });
+
+        if (photoFileId) {
+          photoToDownloadMap.set(item.code, { fileId: photoFileId, code: item.code });
+        }
       }
     }
 
-    // Optional: Mark updates as read so they won't repeat
-    if (options.markRead && highestUpdateId > 0) {
-      try {
-        await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${highestUpdateId + 1}&limit=1`);
-      } catch (err) {}
+    // 4. Download photos in parallel batches of 6 (prevents timeout when downloading 100+ images)
+    const downloadEntries = Array.from(photoToDownloadMap.entries());
+    const concurrency = 6;
+    for (let i = 0; i < downloadEntries.length; i += concurrency) {
+      const chunk = downloadEntries.slice(i, i + concurrency);
+      await Promise.all(
+        chunk.map(async ([code, { fileId }]) => {
+          try {
+            const url = await downloadTelegramPhoto(token, fileId, code);
+            const item = newlyParsedMap.get(code);
+            if (item && url) {
+              item.image_url = url;
+            }
+          } catch (err) {
+            console.error(`[Telegram Photo Download Failed for ${code}]:`, err);
+          }
+        })
+      );
     }
 
-    const items = Array.from(parsedItemsMap.values());
+    // 5. Merge with cached items (keeps previously scanned items even if Telegram queue clears)
+    const combinedMap = new Map<string, TelegramItemParsed>();
+    for (const it of cachedTelegramItems) {
+      combinedMap.set(it.code, it);
+    }
+    for (const [code, it] of newlyParsedMap.entries()) {
+      const existing = combinedMap.get(code);
+      if (existing) {
+        combinedMap.set(code, {
+          ...existing,
+          ...it,
+          image_url: it.image_url || existing.image_url
+        });
+      } else {
+        combinedMap.set(code, it);
+      }
+    }
+
+    cachedTelegramItems = Array.from(combinedMap.values());
+
+    const items = cachedTelegramItems;
     const isPrivacyRestricted = botRes.bot?.can_read_all_group_messages === false;
     const privacyNotice = (isPrivacyRestricted && items.length === 0)
       ? `Bot Privacy Mode កំពុងបើក (can_read_all_group_messages=false)។ ដើម្បីឱ្យ Bot អាចមើលឃើញសារក្នុង Group សូមចូល @BotFather រួចវាយ /setprivacy -> ជ្រើស Bot @${botRes.bot?.username || 'bot'} -> ចុច 'Disable' រួចផ្ញើរូបភាព/កូដថ្មីក្នុង Group (ឬ Mention @${botRes.bot?.username || 'bot'} ក្នុង Caption)!`
@@ -311,7 +396,7 @@ export async function fetchTelegramStockUpdates(options: {
       success: true,
       bot: botRes.bot,
       items,
-      messagesScanned: updates.length,
+      messagesScanned: allUpdates.length,
       totalFound: items.length,
       privacyNotice
     };
@@ -319,9 +404,9 @@ export async function fetchTelegramStockUpdates(options: {
     return {
       success: false,
       bot: botRes.bot,
-      items: [],
+      items: cachedTelegramItems,
       messagesScanned: 0,
-      totalFound: 0,
+      totalFound: cachedTelegramItems.length,
       error: err.message || 'Error communicating with Telegram Bot API'
     };
   }

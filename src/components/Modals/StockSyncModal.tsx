@@ -168,7 +168,7 @@ export function StockSyncModal({
   };
 
   // Fetch Stock & Photos from Telegram Group
-  const handleFetchTelegramStock = async (autoImport: boolean = false) => {
+  const handleFetchTelegramStock = async (autoImport: boolean = false, clearCache: boolean = false) => {
     const clean = botToken.trim();
     if (!clean) {
       onShowToast('⚠️ សូមបញ្ចូល Telegram Bot Token ជាមុនសិន!', 'error');
@@ -187,6 +187,7 @@ export function StockSyncModal({
           auto_import: autoImport,
           mark_read: markRead,
           save_token: true,
+          clear_cache: clearCache,
           keep_existing_stock_qty: keepExistingStockQty
         })
       });
@@ -210,7 +211,7 @@ export function StockSyncModal({
         } else {
           if (data.items?.length > 0) {
             playSuccessFanfare();
-            onShowToast(`🔍 រកឃើញ ${data.items.length} មុខទំនិញពី Telegram! ពិនិត្យខាងក្រោម`);
+            onShowToast(`🔍 រកឃើញ ${data.items.length} មុខទំនិញពី Telegram (ស្កេនបាន ${data.messagesScanned || data.items.length} សារ)!`);
           } else {
             playWarningBuzzer();
             if (data.bot?.can_read_all_group_messages === false) {
@@ -692,9 +693,20 @@ export function StockSyncModal({
               {tgItems.length > 0 && (
                 <div className="flex flex-col gap-2 mt-1 border-t border-slate-800 pt-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold text-emerald-400">
-                      ✅ រកឃើញ {tgItems.length} មុខទំនិញ ៖
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-emerald-400">
+                        ✅ រកឃើញ {tgItems.length} មុខទំនិញ ៖
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleFetchTelegramStock(false, true)}
+                        disabled={fetchingTg}
+                        className="text-[10px] text-slate-400 hover:text-rose-400 underline cursor-pointer"
+                        title="សម្អាតបញ្ជីដែលបានស្កេនរួច ហើយស្កេនសារថ្មីឡើងវិញ"
+                      >
+                        🗑️ សម្អាតបញ្ជីស្កេន
+                      </button>
+                    </div>
                     <button
                       type="button"
                       onClick={handleImportTgItems}
