@@ -253,11 +253,15 @@ export function renderInvoiceTo576Canvas(
   drawLine(y, 3);
   y += 18;
 
-  // 7. GRAND TOTAL (Huge 50px font centered!)
+  // 7. GRAND TOTAL (USD on Line 1, Riel on Line 2 centered!)
   ctx.textAlign = 'center';
   ctx.font = `900 50px ${fontMono}`;
-  ctx.fillText(`TOTAL: $${exactTotal.toFixed(2)} / ${formattedRiel} R`, width / 2, y);
-  y += 65;
+  ctx.fillText(`TOTAL: $${exactTotal.toFixed(2)}`, width / 2, y);
+  y += 50;
+
+  ctx.font = `900 42px ${fontMono}`;
+  ctx.fillText(`( ${formattedRiel} R )`, width / 2, y);
+  y += 55;
 
   // 8. FOOTER POLICY & CUT LINE
   ctx.font = `900 24px ${fontKhmer}`;

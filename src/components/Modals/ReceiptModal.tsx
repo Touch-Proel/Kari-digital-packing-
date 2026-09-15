@@ -833,8 +833,11 @@ export function ReceiptModal({
 
             {/* 6. Grand Total */}
             <div className="border-b-2 border-black pb-2 pt-1 text-center">
-              <div className="text-3xl font-black font-mono text-black py-1">
-                TOTAL: ${exactTotal.toFixed(2)} / {formattedRiel} R
+              <div className="text-3xl font-black font-mono text-black leading-tight">
+                TOTAL: ${exactTotal.toFixed(2)}
+              </div>
+              <div className="text-2xl font-black font-mono text-black">
+                ({formattedRiel} R)
               </div>
             </div>
 
@@ -992,7 +995,10 @@ export function ReceiptModal({
             {/* Grand Total Bar */}
             <div style={{ borderBottom: '3px solid #000000', paddingBottom: '14px', marginBottom: '14px', textAlign: 'center' }}>
               <div style={{ fontSize: '50px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', lineHeight: 1.1 }}>
-                TOTAL: ${exactTotal.toFixed(2)} / {formattedRiel} R
+                TOTAL: ${exactTotal.toFixed(2)}
+              </div>
+              <div style={{ fontSize: '42px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', marginTop: '4px' }}>
+                ( {formattedRiel} R )
               </div>
             </div>
 
