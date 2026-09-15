@@ -488,7 +488,7 @@ export function ReceiptModal({
               customer_name: invoice.facebook_name || '',
               escpos_base64: base64EscPos
             }),
-            signal: AbortSignal.timeout(1500)
+            signal: AbortSignal.timeout(350)
           });
           if (directRes.ok) {
             printedDirect = true;

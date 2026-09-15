@@ -1955,25 +1955,27 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
       }
     }
 
-    // Also broadcast to zero-auth ntfy.sh relay for instant shop reception
-    try {
-      const ntfyReq = https.request('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
-        method: 'POST',
-        headers: {
-          'Title': `Basket #${job.basket_no} - ${job.customer_name}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      ntfyReq.on('error', () => {});
-      ntfyReq.write(JSON.stringify({
-        basket_no: job.basket_no,
-        customer_name: job.customer_name,
-        escpos_base64: job.escpos_base64
-      }));
-      ntfyReq.end();
-    } catch {}
-
     const isOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat.last_seen < 30000);
+
+    // Only fallback to ntfy.sh relay if the agent is offline / not polling directly
+    if (!isOnline && waitingAgentPollers.length === 0) {
+      try {
+        const ntfyReq = https.request('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
+          method: 'POST',
+          headers: {
+            'Title': `Basket #${job.basket_no} - ${job.customer_name}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        ntfyReq.on('error', () => {});
+        ntfyReq.write(JSON.stringify({
+          basket_no: job.basket_no,
+          customer_name: job.customer_name,
+          escpos_base64: job.escpos_base64
+        }));
+        ntfyReq.end();
+      } catch {}
+    }
 
     return res.json({
       success: true,

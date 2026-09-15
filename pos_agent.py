@@ -650,7 +650,7 @@ def main():
                     try:
                         event_data = json.loads(raw)
                         if event_data.get("event") == "message":
-                            process_message(event_data)
+                            threading.Thread(target=process_message, args=(event_data,), daemon=True).start()
                     except json.JSONDecodeError:
                         continue
         except KeyboardInterrupt:

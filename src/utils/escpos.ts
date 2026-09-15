@@ -86,11 +86,9 @@ export function canvasToEscPos(
             const bl = data[idx + 2];
             const a = data[idx + 3];
 
-            // Luminance calculation
-            const luminance = 0.299 * r + 0.587 * g + 0.114 * bl;
-
-            // Sharp thermal thresholding: only truly dark text pixels become black dots (prevents heavy black smudging)
-            if (a > 120 && luminance < 138) {
+            // Fast integer luminance calculation (avoids floating point overhead on mobile)
+            const lum = r * 299 + g * 587 + bl * 114;
+            if (a > 120 && lum < 138000) {
               byteVal |= (1 << (7 - bit));
             }
           }
