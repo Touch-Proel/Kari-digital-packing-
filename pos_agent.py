@@ -254,6 +254,10 @@ print(f"☁️ Cloud Relay Channel         : {CHANNEL_ID}")
 print("-" * 65)
 
 
+import time
+
+recent_print_jobs = {}
+
 class LocalPrintHandler(http.server.BaseHTTPRequestHandler):
     """Direct HTTP Server for instant Wi-Fi printing from staff phones without cloud relay."""
     def do_OPTIONS(self):
@@ -289,8 +293,18 @@ class LocalPrintHandler(http.server.BaseHTTPRequestHandler):
         try:
             payload = json.loads(post_data.decode("utf-8"))
             escpos_base64 = payload.get("escpos_base64")
-            basket_no = payload.get("basket_no", "")
+            basket_no = str(payload.get("basket_no", ""))
             cust = payload.get("customer_name", "")
+            
+            # Deduplication check (prevent printing same basket within 15 seconds)
+            now = time.time()
+            if basket_no and basket_no in recent_print_jobs:
+                if now - recent_print_jobs[basket_no] < 15:
+                    print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+                    return
+            if basket_no:
+                recent_print_jobs[basket_no] = now
+
             print(f"📥 [WI-FI DIRECT JOB] Basket #{basket_no} - {cust} (ល្បឿនលឿនក្នុងហាង)")
             if escpos_base64:
                 raw_bytes = base64.b64decode(escpos_base64)

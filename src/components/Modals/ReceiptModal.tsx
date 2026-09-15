@@ -462,10 +462,10 @@ export function ReceiptModal({
     onShowToast(`🏪 កំពុង Render & បញ្ជូនទៅ Shop Print Agent...`);
 
     try {
-      // 80mm thermal printable width is exactly 576 dots at 203 DPI (72mm)
+      // 80mm thermal printable width at high 2x DPI for crystal sharp text
       const canvas = await html2canvas(targetEl, {
         width: 576,
-        scale: 1,
+        scale: 2,
         backgroundColor: '#ffffff',
         useCORS: true,
         logging: false
@@ -488,33 +488,41 @@ export function ReceiptModal({
               customer_name: invoice.facebook_name || '',
               escpos_base64: base64EscPos
             }),
-            signal: AbortSignal.timeout(1200)
+            signal: AbortSignal.timeout(1500)
           });
           if (directRes.ok) {
             printedDirect = true;
           }
         } catch {
-          // not on same Wi-Fi, fall back to Cloud Relay
+          // not on same Wi-Fi
         }
       }
 
-      // 2. Dual-push to zero-auth ntfy.sh relay for guaranteed delivery (if not printed direct)
-      if (!printedDirect) {
-        try {
-          fetch('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
-            method: 'POST',
-            headers: {
-              'Title': `Basket #${invoice.basket_no || invoice.invoice_id} - ${invoice.facebook_name || ''}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              basket_no: invoice.basket_no || invoice.invoice_id,
-              customer_name: invoice.facebook_name || '',
-              escpos_base64: base64EscPos
-            })
-          }).catch(() => {});
-        } catch {}
+      // If printed directly via Local Wi-Fi Agent, stop here to avoid duplicate printing!
+      if (printedDirect) {
+        await triggerStagePack('ShopAgent');
+        playSuccessFanfare();
+        onShowToast(`✅ បានព្រីនតាម Shop Agent Wi-Fi ជោគជ័យ! កន្ត្រក #${invoice.basket_no || invoice.invoice_id} រត់ចូល «រង់ចាំលុយ»!`, 'success');
+        setTimeout(() => onClose(), 800);
+        setIsSendingToAgent(false);
+        return;
       }
+
+      // 2. Dual-push to zero-auth ntfy.sh relay for guaranteed delivery (if not printed direct)
+      try {
+        fetch('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
+          method: 'POST',
+          headers: {
+            'Title': `Basket #${invoice.basket_no || invoice.invoice_id} - ${invoice.facebook_name || ''}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            basket_no: invoice.basket_no || invoice.invoice_id,
+            customer_name: invoice.facebook_name || '',
+            escpos_base64: base64EscPos
+          })
+        }).catch(() => {});
+      } catch {}
 
       // 3. Push to server endpoint
       const res = await fetch('/api/print_agent/job', {
