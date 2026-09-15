@@ -14,9 +14,9 @@ export default defineConfig(() => {
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
           id: '/',
-          name: 'KARI ARNETT OS',
-          short_name: 'KARI POS',
-          description: 'Kari Arnett Mobile Digital Packing OS & FB Live Comment Orders System',
+          name: 'Remix Packing OS & Live Stream Orders',
+          short_name: 'RemixPacking',
+          description: 'Mobile digital packing OS for Facebook Live stream comment orders, basket allocation, and 2-stage QC fulfillment.',
           theme_color: '#060D1D',
           background_color: '#060D1D',
           display: 'standalone',

@@ -1,6 +1,6 @@
 {
-  "name": "KARI ARNETT OS",
-  "description": "Kari Arnett Mobile Digital Packing OS & FB Live Comment Orders System",
+  "name": "Digital Packing \u0026 FB Live Orders New V2",
+  "description": "Mobile digital packing OS for Facebook Live stream comment orders, basket allocation, and 2-stage QC fulfillment.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
