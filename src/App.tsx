@@ -22,6 +22,7 @@ import { ReceiptModal } from './components/Modals/ReceiptModal';
 import { VipInvoiceModal } from './components/Modals/VipInvoiceModal';
 import { DatabaseModal } from './components/Modals/DatabaseModal';
 import { ManageLiveSessionsModal } from './components/Modals/ManageLiveSessionsModal';
+import { RequirePackerNameModal } from './components/Modals/RequirePackerNameModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -43,7 +44,8 @@ export default function App() {
   const [displayedLimit, setDisplayedLimit] = useState<number>(25);
 
   // User / Packer Settings
-  const [packerName, setPackerName] = useState<string>(() => localStorage.getItem('packerName') || 'សុខា');
+  const [packerName, setPackerName] = useState<string>(() => localStorage.getItem('packerName') || '');
+  const [isRequirePackerModalOpen, setIsRequirePackerModalOpen] = useState<boolean>(() => !localStorage.getItem('packerName'));
   const [fontScale, setFontScale] = useState<number>(() => parseFloat(localStorage.getItem('fontScale') || '1'));
   const [khmerFont, setKhmerFont] = useState<string>(() => localStorage.getItem('khmerFont') || 'kantumruy');
 
@@ -493,6 +495,7 @@ export default function App() {
           onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
           onOpenDatabaseModal={() => setIsDatabaseModalOpen(true)}
           packerName={packerName}
+          onChangePackerName={() => setIsRequirePackerModalOpen(true)}
           onOpenPackerHistory={() => {
             setPackerModalMode('history');
             setIsPackerModalOpen(true);
@@ -794,6 +797,15 @@ export default function App() {
           fetchStock();
         }}
         onShowToast={showToast}
+      />
+
+      <RequirePackerNameModal
+        isOpen={isRequirePackerModalOpen || !packerName}
+        currentPackerName={packerName}
+        onSavePackerName={name => {
+          handleChangePackerName(name);
+          setIsRequirePackerModalOpen(false);
+        }}
       />
     </div>
   );

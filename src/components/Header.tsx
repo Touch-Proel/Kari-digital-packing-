@@ -1,4 +1,5 @@
 import { FacebookPage } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   activePage: FacebookPage | null;
@@ -8,6 +9,7 @@ interface HeaderProps {
   onOpenDatabaseModal?: () => void;
   packerName: string;
   onOpenPackerHistory: () => void;
+  onChangePackerName?: () => void;
   liveSessions: { live_id: string; created_at: string; basket_count?: number }[];
   selectedLiveId: string;
   onSelectLiveId: (id: string) => void;
@@ -29,6 +31,7 @@ export function Header({
   onOpenDatabaseModal,
   packerName,
   onOpenPackerHistory,
+  onChangePackerName,
   liveSessions,
   selectedLiveId,
   onSelectLiveId,
@@ -51,6 +54,9 @@ export function Header({
             <span>⚡</span>
             <span>KARI ARNETT OS</span>
           </div>
+
+          {/* PWA Install Button */}
+          <PWAInstallButton />
 
           <a
             href={window.location.href}
@@ -105,11 +111,19 @@ export function Header({
 
           {/* Packer Tag */}
           <button
-            onClick={onOpenPackerHistory}
-            className="bg-blue-900/80 text-white px-2 py-1 rounded-xl text-xs font-bold border border-blue-400/60 shadow-sm active:scale-95 transition-all truncate max-w-[75px] sm:max-w-[90px]"
-            title="ចុចមើលប្រវត្តិ ឬប្តូរឈ្មោះ"
+            onClick={() => {
+              if (onChangePackerName) {
+                onChangePackerName();
+              } else {
+                onOpenPackerHistory();
+              }
+            }}
+            className="bg-[#0D2847] hover:bg-[#12365E] text-cyan-200 border border-cyan-400/80 px-2.5 py-1 rounded-xl text-xs font-bold shadow-sm active:scale-95 transition-all truncate max-w-[100px] sm:max-w-[120px] flex items-center gap-1 cursor-pointer"
+            title="ចុចដើម្បីប្តូរឈ្មោះអ្នករៀបអីវ៉ាន់"
           >
-            👤 {packerName}
+            <span>👤</span>
+            <span className="truncate">{packerName || 'កំណត់ឈ្មោះ'}</span>
+            <span className="text-[10px] text-amber-400">✏️</span>
           </button>
         </div>
       </div>

@@ -716,16 +716,16 @@ export function ReceiptModal({
             <div className="border-b-2 border-black pb-2 pt-1 flex flex-col gap-1">
               <div className="flex items-center justify-between">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-extrabold text-black">វិក្កយបត្រ ៖</span>
-                  <span className="text-3xl font-black font-mono tracking-tight text-black leading-none">
+                  <span className="text-base font-extrabold text-black">វិក្កយបត្រ ៖</span>
+                  <span className="text-4xl font-black font-mono tracking-tight text-black leading-none">
                     #{invoice.basket_no || invoice.invoice_id}
                   </span>
                 </div>
-                <span className="text-xs font-bold text-black border-2 border-black px-2 py-0.5 rounded bg-white">
+                <span className="text-sm font-bold text-black border-2 border-black px-2 py-0.5 rounded bg-white">
                   {locationBadge}
                 </span>
               </div>
-              <div className="text-xs font-bold text-black flex items-center gap-2">
+              <div className="text-sm font-bold text-black flex items-center gap-2">
                 <span>កាលបរិច្ឆេទ ៖</span>
                 <span className="font-mono">{dateStr} {timeStr}</span>
               </div>
@@ -733,24 +733,24 @@ export function ReceiptModal({
 
             {/* 3. Customer Info */}
             <div className="border-b-2 border-black pb-2 pt-1 text-black flex items-start justify-between gap-2">
-              <div className="flex-1 flex flex-col gap-1 text-sm font-bold">
-                <div className="flex items-baseline gap-1">
+              <div className="flex-1 flex flex-col gap-1 text-base font-bold">
+                <div className="flex items-baseline gap-1.5">
                   <span>អតិថិជន ៖</span>
-                  <strong className="font-black text-black text-base break-words">{invoice.facebook_name}</strong>
+                  <strong className="font-black text-black text-2xl break-words">{invoice.facebook_name}</strong>
                 </div>
-                <div>
+                <div className="flex items-baseline gap-1.5">
                   <span>ទូរស័ព្ទ  ៖</span>
-                  <strong className="font-bold font-mono text-black text-sm ml-1">{phoneText || '[គ្មានលេខ]'}</strong>
+                  <strong className="font-black font-mono text-black text-xl">{phoneText || '[គ្មានលេខ]'}</strong>
                 </div>
                 {addressText ? (
                   <div className="break-words">
                     <span>ទីតាំង   ៖</span>
-                    <strong className="font-bold text-black text-sm ml-1">{addressText}</strong>
+                    <strong className="font-bold text-black text-base ml-1">{addressText}</strong>
                   </div>
                 ) : null}
                 <div>
                   <span>តំបន់   ៖</span>
-                  <strong className="font-bold text-black text-sm ml-1">{locationBadge}</strong>
+                  <strong className="font-bold text-black text-base ml-1">{locationBadge}</strong>
                 </div>
               </div>
 
@@ -776,11 +776,11 @@ export function ReceiptModal({
 
             {/* 4. Packing List Items */}
             <div className="border-b-2 border-black pb-2 pt-1">
-              <div className="font-black text-sm text-black pb-1 mb-1.5 uppercase tracking-wide">
+              <div className="font-black text-base text-black pb-1 mb-1.5 uppercase tracking-wide">
                 📋 បញ្ជីទំនិញ (PACKING LIST) ៖
               </div>
 
-              <div className="flex flex-col gap-2.5">
+              <div className="flex flex-col gap-3">
                 {invoice.items.map((it, idx) => {
                   const custom = (it.product_name || '')
                     .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
@@ -792,20 +792,20 @@ export function ReceiptModal({
                   const hasCustom = custom && custom !== 'ទំនិញ';
 
                   return (
-                    <div key={idx} className="flex flex-col text-sm leading-snug">
+                    <div key={idx} className="flex flex-col text-base leading-snug">
                       <div className="flex justify-between items-center font-bold text-black">
                         <div className="flex items-center gap-1.5 break-words">
-                          <span className="font-mono text-xs font-black border-1.5 border-black px-1 rounded bg-white select-none">[ ]</span>
-                          <span className="font-mono font-black text-lg text-black">កូដ [ {it.product_code} ]</span>
-                          {hasCustom ? <span className="font-bold text-black text-xs ml-1">{custom}</span> : null}
+                          <span className="font-mono text-sm font-black border-2 border-black px-1 rounded bg-white select-none">[ ]</span>
+                          <span className="font-mono font-black text-2xl text-black">កូដ [ {it.product_code} ]</span>
+                          {hasCustom ? <span className="font-bold text-black text-sm ml-1">{custom}</span> : null}
                         </div>
-                        <div className="flex items-center gap-3 font-mono font-black text-base text-black">
-                          <span className="min-w-[32px] text-right">x{it.quantity}</span>
-                          <span className="min-w-[65px] text-right">${(it.price * it.quantity).toFixed(2)}</span>
+                        <div className="flex items-center gap-3 font-mono font-black text-xl text-black">
+                          <span className="min-w-[36px] text-right">x{it.quantity}</span>
+                          <span className="min-w-[75px] text-right">${(it.price * it.quantity).toFixed(2)}</span>
                         </div>
                       </div>
                       {it.item_comment && (
-                        <div className="text-xs text-black font-bold pl-6 pt-0.5">
+                        <div className="text-sm text-black font-bold pl-7 pt-0.5">
                           ↳ Note: "{it.item_comment}"
                         </div>
                       )}
@@ -816,24 +816,24 @@ export function ReceiptModal({
             </div>
 
             {/* 5. Totals Breakdown */}
-            <div className="border-b-2 border-black pb-2 pt-1 flex flex-col gap-1 text-xs font-bold text-black">
+            <div className="border-b-2 border-black pb-2 pt-1 flex flex-col gap-1 text-sm font-bold text-black">
               <div className="flex justify-between">
                 <span>ចំនួនសរុប ៖</span>
-                <strong className="font-black text-sm">{totalQty} ឈុត</strong>
+                <strong className="font-black text-base">{totalQty} ឈុត</strong>
               </div>
               <div className="flex justify-between">
                 <span>តម្លៃទំនិញ ៖</span>
-                <strong className="font-black font-mono text-sm">${subtotal.toFixed(2)}</strong>
+                <strong className="font-black font-mono text-base">${subtotal.toFixed(2)}</strong>
               </div>
               <div className="flex justify-between">
                 <span>សេវាដឹក ៖</span>
-                <strong className="font-black font-mono text-sm">{shippingFee === 0 ? 'FREE' : `+$${shippingFee.toFixed(2)}`}</strong>
+                <strong className="font-black font-mono text-base">{shippingFee === 0 ? 'FREE' : `+$${shippingFee.toFixed(2)}`}</strong>
               </div>
             </div>
 
             {/* 6. Grand Total */}
             <div className="border-b-2 border-black pb-2 pt-1 text-center">
-              <div className="text-2xl font-black font-mono text-black">
+              <div className="text-3xl font-black font-mono text-black py-1">
                 TOTAL: ${exactTotal.toFixed(2)} / {formattedRiel} R
               </div>
             </div>
@@ -869,72 +869,72 @@ export function ReceiptModal({
             }}
           >
             {/* Header: Store Identity */}
-            <div style={{ textAlign: 'center', borderBottom: '2.5px solid #000000', paddingBottom: '10px', marginBottom: '10px' }}>
-              <div style={{ fontSize: '30px', fontWeight: 800, fontFamily: 'monospace', color: '#000000', textTransform: 'uppercase', letterSpacing: '1px', lineHeight: 1.1 }}>
+            <div style={{ textAlign: 'center', borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '12px' }}>
+              <div style={{ fontSize: '36px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', textTransform: 'uppercase', letterSpacing: '1px', lineHeight: 1.1 }}>
                 KARI ARNETT BOUTIQUE
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#000000', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '4px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 800, color: '#000000', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '6px' }}>
                 PREMIUM LIVE FULFILLMENT
               </div>
             </div>
 
             {/* Basket No + Zone + Date/Time */}
-            <div style={{ borderBottom: '2.5px solid #000000', paddingBottom: '10px', marginBottom: '10px' }}>
+            <div style={{ borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                  <span style={{ fontSize: '20px', fontWeight: 700 }}>វិក្កយបត្រ ៖</span>
-                  <span style={{ fontSize: '40px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', lineHeight: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                  <span style={{ fontSize: '26px', fontWeight: 800 }}>វិក្កយបត្រ ៖</span>
+                  <span style={{ fontSize: '48px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', lineHeight: 1 }}>
                     #{invoice.basket_no || invoice.invoice_id}
                   </span>
                 </div>
-                <span style={{ fontSize: '18px', fontWeight: 700, border: '2px solid #000000', padding: '2px 8px', borderRadius: '4px', color: '#000000' }}>
+                <span style={{ fontSize: '24px', fontWeight: 800, border: '3px solid #000000', padding: '4px 12px', borderRadius: '6px', color: '#000000' }}>
                   {locationBadge}
                 </span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 700, marginTop: '6px', color: '#000000', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 800, marginTop: '8px', color: '#000000', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span>កាលបរិច្ឆេទ ៖</span>
-                <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{dateStr} {timeStr}</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: 800 }}>{dateStr} {timeStr}</span>
               </div>
             </div>
 
             {/* Customer Row */}
-            <div style={{ borderBottom: '2.5px solid #000000', paddingBottom: '10px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '20px', fontWeight: 700, color: '#000000' }}>
+            <div style={{ borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '26px', fontWeight: 800, color: '#000000' }}>
                 <div>
                   <span>អតិថិជន ៖ </span>
-                  <strong style={{ fontSize: '25px', fontWeight: 800 }}>{invoice.facebook_name}</strong>
+                  <strong style={{ fontSize: '35px', fontWeight: 900 }}>{invoice.facebook_name}</strong>
                 </div>
                 <div>
                   <span>ទូរស័ព្ទ  ៖ </span>
-                  <strong style={{ fontSize: '22px', fontWeight: 800, fontFamily: 'monospace' }}>{phoneText || '[គ្មានលេខ]'}</strong>
+                  <strong style={{ fontSize: '32px', fontWeight: 900, fontFamily: 'monospace' }}>{phoneText || '[គ្មានលេខ]'}</strong>
                 </div>
                 {addressText ? (
                   <div>
                     <span>ទីតាំង   ៖ </span>
-                    <strong style={{ fontSize: '20px', fontWeight: 700 }}>{addressText}</strong>
+                    <strong style={{ fontSize: '25px', fontWeight: 800 }}>{addressText}</strong>
                   </div>
                 ) : null}
                 <div>
                   <span>តំបន់   ៖ </span>
-                  <strong style={{ fontSize: '20px', fontWeight: 700 }}>{locationBadge}</strong>
+                  <strong style={{ fontSize: '25px', fontWeight: 800 }}>{locationBadge}</strong>
                 </div>
               </div>
 
               {avatarUrl ? (
-                <div style={{ width: '76px', height: '76px', borderRadius: '50%', border: '2px solid #000000', overflow: 'hidden', flexShrink: 0, marginLeft: '12px' }}>
+                <div style={{ width: '84px', height: '84px', borderRadius: '50%', border: '3px solid #000000', overflow: 'hidden', flexShrink: 0, marginLeft: '12px' }}>
                   <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} crossOrigin="anonymous" />
                 </div>
               ) : null}
             </div>
 
             {/* Table Header / Title */}
-            <div style={{ borderBottom: '2.5px solid #000000', paddingBottom: '10px', marginBottom: '10px' }}>
-              <div style={{ fontSize: '25px', fontWeight: 900, color: '#000000', textTransform: 'uppercase', marginBottom: '10px', letterSpacing: '0.5px' }}>
+            <div style={{ borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '12px' }}>
+              <div style={{ fontSize: '30px', fontWeight: 900, color: '#000000', textTransform: 'uppercase', marginBottom: '12px', letterSpacing: '0.5px' }}>
                 📋 បញ្ជីទំនិញ (PACKING LIST) ៖
               </div>
 
               {/* Items List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 {invoice.items.map((it, idx) => {
                   const custom = (it.product_name || '')
                     .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
@@ -948,22 +948,22 @@ export function ReceiptModal({
                   return (
                     <div key={idx} style={{ display: 'flex', flexDirection: 'column', color: '#000000' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', border: '2px solid #000', padding: '0 5px', borderRadius: '4px' }}>[ ]</span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '26px' }}>កូដ [ {it.product_code} ]</span>
-                          {hasCustom ? <span style={{ marginLeft: '4px', fontSize: '20px', fontWeight: 800 }}>{custom}</span> : null}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '28px', fontWeight: 900, fontFamily: 'monospace', border: '3px solid #000', padding: '0 6px', borderRadius: '4px' }}>[ ]</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '40px' }}>កូដ [ {it.product_code} ]</span>
+                          {hasCustom ? <span style={{ marginLeft: '6px', fontSize: '24px', fontWeight: 800 }}>{custom}</span> : null}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '26px', minWidth: '45px', textAlign: 'right' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '34px', minWidth: '55px', textAlign: 'right' }}>
                             x{it.quantity}
                           </span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '26px', minWidth: '95px', textAlign: 'right' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '34px', minWidth: '110px', textAlign: 'right' }}>
                             ${(it.price * it.quantity).toFixed(2)}
                           </span>
                         </div>
                       </div>
                       {it.item_comment && (
-                        <div style={{ fontSize: '19px', fontWeight: 800, paddingLeft: '40px', paddingTop: '3px', color: '#000000' }}>
+                        <div style={{ fontSize: '24px', fontWeight: 800, paddingLeft: '48px', paddingTop: '4px', color: '#000000' }}>
                           ↳ Note: "{it.item_comment}"
                         </div>
                       )}
@@ -974,36 +974,36 @@ export function ReceiptModal({
             </div>
 
             {/* Totals Section */}
-            <div style={{ borderBottom: '2.5px solid #000000', paddingBottom: '10px', marginBottom: '10px', fontSize: '20px', fontWeight: 700, color: '#000000', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div style={{ borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '12px', fontSize: '25px', fontWeight: 800, color: '#000000', display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>ចំនួនសរុប ៖</span>
-                <strong style={{ fontSize: '22px', fontWeight: 800 }}>{totalQty} ឈុត</strong>
+                <strong style={{ fontSize: '28px', fontWeight: 900 }}>{totalQty} ឈុត</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>តម្លៃទំនិញ ៖</span>
-                <strong style={{ fontSize: '22px', fontWeight: 800, fontFamily: 'monospace' }}>${subtotal.toFixed(2)}</strong>
+                <strong style={{ fontSize: '28px', fontWeight: 900, fontFamily: 'monospace' }}>${subtotal.toFixed(2)}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>សេវាដឹក ៖</span>
-                <strong style={{ fontSize: '22px', fontWeight: 800, fontFamily: 'monospace' }}>{shippingFee === 0 ? 'FREE' : `+$${shippingFee.toFixed(2)}`}</strong>
+                <strong style={{ fontSize: '28px', fontWeight: 900, fontFamily: 'monospace' }}>{shippingFee === 0 ? 'FREE' : `+$${shippingFee.toFixed(2)}`}</strong>
               </div>
             </div>
 
             {/* Grand Total Bar */}
-            <div style={{ borderBottom: '2.5px solid #000000', paddingBottom: '10px', marginBottom: '10px', textAlign: 'center' }}>
-              <div style={{ fontSize: '28px', fontWeight: 900, fontFamily: 'monospace', color: '#000000' }}>
+            <div style={{ borderBottom: '3px solid #000000', paddingBottom: '14px', marginBottom: '14px', textAlign: 'center' }}>
+              <div style={{ fontSize: '50px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', lineHeight: 1.1 }}>
                 TOTAL: ${exactTotal.toFixed(2)} / {formattedRiel} R
               </div>
             </div>
 
             {/* Footer */}
-            <div style={{ textAlign: 'center', fontSize: '18px', fontWeight: 800, color: '#000000', lineHeight: 1.4 }}>
+            <div style={{ textAlign: 'center', fontSize: '24px', fontWeight: 900, color: '#000000', lineHeight: 1.4 }}>
               <div>អរគុណចំពោះការគាំទ្រ KARI ARNETT!</div>
-              <div style={{ fontSize: '16px', fontWeight: 700 }}>ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ</div>
+              <div style={{ fontSize: '20px', fontWeight: 800 }}>ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ</div>
             </div>
 
             {/* Cut Line */}
-            <div style={{ textAlign: 'center', fontSize: '15px', fontWeight: 700, marginTop: '10px', borderTop: '1px dashed #000000', paddingTop: '6px' }}>
+            <div style={{ textAlign: 'center', fontSize: '18px', fontWeight: 800, marginTop: '12px', borderTop: '2px dashed #000000', paddingTop: '8px' }}>
               - - - - - - - - - - [ កាត់ត្រង់នេះ ✂️ ] - - - - - - - - - -
             </div>
           </div>

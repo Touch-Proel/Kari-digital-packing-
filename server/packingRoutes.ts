@@ -581,12 +581,30 @@ router.post('/update_customer_contact', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+function isInvoiceLockedByOther(invoiceId: number, reqPackerName?: string): { locked: boolean; lockedBy?: string } {
+  cleanExpiredLocks();
+  const lock = activeInvoiceLocks.get(invoiceId);
+  if (!lock) return { locked: false };
+  if (!reqPackerName || lock.packer_name.trim().toLowerCase() !== String(reqPackerName).trim().toLowerCase()) {
+    return { locked: true, lockedBy: lock.packer_name };
+  }
+  return { locked: false };
+}
+
 // POST /api/set_item_qty_direct
 router.post('/set_item_qty_direct', (req: Request, res: Response) => {
-  const { invoice_id, code, new_qty } = req.body;
+  const { invoice_id, code, new_qty, packer_name } = req.body;
   const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
   const cleanCode = String(code).trim().toUpperCase();
   const targetQty = Math.max(0, parseInt(String(new_qty || 0), 10));
+
+  const lockCheck = isInvoiceLockedByOther(cleanId, packer_name);
+  if (lockCheck.locked) {
+    return res.status(409).json({
+      success: false,
+      message: `កន្ត្រកនេះត្រូវបានចាក់សោដោយ «${lockCheck.lockedBy}»!`
+    });
+  }
 
   const inv = invoices.find(i => i.invoice_id === cleanId);
   if (!inv) {
@@ -627,10 +645,18 @@ router.post('/set_item_qty_direct', (req: Request, res: Response) => {
 
 // POST /api/add_item_to_invoice
 router.post('/add_item_to_invoice', (req: Request, res: Response) => {
-  const { invoice_id, code, quantity, comment_text } = req.body;
+  const { invoice_id, code, quantity, comment_text, packer_name } = req.body;
   const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
   const cleanCode = String(code).trim().toUpperCase();
   const addQty = Math.max(1, parseInt(String(quantity || 1), 10));
+
+  const lockCheck = isInvoiceLockedByOther(cleanId, packer_name);
+  if (lockCheck.locked) {
+    return res.status(409).json({
+      success: false,
+      message: `កន្ត្រកនេះត្រូវបានចាក់សោដោយ «${lockCheck.lockedBy}»!`
+    });
+  }
 
   const inv = invoices.find(i => i.invoice_id === cleanId);
   if (!inv) {

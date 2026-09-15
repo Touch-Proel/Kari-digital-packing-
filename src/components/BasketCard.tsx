@@ -92,6 +92,19 @@ export function BasketCard({
     invoice.locked_by &&
     invoice.locked_by.trim().toLowerCase() !== myPackerName.trim().toLowerCase();
 
+  // Guard against illegal actions on baskets locked by other packers
+  const checkLockGuard = (): boolean => {
+    if (isLockedByOther) {
+      playWarningBuzzer();
+      onShowToast(
+        `🔒 កន្ត្រកនេះត្រូវបានចាក់សោដោយ «${invoice.locked_by}»! ចុច «🔓 ដោះសោរច្រកជំនួស» ដើម្បីដណ្តើមច្រកជំនួស!`,
+        'error'
+      );
+      return false;
+    }
+    return true;
+  };
+
   // Parse quick code from unmatched comment
   const parseQuickComment = (text: string): { code: string; qty: number } | null => {
     if (!text) return null;
@@ -332,6 +345,7 @@ export function BasketCard({
   // Stepper: Adjust Qty by Delta (+1 or -1)
   const handleStepQty = async (it: OrderItem, delta: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!checkLockGuard()) return;
     const targetQty = it.quantity + delta;
     if (targetQty < 1) {
       setDeleteConfirmCode(it.product_code);
@@ -354,7 +368,8 @@ export function BasketCard({
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
           code: it.product_code,
-          new_qty: targetQty
+          new_qty: targetQty,
+          packer_name: myPackerName
         })
       });
       const data = await res.json();
@@ -375,6 +390,7 @@ export function BasketCard({
   // Directly Set Qty to a Specific Number
   const handleDirectSetQty = async (code: string, newQty: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!checkLockGuard()) return;
     setActiveQuickQtyCode(null);
     if (newQty < 0) return;
 
@@ -391,7 +407,8 @@ export function BasketCard({
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
           code: code,
-          new_qty: newQty
+          new_qty: newQty,
+          packer_name: myPackerName
         })
       });
       const data = await res.json();
@@ -412,12 +429,14 @@ export function BasketCard({
   // Toggle Quick Qty Selector Popover
   const handleToggleQuickQty = (code: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!checkLockGuard()) return;
     setActiveQuickQtyCode(prev => (prev === code ? null : code));
   };
 
   // Handle Delete Button Click (Double-click confirm pattern)
   const handleDeleteClick = (it: OrderItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!checkLockGuard()) return;
     if (deleteConfirmCode === it.product_code) {
       handleExecuteDelete(it, e);
     } else {
@@ -431,6 +450,7 @@ export function BasketCard({
   // Execute Complete Item Deletion
   const handleExecuteDelete = async (it: OrderItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!checkLockGuard()) return;
     setDeleteConfirmCode(null);
     playWarningBuzzer();
 
@@ -446,7 +466,8 @@ export function BasketCard({
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
           code: it.product_code,
-          new_qty: 0
+          new_qty: 0,
+          packer_name: myPackerName
         })
       });
       const data = await res.json();
@@ -466,6 +487,7 @@ export function BasketCard({
   // Smart cut from comment
   const handleSmartCut = async (commentText: string, autoCode: string, autoQty: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!checkLockGuard()) return;
     let finalCode = autoCode;
     let finalQty = autoQty;
 
@@ -484,7 +506,8 @@ export function BasketCard({
           invoice_id: invoice.invoice_id,
           code: finalCode,
           quantity: finalQty,
-          comment_text: commentText
+          comment_text: commentText,
+          packer_name: myPackerName
         })
       });
       const data = await res.json();
@@ -504,6 +527,7 @@ export function BasketCard({
 
   // Execute Manual Add Item
   const executeManualAddCode = async () => {
+    if (!checkLockGuard()) return;
     const cleanCode = manualCodeInput.trim().toUpperCase();
     if (!cleanCode) {
       onShowToast('សូមបញ្ចូលកូដទំនិញ', 'error');
@@ -518,7 +542,8 @@ export function BasketCard({
           invoice_id: invoice.invoice_id,
           code: cleanCode,
           quantity: manualQtyInput || 1,
-          comment_text: manualCommentSource || undefined
+          comment_text: manualCommentSource || undefined,
+          packer_name: myPackerName
         })
       });
       const data = await res.json();
@@ -873,6 +898,7 @@ export function BasketCard({
                   {/* Outer Item Card matching Capture.PNG */}
                   <div
                     onClick={() => {
+                      if (!checkLockGuard()) return;
                       handleLockInvoice();
                       onToggleItemCheck(invoice.invoice_id, item.product_code);
                     }}
@@ -956,6 +982,7 @@ export function BasketCard({
                       {/* Big Squircle Checkbox Box */}
                       <div
                         onClick={() => {
+                          if (!checkLockGuard()) return;
                           handleLockInvoice();
                           onToggleItemCheck(invoice.invoice_id, item.product_code);
                         }}
@@ -1243,6 +1270,7 @@ export function BasketCard({
                 <button
                   onClick={e => {
                     e.stopPropagation();
+                    if (!checkLockGuard()) return;
                     onOpenQCModal(invoice);
                   }}
                   className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_18px_rgba(16,185,129,0.4)] active:scale-98 transition-all"
@@ -1278,7 +1306,10 @@ export function BasketCard({
                     </button>
                   )}
                   <button
-                    onClick={() => onOpenReceiptModal(invoice)}
+                    onClick={() => {
+                      if (!checkLockGuard()) return;
+                      onOpenReceiptModal(invoice);
+                    }}
                     className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
                   >
                     <span>🖨️</span>
@@ -1317,7 +1348,10 @@ export function BasketCard({
                   </button>
                 )}
                 <button
-                  onClick={() => onOpenReceiptModal(invoice)}
+                  onClick={() => {
+                    if (!checkLockGuard()) return;
+                    onOpenReceiptModal(invoice);
+                  }}
                   className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
                 >
                   <span>🖨️</span>
@@ -1356,7 +1390,10 @@ export function BasketCard({
                   </button>
                 )}
                 <button
-                  onClick={() => onOpenReceiptModal(invoice)}
+                  onClick={() => {
+                    if (!checkLockGuard()) return;
+                    onOpenReceiptModal(invoice);
+                  }}
                   className="py-3 px-4 rounded-2xl bg-[#0F1D38] border border-cyan-500/70 hover:bg-[#14264A] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow active:scale-98 transition-all"
                 >
                   <span>🖨️</span>
@@ -1370,14 +1407,20 @@ export function BasketCard({
           ) : (
             <div className="flex items-center gap-2.5 mt-1" onClick={e => e.stopPropagation()}>
               <button
-                onClick={() => onOpenQCModal(invoice)}
+                onClick={() => {
+                  if (!checkLockGuard()) return;
+                  onOpenQCModal(invoice);
+                }}
                 className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_22px_rgba(16,185,129,0.45)] active:scale-98 transition-all"
               >
                 <span>🔍</span>
                 <span>ផ្ទៀងរូប Telegram & បិទស្កុតចេញដឹក</span>
               </button>
               <button
-                onClick={() => onOpenReceiptModal(invoice)}
+                onClick={() => {
+                  if (!checkLockGuard()) return;
+                  onOpenReceiptModal(invoice);
+                }}
                 className="py-3 px-4 rounded-2xl bg-[#0F1D38] border border-cyan-500/70 hover:bg-[#14264A] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-1 shadow active:scale-98 transition-all"
                 title="ព្រីនវិក្កយបត្រ"
               >

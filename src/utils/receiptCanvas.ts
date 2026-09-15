@@ -46,9 +46,9 @@ export function renderInvoiceTo576Canvas(
   const items = invoice.items || [];
   
   // 1. Calculate height dynamically with extra breathing room for larger text
-  const headerHeight = 440;
-  const itemHeight = items.reduce((acc, it) => acc + (it.item_comment ? 80 : 58), 0);
-  const footerHeight = 350;
+  const headerHeight = 500;
+  const itemHeight = items.reduce((acc, it) => acc + (it.item_comment ? 95 : 65), 0);
+  const footerHeight = 420;
   const totalHeight = headerHeight + itemHeight + footerHeight;
 
   const width = 576;
@@ -85,39 +85,39 @@ export function renderInvoiceTo576Canvas(
 
   // 1. STORE HEADER
   ctx.textAlign = 'center';
-  ctx.font = `900 34px ${fontMono}`;
+  ctx.font = `900 36px ${fontMono}`;
   ctx.fillText('KARI ARNETT BOUTIQUE', width / 2, y);
-  y += 40;
+  y += 44;
 
-  ctx.font = `800 22px ${fontKhmer}`;
+  ctx.font = `800 24px ${fontKhmer}`;
   ctx.fillText('PREMIUM LIVE FULFILLMENT', width / 2, y);
-  y += 32;
+  y += 34;
 
   drawLine(y, 3);
-  y += 14;
+  y += 16;
 
   // 2. BASKET NO + LOCATION BADGE
   ctx.textAlign = 'left';
-  ctx.font = `800 24px ${fontKhmer}`;
+  ctx.font = `800 26px ${fontKhmer}`;
   ctx.fillText('វិក្កយបត្រ ៖ ', paddingX, y + 10);
 
   const basketText = `#${invoice.basket_no || invoice.invoice_id}`;
   ctx.font = `900 48px ${fontMono}`;
-  ctx.fillText(basketText, paddingX + 130, y);
+  ctx.fillText(basketText, paddingX + 135, y);
 
   // Location Badge (Right aligned)
   const locationZone = (invoice.location_zone || invoice.province || 'ភ្នំពេញ').trim();
-  ctx.font = `800 22px ${fontKhmer}`;
-  const badgeWidth = ctx.measureText(locationZone).width + 20;
+  ctx.font = `800 24px ${fontKhmer}`;
+  const badgeWidth = ctx.measureText(locationZone).width + 24;
   const badgeX = width - paddingX - badgeWidth;
   
   ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(badgeX, y + 8, badgeWidth, 38);
+  ctx.lineWidth = 3;
+  ctx.strokeRect(badgeX, y + 6, badgeWidth, 42);
   ctx.textAlign = 'center';
-  ctx.fillText(locationZone, badgeX + badgeWidth / 2, y + 14);
+  ctx.fillText(locationZone, badgeX + badgeWidth / 2, y + 12);
 
-  y += 56;
+  y += 62;
 
   // Date/Time
   const dateObj = invoice.created_at ? new Date(invoice.created_at) : new Date();
@@ -125,43 +125,43 @@ export function renderInvoiceTo576Canvas(
   const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
   ctx.textAlign = 'left';
-  ctx.font = `800 22px ${fontKhmer}`;
+  ctx.font = `800 24px ${fontKhmer}`;
   ctx.fillText(`កាលបរិច្ឆេទ ៖ ${dateStr} ${timeStr}`, paddingX, y);
-  y += 34;
+  y += 36;
 
   drawLine(y, 3);
-  y += 14;
+  y += 16;
 
   // 3. CUSTOMER DETAILS
   const custName = invoice.facebook_name || 'អតិថិជន';
   const phone = invoice.phone || invoice.phone_number || '[គ្មានលេខ]';
   const address = invoice.address || invoice.shipping_address || '';
 
-  ctx.font = `800 24px ${fontKhmer}`;
+  ctx.font = `800 26px ${fontKhmer}`;
   ctx.fillText('អតិថិជន ៖ ', paddingX, y);
-  ctx.font = `900 30px ${fontKhmer}`;
-  ctx.fillText(custName, paddingX + 115, y - 4);
-  y += 38;
+  ctx.font = `900 35px ${fontKhmer}`;
+  ctx.fillText(custName, paddingX + 125, y - 4);
+  y += 44;
 
-  ctx.font = `800 24px ${fontKhmer}`;
+  ctx.font = `800 26px ${fontKhmer}`;
   ctx.fillText('ទូរស័ព្ទ   ៖ ', paddingX, y);
-  ctx.font = `900 28px ${fontMono}`;
-  ctx.fillText(phone, paddingX + 115, y - 2);
-  y += 36;
+  ctx.font = `900 32px ${fontMono}`;
+  ctx.fillText(phone, paddingX + 125, y - 2);
+  y += 42;
 
   if (address) {
-    ctx.font = `800 23px ${fontKhmer}`;
+    ctx.font = `800 25px ${fontKhmer}`;
     ctx.fillText(`ទីតាំង    ៖ ${address.slice(0, 30)}`, paddingX, y);
-    y += 34;
+    y += 38;
   }
 
   drawLine(y, 3);
-  y += 14;
+  y += 16;
 
   // 4. PACKING LIST TITLE
-  ctx.font = `900 28px ${fontKhmer}`;
+  ctx.font = `900 30px ${fontKhmer}`;
   ctx.fillText('📋 បញ្ជីទំនិញ (PACKING LIST) ៖', paddingX, y);
-  y += 40;
+  y += 44;
 
   // 5. PACKING LIST ITEMS
   let totalQty = 0;
@@ -184,40 +184,40 @@ export function renderInvoiceTo576Canvas(
       .trim();
     if (custom === 'ទំនិញ') custom = '';
 
-    // Checkbox box (Larger 26x26)
-    ctx.lineWidth = 2.5;
+    // Checkbox box (30x30px)
+    ctx.lineWidth = 3;
     ctx.strokeStyle = '#000000';
-    ctx.strokeRect(paddingX, y + 3, 26, 26);
+    ctx.strokeRect(paddingX, y + 4, 30, 30);
 
-    // Product Code (Extra Large 30px & Bold)
-    ctx.font = `900 30px ${fontMono}`;
-    ctx.fillText(`កូដ [ ${code} ]`, paddingX + 36, y);
+    // Product Code (Extra Large 40px & Bold 900)
+    ctx.font = `900 40px ${fontMono}`;
+    ctx.fillText(`កូដ [ ${code} ]`, paddingX + 42, y);
 
     if (custom) {
-      ctx.font = `800 22px ${fontKhmer}`;
-      ctx.fillText(custom.slice(0, 10), paddingX + 260, y + 4);
+      ctx.font = `800 24px ${fontKhmer}`;
+      ctx.fillText(custom.slice(0, 8), paddingX + 310, y + 8);
     }
 
-    // Quantity + Price (Right Aligned)
+    // Quantity + Price (Right Aligned - 34px)
     ctx.textAlign = 'right';
-    ctx.font = `900 28px ${fontMono}`;
-    ctx.fillText(`x${qty}`, width - paddingX - 120, y);
-    ctx.fillText(`$${itemTotal.toFixed(2)}`, width - paddingX, y);
+    ctx.font = `900 34px ${fontMono}`;
+    ctx.fillText(`x${qty}`, width - paddingX - 130, y + 2);
+    ctx.fillText(`$${itemTotal.toFixed(2)}`, width - paddingX, y + 2);
     ctx.textAlign = 'left';
 
-    y += 40;
+    y += 50;
 
     if (it.item_comment) {
-      ctx.font = `800 20px ${fontKhmer}`;
-      ctx.fillText(`↳ Note: "${it.item_comment}"`, paddingX + 36, y);
-      y += 30;
+      ctx.font = `800 24px ${fontKhmer}`;
+      ctx.fillText(`↳ Note: "${it.item_comment}"`, paddingX + 42, y);
+      y += 34;
     }
 
     y += 10;
   });
 
   drawLine(y, 3);
-  y += 14;
+  y += 16;
 
   // 6. TOTALS BREAKDOWN
   const shippingFee = Number(invoice.shipping_fee || 0);
@@ -226,50 +226,50 @@ export function renderInvoiceTo576Canvas(
   const rielTotal = Math.round((exactTotal * rielRate) / 100) * 100;
   const formattedRiel = rielTotal.toLocaleString('en-US');
 
-  ctx.font = `800 22px ${fontKhmer}`;
+  ctx.font = `800 25px ${fontKhmer}`;
   ctx.fillText('ចំនួនសរុប ៖', paddingX, y);
   ctx.textAlign = 'right';
-  ctx.font = `900 25px ${fontKhmer}`;
+  ctx.font = `900 28px ${fontKhmer}`;
   ctx.fillText(`${totalQty} ឈុត`, width - paddingX, y);
   ctx.textAlign = 'left';
-  y += 32;
+  y += 36;
 
-  ctx.font = `800 22px ${fontKhmer}`;
+  ctx.font = `800 25px ${fontKhmer}`;
   ctx.fillText('តម្លៃទំនិញ ៖', paddingX, y);
   ctx.textAlign = 'right';
-  ctx.font = `900 25px ${fontMono}`;
+  ctx.font = `900 28px ${fontMono}`;
   ctx.fillText(`$${subtotal.toFixed(2)}`, width - paddingX, y);
   ctx.textAlign = 'left';
-  y += 32;
+  y += 36;
 
-  ctx.font = `800 22px ${fontKhmer}`;
+  ctx.font = `800 25px ${fontKhmer}`;
   ctx.fillText('សេវាដឹក ៖', paddingX, y);
   ctx.textAlign = 'right';
-  ctx.font = `900 25px ${fontMono}`;
+  ctx.font = `900 28px ${fontMono}`;
   ctx.fillText(shippingFee === 0 ? 'FREE' : `+$${shippingFee.toFixed(2)}`, width - paddingX, y);
   ctx.textAlign = 'left';
-  y += 34;
+  y += 38;
 
   drawLine(y, 3);
-  y += 14;
+  y += 18;
 
-  // 7. GRAND TOTAL (Huge 36px font!)
+  // 7. GRAND TOTAL (Huge 50px font centered!)
   ctx.textAlign = 'center';
-  ctx.font = `900 36px ${fontMono}`;
+  ctx.font = `900 50px ${fontMono}`;
   ctx.fillText(`TOTAL: $${exactTotal.toFixed(2)} / ${formattedRiel} R`, width / 2, y);
-  y += 50;
+  y += 65;
 
   // 8. FOOTER POLICY & CUT LINE
-  ctx.font = `900 21px ${fontKhmer}`;
+  ctx.font = `900 24px ${fontKhmer}`;
   ctx.fillText('អរគុណចំពោះការគាំទ្រ KARI ARNETT!', width / 2, y);
-  y += 28;
-
-  ctx.font = `800 18px ${fontKhmer}`;
-  ctx.fillText('ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ', width / 2, y);
   y += 32;
 
+  ctx.font = `800 20px ${fontKhmer}`;
+  ctx.fillText('ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ', width / 2, y);
+  y += 36;
+
   // Dot cut line
-  ctx.font = `800 16px ${fontMono}`;
+  ctx.font = `800 18px ${fontMono}`;
   ctx.fillStyle = '#555555';
   ctx.fillText('- - - - - - - - [ កាត់ត្រង់នេះ ✂️ ] - - - - - - - -', width / 2, y);
 
