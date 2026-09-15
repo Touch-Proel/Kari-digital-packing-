@@ -234,13 +234,31 @@ export function parseAndAllocateComment(
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
 
+  // Check if this comment was already processed in customer's existing basket for this live session
+  const existingInv = invoices.find(
+    i => i.live_id === liveId &&
+         i.status !== 'Cancelled' &&
+         (
+           (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && i.facebook_user_id === fbUserId) ||
+           (i.facebook_name.toLowerCase() === cleanFbName.toLowerCase()) ||
+           (phone && i.phone_number && i.phone_number.replace(/\D/g, '') === phone.replace(/\D/g, ''))
+         )
+  );
+
+  const isAlreadyInBasket = existingInv && (
+    (existingInv.comments && existingInv.comments.includes(rawText)) ||
+    (existingInv.unmatched_comments && existingInv.unmatched_comments.includes(rawText)) ||
+    (existingInv.items && existingInv.items.some(it => it.item_comment === rawText))
+  );
+
   const isDuplicate =
+    isAlreadyInBasket ||
     (commentId && processedCommentKeys.has(commentId)) ||
     processedCommentKeys.has(savedCommentId) ||
     processedCommentKeys.has(signatureKey) ||
     rawComments.some(rc => 
       (commentId && rc.comment_id === commentId) ||
-      (rc.live_id === liveId && rc.facebook_name.toLowerCase() === cleanFbName.toLowerCase() && rc.comment_text === rawText)
+      (rc.live_id === liveId && rc.facebook_name.toLowerCase() === cleanFbName.toLowerCase() && rc.comment_text.trim() === rawText)
     );
 
   if (isDuplicate) {

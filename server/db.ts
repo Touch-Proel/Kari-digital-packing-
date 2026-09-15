@@ -25,6 +25,7 @@ export function saveDatabaseToDisk() {
       settings,
       products,
       invoices,
+      rawComments,
       customers,
       packerLogs,
       activeFacebookPage
@@ -371,6 +372,10 @@ export async function loadDatabaseFromDisk() {
       if (sqliteData.activeFacebookPage) {
         activeFacebookPage = sqliteData.activeFacebookPage;
       }
+      if (sqliteData.rawComments && sqliteData.rawComments.length > 0) {
+        rawComments.length = 0;
+        rawComments.push(...sqliteData.rawComments);
+      }
       if (sqliteData.customers && sqliteData.customers.length > 0) {
         customers.length = 0;
         customers.push(...sqliteData.customers);
@@ -399,6 +404,10 @@ export async function loadDatabaseFromDisk() {
       }
       if (parsed.activeFacebookPage) {
         activeFacebookPage = parsed.activeFacebookPage;
+      }
+      if (parsed.rawComments && Array.isArray(parsed.rawComments) && parsed.rawComments.length > 0) {
+        rawComments.length = 0;
+        rawComments.push(...parsed.rawComments);
       }
       if (parsed.customers && Array.isArray(parsed.customers) && parsed.customers.length > 0) {
         customers.length = 0;
