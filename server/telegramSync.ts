@@ -97,9 +97,25 @@ async function downloadTelegramPhoto(
     const dd = String(d.getDate()).padStart(2, '0');
     const dateStr = `${yyyy}${mm}${dd}`;
 
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    const sec = String(d.getSeconds()).padStart(2, '0');
+    const timeStr = `${hh}${min}${sec}`;
+
     const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
-    const filename = `${safeCode}_${dateStr}.jpg`;
-    const localSavePath = path.join(uploadDir, filename);
+    
+    let filename = `${safeCode}_${dateStr}.jpg`;
+    let localSavePath = path.join(uploadDir, filename);
+
+    // If a photo with this code and date already exists (e.g., Live 2 or Live 3 on the same day), append exact timestamp/counter so photos never collide
+    if (fs.existsSync(localSavePath)) {
+      filename = `${safeCode}_${dateStr}_${timeStr}.jpg`;
+      localSavePath = path.join(uploadDir, filename);
+      if (fs.existsSync(localSavePath)) {
+        filename = `${safeCode}_${dateStr}_${timeStr}_${Date.now().toString().slice(-4)}.jpg`;
+        localSavePath = path.join(uploadDir, filename);
+      }
+    }
 
     // Crop to 500x500 Square HD Center Crop using Sharp
     const processedBuffer = await sharp(rawBuffer)
