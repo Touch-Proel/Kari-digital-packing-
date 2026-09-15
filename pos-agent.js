@@ -135,6 +135,34 @@ function downloadAttachmentWithRetry(url, maxRetries = 5) {
   });
 }
 
+const crypto = require('crypto');
+const recentPrintJobs = new Map();
+
+function isDuplicateJob(title, buffer, ttlSeconds = 15) {
+  const now = Date.now();
+  let key = title;
+  if (title.includes('#')) {
+    const match = title.match(/#(\w+)/);
+    if (match) key = `basket_${match[1]}`;
+  } else if (buffer && buffer.length > 0) {
+    key = `hash_${crypto.createHash('md5').update(buffer).digest('hex')}`;
+  }
+
+  // Cleanup old keys
+  for (const [k, time] of recentPrintJobs.entries()) {
+    if (now - time > 60000) recentPrintJobs.delete(k);
+  }
+
+  if (recentPrintJobs.has(key)) {
+    if (now - recentPrintJobs.get(key) < ttlSeconds * 1000) {
+      return true;
+    }
+  }
+
+  recentPrintJobs.set(key, now);
+  return false;
+}
+
 async function handleMessage(eventData) {
   try {
     const title = eventData.title || 'Print Job';
@@ -173,6 +201,10 @@ async function handleMessage(eventData) {
     }
 
     if (rawBuffer && rawBuffer.length > 0) {
+      if (isDuplicateJob(title, rawBuffer, 15)) {
+        console.log(`⏩ [DUPLICATE BLOCKED] ${title} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)`);
+        return;
+      }
       await printRawEscpos(rawBuffer);
     }
   } catch (err) {

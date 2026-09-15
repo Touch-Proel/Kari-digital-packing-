@@ -508,23 +508,7 @@ export function ReceiptModal({
         return;
       }
 
-      // 2. Dual-push to zero-auth ntfy.sh relay for guaranteed delivery (if not printed direct)
-      try {
-        fetch('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
-          method: 'POST',
-          headers: {
-            'Title': `Basket #${invoice.basket_no || invoice.invoice_id} - ${invoice.facebook_name || ''}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            basket_no: invoice.basket_no || invoice.invoice_id,
-            customer_name: invoice.facebook_name || '',
-            escpos_base64: base64EscPos
-          })
-        }).catch(() => {});
-      } catch {}
-
-      // 3. Push to server endpoint
+      // 2. Push to server endpoint (The server endpoint dispatches to long-poll listeners & cloud relay)
       const res = await fetch('/api/print_agent/job', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -774,11 +758,11 @@ export function ReceiptModal({
 
             {/* 4. Packing List Items */}
             <div className="border-b-2 border-black pb-2 pt-1">
-              <div className="font-extrabold text-xs text-black pb-1 mb-1.5 uppercase">
+              <div className="font-black text-sm text-black pb-1 mb-1.5 uppercase tracking-wide">
                 📋 បញ្ជីទំនិញ (PACKING LIST) ៖
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2.5">
                 {invoice.items.map((it, idx) => {
                   const custom = (it.product_name || '')
                     .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
@@ -793,12 +777,13 @@ export function ReceiptModal({
                     <div key={idx} className="flex flex-col text-sm leading-snug">
                       <div className="flex justify-between items-center font-bold text-black">
                         <div className="flex items-center gap-1.5 break-words">
-                          <span className="font-mono text-xs font-bold border border-black px-1 rounded bg-white select-none">☐</span>
-                          <span className="font-mono font-black text-base text-black">កូដ [ {it.product_code} ]</span>
+                          <span className="font-mono text-xs font-black border-1.5 border-black px-1 rounded bg-white select-none">[ ]</span>
+                          <span className="font-mono font-black text-lg text-black">កូដ [ {it.product_code} ]</span>
                           {hasCustom ? <span className="font-bold text-black text-xs ml-1">{custom}</span> : null}
                         </div>
-                        <div className="font-black font-mono text-base text-black">
-                          x{it.quantity} ${(it.price * it.quantity).toFixed(2)}
+                        <div className="flex items-center gap-3 font-mono font-black text-base text-black">
+                          <span className="min-w-[32px] text-right">x{it.quantity}</span>
+                          <span className="min-w-[65px] text-right">${(it.price * it.quantity).toFixed(2)}</span>
                         </div>
                       </div>
                       {it.item_comment && (
@@ -926,12 +911,12 @@ export function ReceiptModal({
 
             {/* Table Header / Title */}
             <div style={{ borderBottom: '2.5px solid #000000', paddingBottom: '10px', marginBottom: '10px' }}>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#000000', textTransform: 'uppercase', marginBottom: '8px' }}>
+              <div style={{ fontSize: '25px', fontWeight: 900, color: '#000000', textTransform: 'uppercase', marginBottom: '10px', letterSpacing: '0.5px' }}>
                 📋 បញ្ជីទំនិញ (PACKING LIST) ៖
               </div>
 
               {/* Items List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {invoice.items.map((it, idx) => {
                   const custom = (it.product_name || '')
                     .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
@@ -943,19 +928,24 @@ export function ReceiptModal({
                   const hasCustom = custom && custom !== 'ទំនិញ';
 
                   return (
-                    <div key={idx} style={{ display: 'flex', flexDirection: 'column', fontSize: '20px', lineHeight: 1.3, color: '#000000' }}>
+                    <div key={idx} style={{ display: 'flex', flexDirection: 'column', color: '#000000' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '22px', fontWeight: 700, fontFamily: 'monospace', border: '1.5px solid #000', padding: '0 4px', borderRadius: '3px' }}>[ ]</span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '22px' }}>កូដ [ {it.product_code} ]</span>
-                          {hasCustom ? <span style={{ marginLeft: '4px', fontSize: '18px', fontWeight: 700 }}>{custom}</span> : null}
+                          <span style={{ fontSize: '24px', fontWeight: 800, fontFamily: 'monospace', border: '2px solid #000', padding: '0 5px', borderRadius: '4px' }}>[ ]</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '26px' }}>កូដ [ {it.product_code} ]</span>
+                          {hasCustom ? <span style={{ marginLeft: '4px', fontSize: '20px', fontWeight: 800 }}>{custom}</span> : null}
                         </div>
-                        <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '22px' }}>
-                          x{it.quantity} ${(it.price * it.quantity).toFixed(2)}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '26px', minWidth: '45px', textAlign: 'right' }}>
+                            x{it.quantity}
+                          </span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: '26px', minWidth: '95px', textAlign: 'right' }}>
+                            ${(it.price * it.quantity).toFixed(2)}
+                          </span>
                         </div>
                       </div>
                       {it.item_comment && (
-                        <div style={{ fontSize: '17px', fontWeight: 700, paddingLeft: '38px', paddingTop: '2px', color: '#000000' }}>
+                        <div style={{ fontSize: '19px', fontWeight: 800, paddingLeft: '40px', paddingTop: '3px', color: '#000000' }}>
                           ↳ Note: "{it.item_comment}"
                         </div>
                       )}

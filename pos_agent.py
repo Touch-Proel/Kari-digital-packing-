@@ -267,8 +267,34 @@ print("-" * 65)
 
 
 import time
+import hashlib
 
-recent_print_jobs = {}
+recent_print_jobs = {} # {key: timestamp}
+
+def is_duplicate_job(basket_no=None, binary_data=None, ttl_seconds=15):
+    """Prevent duplicate printing of the same basket/receipt within ttl_seconds across all channels."""
+    now = time.time()
+    
+    key = None
+    if basket_no and str(basket_no).strip():
+        key = f"basket_{str(basket_no).strip()}"
+    elif binary_data and len(binary_data) > 0:
+        key = f"hash_{hashlib.md5(binary_data).hexdigest()}"
+
+    if not key:
+        return False
+
+    # Clean up entries older than 60 seconds
+    stale_keys = [k for k, t in recent_print_jobs.items() if now - t > 60]
+    for k in stale_keys:
+        recent_print_jobs.pop(k, None)
+
+    if key in recent_print_jobs:
+        if now - recent_print_jobs[key] < ttl_seconds:
+            return True
+
+    recent_print_jobs[key] = now
+    return False
 
 class LocalPrintHandler(http.server.BaseHTTPRequestHandler):
     """Direct HTTP Server for instant Wi-Fi printing from staff phones without cloud relay."""
@@ -308,18 +334,15 @@ class LocalPrintHandler(http.server.BaseHTTPRequestHandler):
             basket_no = str(payload.get("basket_no", ""))
             cust = payload.get("customer_name", "")
             
-            # Deduplication check (prevent printing same basket within 15 seconds)
-            now = time.time()
-            if basket_no and basket_no in recent_print_jobs:
-                if now - recent_print_jobs[basket_no] < 15:
-                    print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
-                    return
-            if basket_no:
-                recent_print_jobs[basket_no] = now
+            raw_bytes = base64.b64decode(escpos_base64) if escpos_base64 else None
+
+            # Deduplication check
+            if is_duplicate_job(basket_no, raw_bytes, ttl_seconds=15):
+                print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no} (Wi-Fi Direct) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+                return
 
             print(f"📥 [WI-FI DIRECT JOB] Basket #{basket_no} - {cust} (ល្បឿនលឿនក្នុងហាង)")
-            if escpos_base64:
-                raw_bytes = base64.b64decode(escpos_base64)
+            if raw_bytes:
                 print_raw_escpos(raw_bytes)
         except Exception as e:
             print(f"❌ Local job error: {e}")
@@ -426,9 +449,22 @@ def app_server_poll_loop():
                         basket = job.get("basket_no", "")
                         cust = job.get("customer_name", "")
                         b64 = job.get("escpos_base64", "")
+                        
+                        raw_bytes = base64.b64decode(b64) if b64 else None
+
+                        if is_duplicate_job(basket, raw_bytes, ttl_seconds=15):
+                            print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket} ( App Server Poll) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+                            try:
+                                ack_payload = json.dumps({"job_id": job_id, "status": "SKIPPED_DUPLICATE"}).encode("utf-8")
+                                req_ack = urllib.request.Request(f"{SERVER_URL}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
+                                with urllib.request.urlopen(req_ack, timeout=5):
+                                    pass
+                            except Exception:
+                                pass
+                            continue
+
                         print(f"\n⚡ [DIRECT APP JOB] Basket #{basket} - {cust} (ពីទូរស័ព្ទដៃ)")
-                        if b64:
-                            raw_bytes = base64.b64decode(b64)
+                        if raw_bytes:
                             success = print_raw_escpos(raw_bytes)
                             # Ack
                             try:
@@ -546,6 +582,18 @@ def process_message(data):
                     binary_escpos = msg_text.encode("utf-8")
 
         if binary_escpos and len(binary_escpos) > 0:
+            # Extract basket_no from title if present
+            basket_no = None
+            if "#" in title:
+                import re
+                m = re.search(r'#(\w+)', title)
+                if m:
+                    basket_no = m.group(1)
+
+            if is_duplicate_job(basket_no, binary_escpos, ttl_seconds=15):
+                print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no or title} (Cloud Relay) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+                return
+
             print_raw_escpos(binary_escpos)
         else:
             print("⚠️ [WARNING] No valid print payload found in job.")
