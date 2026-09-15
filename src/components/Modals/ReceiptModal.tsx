@@ -13,6 +13,7 @@ import {
   disconnectBluetoothPrinter,
   printViaRawBT
 } from '../../utils/escpos';
+import { renderInvoiceTo576Canvas } from '../../utils/receiptCanvas';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -278,13 +279,18 @@ export function ReceiptModal({
     await triggerStagePack('POS Bluetooth');
 
     try {
-      const canvas = await html2canvas(targetEl, {
-        width: 576,
-        scale: 1,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false
-      });
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = renderInvoiceTo576Canvas(invoice, { rielRate: 4100 });
+      } catch {
+        canvas = await html2canvas(targetEl, {
+          width: 576,
+          scale: 1,
+          backgroundColor: '#ffffff',
+          logging: false,
+          imageTimeout: 200
+        });
+      }
 
       setBtProgress(35);
       const escPosBytes = canvasToEscPos(canvas, { feedLines: 5, cutPaper: true });
@@ -362,13 +368,18 @@ export function ReceiptModal({
     await triggerStagePack('POS Wi-Fi/LAN');
 
     try {
-      const canvas = await html2canvas(targetEl, {
-        width: 576,
-        scale: 1,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false
-      });
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = renderInvoiceTo576Canvas(invoice, { rielRate: 4100 });
+      } catch {
+        canvas = await html2canvas(targetEl, {
+          width: 576,
+          scale: 1,
+          backgroundColor: '#ffffff',
+          logging: false,
+          imageTimeout: 200
+        });
+      }
 
       const escPosBytes = canvasToEscPos(canvas, { feedLines: 5, cutPaper: true });
       const b64 = uint8ToBase64(escPosBytes);
@@ -454,22 +465,29 @@ export function ReceiptModal({
 
   // Handle Shop Print Agent ESC/POS Thermal Print (Direct Relay to Store Printer + Auto Cut!)
   const handleShopAgentPrint = async () => {
-    const targetEl = offscreenRenderRef.current || receiptRef.current;
-    if (!targetEl) return;
+    if (!invoice) return;
 
     setIsSendingToAgent(true);
     playPureTone(1200, 0.1);
-    onShowToast(`🏪 កំពុង Render & បញ្ជូនទៅ Shop Print Agent...`);
+    onShowToast(`⚡ កំពុងរៀបចំ & បញ្ជូនទៅ Shop Print Agent...`);
 
     try {
-      // 80mm thermal printable width (576 dots at 203 DPI)
-      const canvas = await html2canvas(targetEl, {
-        width: 576,
-        scale: 1,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false
-      });
+      // Direct 2D Canvas rendering (0.002s instant - zero html2canvas DOM lag & zero CORS image delay!)
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = renderInvoiceTo576Canvas(invoice, { rielRate: 4100 });
+      } catch (e) {
+        // Fallback to html2canvas if direct rendering fails
+        const targetEl = offscreenRenderRef.current || receiptRef.current;
+        if (!targetEl) return;
+        canvas = await html2canvas(targetEl, {
+          width: 576,
+          scale: 1,
+          backgroundColor: '#ffffff',
+          logging: false,
+          imageTimeout: 200
+        });
+      }
 
       // Generate ESC/POS raster bitmap with paper feed and auto-cut commands
       const escPosBytes = canvasToEscPos(canvas, { feedLines: 5, cutPaper: true });
