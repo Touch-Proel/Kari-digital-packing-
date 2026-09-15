@@ -462,10 +462,10 @@ export function ReceiptModal({
     onShowToast(`🏪 កំពុង Render & បញ្ជូនទៅ Shop Print Agent...`);
 
     try {
-      // 80mm thermal printable width at high 2x DPI for crystal sharp text
+      // 80mm thermal printable width (576 dots at 203 DPI)
       const canvas = await html2canvas(targetEl, {
         width: 576,
-        scale: 2,
+        scale: 1,
         backgroundColor: '#ffffff',
         useCORS: true,
         logging: false

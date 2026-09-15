@@ -18,9 +18,28 @@ export interface EscPosPrintOptions {
  * with paper feed and auto-cut commands.
  */
 export function canvasToEscPos(
-  canvas: HTMLCanvasElement,
+  sourceCanvas: HTMLCanvasElement,
   options: EscPosPrintOptions = { feedLines: 5, cutPaper: true }
 ): Uint8Array {
+  // Defensive check: Standard 80mm thermal receipt printers require strictly 576 dots (72 bytes) printable width.
+  // If the input canvas width is not 576, resize it to 576px wide to prevent sending invalid raster dimensions to printer.
+  let canvas = sourceCanvas;
+  if (sourceCanvas.width !== 576) {
+    const scaledCanvas = document.createElement('canvas');
+    scaledCanvas.width = 576;
+    const targetHeight = Math.max(1, Math.round((sourceCanvas.height / sourceCanvas.width) * 576));
+    scaledCanvas.height = targetHeight;
+    const sCtx = scaledCanvas.getContext('2d');
+    if (sCtx) {
+      sCtx.imageSmoothingEnabled = true;
+      sCtx.imageSmoothingQuality = 'high';
+      sCtx.fillStyle = '#ffffff';
+      sCtx.fillRect(0, 0, 576, targetHeight);
+      sCtx.drawImage(sourceCanvas, 0, 0, 576, targetHeight);
+      canvas = scaledCanvas;
+    }
+  }
+
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas context not available');
 
