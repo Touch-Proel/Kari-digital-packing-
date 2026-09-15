@@ -8,6 +8,9 @@ import {
   activeLiveId
 } from './db';
 import { DeliveryZone, Invoice, OrderItem } from './types';
+import { detectDeliveryZone } from './locationHelper';
+
+export { detectDeliveryZone };
 
 const COMMON_GREETINGS = new Set([
   'HI', 'HELLO', 'BONG', 'OK', 'YES', 'NO', 'PRICE', 'INBOX',
@@ -66,39 +69,7 @@ export function extractPhoneNumber(text: string): { phone: string | null; cleanT
   return { phone: null, cleanText: text };
 }
 
-export function detectDeliveryZone(text: string): { zone: DeliveryZone; label: string } {
-  if (!text) return { zone: 'UNKNOWN', label: 'មិនទាន់កំណត់' };
-  const lower = text.toLowerCase();
 
-  const ppKeywords = [
-    'ភ្នំពេញ', 'phnom penh', ' pp', 'ទួលគោក', 'ដូនពេញ', 'ចំការមន', 'មានជ័យ',
-    'សែនសុខ', 'ច្បារអំពៅ', 'បឹងកេងកង', 'ជ្រោយចង្វារ', 'ឫស្សីកែវ', 'ពោធិ៍សែនជ័យ',
-    'ដង្កោ', 'កំបូល', 'ព្រែកព្នៅ', 'បឹងទំពុន', 'បឹងត្របែក', 'ទឹកថ្លា', 'ស្ទឹងមានជ័យ',
-    'ទួលទំពូង', 'អូឡាំពិក', 'ផ្សារដើមថ្កូវ', 'កាល់ម៉ែត', 'កំបូល'
-  ];
-
-  for (const kw of ppKeywords) {
-    if (lower.includes(kw)) {
-      return { zone: 'PP', label: '🏙️ ភ្នំពេញ' };
-    }
-  }
-
-  const provKeywords = [
-    'ខេត្ត', 'សៀមរាប', 'siem reap', 'បាត់ដំបង', 'battambang', 'កំពង់ចាម', 'kampong cham',
-    'កំពង់ស្ពឺ', 'កំពង់ឆ្នាំង', 'កំពង់ធំ', 'កំពត', 'kampot', 'កែប', 'kep', 'កោះកុង',
-    'ព្រះសីហនុ', 'sihanoukville', 'កំពង់សោម', 'កណ្តាល', 'kandal', 'ក្រចេះ', 'មណ្ឌលគិរី',
-    'រតនគិរី', 'ព្រះវិហារ', 'ព្រៃវែង', 'ពោធិ៍សាត់', 'ស្ទឹងត្រែង', 'ស្វាយរៀង', 'តាកែវ',
-    'ឧត្តរមានជ័យ', 'ត្បូងឃ្មុំ', 'ប៉ៃលិន'
-  ];
-
-  for (const kw of provKeywords) {
-    if (lower.includes(kw)) {
-      return { zone: 'PROVINCE', label: '🏞️ តាមខេត្ត' };
-    }
-  }
-
-  return { zone: 'UNKNOWN', label: 'មិនទាន់កំណត់' };
-}
 
 export function isQuestionComment(text: string): boolean {
   if (!text) return false;

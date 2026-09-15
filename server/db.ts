@@ -11,6 +11,7 @@ import {
   FacebookPage
 } from './types';
 import { persistToSqlite, loadFromSqlite } from './sqlite';
+import { detectDeliveryZone } from './locationHelper';
 
 let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;
@@ -444,21 +445,11 @@ export async function loadDatabaseFromDisk() {
         inv.shipping_fee = 2.0;
       }
 
-      // Fix location_zone if it was auto-defaulted to PP without address/comments specifying Phnom Penh
-      const allText = `${inv.address || ''} ${(inv.comments || []).join(' ')}`.toLowerCase();
-      const hasPP = /ភ្នំពេញ|phnom penh|\bpp\b|ទួលគោក|ដូនពេញ|ចំការមន|មានជ័យ|សែនសុខ|ច្បារអំពៅ|បឹងកេងកង|ជ្រោយចង្វារ|ឫស្សីកែវ|ពោធិ៍សែនជ័យ|ដង្កោ|កំបូល|ព្រែកព្នៅ/i.test(allText);
-      const hasProv = /ខេត្ត|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|កំពង់ឆ្នាំង|កំពង់ធំ|កំពត|កែប|កោះកុង|ព្រះសីហនុ|កំពង់សោម|កណ្តាល|ក្រចេះ|មណ្ឌលគិរី|រតនគិរី|ព្រះវិហារ|ព្រៃវែង|ពោធិ៍សាត់|ស្ទឹងត្រែង|ស្វាយរៀង|តាកែវ|ប៉ៃលិន/i.test(allText);
-
-      if (hasProv) {
-        inv.location_zone = 'PROVINCE';
-        inv.location_label = '🏞️ តាមខេត្ត';
-      } else if (hasPP) {
-        inv.location_zone = 'PP';
-        inv.location_label = '🏙️ ភ្នំពេញ';
-      } else if (inv.location_zone === 'PP') {
-        inv.location_zone = 'UNKNOWN';
-        inv.location_label = '❓ មិនទាន់ដឹង';
-      }
+      // Auto-detect delivery zone with comprehensive Phnom Penh rules
+      const allText = `${inv.address || ''} ${(inv.comments || []).join(' ')} ${inv.phone_number || ''}`.trim();
+      const { zone, label } = detectDeliveryZone(allText);
+      inv.location_zone = zone;
+      inv.location_label = label;
 
       if (inv.items && Array.isArray(inv.items)) {
         inv.items.forEach(it => {

@@ -23,6 +23,7 @@ import {
 } from './db';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
 import { parseAndAllocateComment } from './parser';
+import { detectDeliveryZone } from './locationHelper';
 import { sendFacebookReply } from './fbAuth';
 import {
   testTelegramBotToken,
@@ -568,17 +569,23 @@ router.post('/update_customer_contact', (req: Request, res: Response) => {
 
   if (inv) {
     if (phone) inv.phone_number = String(phone).trim();
-    if (address) inv.address = String(address).trim();
+    if (address !== undefined) {
+      inv.address = String(address).trim();
+      const allText = `${inv.address || ''} ${(inv.comments || []).join(' ')} ${inv.phone_number || ''}`.trim();
+      const { zone, label } = detectDeliveryZone(allText);
+      inv.location_zone = zone;
+      inv.location_label = label;
+    }
   }
 
   const cust = customers.find(c => c.facebook_name.toLowerCase() === String(facebook_name || '').trim().toLowerCase());
   if (cust) {
     if (phone) cust.phone_number = String(phone).trim();
-    if (address) cust.address = String(address).trim();
+    if (address !== undefined) cust.address = String(address).trim();
   }
 
   bumpDataRevision();
-  res.json({ success: true });
+  res.json({ success: true, location_zone: inv?.location_zone, location_label: inv?.location_label });
 });
 
 function isInvoiceLockedByOther(invoiceId: number, reqPackerName?: string): { locked: boolean; lockedBy?: string } {
