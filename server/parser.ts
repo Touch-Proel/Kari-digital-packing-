@@ -212,6 +212,9 @@ export interface ParseCommentResult {
   total_amount?: number;
 }
 
+// Memory cache of processed comment keys to prevent duplicate quantity additions when syncing comments
+const processedCommentKeys = new Set<string>();
+
 export function parseAndAllocateComment(
   fbUserId: string,
   fbName: string,
@@ -227,8 +230,31 @@ export function parseAndAllocateComment(
     return { status: 'IGNORED', message: 'Comment ទទេ' };
   }
 
-  // 1. Permanently record into rawComments list
+  // Deduplication check: Prevent re-allocating items if comment was fetched multiple times
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
+
+  const isDuplicate =
+    (commentId && processedCommentKeys.has(commentId)) ||
+    processedCommentKeys.has(savedCommentId) ||
+    processedCommentKeys.has(signatureKey) ||
+    rawComments.some(rc => 
+      (commentId && rc.comment_id === commentId) ||
+      (rc.live_id === liveId && rc.facebook_name.toLowerCase() === cleanFbName.toLowerCase() && rc.comment_text === rawText)
+    );
+
+  if (isDuplicate) {
+    return {
+      status: 'IGNORED',
+      message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`
+    };
+  }
+
+  // 1. Permanently record into rawComments list & processed cache
+  processedCommentKeys.add(savedCommentId);
+  if (commentId) processedCommentKeys.add(commentId);
+  processedCommentKeys.add(signatureKey);
+
   rawComments.push({
     comment_id: savedCommentId,
     live_id: liveId,
@@ -264,8 +290,11 @@ export function parseAndAllocateComment(
     cust.last_interaction_at = new Date().toISOString();
   }
 
-  // 3. Find or create customer's basket in the current live session
-  // EVERY customer comment is retained and attached to their basket!
+  // 3. Extract item code and quantity pairs & check if question
+  const isQuestion = isQuestionComment(rawText);
+  const pairs = extractCodeQtyPairs(cleanText);
+
+  // Find existing active basket for this customer in current live session
   let inv = invoices.find(
     i => i.live_id === liveId &&
          i.status !== 'Packed' &&
@@ -278,6 +307,27 @@ export function parseAndAllocateComment(
          )
   );
 
+  // Rule 1: Do NOT create empty baskets for customers who only ask questions or haven't ordered any product codes!
+  if (isQuestion || pairs.length === 0) {
+    if (inv) {
+      if (!inv.comments) inv.comments = [];
+      if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
+      if (!inv.unmatched_comments) inv.unmatched_comments = [];
+      if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
+      recalculateInvoice(inv);
+      bumpDataRevision();
+    }
+
+    return {
+      status: isQuestion ? 'QUESTION_SAVED' : 'UNMATCHED_SAVED',
+      message: `💬 កត់ត្រាខមិន${isQuestion ? 'សួរ' : ''} (មិនទាន់កាត់កន្ត្រក) ៖ «${cleanFbName}» ៖ "${rawText}"`,
+      customer_name: cleanFbName,
+      phone_number: phone || cust.phone_number,
+      address: cust.address
+    };
+  }
+
+  // Rule 2: Customer ordered product code(s) (pairs.length > 0) -> Create basket now if none exists!
   if (!inv) {
     const nextId = invoices.length > 0 ? Math.max(...invoices.map(i => i.invoice_id)) + 1 : 101;
     inv = {
@@ -317,42 +367,6 @@ export function parseAndAllocateComment(
     if (!inv.comments.includes(rawText)) {
       inv.comments.push(rawText);
     }
-  }
-
-  // 4. Check whether this is an inquiry or question comment
-  const isQuestion = isQuestionComment(rawText);
-
-  // 5. Extract item code and quantity pairs
-  const pairs = extractCodeQtyPairs(cleanText);
-
-  // If question OR no product codes found: retain in unmatched_comments so staff sees it directly!
-  if (isQuestion || pairs.length === 0) {
-    if (!inv.unmatched_comments) inv.unmatched_comments = [];
-    if (!inv.unmatched_comments.includes(rawText)) {
-      inv.unmatched_comments.push(rawText);
-    }
-    recalculateInvoice(inv);
-    bumpDataRevision();
-
-    if (phone || zone !== 'UNKNOWN') {
-      return {
-        status: 'CONTACT_SAVED',
-        message: `📝 បានកត់ត្រាព័ត៌មាន & ខមិន ៖ ${cleanFbName} (${phone || label})`,
-        invoice_id: inv.invoice_id,
-        customer_name: cleanFbName,
-        phone_number: inv.phone_number,
-        address: inv.address
-      };
-    }
-
-    return {
-      status: isQuestion ? 'QUESTION_SAVED' : 'UNMATCHED_SAVED',
-      message: `💬 បានកត់ត្រាខមិន${isQuestion ? 'សួរ' : ''} ៖ «${cleanFbName}» ៖ "${rawText}"`,
-      invoice_id: inv.invoice_id,
-      customer_name: cleanFbName,
-      phone_number: inv.phone_number,
-      address: inv.address
-    };
   }
 
   // 6. Allocate items into customer's basket

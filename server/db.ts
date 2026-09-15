@@ -444,6 +444,9 @@ export async function loadDatabaseFromDisk() {
       recalculateInvoice(inv);
     });
 
+    // Remove any leftover 0-item empty baskets from previous question comments
+    cleanupEmptyZeroItemInvoices();
+
     // Normalize all existing product image filenames to [CODE]_[YYYYMMDD].jpg
     const uploadDir = path.join(process.cwd(), 'public', 'uploads');
     const now = new Date();
@@ -488,6 +491,20 @@ export async function loadDatabaseFromDisk() {
     saveDatabaseToDisk();
   } catch (err) {
     console.error('Failed to load database on startup:', err);
+  }
+}
+
+export function cleanupEmptyZeroItemInvoices() {
+  let removed = 0;
+  for (let i = invoices.length - 1; i >= 0; i--) {
+    if ((!invoices[i].items || invoices[i].items.length === 0) && (!invoices[i].total_amount || invoices[i].total_amount === 0)) {
+      invoices.splice(i, 1);
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    bumpDataRevision();
+    console.log(`[DB Clean] Removed ${removed} empty 0-item baskets.`);
   }
 }
 
