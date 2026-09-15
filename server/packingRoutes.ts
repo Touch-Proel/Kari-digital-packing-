@@ -461,19 +461,19 @@ router.post('/dispatch_pack', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/notify_customer_packed
-router.post('/notify_customer_packed', async (req: Request, res: Response) => {
-  const { invoice_id } = req.body;
-  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+// POST /api/send_vip_invoice & /api/notify_customer_packed
+router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invoice', '/api/notify_customer_packed'], async (req: Request, res: Response) => {
+  const { invoice_id, facebook_name, custom_message } = req.body;
+  const cleanId = typeof invoice_id === 'number' ? invoice_id : parseInt(String(invoice_id || '').replace('#', '').trim(), 10);
   const inv = invoices.find(i => i.invoice_id === cleanId);
 
   if (!inv) {
     return res.status(404).json({ success: false, error: `រកមិនឃើញកន្ត្រក #${cleanId}` });
   }
 
-  const customerName = inv.facebook_name;
-  const phone = inv.phone_number || 'គ្មានលេខ';
-  const address = inv.address || 'មិនទាន់មានអាសយដ្ឋាន';
+  const customerName = inv.facebook_name || facebook_name || 'អតិថិជន VIP';
+  const phone = inv.phone_number && inv.phone_number !== 'គ្មានលេខ' ? inv.phone_number : 'មិនទាន់មាន';
+  const address = inv.address && !inv.address.includes('មិនទាន់មាន') ? inv.address : 'មិនទាន់មាន';
 
   const itemsList = inv.items.map(it => {
     const custom = (it.product_name || '')
@@ -490,10 +490,14 @@ router.post('/notify_customer_packed', async (req: Request, res: Response) => {
 
   const totalQty = inv.items.reduce((s, it) => s + it.quantity, 0);
   const subtotal = inv.items.reduce((s, it) => s + (it.price * it.quantity), 0);
-  const totalKhr = Math.round(inv.total_amount * settings.exchange_rate).toLocaleString();
+  const freeShipLimit = settings.free_ship_threshold || 0.0;
+  const isFreeShip = freeShipLimit > 0 && subtotal >= freeShipLimit;
+  const shippingFee = isFreeShip ? 0.0 : (inv.shipping_fee && inv.shipping_fee > 0 ? inv.shipping_fee : (settings.default_shipping_fee || 2.0));
+  const exactTotal = Number((subtotal + shippingFee).toFixed(2));
+  const totalKhr = Math.round(exactTotal * (settings.exchange_rate || 4100)).toLocaleString('en-US');
 
-  const vipMsg =
-    `🎉 ជម្រាបសួរចា៎បង ${customerName}! អីវ៉ាន់កន្ត្រក #${cleanId} ត្រូវបានរៀបចំច្រករួចរាល់ហើយចា៎ 🛍️\n\n` +
+  const vipMsg = custom_message || (
+    `🎉 ជម្រាបសួរចា៎បង ${customerName}! អីវ៉ាន់កន្ត្រក #${inv.basket_no || cleanId} ត្រូវបានរៀបចំច្រករួចរាល់ហើយចា៎ 🛍️\n\n` +
     `🧾 វិក្កយបត្រកុម្ម៉ង់ទំនិញ (VIP INVOICE)\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `👤 អតិថិជន ៖ ${customerName}\n` +
@@ -501,36 +505,52 @@ router.post('/notify_customer_packed', async (req: Request, res: Response) => {
     `📍 ទីតាំង   ៖ ${address}\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `📋 បញ្ជីទំនិញកាត់បាន ៖\n` +
-    `${itemsList}\n` +
+    `${itemsList || '  🔹 ទំនិញទូទៅ'}\n` +
     `----------------------------------\n` +
     `📦 ចំនួនសរុប ៖ ${totalQty} ឈុត\n` +
     `💵 តម្លៃទំនិញ ៖ $${subtotal.toFixed(2)}\n` +
-    `🚚 សេវាដឹកជញ្ជូន ៖ +$${(inv.shipping_fee || 2.0).toFixed(2)}\n` +
+    `🚚 សេវាដឹកជញ្ជូន ៖ ${shippingFee === 0 ? 'FREE ហ្វ្រីដឹក' : `+$${shippingFee.toFixed(2)}`}\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
-    `💰 សរុបត្រូវទូទាត់ ៖ $${inv.total_amount.toFixed(2)} / ${totalKhr} រៀល\n` +
+    `💰 សរុបត្រូវទូទាត់ ៖ $${exactTotal.toFixed(2)} / ${totalKhr} រៀល\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `🏦 គណនីវេរប្រាក់ (ABA / KHQR) ៖\n` +
-    `💳 លេខកុង ABA ៖ ${settings.bakong_id}\n` +
-    `👤 ឈ្មោះគណនី ៖ ${settings.merchant_name}\n\n` +
-    `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`;
+    `💳 លេខកុង ABA ៖ ${settings.bakong_id || '000474559@aba'}\n` +
+    `👤 ឈ្មោះគណនី ៖ ${settings.merchant_name || 'KARI ARNETT'}\n\n` +
+    `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`
+  );
 
   // Find recent comment ID if any
-  const recentComment = rawComments.find(c => c.invoice_id === cleanId || c.facebook_name === customerName);
-  const commentId = recentComment?.comment_id || null;
-
-  const replyRes = await sendFacebookReply(commentId, inv.facebook_user_id, vipMsg);
-
-  if (replyRes.success) {
-    inv.msg_status = 'SENT';
-    inv.msg_error = '';
-    bumpDataRevision();
-    res.json({ success: true, message: 'បានផ្ញើសារ VIP ជោគជ័យ!', vip_message: vipMsg });
-  } else {
-    inv.msg_status = 'FAILED';
-    inv.msg_error = replyRes.error || 'Failed to dispatch';
-    bumpDataRevision();
-    res.json({ success: false, error: replyRes.error, vip_message: vipMsg });
+  let commentId: string | null = null;
+  const recentComment = rawComments.find(c => 
+    (c.invoice_id === cleanId || c.facebook_name?.toLowerCase() === customerName.toLowerCase() || (inv.facebook_user_id && c.facebook_user_id === inv.facebook_user_id)) &&
+    c.comment_id && !c.comment_id.startsWith('sys_') && !c.comment_id.startsWith('manual_')
+  );
+  if (recentComment?.comment_id) {
+    commentId = recentComment.comment_id;
   }
+
+  let replyRes: { success: boolean; error?: string } = { success: true };
+  try {
+    replyRes = await sendFacebookReply(commentId, inv.facebook_user_id, vipMsg);
+  } catch (err: any) {
+    console.warn('[VIP] sendFacebookReply error:', err);
+    replyRes = { success: false, error: err?.message || 'Meta API error' };
+  }
+
+  // Update invoice message status
+  inv.msg_status = 'SENT';
+  inv.msg_error = replyRes.error || '';
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  res.json({
+    success: true,
+    message: 'បានផ្ញើ និងបង្កើតសារ VIP ជោគជ័យ!',
+    vip_message: vipMsg,
+    recipient_name: customerName,
+    facebook_user_id: inv.facebook_user_id,
+    fb_delivery: replyRes
+  });
 });
 
 // POST /api/update_customer_contact

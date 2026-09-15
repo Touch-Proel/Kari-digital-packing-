@@ -41,100 +41,165 @@ export async function getSqliteDb(): Promise<Database> {
 }
 
 function initTables(db: Database) {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS live_sessions (
-      live_id TEXT PRIMARY KEY,
-      title TEXT,
-      live_date TEXT,
-      created_at TEXT,
-      total_baskets INTEGER DEFAULT 0,
-      total_revenue REAL DEFAULT 0,
-      status TEXT DEFAULT 'ACTIVE'
-    );
+  try {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS live_sessions (
+        live_id TEXT PRIMARY KEY,
+        title TEXT,
+        live_date TEXT,
+        created_at TEXT,
+        total_baskets INTEGER DEFAULT 0,
+        total_revenue REAL DEFAULT 0,
+        status TEXT DEFAULT 'ACTIVE'
+      );
 
-    CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY,
-      code TEXT UNIQUE,
-      name TEXT,
-      stock_qty INTEGER DEFAULT 0,
-      price REAL DEFAULT 0,
-      cost_price REAL DEFAULT 0,
-      image_file TEXT
-    );
+      CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY,
+        code TEXT UNIQUE,
+        name TEXT,
+        stock_qty INTEGER DEFAULT 0,
+        price REAL DEFAULT 0,
+        cost_price REAL DEFAULT 0,
+        image_file TEXT
+      );
 
-    CREATE TABLE IF NOT EXISTS invoices (
-      invoice_id INTEGER PRIMARY KEY,
-      basket_no INTEGER,
-      live_id TEXT,
-      created_at TEXT,
-      created_date TEXT,
-      facebook_user_id TEXT,
-      facebook_name TEXT,
-      phone_number TEXT,
-      address TEXT,
-      location_zone TEXT,
-      location_label TEXT,
-      total_amount REAL DEFAULT 0,
-      shipping_fee REAL DEFAULT 2.0,
-      is_free_ship INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'Pending',
-      packing_stage TEXT DEFAULT 'UNPICKED',
-      staged_by TEXT,
-      staged_at TEXT,
-      verified_by TEXT,
-      verified_at TEXT,
-      paid_by TEXT,
-      paid_at TEXT,
-      msg_status TEXT DEFAULT 'UNSENT',
-      comments_json TEXT,
-      unmatched_comments_json TEXT,
-      items_json TEXT
-    );
+      CREATE TABLE IF NOT EXISTS invoices (
+        invoice_id INTEGER PRIMARY KEY,
+        basket_no INTEGER,
+        live_id TEXT,
+        created_at TEXT,
+        created_date TEXT,
+        facebook_user_id TEXT,
+        facebook_name TEXT,
+        phone_number TEXT,
+        address TEXT,
+        location_zone TEXT,
+        location_label TEXT,
+        total_amount REAL DEFAULT 0,
+        shipping_fee REAL DEFAULT 2.0,
+        is_free_ship INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'Pending',
+        packing_stage TEXT DEFAULT 'UNPICKED',
+        staged_by TEXT,
+        staged_at TEXT,
+        verified_by TEXT,
+        verified_at TEXT,
+        paid_by TEXT,
+        paid_at TEXT,
+        msg_status TEXT DEFAULT 'UNSENT',
+        comments_json TEXT,
+        unmatched_comments_json TEXT,
+        items_json TEXT
+      );
 
-    CREATE INDEX IF NOT EXISTS idx_invoices_live_id ON invoices(live_id);
-    CREATE INDEX IF NOT EXISTS idx_invoices_created_date ON invoices(created_date);
-    CREATE INDEX IF NOT EXISTS idx_invoices_basket_no ON invoices(basket_no);
+      CREATE INDEX IF NOT EXISTS idx_invoices_live_id ON invoices(live_id);
+      CREATE INDEX IF NOT EXISTS idx_invoices_created_date ON invoices(created_date);
+      CREATE INDEX IF NOT EXISTS idx_invoices_basket_no ON invoices(basket_no);
 
-    CREATE TABLE IF NOT EXISTS invoice_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      invoice_id INTEGER,
-      product_id INTEGER,
-      product_code TEXT,
-      product_name TEXT,
-      quantity INTEGER,
-      price REAL,
-      is_packed INTEGER DEFAULT 0,
-      item_comment TEXT,
-      image_file TEXT,
-      FOREIGN KEY(invoice_id) REFERENCES invoices(invoice_id)
-    );
+      CREATE TABLE IF NOT EXISTS invoice_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER,
+        product_id INTEGER,
+        product_code TEXT,
+        product_name TEXT,
+        quantity INTEGER,
+        price REAL,
+        is_packed INTEGER DEFAULT 0,
+        item_comment TEXT,
+        image_file TEXT,
+        FOREIGN KEY(invoice_id) REFERENCES invoices(invoice_id)
+      );
 
-    CREATE TABLE IF NOT EXISTS customers (
-      customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      facebook_user_id TEXT,
-      facebook_name TEXT,
-      phone_number TEXT,
-      address TEXT,
-      is_vip INTEGER DEFAULT 0,
-      is_blacklist INTEGER DEFAULT 0
-    );
+      CREATE TABLE IF NOT EXISTS customers (
+        customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        facebook_user_id TEXT,
+        facebook_name TEXT,
+        phone_number TEXT,
+        address TEXT,
+        is_vip INTEGER DEFAULT 0,
+        is_blacklist INTEGER DEFAULT 0
+      );
 
-    CREATE TABLE IF NOT EXISTS packer_logs (
-      log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      invoice_id INTEGER,
-      packer_name TEXT,
-      items_count INTEGER,
-      duration_seconds INTEGER,
-      packed_at TEXT,
-      facebook_name TEXT,
-      total_amount REAL
-    );
+      CREATE TABLE IF NOT EXISTS packer_logs (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id INTEGER,
+        packer_name TEXT,
+        items_count INTEGER,
+        duration_seconds INTEGER,
+        packed_at TEXT,
+        facebook_name TEXT,
+        total_amount REAL
+      );
 
-    CREATE TABLE IF NOT EXISTS app_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    );
-  `);
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `);
+  } catch (err) {
+    console.warn('[SQLite] Table creation warning:', err);
+  }
+
+  // Schema migrations for legacy/existing tables
+  const ensureColumns = (tableName: string, requiredColumns: [string, string][]) => {
+    try {
+      const tableInfo = db.exec(`PRAGMA table_info(${tableName});`);
+      if (tableInfo.length > 0 && tableInfo[0].values) {
+        const existingCols = new Set(tableInfo[0].values.map((row: any) => String(row[1]).toLowerCase()));
+        for (const [colName, colType] of requiredColumns) {
+          if (!existingCols.has(colName.toLowerCase())) {
+            try {
+              db.run(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colType};`);
+              console.log(`[SQLite Migration] Added column ${colName} (${colType}) to ${tableName}`);
+            } catch (addErr) {
+              console.warn(`[SQLite Migration] Failed to add column ${colName} to ${tableName}:`, addErr);
+            }
+          }
+        }
+      }
+    } catch (migErr) {
+      console.warn(`[SQLite Migration] Error inspecting columns for ${tableName}:`, migErr);
+    }
+  };
+
+  ensureColumns('invoice_items', [
+    ['image_file', 'TEXT'],
+    ['item_comment', 'TEXT'],
+    ['is_packed', 'INTEGER DEFAULT 0'],
+    ['product_name', 'TEXT'],
+    ['product_code', 'TEXT'],
+    ['product_id', 'INTEGER'],
+    ['quantity', 'INTEGER DEFAULT 1'],
+    ['price', 'REAL DEFAULT 0']
+  ]);
+
+  ensureColumns('invoices', [
+    ['basket_no', 'INTEGER'],
+    ['shipping_fee', 'REAL DEFAULT 2.0'],
+    ['is_free_ship', 'INTEGER DEFAULT 0'],
+    ['location_zone', 'TEXT'],
+    ['location_label', 'TEXT'],
+    ['comments_json', 'TEXT'],
+    ['unmatched_comments_json', 'TEXT'],
+    ['items_json', 'TEXT'],
+    ['msg_status', "TEXT DEFAULT 'UNSENT'"],
+    ['staged_by', 'TEXT'],
+    ['staged_at', 'TEXT'],
+    ['verified_by', 'TEXT'],
+    ['verified_at', 'TEXT'],
+    ['paid_by', 'TEXT'],
+    ['paid_at', 'TEXT']
+  ]);
+
+  ensureColumns('products', [
+    ['cost_price', 'REAL DEFAULT 0'],
+    ['image_file', 'TEXT']
+  ]);
+
+  ensureColumns('customers', [
+    ['is_vip', 'INTEGER DEFAULT 0'],
+    ['is_blacklist', 'INTEGER DEFAULT 0']
+  ]);
 }
 
 let isPersisting = false;

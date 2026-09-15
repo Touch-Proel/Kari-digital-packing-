@@ -13,6 +13,7 @@ interface BasketCardProps {
   onToggleItemCheck: (invId: number, code: string) => void;
   onOpenQCModal: (inv: Invoice) => void;
   onOpenReceiptModal: (inv: Invoice) => void;
+  onOpenVipModal?: (inv: Invoice) => void;
   onOpenZoomModal: (code: string, name: string, imageUrl?: string, price?: number, stockQty?: number) => void;
   onDataChanged: () => void;
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
@@ -29,6 +30,7 @@ export function BasketCard({
   onToggleItemCheck,
   onOpenQCModal,
   onOpenReceiptModal,
+  onOpenVipModal,
   onOpenZoomModal,
   onDataChanged,
   onOptimisticItemUpdate,
@@ -213,9 +215,16 @@ export function BasketCard({
     }
   };
 
+  const [isSendingVip, setIsSendingVip] = useState(false);
+
   // Notify VIP Messenger Invoice
   const handleNotifyVIP = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isSendingVip) return;
+    setIsSendingVip(true);
+    playPureTone(900, 0.08);
+    onShowToast(`✉️ កំពុងផ្ញើវិក្កយបត្រ VIP ទៅ ${invoice.facebook_name}...`);
+
     try {
       const res = await fetch('/api/send_vip_invoice', {
         method: 'POST',
@@ -228,14 +237,22 @@ export function BasketCard({
       });
       const data = await res.json();
       if (data.success) {
+        if (data.vip_message && navigator.clipboard) {
+          try {
+            await navigator.clipboard.writeText(data.vip_message);
+          } catch {}
+        }
+        invoice.msg_status = 'SENT';
         playSuccessFanfare();
-        onShowToast(`✉️ បានផ្ញើវិក្កយបត្រ VIP ទៅ ${invoice.facebook_name}`);
+        onShowToast(`✉️ បានផ្ញើវិក្កយបត្រ VIP ទៅ ${invoice.facebook_name} & Copy ចូល Clipboard រួចរាល់!`, 'success');
         onDataChanged();
       } else {
-        onShowToast('VIP Message simulation completed');
+        onShowToast(`❌ ${data.error || 'មិនអាចផ្ញើសារបានទេ'}`, 'error');
       }
-    } catch (err) {
-      onShowToast('Error notifying VIP', 'error');
+    } catch (err: any) {
+      onShowToast(`❌ បរាជ័យក្នុងការផ្ញើ VIP៖ ${err?.message || err}`, 'error');
+    } finally {
+      setIsSendingVip(false);
     }
   };
 
@@ -746,8 +763,16 @@ export function BasketCard({
 
             {/* VIP Messenger notification status */}
             <button
-              onClick={handleNotifyVIP}
-              className={`text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm ${
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onOpenVipModal) {
+                  onOpenVipModal(invoice);
+                } else {
+                  handleNotifyVIP(e);
+                }
+              }}
+              title="ចុចដើម្បីពិនិត្យ ឬកែសម្រួលសារ VIP"
+              className={`text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer ${
                 invoice.msg_status === 'SENT'
                   ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
                   : 'bg-[#081B34] hover:bg-[#0D274C] border-cyan-500/50 text-cyan-200'
@@ -1168,14 +1193,15 @@ export function BasketCard({
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     onClick={handleNotifyVIP}
-                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all"
+                    disabled={isSendingVip}
+                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
                   >
-                    <span>✉️</span>
-                    <span>ផ្ញើវិក្កយបត្រ VIP</span>
+                    <span>{isSendingVip ? '⏳' : '✉️'}</span>
+                    <span>{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
                   </button>
                   <button
                     onClick={() => onOpenReceiptModal(invoice)}
-                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all"
+                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
                   >
                     <span>🖨️</span>
                     <span>ព្រីនបិទលើថង់</span>
@@ -1187,14 +1213,15 @@ export function BasketCard({
               <div className="grid grid-cols-2 gap-2.5 sm:gap-3 mt-1" onClick={e => e.stopPropagation()}>
                 <button
                   onClick={handleNotifyVIP}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all"
+                  disabled={isSendingVip}
+                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
                 >
-                  <span>✉️</span>
-                  <span>ផ្ញើវិក្កយបត្រ VIP</span>
+                  <span>{isSendingVip ? '⏳' : '✉️'}</span>
+                  <span>{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
                 </button>
                 <button
                   onClick={() => onOpenReceiptModal(invoice)}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all"
+                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
                 >
                   <span>🖨️</span>
                   <span>ព្រីនបិទលើថង់</span>
@@ -1206,10 +1233,11 @@ export function BasketCard({
               <div className="grid grid-cols-2 gap-2.5">
                 <button
                   onClick={handleNotifyVIP}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all"
+                  disabled={isSendingVip}
+                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
                 >
-                  <span>✉️</span>
-                  <span>ផ្ញើវិក្កយបត្រ VIP</span>
+                  <span>{isSendingVip ? '⏳' : '✉️'}</span>
+                  <span>{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
                 </button>
                 <button
                   onClick={() => onOpenReceiptModal(invoice)}

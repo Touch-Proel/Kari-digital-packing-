@@ -19,6 +19,7 @@ import { PackerModal } from './components/Modals/PackerModal';
 import { FacebookAuthModal } from './components/Modals/FacebookAuthModal';
 import { ImageZoomModal } from './components/Modals/ImageZoomModal';
 import { ReceiptModal } from './components/Modals/ReceiptModal';
+import { VipInvoiceModal } from './components/Modals/VipInvoiceModal';
 import { DatabaseModal } from './components/Modals/DatabaseModal';
 import { ManageLiveSessionsModal } from './components/Modals/ManageLiveSessionsModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
@@ -116,6 +117,15 @@ export default function App() {
   const handleOpenReceiptModal = (inv: Invoice) => {
     setReceiptInvoice(inv);
     setIsReceiptModalOpen(true);
+  };
+
+  // VIP Invoice Modal State
+  const [isVipModalOpen, setIsVipModalOpen] = useState(false);
+  const [vipInvoice, setVipInvoice] = useState<Invoice | null>(null);
+
+  const handleOpenVipModal = (inv: Invoice) => {
+    setVipInvoice(inv);
+    setIsVipModalOpen(true);
   };
 
   // Fast Product Lookup Map for Instant Basket Thumbnail & Image Matching
@@ -593,6 +603,7 @@ export default function App() {
                   setIsQCModalOpen(true);
                 }}
                 onOpenReceiptModal={handleOpenReceiptModal}
+                onOpenVipModal={handleOpenVipModal}
                 onOpenZoomModal={(c, n, img, pr, sq) => {
                   setZoomCode(c);
                   setZoomName(n);
@@ -745,6 +756,16 @@ export default function App() {
         onStagePackSuccess={() => {
           fetchInvoices();
           fetchPackerStats();
+        }}
+      />
+
+      <VipInvoiceModal
+        isOpen={isVipModalOpen}
+        onClose={() => setIsVipModalOpen(false)}
+        invoice={vipInvoice}
+        onShowToast={showToast}
+        onDataChanged={() => {
+          fetchInvoices();
         }}
       />
 
