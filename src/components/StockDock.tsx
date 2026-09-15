@@ -44,11 +44,11 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
           {/* Quick Filter Buttons */}
           <button
             onClick={() => setFilterMode(filterMode === 'OUT' ? 'ALL' : 'OUT')}
-            className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold border transition-all cursor-pointer ${
+            className={`px-2 py-1 rounded-lg text-[10.5px] font-bold border transition-all cursor-pointer h-7 flex items-center ${
               filterMode === 'OUT'
                 ? 'bg-rose-600 border-rose-400 text-white'
                 : 'bg-rose-950/40 border-rose-800/60 text-rose-300 hover:bg-rose-900/60'
@@ -60,7 +60,7 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
           {lowCount > 0 && (
             <button
               onClick={() => setFilterMode(filterMode === 'LOW' ? 'ALL' : 'LOW')}
-              className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold border transition-all cursor-pointer ${
+              className={`px-2 py-1 rounded-lg text-[10.5px] font-bold border transition-all cursor-pointer h-7 flex items-center ${
                 filterMode === 'LOW'
                   ? 'bg-amber-600 border-amber-400 text-white'
                   : 'bg-amber-950/40 border-amber-800/60 text-amber-300 hover:bg-amber-900/60'
@@ -75,29 +75,31 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
               <button
                 type="button"
                 onClick={() => onOpenStockSync('telegram')}
-                className="bg-sky-950 hover:bg-sky-900 text-cyan-300 border border-sky-500/70 px-2 py-1 rounded-lg text-[11px] font-black active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
-                title="ទាញកូដ តម្លៃ និងរូបភាពពី Telegram Group តាមរយៈ Bot Token"
+                className="bg-sky-950 hover:bg-sky-900 text-cyan-300 border border-sky-500/70 px-2 py-1 rounded-lg text-[11px] font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-sm h-7"
+                title="ទាញកូដ តម្លៃ និងរូបភាពពី Telegram Group"
               >
-                <span>✈️ Telegram</span>
-                <span className="hidden md:inline">/ នាំចូល</span>
+                <span>✈️</span>
+                <span>Telegram</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => onOpenStockSync('export')}
-                className="bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/60 px-2 py-1 rounded-lg text-[11px] font-black active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                className="bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/60 px-2 py-1 rounded-lg text-[11px] font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-sm h-7"
                 title="នាំចេញស្តុកជា CSV (Excel) ឬ JSON Backup"
               >
-                <span>📤 នាំចេញ</span>
+                <span>📤</span>
+                <span>នាំចេញ</span>
               </button>
             </>
           )}
 
           <button
             onClick={onOpenAddStockPrompt}
-            className="bg-emerald-800 hover:bg-emerald-700 text-emerald-200 border border-emerald-500 px-2.5 py-1 rounded-lg text-[11px] font-black active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+            className="bg-emerald-800 hover:bg-emerald-700 text-emerald-200 border border-emerald-500 px-2.5 py-1 rounded-lg text-[11px] font-black active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-sm h-7"
           >
-            <span>➕ បន្ថែមស្តុក</span>
+            <span>➕</span>
+            <span>បន្ថែមស្តុក</span>
           </button>
         </div>
       </div>
