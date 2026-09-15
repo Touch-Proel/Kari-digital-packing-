@@ -261,6 +261,22 @@ app.post('/api/fb/sync_comments', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
+// 📥 Download Helper Scripts Endpoints
+// -------------------------------------------------------------
+app.get('/api/download/:filename', (req: Request, res: Response) => {
+  const allowed = ['pos_agent.py', 'build_exe.bat', 'run_agent.bat'];
+  const filename = req.params.filename;
+  if (!allowed.includes(filename)) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  const filePath = path.join(process.cwd(), filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  res.download(filePath, filename);
+});
+
+// -------------------------------------------------------------
 // 📦 Digital Packing API Routes
 // -------------------------------------------------------------
 app.use('/api', packingRoutes);

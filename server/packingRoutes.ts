@@ -901,7 +901,7 @@ router.get('/packer_leaderboard', (_req: Request, res: Response) => {
 router.get('/live_sessions', (_req: Request, res: Response) => {
   const uniqueLiveIds = Array.from(new Set(invoices.map(i => i.live_id))).filter(Boolean).map(liveId => {
     const sample = invoices.find(i => i.live_id === liveId);
-    const count = invoices.filter(i => i.live_id === liveId && i.items && i.items.length > 0).length;
+    const count = invoices.filter(i => i.live_id === liveId && i.status !== 'Cancelled').length;
     return {
       live_id: liveId,
       created_at: sample?.created_at || new Date().toISOString(),
@@ -910,7 +910,7 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
     };
   });
   if (activeLiveId && !uniqueLiveIds.some(l => l.live_id === activeLiveId)) {
-    const count = invoices.filter(i => i.live_id === activeLiveId && i.items && i.items.length > 0).length;
+    const count = invoices.filter(i => i.live_id === activeLiveId && i.status !== 'Cancelled').length;
     uniqueLiveIds.unshift({
       live_id: activeLiveId,
       created_at: new Date().toISOString(),
