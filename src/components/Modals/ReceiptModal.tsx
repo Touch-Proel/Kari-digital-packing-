@@ -1217,11 +1217,7 @@ export function ReceiptModal({
                   <div className="flex flex-col gap-1.5">
                     <div className="bg-black/60 p-2 rounded-lg font-mono text-[11px] text-emerald-300 select-all border border-slate-700 flex items-center justify-between">
                       <span>python pos_agent.py usb</span>
-                      <span className="text-[9px] text-slate-400 font-sans font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-600/40 px-1.5 py-0.5 rounded">🔌 USB ស្វ័យប្រវត្តិ</span>
-                    </div>
-                    <div className="bg-black/60 p-2 rounded-lg font-mono text-[11px] text-amber-300 select-all border border-slate-700 flex items-center justify-between">
-                      <span>python pos_agent.py CASHIER</span>
-                      <span className="text-[9px] text-slate-400 font-sans font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-600/40 px-1.5 py-0.5 rounded">🏷️ ឈ្មោះជាក់លាក់ (CASHIER)</span>
+                      <span className="text-[9px] text-slate-400 font-sans font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-600/40 px-1.5 py-0.5 rounded">🔌 ខ្សែ USB</span>
                     </div>
                     <div className="bg-black/60 p-2 rounded-lg font-mono text-[11px] text-cyan-300 select-all border border-slate-700 flex items-center justify-between">
                       <span>python pos_agent.py 192.168.0.200</span>
