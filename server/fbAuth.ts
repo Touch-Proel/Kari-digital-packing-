@@ -495,13 +495,21 @@ export async function sendFacebookReply(
         console.log(`=======================================================\n`);
         return { success: true, method: 'PUBLIC_COMMENT' };
       }
-    } catch (pubErr) {
+    } catch (pubErr: any) {
       console.warn(`[PUBLIC COMMENT ERROR]:`, pubErr);
     }
   }
 
-  console.log(`🚨 [DISPATCH RESULT]: Message delivered with fallback simulation.`);
+  const isRealToken = activeToken && !activeToken.startsWith('simulated_') && activeToken.length > 20;
+  if (isRealToken) {
+    console.log(`🚨 [DISPATCH RESULT]: All delivery attempts failed with real token.`);
+    console.log(`=======================================================\n`);
+    return { success: false, error: 'Facebook Meta API បដិសេធ (អាចមកពីហួស 7 ថ្ងៃ ឬអត់មាន Chat ID) ➔ សូមចុចឆាតផ្ទាល់' };
+  }
+
+  console.log(`🚨 [DISPATCH RESULT]: Simulated test message delivered.`);
   console.log(`=======================================================\n`);
   return { success: true, method: 'SIMULATED' };
 }
+
 

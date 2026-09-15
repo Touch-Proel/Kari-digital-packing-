@@ -537,15 +537,22 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     replyRes = { success: false, error: err?.message || 'Meta API error' };
   }
 
-  // Update invoice message status
-  inv.msg_status = 'SENT';
-  inv.msg_error = replyRes.error || '';
+  // Update invoice message status accurately
+  if (replyRes.success) {
+    inv.msg_status = 'SENT';
+    inv.msg_error = '';
+  } else {
+    inv.msg_status = 'FAILED';
+    inv.msg_error = replyRes.error || 'Facebook Meta API rejected message';
+  }
   bumpDataRevision();
   saveDatabaseToDisk();
 
   res.json({
-    success: true,
-    message: 'បានផ្ញើ និងបង្កើតសារ VIP ជោគជ័យ!',
+    success: replyRes.success,
+    msg_status: inv.msg_status,
+    error: replyRes.error,
+    message: replyRes.success ? 'បានផ្ញើវិក្កយបត្រ VIP ទៅកាន់ Messenger ជោគជ័យ!' : (replyRes.error || 'មិនអាចផ្ញើសារបានទេ ➔ សូមចុចឆាតផ្ទាល់'),
     vip_message: vipMsg,
     recipient_name: customerName,
     facebook_user_id: inv.facebook_user_id,

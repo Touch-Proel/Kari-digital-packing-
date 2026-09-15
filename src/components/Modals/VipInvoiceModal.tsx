@@ -144,7 +144,11 @@ export function VipInvoiceModal({
                 <span>ផ្ញើវិក្កយបត្រ VIP (Messenger / ABA)</span>
                 {invoice.msg_status === 'SENT' ? (
                   <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">
-                    ✅ ឆាតរួច
+                    ✅ ឆាតជោគជ័យ
+                  </span>
+                ) : invoice.msg_status === 'FAILED' ? (
+                  <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                    ❌ ផ្ញើបរាជ័យ
                   </span>
                 ) : (
                   <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold">
@@ -167,6 +171,17 @@ export function VipInvoiceModal({
 
         {/* Message Preview Body */}
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-slate-950/70">
+          {invoice.msg_status === 'FAILED' && (
+            <div className="bg-rose-950/60 border border-rose-600/70 rounded-2xl p-3 text-xs text-rose-200 flex items-start gap-2.5 shadow-md">
+              <span className="text-lg">⚠️</span>
+              <div className="flex-1">
+                <div className="font-bold text-rose-100">ការផ្ញើស្វ័យប្រវត្តិកន្លងមកមិនបានជោគជ័យ ៖</div>
+                <div className="text-[11px] text-rose-300/90 mt-0.5">
+                  Facebook Meta API អាចបដិសេធដោយសារហួសពេល ២៤ ម៉ោង ឬគ្មាន Chat ID។ សូមចុចប៊ូតុង <strong>«💬 បើក Messenger»</strong> ខាងក្រោម ដើម្បី Paste អត្ថបទវិក្កយបត្រនេះជូនភ្ញៀវដោយផ្ទាល់!
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <span>💬</span>

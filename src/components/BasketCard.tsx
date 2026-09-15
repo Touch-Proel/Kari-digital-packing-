@@ -217,6 +217,19 @@ export function BasketCard({
 
   const [isSendingVip, setIsSendingVip] = useState(false);
 
+  // Open Facebook Messenger or Page Inbox directly
+  const openFacebookDirectChat = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const cleanUid = String(invoice.facebook_user_id || '').trim();
+    let chatUrl = '';
+    if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None'].includes(cleanUid) && cleanUid.length > 4) {
+      chatUrl = `https://m.me/${cleanUid}`;
+    } else {
+      chatUrl = `https://www.facebook.com/messages`;
+    }
+    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+  };
+
   // Notify VIP Messenger Invoice
   const handleNotifyVIP = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -236,21 +249,27 @@ export function BasketCard({
         })
       });
       const data = await res.json();
+      if (data.vip_message && navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(data.vip_message);
+        } catch {}
+      }
+
       if (data.success) {
-        if (data.vip_message && navigator.clipboard) {
-          try {
-            await navigator.clipboard.writeText(data.vip_message);
-          } catch {}
-        }
         invoice.msg_status = 'SENT';
         playSuccessFanfare();
-        onShowToast(`✉️ បានផ្ញើវិក្កយបត្រ VIP ទៅ ${invoice.facebook_name} & Copy ចូល Clipboard រួចរាល់!`, 'success');
+        onShowToast(`✅ បានផ្ញើ VIP ទៅ ${invoice.facebook_name} ជោគជ័យ & Copy ចូល Clipboard រួចរាល់!`, 'success');
         onDataChanged();
       } else {
-        onShowToast(`❌ ${data.error || 'មិនអាចផ្ញើសារបានទេ'}`, 'error');
+        invoice.msg_status = 'FAILED';
+        playPureTone(320, 0.18, 'sawtooth');
+        onShowToast(`❌ ផ្ញើបរាជ័យ (បាន Copy សារ) ➔ សូមចុច «ឆាតផ្ទាល់»!`, 'error');
+        onDataChanged();
       }
     } catch (err: any) {
-      onShowToast(`❌ បរាជ័យក្នុងការផ្ញើ VIP៖ ${err?.message || err}`, 'error');
+      invoice.msg_status = 'FAILED';
+      onShowToast(`❌ ផ្ញើមិនបានជោគជ័យ៖ ${err?.message || err}`, 'error');
+      onDataChanged();
     } finally {
       setIsSendingVip(false);
     }
@@ -762,25 +781,65 @@ export function BasketCard({
             )}
 
             {/* VIP Messenger notification status */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onOpenVipModal) {
-                  onOpenVipModal(invoice);
-                } else {
-                  handleNotifyVIP(e);
-                }
-              }}
-              title="ចុចដើម្បីពិនិត្យ ឬកែសម្រួលសារ VIP"
-              className={`text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer ${
-                invoice.msg_status === 'SENT'
-                  ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
-                  : 'bg-[#081B34] hover:bg-[#0D274C] border-cyan-500/50 text-cyan-200'
-              }`}
-            >
-              <span>{invoice.msg_status === 'SENT' ? '✅' : '✉️'}</span>
-              <span>{invoice.msg_status === 'SENT' ? 'ឆាតរួច' : 'ឆាតប្រាប់ VIP'}</span>
-            </button>
+            {invoice.msg_status === 'SENT' ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenVipModal) {
+                    onOpenVipModal(invoice);
+                  } else {
+                    handleNotifyVIP(e);
+                  }
+                }}
+                title="សារ VIP បានផ្ញើចូល Messenger ជោគជ័យ (ចុចដើម្បីមើល ឬផ្ញើឡើងវិញ)"
+                className="text-xs font-black px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-emerald-950/90 border-emerald-500 text-emerald-300 hover:bg-emerald-900/80"
+              >
+                <span className="text-emerald-400">✅</span>
+                <span>ឆាតជោគជ័យ</span>
+              </button>
+            ) : invoice.msg_status === 'FAILED' ? (
+              <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onOpenVipModal) {
+                      onOpenVipModal(invoice);
+                    } else {
+                      handleNotifyVIP(e);
+                    }
+                  }}
+                  title="ផ្ញើមិនបានជោគជ័យ (ចុចដើម្បីមើល ឬផ្ញើឡើងវិញ)"
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 border transition-all shadow-sm active:scale-95 cursor-pointer bg-rose-950/90 border-rose-500 text-rose-300 hover:bg-rose-900/80"
+                >
+                  <span className="text-rose-400">❌</span>
+                  <span>ផ្ញើបរាជ័យ</span>
+                </button>
+                <button
+                  onClick={openFacebookDirectChat}
+                  title="ចុចចូលទៅកាន់ Facebook Messenger / Page Inbox ផ្ទាល់"
+                  className="text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-md active:scale-95 cursor-pointer"
+                >
+                  <span>💬</span>
+                  <span>ឆាតផ្ទាល់</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onOpenVipModal) {
+                    onOpenVipModal(invoice);
+                  } else {
+                    handleNotifyVIP(e);
+                  }
+                }}
+                title="ចុចដើម្បីពិនិត្យ ឬផ្ញើសារ VIP"
+                className="text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-[#081B34] hover:bg-[#0D274C] border-cyan-500/50 text-cyan-200"
+              >
+                <span>✉️</span>
+                <span>ឆាតប្រាប់ VIP</span>
+              </button>
+            )}
           </div>
 
           {/* Progress Row matching Capture.PNG */}
@@ -1191,14 +1250,33 @@ export function BasketCard({
                   🚀 ភ្ញៀវបង់រួចហើយ ➔ ផ្ទៀងរូប & បិទស្កុតចេញដឹកភ្លាម
                 </button>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    onClick={handleNotifyVIP}
-                    disabled={isSendingVip}
-                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
-                  >
-                    <span>{isSendingVip ? '⏳' : '✉️'}</span>
-                    <span>{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
-                  </button>
+                  {invoice.msg_status === 'SENT' ? (
+                    <button
+                      onClick={handleNotifyVIP}
+                      disabled={isSendingVip}
+                      className="py-3 px-2 rounded-2xl bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      <span>{isSendingVip ? '⏳' : '✅'}</span>
+                      <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ឆាតជោគជ័យ'}</span>
+                    </button>
+                  ) : invoice.msg_status === 'FAILED' ? (
+                    <button
+                      onClick={openFacebookDirectChat}
+                      className="py-3 px-2 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-cyan-600 hover:from-rose-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all cursor-pointer"
+                    >
+                      <span>💬</span>
+                      <span className="truncate">បរាជ័យ ➔ ឆាតផ្ទាល់</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleNotifyVIP}
+                      disabled={isSendingVip}
+                      className="py-3 px-2 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      <span>{isSendingVip ? '⏳' : '✉️'}</span>
+                      <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => onOpenReceiptModal(invoice)}
                     className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
@@ -1211,14 +1289,33 @@ export function BasketCard({
             ) : (
               /* Two buttons matching Capture.PNG: ✉️ ផ្ញើវិក្កយបត្រ VIP and 🖨️ ព្រីនបិទលើថង់ */
               <div className="grid grid-cols-2 gap-2.5 sm:gap-3 mt-1" onClick={e => e.stopPropagation()}>
-                <button
-                  onClick={handleNotifyVIP}
-                  disabled={isSendingVip}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
-                >
-                  <span>{isSendingVip ? '⏳' : '✉️'}</span>
-                  <span>{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
-                </button>
+                {invoice.msg_status === 'SENT' ? (
+                  <button
+                    onClick={handleNotifyVIP}
+                    disabled={isSendingVip}
+                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>{isSendingVip ? '⏳' : '✅'}</span>
+                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ឆាតជោគជ័យ'}</span>
+                  </button>
+                ) : invoice.msg_status === 'FAILED' ? (
+                  <button
+                    onClick={openFacebookDirectChat}
+                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-cyan-600 hover:from-rose-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all cursor-pointer"
+                  >
+                    <span>💬</span>
+                    <span className="truncate">បរាជ័យ ➔ ឆាតផ្ទាល់</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleNotifyVIP}
+                    disabled={isSendingVip}
+                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>{isSendingVip ? '⏳' : '✉️'}</span>
+                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
+                  </button>
+                )}
                 <button
                   onClick={() => onOpenReceiptModal(invoice)}
                   className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
@@ -1231,14 +1328,33 @@ export function BasketCard({
           ) : currentMasterStage === 2 ? (
             <div className="flex flex-col gap-2 mt-1" onClick={e => e.stopPropagation()}>
               <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  onClick={handleNotifyVIP}
-                  disabled={isSendingVip}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
-                >
-                  <span>{isSendingVip ? '⏳' : '✉️'}</span>
-                  <span>{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
-                </button>
+                {invoice.msg_status === 'SENT' ? (
+                  <button
+                    onClick={handleNotifyVIP}
+                    disabled={isSendingVip}
+                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>{isSendingVip ? '⏳' : '✅'}</span>
+                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ឆាតជោគជ័យ'}</span>
+                  </button>
+                ) : invoice.msg_status === 'FAILED' ? (
+                  <button
+                    onClick={openFacebookDirectChat}
+                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-cyan-600 hover:from-rose-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all cursor-pointer"
+                  >
+                    <span>💬</span>
+                    <span className="truncate">បរាជ័យ ➔ ឆាតផ្ទាល់</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleNotifyVIP}
+                    disabled={isSendingVip}
+                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    <span>{isSendingVip ? '⏳' : '✉️'}</span>
+                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
+                  </button>
+                )}
                 <button
                   onClick={() => onOpenReceiptModal(invoice)}
                   className="py-3 px-4 rounded-2xl bg-[#0F1D38] border border-cyan-500/70 hover:bg-[#14264A] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow active:scale-98 transition-all"
