@@ -51,21 +51,58 @@ export function normalizeKhmerText(text: string): string {
   return s;
 }
 
+export function convertKhmerDigitsToArabic(text: string): string {
+  if (!text) return '';
+  return text.replace(/[០-៩]/g, ch => KHMER_DIGITS_MAP[ch] || ch);
+}
+
+// 7-Digit Subscriber Numbers (Total 10 Digits with leading 0)
+// Smart: 096 | Cellcard: 076 | Metfone: 031, 071, 088, 097 | Seatel: 018
+const RE_CAMBODIA_7_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:18|31|71|76|88|96|97)(?:[\s.\-()]*\d){7}\b/i;
+
+// 6-Digit Subscriber Numbers (Total 9 Digits with leading 0)
+// Smart: 010, 015, 016, 069, 070, 081, 086, 087, 093, 098
+// Cellcard: 011, 012, 014, 017, 061, 077, 078, 085, 089, 092, 095, 099
+// Metfone: 060, 066, 067, 068, 090
+// Cootel: 038
+const RE_CAMBODIA_6_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:10|11|12|14|15|16|17|38|60|61|66|67|68|69|70|77|78|81|85|86|87|89|90|92|93|95|98|99)(?:[\s.\-()]*\d){6}\b/i;
+
+// General Cambodian phone number fallback (9 or 10 digits starting with 0 or +855)
+const RE_CAMBODIA_GENERAL = /(?:\+?855[\s.\-()]*|0)[1-9]\d(?:[\s.\-()]*\d){6,7}\b/i;
+
 export function extractPhoneNumber(text: string): { phone: string | null; cleanText: string } {
   if (!text) return { phone: null, cleanText: text };
-  const rePhone = /(?:\+?855|0)\s*(?:[1-9]\d{1,2})\s*\d{2,3}\s*\d{2,4}\b|\b0\d{8,9}\b|\b0\d{2,3}[-\s]?\d{3}[-\s]?\d{3,4}\b/;
-  const match = text.match(rePhone);
+
+  // Convert Khmer digits (០-៩) to Arabic digits (0-9) preserving 1:1 character indices
+  const normalized = convertKhmerDigitsToArabic(text);
+
+  // Match in priority: 7-digit subscriber, 6-digit subscriber, then general fallback
+  const match = normalized.match(RE_CAMBODIA_7_DIGIT)
+             || normalized.match(RE_CAMBODIA_6_DIGIT)
+             || normalized.match(RE_CAMBODIA_GENERAL);
+
   if (match) {
-    const raw = match[0];
-    let digits = raw.replace(/\D/g, '');
+    const matchedStr = match[0];
+    const matchIndex = match.index ?? normalized.indexOf(matchedStr);
+    const matchLength = matchedStr.length;
+
+    // Get original raw substring from `text` (retaining original Khmer/Arabic digits or separators)
+    const rawInOriginal = text.substring(matchIndex, matchIndex + matchLength);
+
+    // Extract digits only
+    let digits = matchedStr.replace(/\D/g, '');
     if (digits.startsWith('855')) {
       digits = '0' + digits.slice(3);
     }
-    if (digits.length >= 8 && digits.length <= 10) {
-      const clean = text.replace(raw, ' ').trim();
-      return { phone: digits, cleanText: clean };
+
+    if ((digits.length === 9 || digits.length === 10) && digits.startsWith('0')) {
+      const cleanText = (text.substring(0, matchIndex) + ' ' + text.substring(matchIndex + matchLength))
+        .replace(/\s+/g, ' ')
+        .trim();
+      return { phone: digits, cleanText };
     }
   }
+
   return { phone: null, cleanText: text };
 }
 
