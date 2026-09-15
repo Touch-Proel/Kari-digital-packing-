@@ -26,19 +26,31 @@ import http.server
 import socketserver
 
 # ----------------- CONFIGURATION -----------------
-DEFAULT_SERVER_URL = "https://ais-dev-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app"
-DEFAULT_PRINTER_TARGET = "192.168.0.200"
+DEFAULT_SERVER_URL = "http://185.2.103.93:3000"
+DEFAULT_PRINTER_TARGET = "USB"
 DEFAULT_PRINTER_PORT = 9100
 CHANNEL_ID = "kari_pos_bfc84ed2"
 HB_TOPIC = f"{CHANNEL_ID}_hb"
 JOBS_TOPIC = f"{CHANNEL_ID}_jobs"
 AGENT_NAME = "Store-PC"
 
-SERVER_URL = os.getenv("SERVER_URL", DEFAULT_SERVER_URL).rstrip("/")
-if SERVER_URL.startswith("http://") and ("run.app" in SERVER_URL or "ais-" in SERVER_URL):
-    SERVER_URL = SERVER_URL.replace("http://", "https://")
+# Flexible argument parsing:
+# python pos_agent.py [printer_target_or_url] [server_url_or_target]
+arg1 = sys.argv[1] if len(sys.argv) > 1 else os.getenv("PRINTER_TARGET", DEFAULT_PRINTER_TARGET)
+arg2 = sys.argv[2] if len(sys.argv) > 2 else os.getenv("SERVER_URL", DEFAULT_SERVER_URL)
 
-TARGET_ARG = sys.argv[1] if len(sys.argv) > 1 else os.getenv("PRINTER_TARGET", DEFAULT_PRINTER_TARGET)
+if arg1.startswith("http://") or arg1.startswith("https://"):
+    SERVER_URL = arg1.rstrip("/")
+    TARGET_ARG = arg2
+elif arg2.startswith("http://") or arg2.startswith("https://"):
+    TARGET_ARG = arg1
+    SERVER_URL = arg2.rstrip("/")
+else:
+    TARGET_ARG = arg1
+    SERVER_URL = arg2.rstrip("/")
+
+if not SERVER_URL:
+    SERVER_URL = DEFAULT_SERVER_URL
 
 # Windows Spooler Helper for USB Thermal Printers
 IS_WINDOWS = sys.platform.startswith("win")
