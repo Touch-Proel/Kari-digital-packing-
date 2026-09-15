@@ -21,6 +21,7 @@ interface HeaderProps {
   onAdjustFontSize: (delta: number) => void;
   khmerFont?: string;
   onChangeKhmerFont?: (font: string) => void;
+  totalBasketCount?: number;
 }
 
 export function Header({
@@ -42,7 +43,8 @@ export function Header({
   isStreamOpen,
   onAdjustFontSize,
   khmerFont = 'kantumruy',
-  onChangeKhmerFont
+  onChangeKhmerFont,
+  totalBasketCount
 }: HeaderProps) {
   return (
     <div className="bg-[#0B1325]/95 backdrop-blur-md border border-[#1C2B4B] p-2.5 rounded-2xl flex flex-col gap-2 shadow-[0_8px_25px_rgba(0,0,0,0.6)]">
@@ -142,10 +144,12 @@ export function Header({
               const time = raw.slice(11, 16);
               const dateDisp = day && month ? `${day}/${month}${time ? ` (${time})` : ''} ‧ ` : '';
               const idLabel = selectedLiveId.length > 10 ? `Live #${selectedLiveId.slice(-8)}` : selectedLiveId;
-              const countLabel = currentLiveSession.basket_count !== undefined ? ` (${currentLiveSession.basket_count} កន្ត្រក)` : '';
+              const displayCount = totalBasketCount !== undefined ? totalBasketCount : (currentLiveSession.basket_count ?? 0);
+              const countLabel = ` (${displayCount} កន្ត្រក)`;
               liveDisplayTitle = `🎥 ${dateDisp}${idLabel}${countLabel}`;
             } else if (selectedLiveId) {
-              liveDisplayTitle = `🎥 Live #${selectedLiveId.length > 10 ? selectedLiveId.slice(-8) : selectedLiveId}`;
+              const displayCount = totalBasketCount !== undefined ? totalBasketCount : 0;
+              liveDisplayTitle = `🎥 Live #${selectedLiveId.length > 10 ? selectedLiveId.slice(-8) : selectedLiveId} (${displayCount} កន្ត្រក)`;
             }
 
             return (

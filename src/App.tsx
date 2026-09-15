@@ -514,6 +514,7 @@ export default function App() {
           onAdjustFontSize={handleAdjustFontSize}
           khmerFont={khmerFont}
           onChangeKhmerFont={handleChangeKhmerFont}
+          totalBasketCount={invoices.filter(i => i.status !== 'Cancelled').length}
         />
 
         {/* 2. Live Comment Stream Drawer / Simulator */}
@@ -523,6 +524,7 @@ export default function App() {
           activeLiveId={selectedLiveId}
           onCommentProcessed={() => {
             fetchInvoices();
+            fetchLiveSessions();
             fetchStock();
           }}
           onShowToast={showToast}
