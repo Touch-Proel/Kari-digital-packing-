@@ -89,8 +89,8 @@ export function canvasToEscPos(
             // Luminance calculation
             const luminance = 0.299 * r + 0.587 * g + 0.114 * bl;
 
-            // If alpha is strong and pixel is dark -> dot = 1 (black)
-            if (a > 120 && luminance < 170) {
+            // Sharp thermal thresholding: only truly dark text pixels become black dots (prevents heavy black smudging)
+            if (a > 120 && luminance < 138) {
               byteVal |= (1 << (7 - bit));
             }
           }
