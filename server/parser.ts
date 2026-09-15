@@ -230,6 +230,8 @@ export function parseAndAllocateComment(
     return { status: 'IGNORED', message: 'Comment ទទេ' };
   }
 
+  const { phone, cleanText } = extractPhoneNumber(rawText);
+
   // Deduplication check: Prevent re-allocating items if comment was fetched multiple times
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
@@ -283,7 +285,6 @@ export function parseAndAllocateComment(
     picture_url: userPicUrl
   });
 
-  const { phone, cleanText } = extractPhoneNumber(rawText);
   const { zone, label } = detectDeliveryZone(rawText);
 
   // 2. Update or create customer profile

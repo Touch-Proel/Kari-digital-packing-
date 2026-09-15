@@ -215,49 +215,57 @@ app.get('/api/fb/avatar/:userId', async (req: Request, res: Response) => {
 
 // 7. Sync Live Comments from Facebook Graph API and Auto-Allocate into Baskets
 app.post('/api/fb/sync_comments', async (req: Request, res: Response) => {
-  const { post_id } = req.body;
-  const targetId = post_id || activeLiveId;
+  try {
+    const { post_id } = req.body;
+    const targetId = post_id || activeLiveId;
 
-  if (targetId && targetId !== activeLiveId) {
-    setActiveLiveId(targetId);
-  }
+    if (targetId && targetId !== activeLiveId) {
+      setActiveLiveId(targetId);
+    }
 
-  const result = await fetchFacebookComments(targetId);
-  if (result.error && (!result.data || result.data.length === 0)) {
-    return res.status(400).json({
+    const result = await fetchFacebookComments(targetId);
+    if (result.error && (!result.data || result.data.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+    const comments = result.data || [];
+    const processedResults: any[] = [];
+
+    for (const c of comments) {
+      const parsed = parseAndAllocateComment(
+        c.from?.id || '',
+        c.from?.name || 'អតិថិជន Facebook',
+        c.message || '',
+        targetId,
+        c.id,
+        c.from?.picture?.data?.url
+      );
+      processedResults.push({ comment: c, parsed });
+    }
+
+    bumpDataRevision();
+
+    const createdBaskets = invoices.filter(i => i.live_id === targetId && i.items.length > 0);
+    const totalAllocated = processedResults.filter(r => r.parsed?.status === 'SUCCESS').length;
+
+    res.json({
+      success: true,
+      target_live_id: targetId,
+      total_synced: comments.length,
+      total_orders: totalAllocated,
+      total_baskets: createdBaskets.length,
+      is_simulated: result.isSimulated || false,
+      results: processedResults
+    });
+  } catch (err: any) {
+    console.error('[Sync Comments Error]', err);
+    res.status(500).json({
       success: false,
-      error: result.error
+      error: err.message || 'កំហុសបណ្តាញក្នុងការទាញយកខមិន'
     });
   }
-  const comments = result.data || [];
-  const processedResults: any[] = [];
-
-  for (const c of comments) {
-    const parsed = parseAndAllocateComment(
-      c.from?.id || '',
-      c.from?.name || 'អតិថិជន Facebook',
-      c.message || '',
-      targetId,
-      c.id,
-      c.from?.picture?.data?.url
-    );
-    processedResults.push({ comment: c, parsed });
-  }
-
-  bumpDataRevision();
-
-  const createdBaskets = invoices.filter(i => i.live_id === targetId && i.items.length > 0);
-  const totalAllocated = processedResults.filter(r => r.parsed?.status === 'SUCCESS').length;
-
-  res.json({
-    success: true,
-    target_live_id: targetId,
-    total_synced: comments.length,
-    total_orders: totalAllocated,
-    total_baskets: createdBaskets.length,
-    is_simulated: result.isSimulated || false,
-    results: processedResults
-  });
 });
 
 // -------------------------------------------------------------
