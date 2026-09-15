@@ -83,7 +83,7 @@ def find_best_usb_printer():
     if not printers:
         return None
     # Look for common POS thermal printer keywords
-    keywords = ["pos", "xp", "80", "58", "receipt", "thermal", "zj", "xprinter", "epson", "citizen", "bixolon", "gprinter", "printer"]
+    keywords = ["cashier", "cash", "counter", "bill", "pos", "xp", "80", "58", "receipt", "thermal", "zj", "xprinter", "epson", "citizen", "bixolon", "gprinter", "printer"]
     for kw in keywords:
         for p in printers:
             if kw in p.lower():
