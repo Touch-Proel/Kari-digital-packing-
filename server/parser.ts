@@ -183,7 +183,8 @@ export function extractAddressShield(text: string): { address: string | null; cl
   if (!text) return { address: null, cleanText: text };
 
   // Address pattern, excluding order action keywords (captures ផ្សារ and ផ្សា)
-  const reAddr = /(?:ទីតាំង|ផ្ទះ\s*(?:លេខ|№)?|ផ្លូវ\s*(?:លេខ)?|ផ្លូវលំ|បន្ទប់\s*(?:លេខ)?|ផ្សា(?:រ)?|ភូមិ|ឃុំ|សង្កាត់|ខណ្ឌ|បុរី|st(?:reet|\.)?)\s*[:=]?\s*[\u1780-\u17FFA-Za-z0-9._\-\/]+(?:\s+[\u1780-\u17FFA-Za-z0-9._\-\/]+)*/gi;
+  // Ensures trailing tokens stop before action words (យក, ថែម, etc.) or unit words (ឈុត, អាវ, etc.)
+  const reAddr = /(?:ទីតាំង|ផ្ទះ\s*(?:លេខ|№)?|ផ្លូវ\s*(?:លេខ)?|ផ្លូវលំ|បន្ទប់\s*(?:លេខ)?|ផ្សា(?:រ)?|ភូមិ|ឃុំ|សង្កាត់|ខណ្ឌ|បុរី|st(?:reet|\.)?)\s*[:=]?\s*[\u1780-\u17FFA-Za-z0-9._\-\/]+(?:\s+(?!(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ|\d+\s*(?:ឈុត|ឆុត|អាវ|កញ្ចប់|គូ|គូរ|រូប|set|pcs)|[A-Za-z0-9]{1,5}\s*[*xX=:_\-\/]))[\u1780-\u17FFA-Za-z0-9._\-\/]+)*/gi;
   let foundAddr: string | null = null;
   const clean = text.replace(reAddr, (match) => {
     // Only shield if it does not contain explicit order action words or product codes like "121/1"
