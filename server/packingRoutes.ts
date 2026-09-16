@@ -2285,9 +2285,8 @@ router.get('/khqr/config', (_req: Request, res: Response) => {
     config: {
       bankName: settings.bank_name || 'ABA Bank',
       accountNumber: settings.account_number || '000474559',
-      khrAccountNumber: settings.khr_account_number || '003491232',
-      accountName: settings.account_name || 'TOCH PROEL',
-      merchantName: settings.merchant_name || 'TOCH PROEL',
+      accountName: settings.account_name || 'Proel Toch',
+      merchantName: settings.merchant_name || 'Kari Arnett',
       bakongAccountId: effectiveBakongId,
       merchantCity: settings.khqr_city || 'Phnom Penh',
       merchantType: (settings as any).khqr_merchant_type || 'merchant',
@@ -2305,7 +2304,6 @@ router.post('/khqr/config', (req: Request, res: Response) => {
   const body = req.body || {};
   if (body.bankName !== undefined) settings.bank_name = String(body.bankName).trim();
   if (body.accountNumber !== undefined) settings.account_number = String(body.accountNumber).trim();
-  if (body.khrAccountNumber !== undefined) settings.khr_account_number = String(body.khrAccountNumber).trim();
   if (body.accountName !== undefined) settings.account_name = String(body.accountName).trim();
   if (body.merchantName !== undefined) settings.merchant_name = String(body.merchantName).trim();
   if (body.bakongAccountId !== undefined) settings.bakong_id = String(body.bakongAccountId).trim();
@@ -2323,7 +2321,6 @@ router.post('/khqr/config', (req: Request, res: Response) => {
     config: {
       bankName: settings.bank_name,
       accountNumber: settings.account_number,
-      khrAccountNumber: settings.khr_account_number,
       accountName: settings.account_name,
       merchantName: settings.merchant_name,
       bakongAccountId: settings.bakong_id,
@@ -2335,78 +2332,6 @@ router.post('/khqr/config', (req: Request, res: Response) => {
       enabled: settings.khqr_enabled
     }
   });
-});
-
-// GET /api/backup/download - Export Full Database as JSON file
-router.get('/backup/download', (_req: Request, res: Response) => {
-  try {
-    const payload = {
-      backup_date: new Date().toISOString(),
-      activeLiveId,
-      settings,
-      products,
-      invoices,
-      rawComments,
-      customers,
-      packerLogs,
-      activeFacebookPage
-    };
-    const filename = `KariShop_Backup_${new Date().toISOString().slice(0, 10)}.json`;
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'application/json');
-    return res.send(JSON.stringify(payload, null, 2));
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/backup/restore - Restore Full Database from uploaded JSON
-router.post('/backup/restore', (req: Request, res: Response) => {
-  try {
-    const data = req.body;
-    if (!data || (!data.invoices && !data.products)) {
-      return res.status(400).json({ success: false, error: 'Invalid backup file structure' });
-    }
-
-    if (Array.isArray(data.invoices)) {
-      invoices.length = 0;
-      invoices.push(...data.invoices);
-    }
-    if (Array.isArray(data.products)) {
-      products.length = 0;
-      products.push(...data.products);
-    }
-    if (Array.isArray(data.customers)) {
-      customers.length = 0;
-      customers.push(...data.customers);
-    }
-    if (Array.isArray(data.rawComments)) {
-      rawComments.length = 0;
-      rawComments.push(...data.rawComments);
-    }
-    if (Array.isArray(data.packerLogs)) {
-      packerLogs.length = 0;
-      packerLogs.push(...data.packerLogs);
-    }
-    if (data.settings) {
-      Object.assign(settings, data.settings);
-    }
-    if (data.activeLiveId) {
-      setActiveLiveId(data.activeLiveId);
-    }
-
-    bumpDataRevision();
-    saveDatabaseToDisk();
-
-    return res.json({
-      success: true,
-      message: `បានទាញយកទិន្នន័យ (Restore) ជោគជ័យ! (${invoices.length} កន្ត្រក, ${products.length} មុខទំនិញ)`,
-      invoicesCount: invoices.length,
-      productsCount: products.length
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
 });
 
 export default router;

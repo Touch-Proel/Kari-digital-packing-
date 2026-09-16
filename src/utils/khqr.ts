@@ -4,10 +4,9 @@ import jsQR from 'jsqr';
 
 export interface KHQRConfig {
   bankName: string;
-  accountNumber: string; // USD account e.g. 000474559
-  khrAccountNumber?: string; // KHR account e.g. 003491232
-  accountName: string; // e.g. TOCH PROEL
-  merchantName: string; // e.g. TOCH PROEL
+  accountNumber: string;
+  accountName: string;
+  merchantName: string;
   bakongAccountId: string; // e.g. 'abaakhppxxx@abaa' or 'proel_toch@abaa'
   merchantCity: string;
   currency: 'USD' | 'KHR';
@@ -22,9 +21,8 @@ export interface KHQRConfig {
 export const DEFAULT_KHQR_CONFIG: KHQRConfig = {
   bankName: 'ABA Bank',
   accountNumber: '000474559',
-  khrAccountNumber: '003491232',
-  accountName: 'TOCH PROEL',
-  merchantName: 'TOCH PROEL',
+  accountName: 'Proel Toch',
+  merchantName: 'Kari Arnett',
   bakongAccountId: 'abaakhppxxx@abaa',
   merchantCity: 'Phnom Penh',
   currency: 'USD',
@@ -50,15 +48,6 @@ export function getKHQRConfig(): KHQRConfig {
       }
       if (parsed.bakongAccountId === '000474559@aba' || !parsed.bakongAccountId) {
         parsed.bakongAccountId = 'abaakhppxxx@abaa';
-      }
-      if (!parsed.khrAccountNumber) {
-        parsed.khrAccountNumber = '003491232';
-      }
-      if (!parsed.accountName || parsed.accountName === 'Proel Toch') {
-        parsed.accountName = 'TOCH PROEL';
-      }
-      if (!parsed.merchantName || parsed.merchantName === 'Kari Arnett') {
-        parsed.merchantName = 'TOCH PROEL';
       }
       return {
         ...DEFAULT_KHQR_CONFIG,
@@ -207,10 +196,7 @@ export function generateBakongKHQRString(options: GenerateKHQROptions): string {
     const gateway = (currentCfg.bakongAccountId && currentCfg.bakongAccountId.includes('@') && !currentCfg.bakongAccountId.startsWith('000'))
       ? currentCfg.bakongAccountId
       : 'abaakhppxxx@abaa';
-    const rawAccNumber = isKhr
-      ? (currentCfg.khrAccountNumber || currentCfg.accountNumber || '003491232')
-      : (currentCfg.accountNumber || '000474559');
-    const accNumber = rawAccNumber.replace(/\s+/g, '');
+    const accNumber = currentCfg.accountNumber || '000474559';
     const acqBank = currentCfg.acquiringBank || 'abaa';
     const sub00 = formatTag('00', gateway);
     const sub01 = formatTag('01', accNumber);
@@ -219,10 +205,7 @@ export function generateBakongKHQRString(options: GenerateKHQROptions): string {
   } else {
     // Tag 29: Individual Bakong ID (must end with @abaa, e.g. proel_toch@abaa)
     let bakongId = (currentCfg.bakongAccountId || '').trim();
-    if (!bakongId) {
-      const activeAcc = isKhr ? (currentCfg.khrAccountNumber || '003491232') : (currentCfg.accountNumber || '000474559');
-      bakongId = `${activeAcc.replace(/\s+/g, '')}@abaa`;
-    }
+    if (!bakongId) bakongId = `${currentCfg.accountNumber}@abaa`;
     if (!bakongId.includes('@')) bakongId += '@abaa';
     if (bakongId.endsWith('@aba')) bakongId += 'a'; // convert @aba to @abaa
     payload += formatTag('29', formatTag('00', bakongId));
@@ -243,8 +226,8 @@ export function generateBakongKHQRString(options: GenerateKHQROptions): string {
   payload += formatTag('58', 'KH');
 
   // 8. Tag 59: Merchant / Account Name (max 25 chars, clean ASCII)
-  const rawName = currentCfg.accountName || currentCfg.merchantName || 'TOCH PROEL';
-  const merchantDisplayName = rawName.replace(/[^\x20-\x7E]/g, '').trim().slice(0, 25) || 'TOCH PROEL';
+  const rawName = currentCfg.merchantName || currentCfg.accountName || 'Kari Arnett';
+  const merchantDisplayName = rawName.replace(/[^\x20-\x7E]/g, '').trim().slice(0, 25) || 'Kari Arnett';
   payload += formatTag('59', merchantDisplayName);
 
   // 9. Tag 60: Merchant City (max 15 chars, clean ASCII)
@@ -389,32 +372,18 @@ export async function decodeQRFromImageFile(file: File): Promise<{ qrString: str
             resolve({ qrString: null, error: 'Cannot create canvas context' });
             return;
           }
-
-          // Try multi-scale scan (original, max 1000px, max 600px)
-          const maxDim = Math.max(img.width, img.height);
-          const scales = [1.0];
-          if (maxDim > 1000) scales.push(1000 / maxDim);
-          if (maxDim > 600) scales.push(600 / maxDim);
-          if (maxDim > 1600) scales.unshift(1200 / maxDim);
-
-          for (const scale of scales) {
-            const w = Math.round(img.width * scale);
-            const h = Math.round(img.height * scale);
-            canvas.width = w;
-            canvas.height = h;
-            ctx.clearRect(0, 0, w, h);
-            ctx.drawImage(img, 0, 0, w, h);
-            const imageData = ctx.getImageData(0, 0, w, h);
-            const code = jsQR(imageData.data, w, h, {
-              inversionAttempts: 'attemptBoth'
-            });
-            if (code && code.data) {
-              resolve({ qrString: code.data });
-              return;
-            }
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, img.width, img.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'attemptBoth'
+          });
+          if (code && code.data) {
+            resolve({ qrString: code.data });
+          } else {
+            resolve({ qrString: null, error: 'រកមិនឃើញ QR កូដក្នុងរូបភាពនេះឡើយ សូមសាកល្បងរូបភាពដែលច្បាស់ជាងនេះ' });
           }
-
-          resolve({ qrString: null, error: 'រកមិនឃើញ QR កូដក្នុងរូបភាពនេះឡើយ សូមសាកល្បងថតឱ្យចំពីមុខ និងជិតបន្តិច' });
         } catch (err: any) {
           resolve({ qrString: null, error: err?.message || 'Error processing image' });
         }

@@ -58,19 +58,17 @@ export function convertKhmerDigitsToArabic(text: string): string {
 
 // 7-Digit Subscriber Numbers (Total 10 Digits with leading 0)
 // Smart: 096 | Cellcard: 076 | Metfone: 031, 071, 088, 097 | Seatel: 018
-// Note: Cambodian phone numbers can be immediately followed by Khmer text (e.g. 0968611745ត្រង់សំ...)
-// Use lookahead (?![0-9A-Za-z]) instead of \b so that Khmer characters following the phone number are handled.
-const RE_CAMBODIA_7_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:18|31|71|76|88|96|97)(?:[\s.\-()]*\d){7}(?![0-9A-Za-z])/i;
+const RE_CAMBODIA_7_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:18|31|71|76|88|96|97)(?:[\s.\-()]*\d){7}\b/i;
 
 // 6-Digit Subscriber Numbers (Total 9 Digits with leading 0)
 // Smart: 010, 015, 016, 069, 070, 081, 086, 087, 093, 098
 // Cellcard: 011, 012, 014, 017, 061, 077, 078, 085, 089, 092, 095, 099
 // Metfone: 060, 066, 067, 068, 090
 // Cootel: 038
-const RE_CAMBODIA_6_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:10|11|12|14|15|16|17|38|60|61|66|67|68|69|70|77|78|81|85|86|87|89|90|92|93|95|98|99)(?:[\s.\-()]*\d){6}(?![0-9A-Za-z])/i;
+const RE_CAMBODIA_6_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:10|11|12|14|15|16|17|38|60|61|66|67|68|69|70|77|78|81|85|86|87|89|90|92|93|95|98|99)(?:[\s.\-()]*\d){6}\b/i;
 
 // General Cambodian phone number fallback (9 or 10 digits starting with 0 or +855)
-const RE_CAMBODIA_GENERAL = /(?:\+?855[\s.\-()]*|0)[1-9]\d(?:[\s.\-()]*\d){6,7}(?![0-9A-Za-z])/i;
+const RE_CAMBODIA_GENERAL = /(?:\+?855[\s.\-()]*|0)[1-9]\d(?:[\s.\-()]*\d){6,7}\b/i;
 
 export function extractPhoneNumber(text: string): { phone: string | null; cleanText: string } {
   if (!text) return { phone: null, cleanText: text };
@@ -87,6 +85,9 @@ export function extractPhoneNumber(text: string): { phone: string | null; cleanT
     const matchedStr = match[0];
     const matchIndex = match.index ?? normalized.indexOf(matchedStr);
     const matchLength = matchedStr.length;
+
+    // Get original raw substring from `text` (retaining original Khmer/Arabic digits or separators)
+    const rawInOriginal = text.substring(matchIndex, matchIndex + matchLength);
 
     // Extract digits only
     let digits = matchedStr.replace(/\D/g, '');
@@ -130,24 +131,12 @@ export function extractCodeQtyPairs(text: string): { code: string; qty: number }
   const pairs: { code: string; qty: number }[] = [];
   const seenCodes = new Set<string>();
 
-  // Helper to test if a matched quantity token is followed by a weight unit (e.g. 70kg, 70 kilo, 70គីឡូ, 70g)
-  const isWeightUnit = (fullStr: string, matchEndIndex: number): boolean => {
-    const afterMatch = fullStr.slice(matchEndIndex);
-    return /^\s*(?:KG|KGS|KILO|KILOGRAM|គីឡូ|គីឡូក្រាម|គីឡូ|ក្រាម|G|GM)\b/i.test(afterMatch)
-        || /^\s*(?:គីឡូ|គីឡូក្រាម|គីឡូ|ក្រាម)/i.test(afterMatch);
-  };
-
   // Explicit connector: 30=2, 30*2, 30x2, 30:2, 30-2, 30+2, 118_1
-  // Exclude when followed by kg / kilo / គីឡូ (e.g. 132/70kg is weight, not quantity 70)
-  const reConnector = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})(?!\d)/g;
+  const reConnector = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})/g;
   let match: RegExpExecArray | null;
   while ((match = reConnector.exec(clean)) !== null) {
     const c = match[1].trim().replace(/^\./, '');
     const q = parseInt(match[2], 10) || 1;
-    const matchEnd = match.index + match[0].length;
-    if (isWeightUnit(clean, matchEnd)) {
-      continue;
-    }
     if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 5) {
       pairs.push({ code: c, qty: q });
       seenCodes.add(c);
@@ -155,14 +144,10 @@ export function extractCodeQtyPairs(text: string): { code: string; qty: number }
   }
 
   // Khmer Action Word attached or spaced after code: ១១៩យក១, 119យក2, 119 យក 1, 119យក
-  const reCodeAction = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(\d{1,2})?(?!\d)/g;
+  const reCodeAction = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(\d{1,2})?/g;
   while ((match = reCodeAction.exec(clean)) !== null) {
     const c = match[1].trim().replace(/^\./, '');
     const q = match[2] ? (parseInt(match[2], 10) || 1) : 1;
-    const matchEnd = match.index + match[0].length;
-    if (match[2] && isWeightUnit(clean, matchEnd)) {
-      continue;
-    }
     if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 5) {
       pairs.push({ code: c, qty: q });
       seenCodes.add(c);
@@ -170,14 +155,10 @@ export function extractCodeQtyPairs(text: string): { code: string; qty: number }
   }
 
   // Action word before code: យក 119 2 or យក 119 or កាត់ 30 2
-  const reActionBefore = /(?:ថែម|យក|កាត់|ដាក់|កក់|បូក)\s*(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})(?:\s+(\d{1,2}))?(?!\d)/g;
+  const reActionBefore = /(?:ថែម|យក|កាត់|ដាក់|កក់|បូក)\s*(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})(?:\s+(\d{1,2}))?/g;
   while ((match = reActionBefore.exec(clean)) !== null) {
     const c = match[1].trim().replace(/^\./, '');
     const q = match[2] ? (parseInt(match[2], 10) || 1) : 1;
-    const matchEnd = match.index + match[0].length;
-    if (match[2] && isWeightUnit(clean, matchEnd)) {
-      continue;
-    }
     if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 5) {
       pairs.push({ code: c, qty: q });
       seenCodes.add(c);
@@ -189,10 +170,6 @@ export function extractCodeQtyPairs(text: string): { code: string; qty: number }
   while ((match = reSpace.exec(clean)) !== null) {
     const c = match[1].trim().replace(/^\./, '');
     const q = parseInt(match[2], 10) || 1;
-    const matchEnd = match.index + match[0].length;
-    if (isWeightUnit(clean, matchEnd)) {
-      continue;
-    }
     // Don't mistake phone fragments as code
     if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && !/^\d{3,}$/.test(c)) {
       pairs.push({ code: c, qty: q });
@@ -200,8 +177,8 @@ export function extractCodeQtyPairs(text: string): { code: string; qty: number }
     }
   }
 
-  // Standalone code or code with variant/color or weight: e.g. "120", "119", "A12", "កូដ 120", "120 ស", "132/70kg", "132 70kg"
-  const reStandalone = /^\s*(?:កូដលេខ|លេខកូដ|កូដ|code|លេខ)?\s*([A-Za-z0-9]{1,5})(?:(?:[_\s]+([ក-អA-Za-z0-9_]+))|(?:[\/\s]*\d{1,3}\s*(?:KG|KGS|KILO|KILOGRAM|គីឡូ|គីឡូក្រាម|ក្រាម|G|GM)\b))?\s*$/i;
+  // Standalone code or code with variant/color: e.g. "120", "119", "A12", "កូដ 120", "120 ស"
+  const reStandalone = /^\s*(?:កូដលេខ|លេខកូដ|កូដ|code|លេខ)?\s*([A-Za-z0-9]{1,5})(?:[_\s]+([ក-អA-Za-z0-9_]+))?\s*$/i;
   const standaloneMatch = clean.match(reStandalone);
   if (standaloneMatch) {
     const c = standaloneMatch[1].trim();
@@ -360,17 +337,6 @@ export function parseAndAllocateComment(
   // Rule 1: Do NOT create empty baskets for customers who only ask questions or haven't ordered any product codes!
   if (isQuestion || pairs.length === 0) {
     if (inv) {
-      if (userPicUrl && !inv.picture_url) {
-        inv.picture_url = userPicUrl;
-      }
-      if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) {
-        inv.phone_number = phone;
-      }
-      if (zone !== 'UNKNOWN' && (!inv.address || inv.address.includes('មិនទាន់មាន'))) {
-        inv.location_zone = zone;
-        inv.location_label = label;
-        inv.address = label;
-      }
       if (!inv.comments) inv.comments = [];
       if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
       if (!inv.unmatched_comments) inv.unmatched_comments = [];

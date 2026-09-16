@@ -103,7 +103,6 @@ export interface AppSettings {
   merchant_name: string;
   account_name?: string;
   account_number?: string;
-  khr_account_number?: string;
   bank_name?: string;
   khqr_city?: string;
   khqr_enabled?: boolean;

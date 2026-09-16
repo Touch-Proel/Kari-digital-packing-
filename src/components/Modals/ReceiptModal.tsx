@@ -976,19 +976,14 @@ export function ReceiptModal({
 
                   {/* Account / Merchant Information */}
                   <div className="text-center text-xs text-black font-bold mt-1">
-                    <div className="text-[13px] text-slate-900 font-black">
-                      {khqrConfig.bankName}: <span className="text-blue-700">{khqrConfig.accountName || 'TOCH PROEL'}</span>
+                    <div className="font-mono text-sm font-black text-slate-900 tracking-wide">
+                      {khqrConfig.bankName}: <span className="text-blue-700">{khqrConfig.accountNumber}</span>
                     </div>
-                    <div className="flex items-center justify-center gap-2 mt-1 text-[11px] font-mono font-bold text-slate-800 flex-wrap">
-                      <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
-                        ៛ KHR: <strong>{khqrConfig.khrAccountNumber || '003 491 232'}</strong>
-                      </span>
-                      <span className="bg-blue-50 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
-                        $ USD: <strong>{khqrConfig.accountNumber || '000 474 559'}</strong>
-                      </span>
+                    <div className="text-[12px] text-slate-800">
+                      ឈ្មោះគណនី ៖ <span className="font-black text-black">{khqrConfig.accountName}</span>
                     </div>
-                    <div className="text-[11px] text-slate-600 mt-1">
-                      ឈ្មោះហាង ៖ <span className="font-black text-slate-900">{khqrConfig.merchantName || 'TOCH PROEL'}</span>
+                    <div className="text-[11px] text-slate-600">
+                      ឈ្មោះហាង ៖ <span className="font-black text-slate-900">{khqrConfig.merchantName}</span>
                     </div>
                     <div className="text-[13px] font-mono font-black text-emerald-700 mt-1 bg-emerald-50 border border-emerald-200 px-3 py-0.5 rounded-full inline-block">
                       {khqrCurrency === 'KHR' ? `${formattedRiel} ៛ (KHR)` : `$${exactTotal.toFixed(2)} USD`}
@@ -1221,14 +1216,11 @@ export function ReceiptModal({
                   alt="KHQR"
                   style={{ width: '240px', height: '240px', imageRendering: 'pixelated', margin: '6px auto' }}
                 />
-                <div style={{ fontSize: '24px', fontWeight: 900, marginTop: '8px' }}>
-                  {khqrConfig.bankName}: {khqrConfig.accountName || 'TOCH PROEL'}
-                </div>
-                <div style={{ fontSize: '20px', fontWeight: 900, fontFamily: 'monospace', marginTop: '2px' }}>
-                  ៛ KHR: {khqrConfig.khrAccountNumber || '003 491 232'} | $ USD: {khqrConfig.accountNumber || '000 474 559'}
+                <div style={{ fontSize: '24px', fontWeight: 900, fontFamily: 'monospace', marginTop: '8px' }}>
+                  {khqrConfig.bankName}: {khqrConfig.accountNumber} ({khqrConfig.accountName})
                 </div>
                 <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '4px' }}>
-                  ឈ្មោះហាង ៖ {khqrConfig.merchantName || 'TOCH PROEL'} ‧ ទឹកប្រាក់ ៖ {khqrCurrency === 'KHR' ? `${formattedRiel} ៛` : `$${exactTotal.toFixed(2)}`}
+                  ឈ្មោះហាង ៖ {khqrConfig.merchantName} ‧ ទឹកប្រាក់ ៖ {khqrCurrency === 'KHR' ? `${formattedRiel} ៛` : `$${exactTotal.toFixed(2)}`}
                 </div>
               </div>
             )}
@@ -1699,37 +1691,20 @@ export function ReceiptModal({
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">
-                      លេខគណនី $ USD
-                    </label>
-                    <input
-                      type="text"
-                      value={tempKhqrConfig.accountNumber}
-                      onChange={e => setTempKhqrConfig(prev => ({
-                        ...prev,
-                        accountNumber: e.target.value.trim()
-                      }))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-mono font-bold focus:border-cyan-400 outline-none"
-                      placeholder="000474559"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">
-                      លេខគណនី ៛ KHR
-                    </label>
-                    <input
-                      type="text"
-                      value={tempKhqrConfig.khrAccountNumber || ''}
-                      onChange={e => setTempKhqrConfig(prev => ({
-                        ...prev,
-                        khrAccountNumber: e.target.value.trim()
-                      }))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-mono font-bold focus:border-cyan-400 outline-none"
-                      placeholder="003491232"
-                    />
-                  </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-300 block mb-1">
+                    លេខគណនី ABA (Account Number)
+                  </label>
+                  <input
+                    type="text"
+                    value={tempKhqrConfig.accountNumber}
+                    onChange={e => setTempKhqrConfig(prev => ({
+                      ...prev,
+                      accountNumber: e.target.value
+                    }))}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-mono font-bold focus:border-cyan-400 outline-none"
+                    placeholder="000474559"
+                  />
                 </div>
 
                 <div>
@@ -1741,7 +1716,7 @@ export function ReceiptModal({
                     value={tempKhqrConfig.accountName}
                     onChange={e => setTempKhqrConfig(prev => ({ ...prev, accountName: e.target.value }))}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-bold focus:border-cyan-400 outline-none"
-                    placeholder="TOCH PROEL"
+                    placeholder="Proel Toch"
                   />
                 </div>
 
@@ -1754,7 +1729,7 @@ export function ReceiptModal({
                     value={tempKhqrConfig.merchantName}
                     onChange={e => setTempKhqrConfig(prev => ({ ...prev, merchantName: e.target.value }))}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-bold focus:border-cyan-400 outline-none"
-                    placeholder="TOCH PROEL"
+                    placeholder="Kari Arnett"
                   />
                 </div>
 
