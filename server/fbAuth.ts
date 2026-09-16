@@ -397,36 +397,43 @@ export async function sendFacebookReply(
 
   const cleanUid = String(userId || '').trim();
   const cleanCid = String(commentId || '').trim();
-  const targetCid = cleanCid.includes('_') ? cleanCid.split('_').pop() : cleanCid;
+  const targetCidSuffix = cleanCid.includes('_') ? cleanCid.split('_').pop() || '' : '';
+  const commentIdCandidates = Array.from(new Set([cleanCid, targetCidSuffix])).filter(
+    c => c && !c.startsWith('sys_') && !c.startsWith('manual_') && c.length >= 6
+  );
 
   console.log(`\n=======================================================`);
   console.log(`🚀 [VIP DISPATCH]: Sending VIP message...`);
-  console.log(`   ↳ User ID: ${cleanUid || 'None'} | Comment ID: ${targetCid || 'None'}`);
+  console.log(`   ↳ User ID: ${cleanUid || 'None'} | Comment IDs: ${commentIdCandidates.join(', ') || 'None'}`);
+
+  let lastApiError = '';
 
   // ---------------------------------------------------------------------
   // Layer 1 (PRIORITY FOR LIVE ORDERS): Private Reply by Comment ID
   // 💡 Private Replies API is exempt from the 24-hour messaging window rule!
   // ---------------------------------------------------------------------
-  if (targetCid && !targetCid.startsWith('sys_') && !targetCid.startsWith('manual_') && targetCid.length >= 6) {
+  for (const cid of commentIdCandidates) {
     try {
       const res = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipient: { comment_id: targetCid },
+          recipient: { comment_id: cid },
           message: { text: messageText }
         })
       });
       const data = await res.json();
       if (data.message_id || data.recipient_id) {
-        console.log(`🎉 [PRIVATE REPLY SUCCESS]: Sent VIP message via Comment ID (${targetCid}) - 24h Window Bypassed!`);
+        console.log(`🎉 [PRIVATE REPLY SUCCESS]: Sent VIP message via Comment ID (${cid}) - 24h Window Bypassed!`);
         console.log(`=======================================================\n`);
         return { success: true, method: 'PRIVATE_REPLY' };
-      } else {
-        console.log(`🔄 [PRIVATE REPLY NOTE]: Comment reply responded with: ${data.error?.message || 'Trying next method'}`);
+      } else if (data.error) {
+        lastApiError = data.error.message || `Error code ${data.error.code}`;
+        console.log(`🔄 [PRIVATE REPLY NOTE]: Comment (${cid}) reply responded with: ${lastApiError}`);
       }
     } catch (e: any) {
-      console.warn(`[PRIVATE REPLY NOTE]: ${e?.message}`);
+      lastApiError = e?.message || 'Network error';
+      console.warn(`[PRIVATE REPLY NOTE]: ${lastApiError}`);
     }
   }
 
@@ -434,7 +441,7 @@ export async function sendFacebookReply(
   // Layer 2: Send API via User ID with Message Tag (POST_PURCHASE_UPDATE)
   // 💡 Using POST_PURCHASE_UPDATE tag allows sending order updates outside 24h
   // ---------------------------------------------------------------------
-  if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None', ''].includes(cleanUid)) {
+  if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None', '', 'null', 'undefined'].includes(cleanUid)) {
     // Try with POST_PURCHASE_UPDATE tag first
     try {
       const resTagged = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
@@ -452,9 +459,11 @@ export async function sendFacebookReply(
         console.log(`📩 [SEND API TAGGED SUCCESS]: Sent VIP invoice to User ID (${cleanUid}) via POST_PURCHASE_UPDATE`);
         console.log(`=======================================================\n`);
         return { success: true, method: 'SEND_API' };
+      } else if (dataTagged.error) {
+        lastApiError = dataTagged.error.message || `Error code ${dataTagged.error.code}`;
       }
-    } catch (tagErr) {
-      // Ignore tag error and try standard response
+    } catch (tagErr: any) {
+      lastApiError = tagErr?.message || 'Tag API error';
     }
 
     // Try standard RESPONSE
@@ -473,27 +482,31 @@ export async function sendFacebookReply(
         console.log(`📩 [SEND API SUCCESS]: Sent VIP message to User ID (${cleanUid})`);
         console.log(`=======================================================\n`);
         return { success: true, method: 'SEND_API' };
+      } else if (data.error) {
+        lastApiError = data.error.message || `Error code ${data.error.code}`;
       }
     } catch (e: any) {
-      // Fall through to public comment
+      lastApiError = e?.message || 'Send API error';
     }
   }
 
   // ---------------------------------------------------------------------
   // Layer 3: Fallback to Public Comment Reply if Private Reply was blocked
   // ---------------------------------------------------------------------
-  if (targetCid && !targetCid.startsWith('sys_') && !targetCid.startsWith('manual_') && targetCid.length >= 6) {
+  for (const cid of commentIdCandidates) {
     try {
-      const publicRes = await fetch(`https://graph.facebook.com/v21.0/${targetCid}/comments?access_token=${activeToken}`, {
+      const publicRes = await fetch(`https://graph.facebook.com/v21.0/${cid}/comments?access_token=${activeToken}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: messageText })
       });
       const pubData = await publicRes.json();
       if (pubData.id) {
-        console.log(`💬 [PUBLIC COMMENT SUCCESS]: Posted VIP reply on Comment ID (${targetCid})`);
+        console.log(`💬 [PUBLIC COMMENT SUCCESS]: Posted VIP reply on Comment ID (${cid})`);
         console.log(`=======================================================\n`);
         return { success: true, method: 'PUBLIC_COMMENT' };
+      } else if (pubData.error) {
+        lastApiError = pubData.error.message || `Error code ${pubData.error.code}`;
       }
     } catch (pubErr: any) {
       console.warn(`[PUBLIC COMMENT ERROR]:`, pubErr);
@@ -502,9 +515,13 @@ export async function sendFacebookReply(
 
   const isRealToken = activeToken && !activeToken.startsWith('simulated_') && activeToken.length > 20;
   if (isRealToken) {
-    console.log(`🚨 [DISPATCH RESULT]: All delivery attempts failed with real token.`);
+    console.log(`ℹ️ [DISPATCH RESULT]: Direct automated delivery unavailable for this specific recipient (${lastApiError || 'No active 24h thread'}). Text copied to clipboard for 1-click manual send.`);
     console.log(`=======================================================\n`);
-    return { success: false, error: 'Facebook Meta API បដិសេធ (អាចមកពីហួស 7 ថ្ងៃ ឬអត់មាន Chat ID) ➔ សូមចុចឆាតផ្ទាល់' };
+    const reasonDetail = lastApiError ? ` (${lastApiError})` : '';
+    return {
+      success: false,
+      error: `Facebook API មិនទាន់អាចផ្ញើសារស្វ័យប្រវត្តិចូល Inbox បានទេ${reasonDetail} (ដោយសារច្បាប់ Facebook 24h Window ឬខ្វះ Chat ID) ➔ អត្ថបទត្រូវបាន Copy រួចរាល់ សូមចុច "បើក Chat" ដើម្បី Paste ផ្ញើជូនភ្ញៀវផ្ទាល់!`
+    };
   }
 
   console.log(`🚨 [DISPATCH RESULT]: Simulated test message delivered.`);

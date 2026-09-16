@@ -602,12 +602,12 @@ export function BasketCard({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
             {/* Basket Number */}
-            <span className="text-xl sm:text-2xl font-black font-mono text-cyan-400 tracking-tight flex-shrink-0">
+            <span className="text-xl sm:text-2xl font-black font-mono text-cyan-400 tracking-tight flex-shrink-0 bg-cyan-950/50 border border-cyan-500/40 px-2 py-0.5 rounded-xl shadow-inner">
               #{invoice.basket_no || invoice.invoice_id}
             </span>
 
             {/* Customer Avatar Circle */}
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-cyan-400 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-md relative">
+            <div className="w-10 h-10 rounded-full border-2 border-cyan-400/80 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-lg relative ring-2 ring-cyan-500/20">
               {invoice.picture_url || invoice.facebook_user_id ? (
                 <img
                   src={
@@ -623,19 +623,19 @@ export function BasketCard({
                   className="w-full h-full object-cover relative z-10"
                 />
               ) : null}
-              <span className="absolute inset-0 flex items-center justify-center text-xs sm:text-sm font-black text-cyan-300 pointer-events-none select-none z-0">
+              <span className="absolute inset-0 flex items-center justify-center text-sm font-black text-cyan-300 pointer-events-none select-none z-0">
                 {invoice.facebook_name ? invoice.facebook_name.trim().charAt(0).toUpperCase() : '👤'}
               </span>
             </div>
 
             {/* Customer Name & Live Timestamp */}
             <div className="flex flex-col min-w-0">
-              <span className="text-white font-bold text-sm sm:text-base leading-tight truncate">
+              <span className="text-white font-black text-sm sm:text-base leading-tight truncate drop-shadow-sm">
                 {invoice.facebook_name}
               </span>
-              <span className="text-[11px] text-amber-400 font-medium flex items-center gap-1 mt-0.5 whitespace-nowrap">
+              <span className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-0.5 whitespace-nowrap">
                 <span>📹</span>
-                <span>វត្ត Live ៖ {formatLiveDate(invoice.created_at)}</span>
+                <span>Live ៖ {formatLiveDate(invoice.created_at)}</span>
               </span>
             </div>
           </div>
@@ -643,22 +643,22 @@ export function BasketCard({
           {/* Right: Status Pill & Collapse Indicator */}
           <div className="flex items-center gap-2 flex-shrink-0">
             {isPaid ? (
-              <span className="bg-[#042416] border border-emerald-500 text-emerald-400 text-xs font-black px-3 py-1 rounded-lg uppercase tracking-wider shadow-sm">
+              <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)]">
                 PAID
               </span>
             ) : isStaged ? (
-              <span className="bg-[#241704] border border-amber-500 text-amber-400 text-xs font-black px-3 py-1 rounded-lg uppercase tracking-wider shadow-sm">
+              <span className="bg-amber-950/90 border border-amber-400 text-amber-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(245,158,11,0.3)]">
                 STAGED
               </span>
             ) : (
-              <span className="bg-[#261703] border border-amber-600/80 text-amber-400 text-xs font-black px-3 py-1 rounded-lg uppercase tracking-wider shadow-sm">
+              <span className="bg-[#261703] border border-amber-500/90 text-amber-400 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_10px_rgba(245,158,11,0.2)]">
                 UNPAID
               </span>
             )}
 
             <button
               type="button"
-              className="text-slate-400 hover:text-white text-xs transition-colors p-0.5"
+              className="text-slate-400 hover:text-white text-xs transition-colors p-1 rounded-lg bg-slate-800/60"
               title={isOpen ? 'បង្រួម' : 'ពន្លាត'}
             >
               {isOpen ? '▲' : '▼'}
@@ -667,31 +667,33 @@ export function BasketCard({
         </div>
 
         {/* Sub Header Row: Location Zone buttons (Left) + Total Price (Right) */}
-        <div className="flex items-center justify-between gap-2 pt-0.5">
-          {/* Location Zone Buttons */}
+        <div className="flex items-center justify-between gap-2 pt-1">
+          {/* Location Zone Segmented Control */}
           <div
-            className="flex items-center gap-1 bg-[#040914] p-1 rounded-xl border border-slate-800"
+            className="flex items-center bg-[#040914] p-0.5 rounded-xl border border-slate-800/90 shadow-inner"
             onClick={e => e.stopPropagation()}
           >
             <button
               onClick={e => handleSetZone('PP', e)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                 invoice.location_zone === 'PP'
-                  ? 'bg-emerald-900/80 border border-emerald-500/60 text-white shadow-sm'
+                  ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              🏙️ ភ្នំពេញ
+              <span>🏙️</span>
+              <span>ភ្នំពេញ</span>
             </button>
             <button
               onClick={e => handleSetZone('PROVINCE', e)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                 invoice.location_zone === 'PROVINCE'
-                  ? 'bg-amber-900/80 border border-amber-500/60 text-white shadow-sm'
+                  ? 'bg-amber-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              🏕️ ខេត្ត
+              <span>🏕️</span>
+              <span>ខេត្ត</span>
             </button>
           </div>
 
@@ -701,17 +703,17 @@ export function BasketCard({
               <button
                 type="button"
                 onClick={() => onOpenKHQRModal(invoice)}
-                className="bg-[#E11925] hover:bg-[#c91420] text-white px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1 shadow-[0_0_12px_rgba(225,25,37,0.45)] active:scale-95 transition-all cursor-pointer"
-                title="ស្កេន Bakong KHQR (ABA: 000474559)"
+                className="bg-[#E11925] hover:bg-[#c91420] text-white px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1 shadow-[0_0_14px_rgba(225,25,37,0.5)] active:scale-95 transition-all cursor-pointer border border-red-400/40"
+                title="ស្កេន Bakong KHQR"
               >
                 <span className="bg-white text-[#E11925] text-[10px] font-black px-1 py-0.5 rounded shadow-sm">
                   KHQR
                 </span>
-                <span>ស្កេន</span>
+                <span>ស្កែន</span>
               </button>
             )}
-            <div className="bg-[#031526] border-[1.5px] border-cyan-400 text-cyan-300 px-3 py-1 rounded-xl font-mono font-black text-sm sm:text-base shadow-[0_0_12px_rgba(6,182,212,0.3)]">
-              ${invoice.total_amount.toFixed(2)}
+            <div className="bg-[#031526] border-2 border-cyan-400 text-cyan-300 px-3 py-1 rounded-xl font-mono font-black text-sm sm:text-base shadow-[0_0_14px_rgba(6,182,212,0.35)] flex items-center gap-1">
+              <span>${invoice.total_amount.toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -825,6 +827,7 @@ export function BasketCard({
             {/* VIP Messenger notification status */}
             {invoice.msg_status === 'SENT' ? (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onOpenVipModal) {
@@ -834,14 +837,15 @@ export function BasketCard({
                   }
                 }}
                 title="សារ VIP បានផ្ញើចូល Messenger ជោគជ័យ (ចុចដើម្បីមើល ឬផ្ញើឡើងវិញ)"
-                className="text-xs font-black px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-emerald-950/90 border-emerald-500 text-emerald-300 hover:bg-emerald-900/80"
+                className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-emerald-950/90 border-emerald-500/80 text-emerald-300 hover:bg-emerald-900/80"
               >
-                <span className="text-emerald-400">✅</span>
+                <span className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] text-emerald-400">✓</span>
                 <span>ឆាតជោគជ័យ</span>
               </button>
             ) : invoice.msg_status === 'FAILED' ? (
               <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (onOpenVipModal) {
@@ -851,15 +855,16 @@ export function BasketCard({
                     }
                   }}
                   title="ផ្ញើមិនបានជោគជ័យ (ចុចដើម្បីមើល ឬផ្ញើឡើងវិញ)"
-                  className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 border transition-all shadow-sm active:scale-95 cursor-pointer bg-rose-950/90 border-rose-500 text-rose-300 hover:bg-rose-900/80"
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 border transition-all shadow-sm active:scale-95 cursor-pointer bg-rose-950/90 border-rose-500/80 text-rose-300 hover:bg-rose-900/80"
                 >
-                  <span className="text-rose-400">❌</span>
+                  <span className="text-rose-400 text-xs">✕</span>
                   <span>ផ្ញើបរាជ័យ</span>
                 </button>
                 <button
+                  type="button"
                   onClick={openFacebookDirectChat}
                   title="ចុចចូលទៅកាន់ Facebook Messenger / Page Inbox ផ្ទាល់"
-                  className="text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-md active:scale-95 cursor-pointer"
+                  className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-md active:scale-95 cursor-pointer"
                 >
                   <span>💬</span>
                   <span>ឆាតផ្ទាល់</span>
@@ -867,6 +872,7 @@ export function BasketCard({
               </div>
             ) : (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onOpenVipModal) {
@@ -876,7 +882,7 @@ export function BasketCard({
                   }
                 }}
                 title="ចុចដើម្បីពិនិត្យ ឬផ្ញើសារ VIP"
-                className="text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-[#081B34] hover:bg-[#0D274C] border-cyan-500/50 text-cyan-200"
+                className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-[#0A1832] hover:bg-[#0E234A] border-purple-500/40 hover:border-purple-400 text-purple-200"
               >
                 <span>✉️</span>
                 <span>ឆាតប្រាប់ VIP</span>
@@ -884,14 +890,35 @@ export function BasketCard({
             )}
           </div>
 
-          {/* Progress Row matching Capture.PNG */}
-          <div className="flex items-center justify-between text-xs text-slate-300 font-bold px-1 pt-0.5">
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">រៀបធ្លាក់ ៖</span>
-              <span className="font-mono text-white font-black">{packedCount} / {totalCount} មុខ</span>
+          {/* Progress Row & Sleek Progress Bar */}
+          <div className="flex flex-col gap-1.5 px-1 pt-0.5">
+            <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-400">រៀបធ្លាក់ ៖</span>
+                <span className="font-mono text-white font-black bg-slate-900 border border-slate-700/80 px-2 py-0.5 rounded-lg">
+                  {packedCount} / {totalCount} មុខ
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className={`font-mono font-black text-xs px-2 py-0.5 rounded-lg ${
+                  packPercent === 100
+                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/60'
+                    : 'bg-cyan-950 text-cyan-300 border border-cyan-500/60'
+                }`}>
+                  {packPercent}%
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-cyan-400 font-black">{packPercent}%</span>
+            {/* Visual Progress Bar Track */}
+            <div className="w-full h-1.5 bg-slate-900/90 rounded-full overflow-hidden border border-slate-800/80">
+              <div
+                className={`h-full transition-all duration-300 rounded-full ${
+                  packPercent === 100
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                    : 'bg-gradient-to-r from-cyan-500 to-blue-500 shadow-[0_0_8px_rgba(6,182,212,0.4)]'
+                }`}
+                style={{ width: `${packPercent}%` }}
+              />
             </div>
           </div>
 
@@ -919,15 +946,17 @@ export function BasketCard({
                       handleLockInvoice();
                       onToggleItemCheck(invoice.invoice_id, item.product_code);
                     }}
-                    className={`p-2.5 sm:p-3 rounded-2xl border flex items-center gap-3 transition-all cursor-pointer select-none relative ${
+                    className={`p-3 rounded-2xl border-2 flex items-center gap-3 transition-all cursor-pointer select-none relative ${
                       isChecked
-                        ? 'bg-[#051720]/90 border-emerald-500/70 shadow-[0_0_14px_rgba(16,185,129,0.18)]'
-                        : 'bg-[#060E1E]/90 border-cyan-900/60 hover:border-cyan-500/50'
+                        ? 'bg-[#041A14]/95 border-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.25)] ring-1 ring-emerald-500/30'
+                        : 'bg-[#060E1E]/95 border-slate-800 hover:border-cyan-500/60 shadow-md'
                     }`}
                   >
                     {/* LEFT THUMBNAIL: Exactly 80x80 px */}
                     <div
-                      className="w-[80px] h-[80px] min-w-[80px] min-h-[80px] max-w-[80px] max-h-[80px] rounded-xl overflow-hidden bg-slate-950 border border-slate-700/80 flex-shrink-0 relative group flex items-center justify-center cursor-pointer shadow-md"
+                      className={`w-[80px] h-[80px] min-w-[80px] min-h-[80px] max-w-[80px] max-h-[80px] rounded-2xl overflow-hidden bg-slate-950 border-2 flex-shrink-0 relative group flex items-center justify-center cursor-pointer shadow-md transition-all ${
+                        isChecked ? 'border-emerald-500/60' : 'border-slate-700/80 group-hover:border-cyan-400'
+                      }`}
                       onClick={e => {
                         e.stopPropagation();
                         onOpenZoomModal(
@@ -948,8 +977,8 @@ export function BasketCard({
                         />
                       ) : (
                         <div className="flex flex-col items-center justify-center text-slate-500">
-                          <span className="text-base">📷</span>
-                          <span className="text-[10px] font-bold mt-0.5 text-cyan-400">+រូប</span>
+                          <span className="text-xl">📷</span>
+                          <span className="text-[10px] font-black mt-0.5 text-cyan-400 bg-cyan-950/80 px-1.5 py-0.2 rounded border border-cyan-500/40">+រូប</span>
                         </div>
                       )}
                     </div>
@@ -958,9 +987,13 @@ export function BasketCard({
                     <div className="flex-1 overflow-hidden flex flex-col justify-center min-w-0">
                       {/* Row 1: [ Code ] and Name */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="bg-[#0C1E40] border border-blue-500/70 text-blue-300 px-2 py-0.5 rounded-md text-xs sm:text-sm font-bold tracking-wider shadow-sm flex items-center gap-1">
-                          <span className="text-blue-400 font-semibold text-xs">កូដ</span>
-                          <span className="font-mono font-black">[{item.product_code}]</span>
+                        <span className={`border px-2.5 py-1 rounded-xl text-xs sm:text-sm font-bold tracking-wider shadow-sm flex items-center gap-1 ${
+                          isChecked
+                            ? 'bg-emerald-950/90 border-emerald-500/70 text-emerald-300'
+                            : 'bg-[#0B1E3D] border-blue-400/80 text-blue-200'
+                        }`}>
+                          <span className="text-[11px] font-bold opacity-80">កូដ</span>
+                          <span className="font-mono font-black text-sm text-cyan-300">[{item.product_code}]</span>
                         </span>
                         {(() => {
                           const custom = (item.product_name || '')
@@ -971,47 +1004,68 @@ export function BasketCard({
                             .replace(/\s*ទំនិញ$/i, '')
                             .trim();
                           return custom && custom !== 'ទំនិញ' ? (
-                            <span className="text-white font-bold text-sm sm:text-base truncate">
+                            <span className={`font-bold text-xs sm:text-sm truncate ${isChecked ? 'text-slate-300 line-through' : 'text-white'}`}>
                               {custom}
                             </span>
                           ) : null;
                         })()}
                       </div>
 
-                      {/* Row 2: Price · Qty */}
-                      <div className="text-amber-400 font-mono font-black text-sm sm:text-base mt-1 tracking-wide">
-                        ${item.price.toFixed(2)} · ចំនួន {item.quantity}
+                      {/* Row 2: Price & High-Visibility Quantity Pill */}
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className="text-amber-400 font-mono font-black text-sm sm:text-base tracking-wide drop-shadow-sm">
+                          ${item.price.toFixed(2)}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-lg text-xs font-black font-mono flex items-center gap-1 border ${
+                          isChecked
+                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50'
+                            : 'bg-amber-950/90 text-amber-300 border-amber-500/70 shadow-sm'
+                        }`}>
+                          <span>ចំនួន ៖</span>
+                          <span className="text-sm font-black">{item.quantity}</span>
+                        </span>
                       </div>
 
                       {/* Row 3: Note */}
                       {noteText && (
-                        <div className="text-amber-300/90 text-xs font-medium mt-1 truncate">
+                        <div className="text-amber-300/90 text-xs font-medium mt-1 truncate bg-amber-950/30 px-2 py-0.5 rounded-lg border border-amber-600/30">
                           ↳ Note: "{noteText}"
                         </div>
                       )}
                     </div>
 
-                    {/* RIGHT COLUMN: Square Checkbox (Top) + Qty Edit & Delete (Bottom) */}
+                    {/* RIGHT COLUMN: Tactile Picking Checkbox Button (Top) + Qty Edit & Delete (Bottom) */}
                     <div
-                      className="flex flex-col items-end justify-between self-stretch gap-1.5 flex-shrink-0"
+                      className="flex flex-col items-end justify-between self-stretch gap-2 flex-shrink-0"
                       onClick={e => e.stopPropagation()}
                     >
-                      {/* Big Squircle Checkbox Box */}
-                      <div
+                      {/* Big Tactile Picking Button */}
+                      <button
+                        type="button"
                         onClick={() => {
                           if (!checkLockGuard()) return;
                           handleLockInvoice();
                           onToggleItemCheck(invoice.invoice_id, item.product_code);
                         }}
-                        className={`w-12 h-12 rounded-2xl border-2 flex items-center justify-center text-xl font-black transition-all cursor-pointer ${
+                        className={`w-14 h-12 rounded-2xl border-2 flex flex-col items-center justify-center transition-all cursor-pointer shadow-md active:scale-95 ${
                           isChecked
-                            ? 'bg-emerald-950/80 border-emerald-400 text-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.45)]'
-                            : 'bg-[#061226]/90 border-slate-700/80 text-transparent hover:border-cyan-400'
+                            ? 'bg-emerald-500 border-emerald-300 text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.6)] font-black'
+                            : 'bg-[#09152B] border-slate-600/90 hover:border-cyan-400 text-slate-300 hover:text-cyan-300'
                         }`}
-                        title={isChecked ? 'បានច្រកហើយ' : 'ចុចដើម្បីសម្គាល់ថាបានច្រក'}
+                        title={isChecked ? 'បានច្រកហើយ (ចុចដើម្បីដោះ)' : 'ចុចដើម្បីសម្គាល់ថាបានច្រក'}
                       >
-                        ✓
-                      </div>
+                        {isChecked ? (
+                          <div className="flex flex-col items-center leading-tight">
+                            <span className="text-lg leading-none font-black">✓</span>
+                            <span className="text-[9px] font-black uppercase tracking-tight">រួច</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center leading-tight">
+                            <span className="text-sm opacity-60 leading-none">○</span>
+                            <span className="text-[10px] font-black text-cyan-300 tracking-tight mt-0.5">រើស</span>
+                          </div>
+                        )}
+                      </button>
 
                       {/* Sub-actions Row: Qty Pill with Edit + Delete Button */}
                       <div className="flex items-center gap-1.5">
@@ -1283,165 +1337,275 @@ export function BasketCard({
           {/* BOTTOM ACTION BUTTONS ROW */}
           {currentMasterStage === 1 ? (
             isPaid ? (
-              <div className="flex flex-col gap-2 mt-1" onClick={e => e.stopPropagation()}>
+              <div className="flex flex-col gap-2.5 mt-1" onClick={e => e.stopPropagation()}>
                 <button
+                  type="button"
                   onClick={e => {
                     e.stopPropagation();
                     if (!checkLockGuard()) return;
                     onOpenQCModal(invoice);
                   }}
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_18px_rgba(16,185,129,0.4)] active:scale-98 transition-all"
+                  className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(16,185,129,0.4)] active:scale-[0.98] transition-all cursor-pointer border border-emerald-300/60"
                 >
-                  🚀 ភ្ញៀវបង់រួចហើយ ➔ ផ្ទៀងរូប & បិទស្កុតចេញដឹកភ្លាម
+                  <span className="text-base">🚀</span>
+                  <span>ភ្ញៀវបង់រួចហើយ ➔ ផ្ទៀងរូប & បិទស្កុតចេញដឹកភ្លាម</span>
                 </button>
                 <div className="grid grid-cols-2 gap-2.5">
+                  {/* VIP Button */}
                   {invoice.msg_status === 'SENT' ? (
                     <button
-                      onClick={handleNotifyVIP}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onOpenVipModal) onOpenVipModal(invoice);
+                        else handleNotifyVIP(e);
+                      }}
                       disabled={isSendingVip}
-                      className="py-3 px-2 rounded-2xl bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                      className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-emerald-800/90 via-teal-800/90 to-emerald-900/90 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-emerald-500/50 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
                     >
-                      <span>{isSendingVip ? '⏳' : '✅'}</span>
-                      <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ឆាតជោគជ័យ'}</span>
+                      <span className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-sm flex-shrink-0">
+                        {isSendingVip ? '⏳' : '✅'}
+                      </span>
+                      <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                        <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតជោគជ័យ</span>
+                        <span className="text-[10px] text-emerald-300/90 font-medium">ចុចមើល/ផ្ញើឡើងវិញ</span>
+                      </div>
                     </button>
                   ) : invoice.msg_status === 'FAILED' ? (
                     <button
+                      type="button"
                       onClick={openFacebookDirectChat}
-                      className="py-3 px-2 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-cyan-600 hover:from-rose-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all cursor-pointer"
+                      className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-800/90 via-rose-700/90 to-cyan-800/90 hover:from-rose-700 hover:to-cyan-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-rose-500/50 active:scale-[0.98] transition-all cursor-pointer"
                     >
-                      <span>💬</span>
-                      <span className="truncate">បរាជ័យ ➔ ឆាតផ្ទាល់</span>
+                      <span className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-sm flex-shrink-0">
+                        💬
+                      </span>
+                      <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                        <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតផ្ទាល់</span>
+                        <span className="text-[10px] text-rose-200/90 font-medium">បើក Messenger</span>
+                      </div>
                     </button>
                   ) : (
                     <button
-                      onClick={handleNotifyVIP}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onOpenVipModal) onOpenVipModal(invoice);
+                        else handleNotifyVIP(e);
+                      }}
                       disabled={isSendingVip}
-                      className="py-3 px-2 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                      className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-[#6D28D9] via-[#7C3AED] to-[#9333EA] hover:from-[#7C3AED] hover:via-[#8B5CF6] hover:to-[#A855F7] text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-[0_4px_16px_rgba(124,58,237,0.35)] border border-purple-400/50 hover:border-purple-300/80 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
                     >
-                      <span>{isSendingVip ? '⏳' : '✉️'}</span>
-                      <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
+                      <span className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 backdrop-blur-sm flex items-center justify-center text-sm flex-shrink-0 shadow-inner">
+                        {isSendingVip ? '⏳' : '✉️'}
+                      </span>
+                      <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                        <span className="font-black text-white text-xs sm:text-[13px] truncate">
+                          {isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}
+                        </span>
+                        <span className="text-[10px] text-purple-200/90 font-medium">Messenger · ABA</span>
+                      </div>
                     </button>
                   )}
+
+                  {/* Print Button */}
                   <button
+                    type="button"
                     onClick={() => {
                       if (!checkLockGuard()) return;
                       onOpenReceiptModal(invoice);
                     }}
-                    className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
+                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-[#1D4ED8] via-[#2563EB] to-[#0284C7] hover:from-[#2563EB] hover:via-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-[0_4px_16px_rgba(37,99,235,0.35)] border border-sky-400/50 hover:border-sky-300/80 active:scale-[0.98] transition-all cursor-pointer"
                   >
-                    <span>🖨️</span>
-                    <span>ព្រីនបិទលើថង់</span>
+                    <span className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 backdrop-blur-sm flex items-center justify-center text-sm flex-shrink-0 shadow-inner">
+                      🖨️
+                    </span>
+                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ព្រីនបិទលើថង់</span>
+                      <span className="text-[10px] text-sky-200/90 font-medium">Thermal (58/80mm)</span>
+                    </div>
                   </button>
                 </div>
               </div>
             ) : (
-              /* Three buttons: ✉️ VIP, 🖨️ ព្រីនបិទលើថង់, and 💰 KHQR ABA */
-              <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2 mt-1" onClick={e => e.stopPropagation()}>
+              /* Two buttons in Unpaid: VIP Invoice & Thermal Print */
+              <div className="grid grid-cols-2 gap-2.5 mt-1" onClick={e => e.stopPropagation()}>
                 {invoice.msg_status === 'SENT' ? (
                   <button
-                    onClick={handleNotifyVIP}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenVipModal) onOpenVipModal(invoice);
+                      else handleNotifyVIP(e);
+                    }}
                     disabled={isSendingVip}
-                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-emerald-800/90 via-teal-800/90 to-emerald-900/90 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-emerald-500/50 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
                   >
-                    <span>{isSendingVip ? '⏳' : '✅'}</span>
-                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ឆាតជោគជ័យ'}</span>
+                    <span className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-sm flex-shrink-0">
+                      {isSendingVip ? '⏳' : '✅'}
+                    </span>
+                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតជោគជ័យ</span>
+                      <span className="text-[10px] text-emerald-300/90 font-medium">ចុចមើល/ផ្ញើឡើងវិញ</span>
+                    </div>
                   </button>
                 ) : invoice.msg_status === 'FAILED' ? (
                   <button
+                    type="button"
                     onClick={openFacebookDirectChat}
-                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-cyan-600 hover:from-rose-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all cursor-pointer"
+                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-800/90 via-rose-700/90 to-cyan-800/90 hover:from-rose-700 hover:to-cyan-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-rose-500/50 active:scale-[0.98] transition-all cursor-pointer"
                   >
-                    <span>💬</span>
-                    <span className="truncate">បរាជ័យ ➔ ឆាតផ្ទាល់</span>
+                    <span className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-sm flex-shrink-0">
+                      💬
+                    </span>
+                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតផ្ទាល់</span>
+                      <span className="text-[10px] text-rose-200/90 font-medium">បើក Messenger</span>
+                    </div>
                   </button>
                 ) : (
                   <button
-                    onClick={handleNotifyVIP}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenVipModal) onOpenVipModal(invoice);
+                      else handleNotifyVIP(e);
+                    }}
                     disabled={isSendingVip}
-                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-[#6D28D9] via-[#7C3AED] to-[#9333EA] hover:from-[#7C3AED] hover:via-[#8B5CF6] hover:to-[#A855F7] text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-[0_4px_16px_rgba(124,58,237,0.35)] border border-purple-400/50 hover:border-purple-300/80 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
                   >
-                    <span>{isSendingVip ? '⏳' : '✉️'}</span>
-                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
+                    <span className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 backdrop-blur-sm flex items-center justify-center text-sm flex-shrink-0 shadow-inner">
+                      {isSendingVip ? '⏳' : '✉️'}
+                    </span>
+                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">
+                        {isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}
+                      </span>
+                      <span className="text-[10px] text-purple-200/90 font-medium">Messenger · ABA</span>
+                    </div>
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={() => {
                     if (!checkLockGuard()) return;
                     onOpenReceiptModal(invoice);
                   }}
-                  className="py-3 px-3 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
+                  className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-[#1D4ED8] via-[#2563EB] to-[#0284C7] hover:from-[#2563EB] hover:via-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-[0_4px_16px_rgba(37,99,235,0.35)] border border-sky-400/50 hover:border-sky-300/80 active:scale-[0.98] transition-all cursor-pointer"
                 >
-                  <span>🖨️</span>
-                  <span className="truncate">ព្រីនបិទលើថង់</span>
+                  <span className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 backdrop-blur-sm flex items-center justify-center text-sm flex-shrink-0 shadow-inner">
+                    🖨️
+                  </span>
+                  <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                    <span className="font-black text-white text-xs sm:text-[13px] truncate">ព្រីនបិទលើថង់</span>
+                    <span className="text-[10px] text-sky-200/90 font-medium">Thermal (58/80mm)</span>
+                  </div>
                 </button>
               </div>
             )
           ) : currentMasterStage === 2 ? (
-            <div className="flex flex-col gap-2 mt-1" onClick={e => e.stopPropagation()}>
-              <div className="grid grid-cols-1 xs:grid-cols-2 gap-2">
+            <div className="flex flex-col gap-2.5 mt-1" onClick={e => e.stopPropagation()}>
+              <div className="grid grid-cols-2 gap-2.5">
                 {invoice.msg_status === 'SENT' ? (
                   <button
-                    onClick={handleNotifyVIP}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenVipModal) onOpenVipModal(invoice);
+                      else handleNotifyVIP(e);
+                    }}
                     disabled={isSendingVip}
-                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-emerald-800/90 via-teal-800/90 to-emerald-900/90 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-emerald-500/50 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
                   >
-                    <span>{isSendingVip ? '⏳' : '✅'}</span>
-                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ឆាតជោគជ័យ'}</span>
+                    <span className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-sm flex-shrink-0">
+                      {isSendingVip ? '⏳' : '✅'}
+                    </span>
+                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតជោគជ័យ</span>
+                      <span className="text-[10px] text-emerald-300/90 font-medium">ចុចមើល/ផ្ញើឡើងវិញ</span>
+                    </div>
                   </button>
                 ) : invoice.msg_status === 'FAILED' ? (
                   <button
+                    type="button"
                     onClick={openFacebookDirectChat}
-                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-rose-600 via-rose-500 to-cyan-600 hover:from-rose-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg active:scale-98 transition-all cursor-pointer"
+                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-800/90 via-rose-700/90 to-cyan-800/90 hover:from-rose-700 hover:to-cyan-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-rose-500/50 active:scale-[0.98] transition-all cursor-pointer"
                   >
-                    <span>💬</span>
-                    <span className="truncate">បរាជ័យ ➔ ឆាតផ្ទាល់</span>
+                    <span className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-sm flex-shrink-0">
+                      💬
+                    </span>
+                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតផ្ទាល់</span>
+                      <span className="text-[10px] text-rose-200/90 font-medium">បើក Messenger</span>
+                    </div>
                   </button>
                 ) : (
                   <button
-                    onClick={handleNotifyVIP}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenVipModal) onOpenVipModal(invoice);
+                      else handleNotifyVIP(e);
+                    }}
                     disabled={isSendingVip}
-                    className="py-3 px-2 rounded-2xl bg-gradient-to-r from-[#8B24D6] via-[#7024D6] to-[#5B21B6] hover:from-[#9D36E8] hover:to-[#6D28D9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-purple-950/50 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-[#6D28D9] via-[#7C3AED] to-[#9333EA] hover:from-[#7C3AED] hover:via-[#8B5CF6] hover:to-[#A855F7] text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-[0_4px_16px_rgba(124,58,237,0.35)] border border-purple-400/50 hover:border-purple-300/80 active:scale-[0.98] transition-all disabled:opacity-50 cursor-pointer"
                   >
-                    <span>{isSendingVip ? '⏳' : '✉️'}</span>
-                    <span className="truncate">{isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}</span>
+                    <span className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 backdrop-blur-sm flex items-center justify-center text-sm flex-shrink-0 shadow-inner">
+                      {isSendingVip ? '⏳' : '✉️'}
+                    </span>
+                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">
+                        {isSendingVip ? 'កំពុងផ្ញើ...' : 'ផ្ញើវិក្កយបត្រ VIP'}
+                      </span>
+                      <span className="text-[10px] text-purple-200/90 font-medium">Messenger · ABA</span>
+                    </div>
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={() => {
                     if (!checkLockGuard()) return;
                     onOpenReceiptModal(invoice);
                   }}
-                  className="py-3 px-3 rounded-2xl bg-[#0F1D38] border border-cyan-500/70 hover:bg-[#14264A] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow active:scale-98 transition-all cursor-pointer"
+                  className="py-2.5 px-3 rounded-2xl bg-[#09152B] hover:bg-[#0E2042] border border-cyan-500/60 hover:border-cyan-400 text-cyan-200 font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md active:scale-[0.98] transition-all cursor-pointer"
                 >
-                  <span>🖨️</span>
-                  <span className="truncate">ព្រីនឡើងវិញ</span>
+                  <span className="w-8 h-8 rounded-xl bg-cyan-500/15 border border-cyan-400/40 flex items-center justify-center text-sm flex-shrink-0">
+                    🖨️
+                  </span>
+                  <div className="flex flex-col items-start min-w-0 text-left leading-tight">
+                    <span className="font-black text-white text-xs sm:text-[13px] truncate">ព្រីនឡើងវិញ</span>
+                    <span className="text-[10px] text-cyan-300/80 font-medium">Thermal Label</span>
+                  </div>
                 </button>
               </div>
-              <div className="bg-amber-950/40 border border-amber-700/50 p-2 rounded-xl text-xs text-amber-200 text-center font-bold">
-                📦 ថង់នៅលើធ្នើស្រាប់ ‧ រង់ចាំភ្ញៀវវេរលុយ ABA
+              <div className="bg-[#1A1204] border border-amber-600/50 p-2.5 rounded-xl text-xs text-amber-200 text-center font-bold flex items-center justify-center gap-1.5 shadow-sm">
+                <span>📦</span>
+                <span>ថង់នៅលើធ្នើស្រាប់ ‧ រង់ចាំភ្ញៀវវេរលុយ ABA</span>
               </div>
             </div>
           ) : (
             <div className="flex items-center gap-2.5 mt-1" onClick={e => e.stopPropagation()}>
               <button
+                type="button"
                 onClick={() => {
                   if (!checkLockGuard()) return;
                   onOpenQCModal(invoice);
                 }}
-                className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_22px_rgba(16,185,129,0.45)] active:scale-98 transition-all"
+                className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_22px_rgba(16,185,129,0.45)] active:scale-[0.98] transition-all cursor-pointer border border-emerald-300/60"
               >
-                <span>🔍</span>
+                <span className="text-base">🔍</span>
                 <span>ផ្ទៀងរូប Telegram & បិទស្កុតចេញដឹក</span>
               </button>
               <button
+                type="button"
                 onClick={() => {
                   if (!checkLockGuard()) return;
                   onOpenReceiptModal(invoice);
                 }}
-                className="py-3 px-4 rounded-2xl bg-[#0F1D38] border border-cyan-500/70 hover:bg-[#14264A] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-1 shadow active:scale-98 transition-all"
+                className="py-3 px-3.5 rounded-2xl bg-[#09152B] border border-cyan-500/60 hover:bg-[#0E2042] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-1 shadow-md active:scale-[0.98] transition-all cursor-pointer"
                 title="ព្រីនវិក្កយបត្រ"
               >
-                <span>🖨️</span>
+                <span className="text-base">🖨️</span>
               </button>
             </div>
           )}

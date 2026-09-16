@@ -45,13 +45,13 @@ export function ReceiptModal({
   const receiptRef = useRef<HTMLDivElement>(null);
   const offscreenRenderRef = useRef<HTMLDivElement>(null);
 
-  // Preferred print mode
+  // Preferred print mode (Default: Shop Agent)
   const [printMode, setPrintMode] = useState<PrintMode>(() => {
     const saved = localStorage.getItem('pos_print_mode');
-    if (saved === 'bluetooth' || saved === 'agent' || saved === 'browser' || saved === 'lan') {
+    if (saved === 'agent' || saved === 'bluetooth' || saved === 'browser' || saved === 'lan') {
       return saved as PrintMode;
     }
-    return isBluetoothSupported() ? 'bluetooth' : 'agent';
+    return 'agent';
   });
 
   // Bluetooth State
@@ -1239,389 +1239,152 @@ export function ReceiptModal({
         </div>
 
         {/* ------------------------------------------------------------- */}
-        {/* 🚀 SMART DIRECT POS PRINTING CONTROLS FOR MOBILE PHONES       */}
+        {/* 🚀 CLEAN & POWERFUL SHOP AGENT PRINT CONTROLS                 */}
         {/* ------------------------------------------------------------- */}
-        <div className="p-3 bg-[#070D1B] border-t border-slate-800 flex flex-col gap-2.5">
+        <div className="p-3.5 bg-[#070D1B] border-t border-slate-800 flex flex-col gap-3">
           
-          {/* Print Mode Selector Tabs */}
-          <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-            <button
-              onClick={() => handleSelectMode('bluetooth')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                printMode === 'bluetooth'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="ព្រីនតាម Bluetooth ផ្ទាល់ (1-Tap & Auto-Cut)"
-            >
-              <span>⚡</span>
-              <span>Bluetooth POS</span>
-              {isBtConnected && (
-                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse"></span>
-              )}
-            </button>
-
-            <button
-              onClick={() => handleSelectMode('rawbt')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                printMode === 'rawbt'
-                  ? 'bg-gradient-to-r from-teal-600 to-cyan-500 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="RawBT Print Service (1-Tap លើ Android សម្រាប់ USB, Bluetooth ឬ Wi-Fi)"
-            >
-              <span>📱</span>
-              <span>RawBT POS</span>
-            </button>
-
-            <button
-              onClick={() => handleSelectMode('agent')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                printMode === 'agent'
-                  ? 'bg-gradient-to-r from-amber-600 to-orange-500 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Shop Print Agent (កូនកម្មវិធីព្រីនក្នុងហាង - មិនបាច់ប្រើ IP លើទូរស័ព្ទ)"
-            >
-              <span>🏪</span>
-              <span>Shop Agent</span>
-              {isAgentOnline && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Agent Online"></span>
-              )}
-            </button>
-
-            <button
-              onClick={() => handleSelectMode('browser')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-black flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                printMode === 'browser'
-                  ? 'bg-gradient-to-r from-indigo-600 to-purple-500 text-white shadow-md'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="ព្រីនតាមប្រព័ន្ធ (AirPrint លើ iPhone ឬ Android Service)"
-            >
-              <span>🖨️</span>
-              <span>AirPrint</span>
-            </button>
-          </div>
-
-          {/* Configuration / Status Row based on Selected Mode */}
-          {printMode === 'rawbt' && (
-            <div className="flex items-center justify-between bg-teal-950/40 border border-teal-500/40 px-3 py-2 rounded-xl text-xs">
-              <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-1.5 font-bold text-teal-200">
-                  <span>📱 RawBT Driver Service (Android)</span>
-                </div>
-                <div className="text-[10px] text-slate-300">
-                  គាំទ្រគ្រប់ម៉ាស៊ីនព្រីន <strong>XP-80C, POS-80</strong> តាម <strong>USB OTG, Bluetooth, Wi-Fi</strong>
-                </div>
-              </div>
-              <a
-                href="https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter"
-                target="_blank"
-                rel="noreferrer"
-                className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded font-bold text-[10px] no-underline whitespace-nowrap shadow cursor-pointer"
-              >
-                ទាញយក App
-              </a>
-            </div>
-          )}
-
-          {printMode === 'bluetooth' && (
-            <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-xs">
-              <div className="flex items-center gap-2 truncate">
-                <span className={`w-2.5 h-2.5 rounded-full ${isBtConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                <span className="font-bold text-emerald-200 truncate">
-                  {isBtConnected ? `ម៉ាស៊ីន ៖ ${btDeviceName || 'Connected'}` : (btDeviceName ? `បានចាំ ៖ ${btDeviceName}` : 'មិនទាន់ភ្ជាប់ម៉ាស៊ីន Bluetooth')}
+          {/* Shop Agent Status Card */}
+          <div className="bg-gradient-to-b from-[#101A32] to-[#0A1224] border border-amber-500/40 rounded-2xl p-3 shadow-md flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-base flex-shrink-0">
+                  🏪
                 </span>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={handleConnectBluetooth}
-                  disabled={isBtConnecting}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-black px-2.5 py-1 rounded-lg font-black text-[11px] shadow active:scale-95 transition-all cursor-pointer"
-                >
-                  {isBtConnecting ? 'កំពុងស្វែងរក...' : (isBtConnected ? 'ប្តូរម៉ាស៊ីន' : '🔗 ភ្ជាប់ម៉ាស៊ីន')}
-                </button>
-                {isBtConnected && (
-                  <button
-                    onClick={handleDisconnectBluetooth}
-                    className="text-slate-400 hover:text-rose-400 px-1.5 text-xs cursor-pointer"
-                    title="ផ្តាច់ការភ្ជាប់"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {printMode === 'agent' && (
-            <div className="flex flex-col gap-2 bg-amber-950/30 border border-amber-500/40 p-2.5 rounded-xl text-xs">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 truncate">
-                  <span className={`w-2.5 h-2.5 rounded-full ${isAgentOnline ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-rose-500'}`}></span>
-                  <span className="font-bold text-amber-200 truncate">
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-black text-amber-200 text-xs sm:text-sm">Shop Print Agent</span>
+                    <span className={`w-2 h-2 rounded-full ${isAgentOnline ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)] animate-pulse' : 'bg-rose-500'}`} />
+                  </div>
+                  <span className="text-[11px] text-slate-300 truncate font-medium">
                     {isAgentOnline
-                      ? `Print Agent ៖ Online (${agentTarget || '192.168.0.200:9100'})`
-                      : 'Print Agent ក្នុងហាង ៖ Offline (មិនទាន់បើក)'}
+                      ? `🟢 Online (${agentName || 'Store PC'}: ${agentTarget || 'XP-80C'})`
+                      : '🔴 Offline (បើក START_PRINT_AGENT.bat លើ PC)'}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={checkAgentStatus}
-                    disabled={isCheckingAgent}
-                    className="text-[11px] text-amber-400 hover:text-amber-200 underline cursor-pointer"
-                  >
-                    {isCheckingAgent ? 'កំពុងឆែក...' : '🔄 ឆែកឡើងវិញ'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowAgentSetup(!showAgentSetup)}
-                    className="text-[11px] text-amber-400 hover:text-amber-200 underline cursor-pointer"
-                  >
-                    {showAgentSetup ? 'បិទការណែនាំ' : '📖 របៀបដំឡើង'}
-                  </button>
-                </div>
               </div>
 
-              {/* Local Wi-Fi Direct Input (Instant 0.05s, Zero Rate Limit) */}
-              <div className="flex items-center gap-1.5 pt-1.5 border-t border-amber-900/40">
-                <span className="text-[10px] text-amber-300/80 whitespace-nowrap font-medium">🏠 Wi-Fi ផ្ទាល់ ៖</span>
-                <input
-                  type="text"
-                  value={localAgentUrl}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setLocalAgentUrl(val);
-                    localStorage.setItem('pos_local_agent_url', val);
-                  }}
-                  placeholder="http://192.168.0.7:8088"
-                  className="flex-1 bg-black/50 border border-amber-600/40 rounded px-2 py-0.5 text-[11px] font-mono text-amber-100 placeholder:text-slate-500 focus:outline-none focus:border-amber-400"
-                />
+              <div className="flex items-center gap-1.5 flex-shrink-0">
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (!localAgentUrl) return;
-                    onShowToast('⚡ កំពុងតេស្តភ្ជាប់ Wi-Fi ផ្ទាល់ទៅកាន់ PC...');
-                    try {
-                      const res = await fetch(localAgentUrl, { signal: AbortSignal.timeout(1500) });
-                      if (res.ok) {
-                        const d = await res.json();
-                        playSuccessFanfare();
-                        setIsAgentOnline(true);
-                        setAgentTarget(d.printer || 'Online');
-                        onShowToast(`🟢 ភ្ជាប់ Wi-Fi ផ្ទាល់ទៅ PC ជោគជ័យ (${d.printer})!`, 'success');
-                      } else {
-                        onShowToast('❌ មិនអាចភ្ជាប់បានទេ។ សូមពិនិត្យមើលថាតើទូរស័ព្ទបានភ្ជាប់ Wi-Fi ហាងហើយឬនៅ?', 'error');
-                      }
-                    } catch {
-                      onShowToast('❌ មិនអាចភ្ជាប់បានទេ។ សូមពិនិត្យ Wi-Fi និង IP លើកុំព្យូទ័រ!', 'error');
-                    }
-                  }}
-                  className="px-2 py-0.5 bg-amber-600/80 hover:bg-amber-500 text-white rounded text-[10px] font-bold cursor-pointer transition shadow"
+                  onClick={checkAgentStatus}
+                  disabled={isCheckingAgent}
+                  className="px-2.5 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 border border-amber-600/40 text-amber-300 font-bold text-[10px] active:scale-95 transition-all cursor-pointer flex items-center gap-1"
                 >
-                  តេស្ត
+                  <span>🔄</span>
+                  <span>{isCheckingAgent ? 'កំពុងឆែក...' : 'ឆែក'}</span>
                 </button>
-              </div>
-
-              {/* Quick instructions / Download pos_agent.py or pos-agent.js */}
-              {showAgentSetup && (
-                <div className="pt-2 border-t border-amber-900/60 flex flex-col gap-2 text-[11px] text-slate-300 leading-relaxed">
-                  <div className="text-amber-300 font-bold">
-                    💡 របៀបប្រើ Shop Print Agent ជាមួយ Python (Zero-Install) ៖
-                  </div>
-                  <div>
-                    ១. បើកកុំព្យូទ័រក្នុងហាងដែលភ្ជាប់ Wi-Fi ឬខ្សែជាមួយម៉ាស៊ីនព្រីន
-                  </div>
-                  <div>
-                    ២. ទាញយក <strong className="text-emerald-400">pos_agent.py</strong> ដាក់លើ Desktop រួចបើក Command Prompt (CMD) វាយ ៖
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <div className="bg-black/60 p-2 rounded-lg font-mono text-[11px] text-emerald-300 select-all border border-slate-700 flex items-center justify-between">
-                      <span>python pos_agent.py usb</span>
-                      <span className="text-[9px] text-slate-400 font-sans font-bold uppercase bg-amber-950/70 text-amber-300 border border-amber-600/40 px-1.5 py-0.5 rounded">🔌 ខ្សែ USB</span>
-                    </div>
-                    <div className="bg-black/60 p-2 rounded-lg font-mono text-[11px] text-cyan-300 select-all border border-slate-700 flex items-center justify-between">
-                      <span>python pos_agent.py 192.168.0.200</span>
-                      <span className="text-[9px] text-slate-400 font-sans font-bold uppercase bg-blue-950/70 text-blue-300 border border-blue-600/40 px-1.5 py-0.5 rounded">📡 ខ្សែ Network</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <a
-                      href="/api/print_agent/download_bat"
-                      download="START_PRINT_AGENT.bat"
-                      className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black rounded-lg font-black text-[11px] no-underline inline-flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
-                      title="ទាញយកដើម្បីចុច Double Click បើកភ្លាមលើ Windows (1-Click)"
-                    >
-                      <span>⚡ START_PRINT_AGENT.bat (1-Click បើកលើ Windows)</span>
-                    </a>
-                    <a
-                      href="/api/print_agent/download_python"
-                      download="pos_agent.py"
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-semibold text-[10px] no-underline inline-flex items-center gap-1 cursor-pointer border border-slate-700"
-                    >
-                      <span>🐍 pos_agent.py</span>
-                    </a>
-                  </div>
-                  <div className="p-2 bg-amber-900/30 border border-amber-500/30 rounded text-[10px] text-amber-200">
-                    ⚠️ <strong>ចំណាំ ៖</strong> ពេលបើក <code className="text-amber-300 font-mono font-bold">START_PRINT_AGENT.bat</code> ឬ <code className="text-emerald-300 font-mono font-bold">pos_agent.py</code> សូម<strong>ទុកផ្ទាំងខ្មៅចោល</strong> កុំចុច X បិទវា (បើបិទវា វានឹងក្លាយជា Offline)!
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {printMode === 'lan' && (
-            <div className="flex flex-col gap-2 bg-blue-950/40 border border-blue-500/40 p-2 rounded-xl text-xs">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-blue-200 font-bold">
-                  <span>📡 ម៉ាស៊ីនព្រីន Wi-Fi ៖</span>
-                  <span className="font-mono bg-black/40 px-2 py-0.5 rounded text-cyan-300 font-black">
-                    {lanPrinterIp}:{lanPrinterPort}
-                  </span>
-                </div>
                 <button
-                  onClick={() => setShowLanConfig(!showLanConfig)}
-                  className="text-[11px] text-cyan-400 hover:text-cyan-200 underline cursor-pointer"
+                  type="button"
+                  onClick={() => setShowAgentSetup(!showAgentSetup)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-[10px] active:scale-95 transition-all cursor-pointer flex items-center gap-1"
                 >
-                  {showLanConfig ? 'បិទការកំណត់' : '⚙️ កែប្រែ IP'}
+                  <span>📖</span>
+                  <span>{showAgentSetup ? 'បិទ' : 'ដំឡើង'}</span>
                 </button>
               </div>
-
-              {showLanConfig && (
-                <div className="flex items-center gap-2 pt-1 border-t border-blue-900/60">
-                  <input
-                    type="text"
-                    placeholder="IP (ឧ. 192.168.0.200)"
-                    value={lanPrinterIp}
-                    onChange={(e) => {
-                      setLanPrinterIp(e.target.value);
-                      localStorage.setItem('pos_lan_printer_ip', e.target.value);
-                    }}
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-mono"
-                  />
-                  <input
-                    type="number"
-                    placeholder="Port"
-                    value={lanPrinterPort}
-                    onChange={(e) => {
-                      const p = parseInt(e.target.value, 10) || 9100;
-                      setLanPrinterPort(p);
-                      localStorage.setItem('pos_lan_printer_port', String(p));
-                    }}
-                    className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white font-mono text-center"
-                  />
-                  <button
-                    onClick={handleTestLan}
-                    disabled={isTestingLan}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-2.5 py-1 rounded-lg text-xs active:scale-95 transition-all cursor-pointer"
-                  >
-                    {isTestingLan ? '...' : 'តេស្ត'}
-                  </button>
-                </div>
-              )}
-
-              {isCloudDeployment && (
-                <div className="p-2.5 bg-amber-950/40 border border-amber-500/30 rounded-lg text-[11px] text-amber-200 flex flex-col gap-1.5 leading-relaxed">
-                  <div className="font-bold flex items-center gap-1 text-amber-300">
-                    <span>💡 ចំណាំ Cloud POS ៖</span>
-                  </div>
-                  <div>
-                    ដោយសារប្រព័ន្ធដំណើរការលើ Cloud Online, Server មិនអាចឆ្លងកាត់ Firewall ទៅកាន់ IP ក្នុងផ្ទះ/ហាង <span className="font-mono text-cyan-300">({lanPrinterIp})</span> បានឡើយ។
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleSelectMode('bluetooth')}
-                      className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-[10px] cursor-pointer active:scale-95 transition-all"
-                    >
-                      ⚡ ប្តូរទៅ Bluetooth POS (1-Tap & Auto-Cut)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectMode('agent')}
-                      className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold text-[10px] cursor-pointer active:scale-95 transition-all"
-                    >
-                      🏪 ប្តូរទៅ Shop Print Agent
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
-          )}
 
-          {/* MAIN BIG ACTION BUTTON (1-TAP POS PRINT) */}
-          {printMode === 'rawbt' && (
-            <button
-              onClick={handleRawBTPrint}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-teal-600 via-cyan-500 to-teal-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(20,184,166,0.45)] active:scale-98 text-center cursor-pointer transition-all border border-teal-400/50"
-            >
-              <span className="text-lg">📱</span>
-              <span>ព្រីនផ្ទាល់ RawBT POS (1-Tap & Auto-Cut)</span>
-            </button>
-          )}
-
-          {printMode === 'bluetooth' && (
-            <button
-              onClick={handleBluetoothDirectPrint}
-              disabled={isPrintingBt}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-500 to-green-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(16,185,129,0.45)] active:scale-98 text-center cursor-pointer disabled:opacity-60 transition-all border border-emerald-400/50"
-            >
-              <span className="text-lg">⚡</span>
-              <span>
-                {isPrintingBt
-                  ? `កំពុងព្រីន & បញ្ជាកាត់ក្រដាស (${btProgress}%)...`
-                  : 'ព្រីនផ្ទាល់ POS (Bluetooth 1-Tap & Auto-Cut)'}
+            {/* Local Wi-Fi Direct Input (Instant 0.05s) */}
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+              <span className="text-[10px] text-amber-300/90 whitespace-nowrap font-medium flex items-center gap-1">
+                <span>🏠</span>
+                <span>Wi-Fi IP ៖</span>
               </span>
-            </button>
-          )}
+              <input
+                type="text"
+                value={localAgentUrl}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setLocalAgentUrl(val);
+                  localStorage.setItem('pos_local_agent_url', val);
+                }}
+                placeholder="http://192.168.0.7:8088"
+                className="flex-1 bg-black/60 border border-amber-500/30 focus:border-amber-400 rounded-lg px-2.5 py-1 text-[11px] font-mono text-amber-100 placeholder:text-slate-600 focus:outline-none transition-colors"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!localAgentUrl) return;
+                  onShowToast('⚡ កំពុងតេស្តភ្ជាប់ Wi-Fi ផ្ទាល់ទៅកាន់ PC...');
+                  try {
+                    const res = await fetch(localAgentUrl, { signal: AbortSignal.timeout(1500) });
+                    if (res.ok) {
+                      const d = await res.json();
+                      playSuccessFanfare();
+                      setIsAgentOnline(true);
+                      setAgentTarget(d.printer || 'Online');
+                      onShowToast(`🟢 ភ្ជាប់ Wi-Fi ផ្ទាល់ទៅ PC ជោគជ័យ (${d.printer})!`, 'success');
+                    } else {
+                      onShowToast('❌ មិនអាចភ្ជាប់បានទេ។ សូមពិនិត្យមើលថាតើទូរស័ព្ទបានភ្ជាប់ Wi-Fi ហាងហើយឬនៅ?', 'error');
+                    }
+                  } catch {
+                    onShowToast('❌ មិនអាចភ្ជាប់បានទេ។ សូមពិនិត្យ Wi-Fi និង IP លើកុំព្យូទ័រ!', 'error');
+                  }
+                }}
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-slate-950 rounded-lg text-[10px] font-black cursor-pointer transition active:scale-95 shadow-sm"
+              >
+                តេស្ត
+              </button>
+            </div>
 
-          {printMode === 'agent' && (
-            <button
-              onClick={handleShopAgentPrint}
-              disabled={isSendingToAgent}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 via-orange-500 to-amber-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(245,158,11,0.45)] active:scale-98 text-center cursor-pointer disabled:opacity-60 transition-all border border-amber-400/50"
-            >
-              <span className="text-lg">🏪</span>
-              <span>
-                {isSendingToAgent
-                  ? 'កំពុងបញ្ជូនទៅកាន់ Shop Print Agent...'
-                  : (isAgentOnline
-                      ? 'ព្រីនតាម Shop Agent (XP-80C Auto-Cut)'
-                      : 'ព្រីនតាម Shop Agent (បញ្ជូនទៅ PC XP-80C)')}
-              </span>
-            </button>
-          )}
+            {/* Quick instructions / Download pos_agent.py or pos-agent.js */}
+            {showAgentSetup && (
+              <div className="pt-2 border-t border-amber-900/60 flex flex-col gap-2 text-[11px] text-slate-300 leading-relaxed animate-fadeIn">
+                <div className="text-amber-300 font-bold flex items-center gap-1">
+                  <span>💡</span>
+                  <span>របៀបបើក Shop Print Agent លើកុំព្យូទ័រ (1-Click) ៖</span>
+                </div>
+                <div className="text-slate-300 text-[10px]">
+                  ១. បើកកុំព្យូទ័រក្នុងហាងដែលភ្ជាប់ជាមួយម៉ាស៊ីនព្រីន (XP-80C / POS-80)
+                </div>
+                <div className="text-slate-300 text-[10px]">
+                  ២. ទាញយក File ខាងក្រោម រួច Double Click បើកលើ Desktop ៖
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <a
+                    href="/api/print_agent/download_bat"
+                    download="START_PRINT_AGENT.bat"
+                    className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black rounded-lg font-black text-[11px] no-underline inline-flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
+                    title="ទាញយកដើម្បីចុច Double Click បើកភ្លាមលើ Windows (1-Click)"
+                  >
+                    <span>⚡ START_PRINT_AGENT.bat (1-Click បើកលើ Windows)</span>
+                  </a>
+                  <a
+                    href="/api/print_agent/download_python"
+                    download="pos_agent.py"
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-semibold text-[10px] no-underline inline-flex items-center gap-1 cursor-pointer border border-slate-700"
+                  >
+                    <span>🐍 pos_agent.py</span>
+                  </a>
+                </div>
+                <div className="p-2 bg-amber-950/60 border border-amber-500/30 rounded-lg text-[10px] text-amber-200">
+                  ⚠️ <strong>ចំណាំ ៖</strong> ពេលបើកផ្ទាំងខ្មៅ Command Prompt សូម<strong>ទុកវាចោល</strong> កុំចុច X បិទវា (បើបិទវា វានឹងក្លាយជា Offline)!
+                </div>
+              </div>
+            )}
+          </div>
 
-          {printMode === 'browser' && (
-            <button
-              onClick={handlePrint}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-sky-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(99,102,241,0.45)] active:scale-98 text-center cursor-pointer transition-all border border-indigo-400/50"
-            >
-              <span className="text-lg">🖨️</span>
-              <span>ព្រីនតាមប្រព័ន្ធ (AirPrint / 80mm Print Dialog)</span>
-            </button>
-          )}
-
-          {printMode === 'lan' && (
-            <button
-              onClick={handleLanDirectPrint}
-              disabled={isPrintingLan}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(6,182,212,0.45)] active:scale-98 text-center cursor-pointer disabled:opacity-60 transition-all border border-sky-400/50"
-            >
-              <span className="text-lg">🌐</span>
-              <span>
-                {isPrintingLan
-                  ? 'កំពុងបញ្ជូនទៅម៉ាស៊ីន Wi-Fi...'
-                  : 'ព្រីនផ្ទាល់ Wi-Fi / LAN (Auto-Cut)'}
-              </span>
-            </button>
-          )}
+          {/* MAIN HERO PRINT BUTTON (Shop Agent Auto-Cut) */}
+          <button
+            type="button"
+            onClick={handleShopAgentPrint}
+            disabled={isSendingToAgent}
+            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:via-orange-400 hover:to-amber-500 text-slate-950 font-black text-sm sm:text-base flex items-center justify-center gap-2.5 shadow-[0_6px_24px_rgba(245,158,11,0.35)] active:scale-[0.98] text-center cursor-pointer disabled:opacity-60 transition-all border border-amber-300/70"
+          >
+            <span className="text-xl">🏪</span>
+            <span>
+              {isSendingToAgent
+                ? 'កំពុងបញ្ជូនទៅកាន់ Shop Print Agent...'
+                : (isAgentOnline
+                    ? 'ព្រីនតាម Shop Agent (XP-80C Auto-Cut)'
+                    : 'ព្រីនតាម Shop Agent (បញ្ជូនទៅ PC XP-80C)')}
+            </span>
+          </button>
 
           {/* Secondary Quick Action Row: Copy Text & Standalone Print Tab */}
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleCopyText}
               className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 border border-slate-700 cursor-pointer"
             >
@@ -1648,11 +1411,9 @@ export function ReceiptModal({
           </div>
 
           {/* Helpful Mobile POS Tip */}
-          <div className="text-[11px] text-slate-400 leading-snug bg-slate-900/90 p-2 rounded-xl border border-slate-800/90 flex items-start gap-1.5">
+          <div className="text-[11px] text-slate-400 leading-snug bg-slate-900/80 p-2 rounded-xl border border-slate-800 flex items-center justify-center gap-1.5 text-center">
             <span className="text-amber-300">💡</span>
-            <div>
-              <strong>វិធីព្រីនផ្ទាល់ដោយមិនប្រើ IP លើទូរស័ព្ទ ៖</strong> ប្រើ <strong>⚡ Bluetooth POS</strong> (ភ្ជាប់ទូរស័ព្ទផ្ទាល់ 1-Tap មិនបាច់ដំឡើង App) ឬ <strong>🏪 Shop Agent</strong> (កុំព្យូទ័រក្នុងហាងទទួលបញ្ជាពីទូរស័ព្ទ ហើយព្រីនកាត់ក្រដាសស្វ័យប្រវត្តិ)!
-            </div>
+            <span>ចុចព្រីនភ្លាម កុំព្យូទ័រក្នុងហាងនឹងទទួលបញ្ជាពីទូរស័ព្ទ ហើយព្រីនកាត់ក្រដាសស្វ័យប្រវត្តិ (XP-80C Auto-Cut)!</span>
           </div>
         </div>
 

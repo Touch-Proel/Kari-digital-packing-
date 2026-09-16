@@ -112,20 +112,21 @@ export function VipInvoiceModal({
       });
 
       const data = await res.json();
+      // Always copy message to clipboard for user convenience
+      if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(data.vip_message || customMsg);
+        } catch {}
+      }
+
       if (data.success) {
-        // Copy to clipboard
-        if (navigator.clipboard) {
-          try {
-            await navigator.clipboard.writeText(data.vip_message || customMsg);
-          } catch {}
-        }
         invoice.msg_status = 'SENT';
         playSuccessFanfare();
         onShowToast(`✅ បានផ្ញើវិក្កយបត្រ VIP & Copy ចូល Clipboard រួចរាល់!`, 'success');
         onDataChanged();
         setTimeout(() => onClose(), 600);
       } else {
-        onShowToast(`❌ ${data.error || 'មិនអាចផ្ញើសារបាន'}`, 'error');
+        onShowToast(`ℹ️ ${data.error || 'បាន Copy សារវិក្កយបត្ររួចរាល់ ➔ សូមចុចឆាតផ្ទាល់'}`, 'error');
       }
     } catch (err: any) {
       onShowToast(`❌ បរាជ័យក្នុងការផ្ញើវិក្កយបត្រ VIP៖ ${err?.message || err}`, 'error');
