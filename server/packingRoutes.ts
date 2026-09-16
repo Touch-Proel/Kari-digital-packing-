@@ -2285,8 +2285,9 @@ router.get('/khqr/config', (_req: Request, res: Response) => {
     config: {
       bankName: settings.bank_name || 'ABA Bank',
       accountNumber: settings.account_number || '000474559',
-      accountName: settings.account_name || 'Proel Toch',
-      merchantName: settings.merchant_name || 'Kari Arnett',
+      khrAccountNumber: settings.khr_account_number || '003491232',
+      accountName: settings.account_name || 'TOCH PROEL',
+      merchantName: settings.merchant_name || 'TOCH PROEL',
       bakongAccountId: effectiveBakongId,
       merchantCity: settings.khqr_city || 'Phnom Penh',
       merchantType: (settings as any).khqr_merchant_type || 'merchant',
@@ -2304,6 +2305,7 @@ router.post('/khqr/config', (req: Request, res: Response) => {
   const body = req.body || {};
   if (body.bankName !== undefined) settings.bank_name = String(body.bankName).trim();
   if (body.accountNumber !== undefined) settings.account_number = String(body.accountNumber).trim();
+  if (body.khrAccountNumber !== undefined) settings.khr_account_number = String(body.khrAccountNumber).trim();
   if (body.accountName !== undefined) settings.account_name = String(body.accountName).trim();
   if (body.merchantName !== undefined) settings.merchant_name = String(body.merchantName).trim();
   if (body.bakongAccountId !== undefined) settings.bakong_id = String(body.bakongAccountId).trim();
@@ -2321,6 +2323,7 @@ router.post('/khqr/config', (req: Request, res: Response) => {
     config: {
       bankName: settings.bank_name,
       accountNumber: settings.account_number,
+      khrAccountNumber: settings.khr_account_number,
       accountName: settings.account_name,
       merchantName: settings.merchant_name,
       bakongAccountId: settings.bakong_id,

@@ -30,12 +30,14 @@ export function KHQRModal({
   const [config, setConfig] = useState<KHQRConfig>(() => getKHQRConfig());
   const [currency, setCurrency] = useState<'USD' | 'KHR'>('USD');
   const [customAmount, setCustomAmount] = useState<string>('');
-  const [qrMode, setQrMode] = useState<'dynamic' | 'static' | 'original'>('dynamic');
+  const [qrMode, setQrMode] = useState<'original' | 'dynamic'>(() => {
+    const c = getKHQRConfig();
+    return (c.qrMode === 'dynamic') ? 'dynamic' : 'original';
+  });
   const [qrString, setQrString] = useState<string>('');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [isEditingSettings, setIsEditingSettings] = useState<boolean>(false);
   const [tempConfig, setTempConfig] = useState<KHQRConfig>(() => getKHQRConfig());
-  const [showTroubleshoot, setShowTroubleshoot] = useState<boolean>(false);
   const [isProcessingImage, setIsProcessingImage] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -50,7 +52,11 @@ export function KHQRModal({
           const cfg = saveKHQRConfig(data.config);
           setConfig(cfg);
           setTempConfig(cfg);
-          if (cfg.qrMode) setQrMode(cfg.qrMode);
+          if (cfg.qrMode === 'dynamic') {
+            setQrMode('dynamic');
+          } else {
+            setQrMode('original');
+          }
         }
       })
       .catch(() => {});
@@ -71,7 +77,8 @@ export function KHQRModal({
     : (customAmount ? Math.max(0, Number(customAmount) || 0) : 0);
   const activeAmountKhr = Math.round(activeAmountUsd * 4100);
 
-  const amountToCharge = qrMode === 'static'
+  const isOriginalMode = qrMode === 'original';
+  const amountToCharge = isOriginalMode
     ? 0
     : (currency === 'KHR' ? activeAmountKhr : activeAmountUsd);
 
@@ -80,31 +87,35 @@ export function KHQRModal({
     if (!isOpen) return;
 
     try {
-      if (qrMode === 'original' && config.originalQRImageUrl) {
+      // 1. If Original Mode and user uploaded a photo/custom string
+      if (isOriginalMode && config.originalQRImageUrl) {
         setQrDataUrl(config.originalQRImageUrl);
         setQrString(config.originalQRString || '');
         return;
       }
 
-      const qrStr = generateBakongKHQRString({
-        amount: amountToCharge,
-        currency,
-        billNumber: invoice ? (invoice.basket_no || invoice.invoice_id) : undefined,
-        storeLabel: config.merchantName || 'Kari Arnett',
-        config: {
-          ...config,
-          qrMode
-        }
-      });
+      // 2. Generate Bakong KHQR String
+      const qrStr = (isOriginalMode && config.originalQRString)
+        ? config.originalQRString
+        : generateBakongKHQRString({
+            amount: amountToCharge,
+            currency: isOriginalMode ? 'USD' : currency,
+            billNumber: invoice ? (invoice.basket_no || invoice.invoice_id) : undefined,
+            storeLabel: config.merchantName || 'TOCH PROEL',
+            config: {
+              ...config,
+              qrMode: isOriginalMode ? 'static' : 'dynamic'
+            }
+          });
 
       setQrString(qrStr);
-      generateKHQRDataUrl(qrStr, { width: 360, margin: 1 })
+      generateKHQRDataUrl(qrStr, { width: 380, margin: 1 })
         .then(url => setQrDataUrl(url))
         .catch(err => console.error('KHQR data URL failed:', err));
     } catch (err) {
       console.error('Failed to generate KHQR string:', err);
     }
-  }, [isOpen, invoice, amountToCharge, currency, config, qrMode]);
+  }, [isOpen, invoice, amountToCharge, currency, config, qrMode, isOriginalMode]);
 
   if (!isOpen) return null;
 
@@ -119,9 +130,11 @@ export function KHQRModal({
     if (!qrDataUrl) return;
     const a = document.createElement('a');
     a.href = qrDataUrl;
-    const filename = invoice
-      ? `KHQR_Basket_${invoice.basket_no || invoice.invoice_id}_${currency}.png`
-      : `KHQR_KariArnett_${currency}.png`;
+    const filename = isOriginalMode
+      ? `ABA_KHQR_TOCH_PROEL_DualCurrency.png`
+      : (invoice
+          ? `KHQR_Basket_${invoice.basket_no || invoice.invoice_id}_${currency}.png`
+          : `KHQR_TOCH_PROEL_${currency}.png`);
     a.download = filename;
     document.body.appendChild(a);
     a.click();
@@ -138,10 +151,10 @@ export function KHQRModal({
     setConfig(saved);
     setIsEditingSettings(false);
     playSuccessFanfare();
-    onShowToast('✅ បានរក្សាទុកព័ត៌មាន ABA / KHQR រួចរាល់!');
+    onShowToast('✅ បានរក្សាទុកព័ត៌មាន ABA & KHQR រួចរាល់!');
   };
 
-  // Upload and decode original ABA QR screenshot
+  // Upload and decode original ABA QR screenshot/photo
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -150,49 +163,44 @@ export function KHQRModal({
     try {
       const { qrString: decodedStr, error } = await decodeQRFromImageFile(file);
 
-      if (!decodedStr) {
-        onShowToast(error || 'រកមិនឃើញ QR កូដក្នុងរូបភាពនេះទេ', 'error');
-        setIsProcessingImage(false);
-        return;
-      }
-
-      // Convert file to data URL for original image display
+      // Convert file to data URL for display
       const reader = new FileReader();
       reader.onload = (ev) => {
         const originalDataUrl = ev.target?.result as string;
-        const parsed = parseBakongKHQRString(decodedStr);
+        const parsed = decodedStr ? parseBakongKHQRString(decodedStr) : null;
 
         const updated: Partial<KHQRConfig> = {
-          originalQRString: decodedStr,
           originalQRImageUrl: originalDataUrl,
-          qrMode: 'dynamic'
+          qrMode: 'original'
         };
 
-        if (parsed.bakongAccountId) {
-          updated.bakongAccountId = parsed.bakongAccountId;
-        }
-        if (parsed.accountNumber) {
-          updated.accountNumber = parsed.accountNumber;
-        }
-        if (parsed.merchantName) {
-          updated.merchantName = parsed.merchantName;
-        }
-        if (parsed.merchantCity) {
-          updated.merchantCity = parsed.merchantCity;
+        if (decodedStr) {
+          updated.originalQRString = decodedStr;
         }
 
-        if (parsed.merchantType) {
-          updated.merchantType = parsed.merchantType;
+        if (parsed && 'bakongAccountId' in parsed && parsed.bakongAccountId) {
+          updated.bakongAccountId = parsed.bakongAccountId;
         }
-        if (parsed.acquiringBank) {
-          updated.acquiringBank = parsed.acquiringBank;
+        if (parsed && 'accountNumber' in parsed && parsed.accountNumber) {
+          updated.accountNumber = parsed.accountNumber;
+        }
+        if (parsed && 'merchantName' in parsed && parsed.merchantName) {
+          updated.merchantName = parsed.merchantName;
         }
 
         const saved = saveKHQRConfig(updated);
         setConfig(saved);
         setTempConfig(saved);
+        setQrMode('original');
+        setQrDataUrl(originalDataUrl);
+        if (decodedStr) setQrString(decodedStr);
+
         playSuccessFanfare();
-        onShowToast(`🎉 បានអានកូដ ABA QR ជោគជ័យ!`);
+        if (decodedStr) {
+          onShowToast(`🎉 បានអានកូដ ABA QR ជោគជ័យ!`);
+        } else {
+          onShowToast(`📸 បានបញ្ចូលរូបភាព QR ដើមរួចរាល់!`);
+        }
         setIsProcessingImage(false);
       };
       reader.readAsDataURL(file);
@@ -201,6 +209,16 @@ export function KHQRModal({
       onShowToast('មិនអាចដំណើរការរូបភាពបានឡើយ', 'error');
       setIsProcessingImage(false);
     }
+  };
+
+  const handleRemoveOriginalImage = () => {
+    const updated = saveKHQRConfig({
+      originalQRImageUrl: '',
+      originalQRString: ''
+    });
+    setConfig(updated);
+    setTempConfig(updated);
+    onShowToast('🔄 បានលុបរូបភាព QR ដើមរួចរាល់');
   };
 
   return (
@@ -228,11 +246,13 @@ export function KHQRModal({
               KHQR
             </span>
             <div>
-              <h2 className="font-black text-sm sm:text-base leading-tight">
-                Bakong KHQR Payment
+              <h2 className="font-black text-sm sm:text-base leading-tight flex items-center gap-1.5">
+                <span>{config.bankName}</span>
+                <span className="text-xs font-normal text-white/80">‧</span>
+                <span className="text-white font-black">{config.accountName || 'TOCH PROEL'}</span>
               </h2>
               <p className="text-[11px] text-white/90">
-                {config.bankName} ‧ ស្កេនបានគ្រប់ធនាគារក្នុងប្រទេសកម្ពុជា
+                ដុល្លារ ($) និង ខ្មែរ (៛) តែ១ ‧ ស្កេនបានគ្រប់ធនាគារ
               </p>
             </div>
           </div>
@@ -240,7 +260,9 @@ export function KHQRModal({
             <button
               type="button"
               onClick={() => setIsEditingSettings(prev => !prev)}
-              className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 text-white flex items-center justify-center text-xs font-bold transition-all cursor-pointer"
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all cursor-pointer ${
+                isEditingSettings ? 'bg-white text-red-600 shadow-md' : 'bg-black/20 hover:bg-black/40 text-white'
+              }`}
               title="ការកំណត់ KHQR (Settings)"
             >
               ⚙️
@@ -265,7 +287,7 @@ export function KHQRModal({
                   #{invoice.basket_no || invoice.invoice_id}
                 </span>
                 <div className="min-w-0">
-                  <div className="text-xs font-bold text-white truncate max-w-[160px]">
+                  <div className="text-xs font-bold text-white truncate max-w-[150px]">
                     {invoice.facebook_name}
                   </div>
                   <div className="text-[10px] text-slate-400">
@@ -277,129 +299,209 @@ export function KHQRModal({
                 <div className="text-emerald-400 font-mono font-black text-sm">
                   ${invoiceTotalUsd.toFixed(2)}
                 </div>
-                <div className="text-[10px] font-mono text-slate-400">
+                <div className="text-[10px] font-mono text-slate-400 font-bold">
                   {invoiceTotalKhr.toLocaleString('en-US')} ៛
                 </div>
               </div>
             </div>
           )}
 
-          {/* Standalone Amount Input (If opened without invoice and dynamic mode) */}
-          {!invoice && !isEditingSettings && qrMode === 'dynamic' && (
-            <div className="w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-slate-300 flex justify-between items-center">
-                <span>ចំនួនទឹកប្រាក់គិតថ្លៃ (Amount) ៖</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-cyan-400 font-black text-base">$</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="0.00"
-                  value={customAmount}
-                  onChange={e => setCustomAmount(e.target.value)}
-                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono font-bold text-sm outline-none focus:border-cyan-400"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Currency Switcher Pill (Only if dynamic) */}
-          {!isEditingSettings && qrMode === 'dynamic' && (
-            <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 w-full justify-center gap-2">
+          {/* Mode Switcher Tabs: QR ដើម (1 QR ទាំង $ & ៛) vs Dynamic QR */}
+          {!isEditingSettings && (
+            <div className="grid grid-cols-2 gap-1.5 w-full bg-slate-900/90 p-1 rounded-2xl border border-slate-800">
               <button
                 type="button"
-                onClick={() => setCurrency('USD')}
-                className={`flex-1 py-1 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  currency === 'USD'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
+                onClick={() => {
+                  setQrMode('original');
+                  saveKHQRConfig({ qrMode: 'original' });
+                }}
+                className={`py-2 px-2 rounded-xl text-xs font-black transition-all flex flex-col items-center justify-center cursor-pointer ${
+                  isOriginalMode
+                    ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg scale-[1.02]'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                 }`}
               >
-                <span>💵 USD</span>
-                <span className="font-mono">(${activeAmountUsd > 0 ? activeAmountUsd.toFixed(2) : '0.00'})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCurrency('KHR')}
-                className={`flex-1 py-1 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  currency === 'KHR'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <span>៛ KHR</span>
-                <span className="font-mono">({activeAmountKhr > 0 ? activeAmountKhr.toLocaleString('en-US') : '0'} ៛)</span>
-              </button>
-            </div>
-          )}
-
-          {/* Main Visual QR Display Card */}
-          {!isEditingSettings ? (
-            <div className="bg-white rounded-3xl p-3 sm:p-4 w-full flex flex-col items-center shadow-xl border-4 border-red-500/90 text-black">
-              {/* Red Header inside QR box */}
-              <div className="w-full bg-[#E11925] text-white py-1 px-3 rounded-lg flex items-center justify-between mb-2 shadow-sm">
-                <div className="flex items-center gap-1.5 font-black text-xs">
-                  <span className="bg-white text-[#E11925] px-1 rounded font-black text-[10px]">KHQR</span>
-                  <span>{config.bankName}</span>
+                <div className="flex items-center gap-1 text-[12px]">
+                  <span>✨ QR ដើម</span>
+                  <span className="text-[10px] bg-white/20 px-1 rounded font-bold">QR តែ១</span>
                 </div>
-                <span className="font-mono text-xs font-black tracking-wider">
-                  {qrMode === 'static'
-                    ? 'SCAN TO PAY'
-                    : (currency === 'KHR' ? `${activeAmountKhr.toLocaleString('en-US')} ៛` : `$${activeAmountUsd.toFixed(2)}`)}
+                <span className="text-[9.5px] font-normal text-white/85 mt-0.5">
+                  ដុល្លារ ($) & ខ្មែរ (៛) តែមួយ
                 </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setQrMode('dynamic');
+                  saveKHQRConfig({ qrMode: 'dynamic' });
+                }}
+                className={`py-2 px-2 rounded-xl text-xs font-black transition-all flex flex-col items-center justify-center cursor-pointer ${
+                  !isOriginalMode
+                    ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg scale-[1.02]'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-1 text-[12px]">
+                  <span>⚡ Dynamic QR</span>
+                </div>
+                <span className="text-[9.5px] font-normal text-white/85 mt-0.5">
+                  បូកទឹកប្រាក់ស្វ័យប្រវត្ត
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* Dynamic Mode: Currency Switcher & Custom Amount */}
+          {!isEditingSettings && !isOriginalMode && (
+            <div className="w-full flex flex-col gap-2">
+              <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 w-full justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrency('USD')}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    currency === 'USD'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>💵 USD ($)</span>
+                  <span className="font-mono">(${activeAmountUsd > 0 ? activeAmountUsd.toFixed(2) : '0.00'})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCurrency('KHR')}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    currency === 'KHR'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>៛ KHR (៛)</span>
+                  <span className="font-mono">({activeAmountKhr > 0 ? activeAmountKhr.toLocaleString('en-US') : '0'} ៛)</span>
+                </button>
               </div>
 
-              {/* QR Image */}
+              {!invoice && (
+                <div className="w-full bg-slate-900/80 border border-slate-800 rounded-xl p-2 flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-300">បញ្ចូលទឹកប្រាក់ ៖</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={customAmount}
+                    onChange={e => setCustomAmount(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-white font-mono font-bold text-sm outline-none focus:border-cyan-400"
+                  />
+                  <span className="text-xs text-cyan-400 font-bold">$</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MAIN VISUAL QR CARD (Modeled after official ABA Stand Poster) */}
+          {!isEditingSettings ? (
+            <div className="bg-white rounded-3xl p-3.5 sm:p-4 w-full flex flex-col items-center shadow-2xl border-4 border-red-500/90 text-black animate-fadeIn">
+              {/* Official Poster Header: ABA' QR & KHQR Logo */}
+              <div className="w-full flex items-center justify-between pb-2 mb-2 border-b-2 border-red-100">
+                <div className="flex items-center gap-1.5">
+                  <div className="bg-[#002D62] text-white font-black text-sm px-2 py-0.5 rounded tracking-wide font-sans">
+                    ABA<span className="text-cyan-400">'</span> QR
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-bold hidden sm:inline">
+                    ស្កេនបង់ប្រាក់
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="bg-[#E11925] text-white px-2 py-0.5 rounded font-black text-[11px] shadow-sm tracking-wider">
+                    KHQR
+                  </span>
+                </div>
+              </div>
+
+              {/* Merchant / Account Name */}
+              <div className="text-center mb-2">
+                <h3 className="text-base sm:text-lg font-black text-slate-950 tracking-wide uppercase font-sans">
+                  {config.accountName || 'TOCH PROEL'}
+                </h3>
+                <p className="text-[10px] text-slate-500 font-bold">
+                  {isOriginalMode
+                    ? 'ដុល្លារ និង ខ្មែរ តែ១ QR តែ១'
+                    : `ទឹកប្រាក់បង់ ៖ ${currency === 'KHR' ? `${activeAmountKhr.toLocaleString('en-US')} ៛` : `$${activeAmountUsd.toFixed(2)} USD`}`}
+                </p>
+              </div>
+
+              {/* QR Image Display */}
               {qrDataUrl ? (
-                <div className="relative p-1 bg-white rounded-2xl border border-slate-200">
+                <div className="relative p-2 bg-white rounded-2xl border-2 border-slate-200 shadow-inner">
                   <img
                     src={qrDataUrl}
                     alt="Bakong KHQR"
-                    className="w-52 h-52 sm:w-56 sm:h-56 object-contain rounded-xl"
+                    className="w-52 h-52 sm:w-60 sm:h-60 object-contain rounded-xl"
                     style={{ imageRendering: 'pixelated' }}
                   />
-                  {qrMode !== 'original' && (
+                  {!config.originalQRImageUrl && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="w-8 h-8 rounded-full bg-white border-2 border-red-600 flex items-center justify-center shadow-sm">
-                        <span className="text-[10px] font-black text-[#E11925]">KH</span>
+                      <div className="w-9 h-9 rounded-full bg-white border-2 border-[#E11925] flex items-center justify-center shadow-md">
+                        <span className="text-[11px] font-black text-[#E11925]">KH</span>
                       </div>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="w-52 h-52 flex items-center justify-center text-xs font-bold text-slate-400">
+                <div className="w-52 h-52 sm:w-60 sm:h-60 flex items-center justify-center text-xs font-bold text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
                   កំពុងបង្កើត QR...
                 </div>
               )}
 
-              {/* Merchant Details */}
-              <div className="text-center mt-2 w-full">
-                <div className="text-xs sm:text-sm font-mono font-black text-slate-900">
-                  {config.bankName}: <span className="text-blue-700 underline">{config.accountNumber}</span>
+              {/* Dual Accounts Box (Matches the ABA Poster: ៛ KHR and $ USD) */}
+              <div className="w-full mt-3 bg-gradient-to-b from-slate-50 to-slate-100 rounded-2xl p-2.5 border border-slate-200 shadow-sm flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-xs sm:text-sm font-black font-mono px-1">
+                  <div className="flex items-center gap-1.5 text-emerald-800">
+                    <span className="bg-emerald-100 text-emerald-800 w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs">
+                      ៛
+                    </span>
+                    <span>គណនី KHR ៖</span>
+                  </div>
+                  <span className="text-slate-900 tracking-wider font-bold">
+                    {config.khrAccountNumber || '003 491 232'}
+                  </span>
                 </div>
-                <div className="text-xs text-slate-700 font-bold mt-0.5">
-                  ឈ្មោះគណនី ៖ <span className="text-black font-black">{config.accountName}</span>
+
+                <div className="h-px bg-slate-200 w-full" />
+
+                <div className="flex items-center justify-between text-xs sm:text-sm font-black font-mono px-1">
+                  <div className="flex items-center gap-1.5 text-blue-800">
+                    <span className="bg-blue-100 text-blue-800 w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs">
+                      $
+                    </span>
+                    <span>គណនី USD ៖</span>
+                  </div>
+                  <span className="text-slate-900 tracking-wider font-bold">
+                    {config.accountNumber || '000 474 559'}
+                  </span>
                 </div>
-                <div className="text-[11px] text-slate-500">
-                  ឈ្មោះហាង ៖ <span className="font-bold text-slate-800">{config.merchantName}</span>
-                </div>
-                <div className="text-[10px] font-mono text-slate-500 mt-0.5 bg-slate-100 py-0.5 px-2 rounded-md inline-block">
-                  {config.merchantType !== 'individual' ? (
-                    <span>ស្តង់ដារ ៖ <strong className="text-blue-700">Tag 30 (គណនី ABA {config.accountNumber})</strong></span>
-                  ) : (
-                    <span>Bakong ID: <span className="font-bold text-slate-900">{config.bakongAccountId}</span></span>
-                  )}
-                </div>
+              </div>
+
+              {/* Footer text (Official ABA slogan) */}
+              <div className="mt-2.5 text-center text-[10px] font-black tracking-wider text-slate-500 uppercase font-sans">
+                ABA' BANK <span className="text-slate-300">|</span> NATIONAL BANK OF CANADA GROUP
+              </div>
+
+              {/* Informative Sub-badge */}
+              <div className="mt-1.5 text-[10.5px] text-center font-bold text-slate-600 bg-slate-100 px-3 py-0.5 rounded-full">
+                {isOriginalMode
+                  ? '✨ ស្កេន QR តែមួយនេះ អាចជ្រើសផ្ទេរជា ដុល្លារ ($) ឬ រៀល (៛) តាមចិត្ត'
+                  : '⚡ បង្កើតកូដ KHQR ស្វ័យប្រវត្តតាមទំហំទឹកប្រាក់'}
               </div>
             </div>
           ) : (
             /* Settings View */
-            <div className="w-full bg-slate-900/95 border border-cyan-500/70 rounded-2xl p-3 sm:p-4 flex flex-col gap-2.5 text-xs">
+            <div className="w-full bg-slate-900/95 border border-cyan-500/70 rounded-2xl p-3.5 sm:p-4 flex flex-col gap-3 text-xs">
               <div className="font-black text-cyan-300 pb-2 border-b border-slate-800 flex items-center justify-between">
-                <span>⚙️ កែប្រែព័ត៌មាន ABA & KHQR</span>
+                <span>⚙️ កំណត់គណនី ABA & QR ដើម</span>
                 <button
                   type="button"
                   onClick={() => setIsEditingSettings(false)}
@@ -409,74 +511,33 @@ export function KHQRModal({
                 </button>
               </div>
 
-              <div>
-                <label className="font-bold text-slate-300 block mb-1">
-                  ទម្រង់ស្តង់ដារ KHQR (Standard Routing)
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setTempConfig(prev => ({ ...prev, merchantType: 'merchant' }))}
-                    className={`p-2 rounded-xl border text-xs text-left transition-all cursor-pointer ${
-                      tempConfig.merchantType !== 'individual'
-                        ? 'bg-blue-600/30 border-blue-400 text-blue-200 shadow-sm'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="font-bold text-white flex items-center gap-1">
-                      <span>🏢 Tag 30 (គណនី ABA)</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
-                      ណែនាំបំផុតសម្រាប់លេខគណនី {tempConfig.accountNumber} (ACLEDA អាចស្កេនបាន)
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setTempConfig(prev => ({ ...prev, merchantType: 'individual' }))}
-                    className={`p-2 rounded-xl border text-xs text-left transition-all cursor-pointer ${
-                      tempConfig.merchantType === 'individual'
-                        ? 'bg-purple-600/30 border-purple-400 text-purple-200 shadow-sm'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="font-bold text-white flex items-center gap-1">
-                      <span>👤 Tag 29 (Bakong ID)</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
-                      សម្រាប់អ្នកមាន Bakong ID ផ្ទាល់ខ្លួន (@abaa)
-                    </div>
-                  </button>
+              {/* Dual Accounts Inputs */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-bold text-blue-300 block mb-1">
+                    $ លេខគណនី USD
+                  </label>
+                  <input
+                    type="text"
+                    value={tempConfig.accountNumber}
+                    onChange={e => setTempConfig(prev => ({ ...prev, accountNumber: e.target.value.trim() }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono font-bold outline-none focus:border-cyan-400"
+                    placeholder="000474559"
+                  />
                 </div>
-              </div>
 
-              <div>
-                <label className="font-bold text-amber-300 block mb-1">
-                  ★ Bakong Account ID / Gateway
-                </label>
-                <input
-                  type="text"
-                  value={tempConfig.bakongAccountId}
-                  onChange={e => setTempConfig(prev => ({ ...prev, bakongAccountId: e.target.value.trim() }))}
-                  className="w-full bg-slate-950 border border-amber-500/60 rounded-xl px-3 py-1.5 text-amber-200 font-mono font-bold outline-none focus:border-amber-400"
-                  placeholder="abaakhppxxx@abaa ឬ proel_toch@abaa"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  💡 សម្រាប់គណនី ABA ទុក <code>abaakhppxxx@abaa</code> ជាស្តង់ដារ ឬដាក់ឈ្មោះ Bakong ផ្ទាល់ខ្លួន
-                </p>
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-300 block mb-1">
-                  លេខគណនី ABA (Account Number)
-                </label>
-                <input
-                  type="text"
-                  value={tempConfig.accountNumber}
-                  onChange={e => setTempConfig(prev => ({ ...prev, accountNumber: e.target.value.trim() }))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono font-bold outline-none"
-                  placeholder="000474559"
-                />
+                <div>
+                  <label className="font-bold text-emerald-300 block mb-1">
+                    ៛ លេខគណនី KHR
+                  </label>
+                  <input
+                    type="text"
+                    value={tempConfig.khrAccountNumber || ''}
+                    onChange={e => setTempConfig(prev => ({ ...prev, khrAccountNumber: e.target.value.trim() }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono font-bold outline-none focus:border-cyan-400"
+                    placeholder="003491232"
+                  />
+                </div>
               </div>
 
               <div>
@@ -487,8 +548,8 @@ export function KHQRModal({
                   type="text"
                   value={tempConfig.accountName}
                   onChange={e => setTempConfig(prev => ({ ...prev, accountName: e.target.value }))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-bold outline-none"
-                  placeholder="Proel Toch"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-bold outline-none focus:border-cyan-400"
+                  placeholder="TOCH PROEL"
                 />
               </div>
 
@@ -500,9 +561,39 @@ export function KHQRModal({
                   type="text"
                   value={tempConfig.merchantName}
                   onChange={e => setTempConfig(prev => ({ ...prev, merchantName: e.target.value }))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-bold outline-none"
-                  placeholder="Kari Arnett"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-bold outline-none focus:border-cyan-400"
+                  placeholder="TOCH PROEL"
                 />
+              </div>
+
+              {/* Upload Original Poster Photo */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-300">
+                    📷 រូបភាព QR ដើម (ABA Poster Stand)
+                  </span>
+                  {config.originalQRImageUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveOriginalImage}
+                      className="text-red-400 hover:text-red-300 text-[11px] font-bold cursor-pointer"
+                    >
+                      🗑️ លុបរូបចេញ
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10.5px] text-slate-400">
+                  អ្នកអាចផ្ទុករូបថតផ្ទាំង QR ដែល ABA ផ្តល់ជូន ដើម្បីបង្ហាញរូបដើមផ្ទាល់៖
+                </p>
+                <button
+                  type="button"
+                  disabled={isProcessingImage}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <span>📷</span>
+                  <span>{isProcessingImage ? 'កំពុងអានរូបភាព...' : 'ជ្រើសរើសរូបថត QR ពីទូរស័ព្ទ / កុំព្យូទ័រ'}</span>
+                </button>
               </div>
 
               <div className="flex items-center gap-2 pt-2">
@@ -526,54 +617,83 @@ export function KHQRModal({
 
           {/* Action Buttons Row */}
           {!isEditingSettings && (
-            <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={handleCopyCode}
-                className="py-2 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
-                title="ចម្លងកូដ KHQR ទៅ Clipboard"
-              >
-                <span>📋</span>
-                <span>ចម្លងកូដ</span>
-              </button>
+            <div className="w-full flex flex-col gap-2 pt-1">
+              {/* Quick Upload Button in Original Mode if user wants to upload their poster */}
+              {isOriginalMode && (
+                <div className="w-full flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isProcessingImage}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1 py-2 px-3 bg-slate-900 hover:bg-slate-800 border border-red-500/50 hover:border-red-400 text-red-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
+                    title="ផ្ទុករូបភាព QR ដើម (Upload Photo)"
+                  >
+                    <span>📷</span>
+                    <span>{isProcessingImage ? 'កំពុងអានរូបភាព...' : (config.originalQRImageUrl ? 'ប្តូររូបភាព QR ដើម' : 'ផ្ទុករូបថត QR ដើម')}</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={handleDownloadPng}
-                className="py-2 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
-                title="ទាញយករូបភាព QR code ជា PNG"
-              >
-                <span>📥</span>
-                <span>ទាញយក</span>
-              </button>
+                  {config.originalQRImageUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveOriginalImage}
+                      className="py-2 px-3 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-400 font-bold text-xs rounded-xl cursor-pointer"
+                      title="លុបរូបដើម ហើយប្រើកូដឌីជីថល"
+                    >
+                      🗑️
+                    </button>
+                  )}
+                </div>
+              )}
 
-              {invoice && onOpenReceiptModal && (
+              <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyCode}
+                  className="py-2 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
+                  title="ចម្លងកូដ KHQR ទៅ Clipboard"
+                >
+                  <span>📋</span>
+                  <span>ចម្លងកូដ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadPng}
+                  className="py-2 px-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
+                  title="ទាញយករូបភាព QR code ជា PNG"
+                >
+                  <span>📥</span>
+                  <span>ទាញយក</span>
+                </button>
+
+                {invoice && onOpenReceiptModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenReceiptModal(invoice);
+                    }}
+                    className="py-2 px-2 bg-blue-950/90 hover:bg-blue-900 border border-blue-500 text-sky-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
+                    title="បើកវិក្កយបត្រដើម្បីព្រីន"
+                  >
+                    <span>🖨️</span>
+                    <span>ព្រីន</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
-                    onClose();
-                    onOpenReceiptModal(invoice);
+                    setTempConfig({ ...config });
+                    setIsEditingSettings(true);
                   }}
-                  className="py-2 px-2 bg-blue-950/90 hover:bg-blue-900 border border-blue-500 text-sky-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
-                  title="បើកវិក្កយបត្រដើម្បីព្រីន"
+                  className="py-2 px-2 bg-slate-900 hover:bg-slate-800 border border-cyan-500/50 text-cyan-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
+                  title="កែប្រែគណនី ABA & KHQR"
                 >
-                  <span>🖨️</span>
-                  <span>ព្រីន</span>
+                  <span>⚙️</span>
+                  <span>កែប្រែ</span>
                 </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => {
-                  setTempConfig({ ...config });
-                  setIsEditingSettings(true);
-                }}
-                className="py-2 px-2 bg-slate-900 hover:bg-slate-800 border border-cyan-500/50 text-cyan-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
-                title="កែប្រែគណនី ABA & KHQR"
-              >
-                <span>⚙️</span>
-                <span>កែប្រែ</span>
-              </button>
+              </div>
             </div>
           )}
         </div>
