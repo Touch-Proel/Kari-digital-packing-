@@ -76,6 +76,20 @@ export function Header({
 
         {/* Action Pills */}
         <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap justify-end">
+          {/* KHQR Quick Scan Button */}
+          {onOpenKHQRModal && (
+            <button
+              onClick={onOpenKHQRModal}
+              className="px-2.5 py-1 rounded-xl text-[11px] font-black border border-red-500/80 bg-[#E11925] hover:bg-[#c91420] text-white flex items-center gap-1 transition-all shadow-[0_0_12px_rgba(225,25,37,0.45)] active:scale-95 cursor-pointer"
+              title="បើកស្កេន Bakong KHQR (ABA Bank)"
+            >
+              <span className="bg-white text-[#E11925] text-[10px] font-black px-1 rounded shadow-sm">
+                KHQR
+              </span>
+              <span className="hidden xs:inline">ស្កេន ABA</span>
+            </button>
+          )}
+
           {/* Facebook Connection Status Button */}
           <button
             onClick={onOpenFbModal}

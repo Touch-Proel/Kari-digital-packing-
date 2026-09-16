@@ -47,6 +47,11 @@ export default defineConfig(() => {
           enabled: true,
           type: 'module',
         },
+        workbox: {
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
+        },
       })
     ],
     resolve: {
