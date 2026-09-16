@@ -72,7 +72,8 @@ export function VipInvoiceModal({
         `🔢 លេខគណនី ABA ៖ ${khqrCfg.accountNumber}\n` +
         `👤 ឈ្មោះម្ចាស់កុង ៖ ${khqrCfg.accountName}\n` +
         `🏪 ឈ្មោះហាង     ៖ ${khqrCfg.merchantName}\n` +
-        `🔗 Bakong ID    ៖ ${khqrCfg.bakongAccountId}\n\n` +
+        `🔗 Bakong ID    ៖ ${khqrCfg.bakongAccountId}\n` +
+        `📲 រូបភាព KHQR ស្កែនទូទាត់ ៖ ${window.location.origin}/api/khqr/image/${invoice.invoice_id}\n\n` +
         `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`;
 
       setCustomMsg(defaultText);

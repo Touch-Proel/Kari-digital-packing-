@@ -537,9 +537,23 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     commentId = recentComment.comment_id;
   }
 
+  // Generate KHQR PNG buffer for direct binary attachment
+  let khqrPngBuffer: Buffer | undefined;
+  try {
+    khqrPngBuffer = await generateServerKHQRPNG({
+      amount: exactTotal,
+      currency: 'USD',
+      billNumber: inv.basket_no || cleanId,
+      customerName,
+      storeLabel: settings.merchant_name || 'Kari Arnett'
+    });
+  } catch (qrErr) {
+    console.warn('[VIP] Could not generate server KHQR PNG buffer:', qrErr);
+  }
+
   let replyRes: { success: boolean; error?: string } = { success: true };
   try {
-    replyRes = await sendFacebookReply(commentId, inv.facebook_user_id, vipMsg, undefined, khqrImageUrl);
+    replyRes = await sendFacebookReply(commentId, inv.facebook_user_id, vipMsg, undefined, khqrImageUrl, khqrPngBuffer);
   } catch (err: any) {
     console.warn('[VIP] sendFacebookReply error:', err);
     replyRes = { success: false, error: err?.message || 'Meta API error' };

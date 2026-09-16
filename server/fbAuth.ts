@@ -388,7 +388,8 @@ export async function sendFacebookReply(
   userId: string | null,
   messageText: string,
   token?: string,
-  imageUrl?: string
+  imageUrl?: string,
+  imageBuffer?: Buffer
 ): Promise<{ success: boolean; error?: string; method?: 'PRIVATE_REPLY' | 'SEND_API' | 'PUBLIC_COMMENT' | 'SIMULATED' }> {
   const activeToken = token || activeFacebookPage?.access_token;
   if (!activeToken || activeToken.startsWith('simulated_') || activeToken.length < 20) {
@@ -409,33 +410,61 @@ export async function sendFacebookReply(
   console.log(`\n=======================================================`);
   console.log(`🚀 [VIP DISPATCH]: Sending VIP message & KHQR...`);
   console.log(`   ↳ User ID: ${cleanUid || 'None'} | Comment IDs: ${commentIdCandidates.join(', ') || 'None'}`);
-  if (imageUrl) console.log(`   ↳ Image Attachment: ${imageUrl}`);
+  if (imageBuffer) console.log(`   ↳ Image Buffer Attachment: ${imageBuffer.length} bytes`);
+  else if (imageUrl) console.log(`   ↳ Image URL Attachment: ${imageUrl}`);
 
   let lastApiError = '';
 
   // Helper to send image attachment via Send API
   const sendImageAttachment = async (recipientId: string) => {
-    if (!imageUrl) return;
+    if (!recipientId || recipientId === 'None' || recipientId.startsWith('FB_USER_ID')) return;
     try {
-      await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipient: { id: recipientId },
-          message: {
-            attachment: {
-              type: 'image',
-              payload: {
-                url: imageUrl,
-                is_reusable: true
+      if (imageBuffer && imageBuffer.length > 0) {
+        // Direct multipart upload (does NOT require Facebook to crawl external URL)
+        const form = new FormData();
+        form.append('recipient', JSON.stringify({ id: recipientId }));
+        form.append('message', JSON.stringify({
+          attachment: {
+            type: 'image',
+            payload: { is_reusable: true }
+          }
+        }));
+        form.append('messaging_type', 'MESSAGE_TAG');
+        form.append('tag', 'POST_PURCHASE_UPDATE');
+        const blob = new Blob([imageBuffer], { type: 'image/png' });
+        form.append('filedata', blob, 'bakong_khqr.png');
+
+        const resImg = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+          method: 'POST',
+          body: form
+        });
+        const imgData = await resImg.json();
+        if (imgData.message_id || imgData.recipient_id) {
+          console.log(`📸 [KHQR IMAGE BINARY SENT]: Successfully uploaded & delivered KHQR image to (${recipientId})!`);
+        } else {
+          console.warn(`[KHQR IMAGE UPLOAD RESPONSE]:`, imgData);
+        }
+      } else if (imageUrl) {
+        await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipient: { id: recipientId },
+            message: {
+              attachment: {
+                type: 'image',
+                payload: {
+                  url: imageUrl,
+                  is_reusable: true
+                }
               }
-            }
-          },
-          messaging_type: 'MESSAGE_TAG',
-          tag: 'POST_PURCHASE_UPDATE'
-        })
-      });
-      console.log(`📸 [KHQR IMAGE SENT]: Successfully attached KHQR image to User ID (${recipientId})`);
+            },
+            messaging_type: 'MESSAGE_TAG',
+            tag: 'POST_PURCHASE_UPDATE'
+          })
+        });
+        console.log(`📸 [KHQR IMAGE SENT]: Successfully attached KHQR image to User ID (${recipientId})`);
+      }
     } catch (imgErr) {
       console.warn(`[KHQR IMAGE ATTACH NOTE]:`, imgErr);
     }
