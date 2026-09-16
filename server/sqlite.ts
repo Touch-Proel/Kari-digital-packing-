@@ -407,6 +407,7 @@ export async function loadFromSqlite(): Promise<{
   customers?: Customer[];
   packerLogs?: PackerLog[];
   activeFacebookPage?: FacebookPage;
+  rawComments?: any[];
 } | null> {
   if (!fs.existsSync(SQLITE_DB_PATH)) {
     return null;

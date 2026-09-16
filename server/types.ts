@@ -101,6 +101,11 @@ export interface AppSettings {
   bulk_discount_amount: number;
   bakong_id: string;
   merchant_name: string;
+  account_name?: string;
+  account_number?: string;
+  bank_name?: string;
+  khqr_city?: string;
+  khqr_enabled?: boolean;
   exchange_rate: number;
   telegram_token: string;
   telegram_chat_id: string;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Invoice } from '../../types';
 import { playPureTone, playSuccessFanfare } from '../../utils/audio';
+import { getKHQRConfig, generateBakongKHQRString, generateKHQRDataUrl } from '../../utils/khqr';
 
 interface VipInvoiceModalProps {
   isOpen: boolean;
@@ -20,10 +21,12 @@ export function VipInvoiceModal({
   const [isSending, setIsSending] = useState(false);
   const [customMsg, setCustomMsg] = useState('');
   const [isEditingCustom, setIsEditingCustom] = useState(false);
+  const [khqrDataUrl, setKhqrDataUrl] = useState<string>('');
 
-  // Generate initial message
+  // Generate initial message & KHQR preview
   useEffect(() => {
     if (invoice) {
+      const khqrCfg = getKHQRConfig();
       const customerName = invoice.facebook_name || 'អតិថិជន VIP';
       const phone = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : 'មិនទាន់មាន';
       const address = invoice.address && !invoice.address.includes('មិនទាន់មាន') ? invoice.address : 'មិនទាន់មាន';
@@ -65,12 +68,27 @@ export function VipInvoiceModal({
         `💰 សរុបត្រូវទូទាត់ ៖ $${exactTotal.toFixed(2)} / ${totalKhr} រៀល\n` +
         `━━━━━━━━━━━━━━━━━━\n` +
         `🏦 គណនីវេរប្រាក់ (ABA / KHQR) ៖\n` +
-        `💳 លេខកុង ABA ៖ 000474559@aba\n` +
-        `👤 ឈ្មោះគណនី ៖ KARI ARNETT\n\n` +
+        `💳 ធនាគារ      ៖ ${khqrCfg.bankName}\n` +
+        `🔢 លេខគណនី ABA ៖ ${khqrCfg.accountNumber}\n` +
+        `👤 ឈ្មោះម្ចាស់កុង ៖ ${khqrCfg.accountName}\n` +
+        `🏪 ឈ្មោះហាង     ៖ ${khqrCfg.merchantName}\n` +
+        `🔗 Bakong ID    ៖ ${khqrCfg.bakongAccountId}\n\n` +
         `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`;
 
       setCustomMsg(defaultText);
       setIsEditingCustom(false);
+
+      // Generate QR preview
+      const qrStr = generateBakongKHQRString({
+        amount: exactTotal,
+        currency: 'USD',
+        billNumber: invoice.basket_no || invoice.invoice_id,
+        storeLabel: khqrCfg.merchantName || 'Kari Arnett',
+        config: khqrCfg
+      });
+      generateKHQRDataUrl(qrStr, { width: 220, margin: 1 })
+        .then(url => setKhqrDataUrl(url))
+        .catch(() => {});
     }
   }, [invoice]);
 
@@ -206,6 +224,47 @@ export function VipInvoiceModal({
           ) : (
             <div className="w-full bg-[#070F1E] border border-purple-900/60 rounded-2xl p-3.5 text-xs text-slate-200 font-sans leading-relaxed whitespace-pre-wrap select-text max-h-[340px] overflow-y-auto shadow-inner">
               {customMsg}
+            </div>
+          )}
+
+          {/* KHQR Card in Vip Modal */}
+          {khqrDataUrl && (
+            <div className="bg-[#0D182E] border border-red-500/50 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-md">
+              <div className="flex items-center gap-2.5">
+                <img
+                  src={khqrDataUrl}
+                  alt="KHQR"
+                  className="w-14 h-14 object-contain bg-white rounded-lg p-0.5 border border-red-400 shadow-sm"
+                />
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="bg-[#E11925] text-white text-[9px] font-black px-1 rounded">KHQR</span>
+                    <span className="text-white text-xs font-bold">ABA: 000474559</span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    Proel Toch ‧ Kari Arnett
+                  </div>
+                  <div className="text-[11px] text-emerald-400 font-mono font-bold">
+                    ${Number((invoice.items.reduce((s, it) => s + it.price * it.quantity, 0) + (invoice.shipping_fee !== undefined ? invoice.shipping_fee : 2)).toFixed(2))}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = khqrDataUrl;
+                  a.download = `KHQR_Basket_${invoice.basket_no || invoice.invoice_id}.png`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  onShowToast('📥 បានទាញយក QR code សម្រាប់ផ្ញើ!');
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 text-red-200 border border-red-500/60 text-xs font-bold flex items-center gap-1 active:scale-95 transition-all cursor-pointer"
+              >
+                <span>📥</span>
+                <span>ទាញយក QR</span>
+              </button>
             </div>
           )}
 

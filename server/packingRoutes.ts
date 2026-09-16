@@ -515,8 +515,8 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     `💰 សរុបត្រូវទូទាត់ ៖ $${exactTotal.toFixed(2)} / ${totalKhr} រៀល\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
     `🏦 គណនីវេរប្រាក់ (ABA / KHQR) ៖\n` +
-    `💳 លេខកុង ABA ៖ ${settings.bakong_id || '000474559@aba'}\n` +
-    `👤 ឈ្មោះគណនី ៖ ${settings.merchant_name || 'KARI ARNETT'}\n\n` +
+    `💳 លេខកុង ABA ៖ ${settings.account_number || '000474559'}\n` +
+    `👤 ឈ្មោះគណនី ៖ ${settings.account_name || 'Proel Toch'} (${settings.merchant_name || 'Kari Arnett'})\n\n` +
     `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`
   );
 
@@ -2268,6 +2268,69 @@ router.get('/db/stats', (_req: Request, res: Response) => {
     total_customers: customers.length,
     total_packer_logs: packerLogs.length,
     active_live_id: activeLiveId
+  });
+});
+
+// -------------------------------------------------------------
+// 💰 Bakong Dynamic KHQR Endpoints (ABA Bank Integration)
+// -------------------------------------------------------------
+
+// GET /api/khqr/config - Get current KHQR store account settings
+router.get('/khqr/config', (_req: Request, res: Response) => {
+  const effectiveBakongId = (!settings.bakong_id || settings.bakong_id === '000474559@aba')
+    ? 'abaakhppxxx@abaa'
+    : settings.bakong_id;
+  res.json({
+    success: true,
+    config: {
+      bankName: settings.bank_name || 'ABA Bank',
+      accountNumber: settings.account_number || '000474559',
+      accountName: settings.account_name || 'Proel Toch',
+      merchantName: settings.merchant_name || 'Kari Arnett',
+      bakongAccountId: effectiveBakongId,
+      merchantCity: settings.khqr_city || 'Phnom Penh',
+      merchantType: (settings as any).khqr_merchant_type || 'merchant',
+      qrMode: (settings as any).khqr_mode || 'dynamic',
+      originalQRString: (settings as any).khqr_orig_string || '',
+      originalQRImageUrl: (settings as any).khqr_orig_image || '',
+      currency: 'USD',
+      enabled: settings.khqr_enabled !== false
+    }
+  });
+});
+
+// POST /api/khqr/config - Update KHQR store account settings
+router.post('/khqr/config', (req: Request, res: Response) => {
+  const body = req.body || {};
+  if (body.bankName !== undefined) settings.bank_name = String(body.bankName).trim();
+  if (body.accountNumber !== undefined) settings.account_number = String(body.accountNumber).trim();
+  if (body.accountName !== undefined) settings.account_name = String(body.accountName).trim();
+  if (body.merchantName !== undefined) settings.merchant_name = String(body.merchantName).trim();
+  if (body.bakongAccountId !== undefined) settings.bakong_id = String(body.bakongAccountId).trim();
+  if (body.merchantCity !== undefined) settings.khqr_city = String(body.merchantCity).trim();
+  if (body.merchantType !== undefined) (settings as any).khqr_merchant_type = String(body.merchantType).trim();
+  if (body.qrMode !== undefined) (settings as any).khqr_mode = String(body.qrMode).trim();
+  if (body.originalQRString !== undefined) (settings as any).khqr_orig_string = String(body.originalQRString);
+  if (body.originalQRImageUrl !== undefined) (settings as any).khqr_orig_image = String(body.originalQRImageUrl);
+  if (body.enabled !== undefined) settings.khqr_enabled = Boolean(body.enabled);
+
+  saveDatabaseToDisk();
+  res.json({
+    success: true,
+    message: 'បានរក្សាទុកការកំណត់ KHQR រួចរាល់!',
+    config: {
+      bankName: settings.bank_name,
+      accountNumber: settings.account_number,
+      accountName: settings.account_name,
+      merchantName: settings.merchant_name,
+      bakongAccountId: settings.bakong_id,
+      merchantCity: settings.khqr_city,
+      merchantType: (settings as any).khqr_merchant_type || 'merchant',
+      qrMode: (settings as any).khqr_mode || 'dynamic',
+      originalQRString: (settings as any).khqr_orig_string || '',
+      originalQRImageUrl: (settings as any).khqr_orig_image || '',
+      enabled: settings.khqr_enabled
+    }
   });
 });
 

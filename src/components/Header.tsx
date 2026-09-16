@@ -22,6 +22,7 @@ interface HeaderProps {
   khmerFont?: string;
   onChangeKhmerFont?: (font: string) => void;
   totalBasketCount?: number;
+  onOpenKHQRModal?: () => void;
 }
 
 export function Header({
@@ -44,7 +45,8 @@ export function Header({
   onAdjustFontSize,
   khmerFont = 'kantumruy',
   onChangeKhmerFont,
-  totalBasketCount
+  totalBasketCount,
+  onOpenKHQRModal
 }: HeaderProps) {
   return (
     <div className="bg-[#0B1325]/95 backdrop-blur-md border border-[#1C2B4B] p-2.5 rounded-2xl flex flex-col gap-2 shadow-[0_8px_25px_rgba(0,0,0,0.6)]">
@@ -88,14 +90,15 @@ export function Header({
             <span className="truncate max-w-[70px] sm:max-w-[100px]">{activePage ? activePage.name : 'FB Page'}</span>
           </button>
 
-          {/* SQLite Database & Date History Button */}
+          {/* Settings & Database Button */}
           {onOpenDatabaseModal && (
             <button
               onClick={onOpenDatabaseModal}
-              className="px-2 py-1 rounded-xl text-[11px] font-bold border bg-cyan-950/70 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900 flex items-center gap-1 transition-all shadow-sm active:scale-95 cursor-pointer"
-              title="ពិនិត្យទិន្នន័យ SQLite & Backup"
+              className="px-2.5 py-1 rounded-xl text-[11px] font-bold border bg-cyan-950/70 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900 flex items-center gap-1 transition-all shadow-sm active:scale-95 cursor-pointer"
+              title="ការកំណត់ហាង, កំណត់ KHQR (Upload) & ទិន្នន័យ SQLite"
             >
-              <span>🗄️</span>
+              <span>⚙️</span>
+              <span className="hidden xs:inline">Settings</span>
             </button>
           )}
 

@@ -14,6 +14,7 @@ interface BasketCardProps {
   onOpenQCModal: (inv: Invoice) => void;
   onOpenReceiptModal: (inv: Invoice) => void;
   onOpenVipModal?: (inv: Invoice) => void;
+  onOpenKHQRModal?: (inv: Invoice) => void;
   onOpenZoomModal: (code: string, name: string, imageUrl?: string, price?: number, stockQty?: number) => void;
   onDataChanged: () => void;
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
@@ -31,6 +32,7 @@ export function BasketCard({
   onOpenQCModal,
   onOpenReceiptModal,
   onOpenVipModal,
+  onOpenKHQRModal,
   onOpenZoomModal,
   onDataChanged,
   onOptimisticItemUpdate,
@@ -693,9 +695,24 @@ export function BasketCard({
             </button>
           </div>
 
-          {/* Total Price Badge */}
-          <div className="bg-[#031526] border-[1.5px] border-cyan-400 text-cyan-300 px-3.5 py-1 rounded-xl font-mono font-black text-sm sm:text-base shadow-[0_0_12px_rgba(6,182,212,0.3)]">
-            ${invoice.total_amount.toFixed(2)}
+          {/* Right: KHQR Button + Total Price Badge */}
+          <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+            {onOpenKHQRModal && (
+              <button
+                type="button"
+                onClick={() => onOpenKHQRModal(invoice)}
+                className="bg-[#E11925] hover:bg-[#c91420] text-white px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1 shadow-[0_0_12px_rgba(225,25,37,0.45)] active:scale-95 transition-all cursor-pointer"
+                title="ស្កេន Bakong KHQR (ABA: 000474559)"
+              >
+                <span className="bg-white text-[#E11925] text-[10px] font-black px-1 py-0.5 rounded shadow-sm">
+                  KHQR
+                </span>
+                <span>ស្កេន</span>
+              </button>
+            )}
+            <div className="bg-[#031526] border-[1.5px] border-cyan-400 text-cyan-300 px-3 py-1 rounded-xl font-mono font-black text-sm sm:text-base shadow-[0_0_12px_rgba(6,182,212,0.3)]">
+              ${invoice.total_amount.toFixed(2)}
+            </div>
           </div>
         </div>
 
@@ -1318,8 +1335,8 @@ export function BasketCard({
                 </div>
               </div>
             ) : (
-              /* Two buttons matching Capture.PNG: ✉️ ផ្ញើវិក្កយបត្រ VIP and 🖨️ ព្រីនបិទលើថង់ */
-              <div className="grid grid-cols-2 gap-2.5 sm:gap-3 mt-1" onClick={e => e.stopPropagation()}>
+              /* Three buttons: ✉️ VIP, 🖨️ ព្រីនបិទលើថង់, and 💰 KHQR ABA */
+              <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2 mt-1" onClick={e => e.stopPropagation()}>
                 {invoice.msg_status === 'SENT' ? (
                   <button
                     onClick={handleNotifyVIP}
@@ -1352,16 +1369,16 @@ export function BasketCard({
                     if (!checkLockGuard()) return;
                     onOpenReceiptModal(invoice);
                   }}
-                  className="py-3 px-4 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
+                  className="py-3 px-3 rounded-2xl bg-gradient-to-r from-[#2563EB] via-[#1D4ED8] to-[#0284C7] hover:from-[#3B82F6] hover:to-[#0EA5E9] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-blue-950/50 active:scale-98 transition-all cursor-pointer"
                 >
                   <span>🖨️</span>
-                  <span>ព្រីនបិទលើថង់</span>
+                  <span className="truncate">ព្រីនបិទលើថង់</span>
                 </button>
               </div>
             )
           ) : currentMasterStage === 2 ? (
             <div className="flex flex-col gap-2 mt-1" onClick={e => e.stopPropagation()}>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 xs:grid-cols-2 gap-2">
                 {invoice.msg_status === 'SENT' ? (
                   <button
                     onClick={handleNotifyVIP}
@@ -1394,10 +1411,10 @@ export function BasketCard({
                     if (!checkLockGuard()) return;
                     onOpenReceiptModal(invoice);
                   }}
-                  className="py-3 px-4 rounded-2xl bg-[#0F1D38] border border-cyan-500/70 hover:bg-[#14264A] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow active:scale-98 transition-all"
+                  className="py-3 px-3 rounded-2xl bg-[#0F1D38] border border-cyan-500/70 hover:bg-[#14264A] text-cyan-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow active:scale-98 transition-all cursor-pointer"
                 >
                   <span>🖨️</span>
-                  <span>ព្រីនវិក្កយបត្រឡើងវិញ</span>
+                  <span className="truncate">ព្រីនឡើងវិញ</span>
                 </button>
               </div>
               <div className="bg-amber-950/40 border border-amber-700/50 p-2 rounded-xl text-xs text-amber-200 text-center font-bold">

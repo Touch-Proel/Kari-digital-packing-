@@ -20,6 +20,7 @@ import { FacebookAuthModal } from './components/Modals/FacebookAuthModal';
 import { ImageZoomModal } from './components/Modals/ImageZoomModal';
 import { ReceiptModal } from './components/Modals/ReceiptModal';
 import { VipInvoiceModal } from './components/Modals/VipInvoiceModal';
+import { KHQRModal } from './components/Modals/KHQRModal';
 import { DatabaseModal } from './components/Modals/DatabaseModal';
 import { ManageLiveSessionsModal } from './components/Modals/ManageLiveSessionsModal';
 import { RequirePackerNameModal } from './components/Modals/RequirePackerNameModal';
@@ -128,6 +129,15 @@ export default function App() {
   const handleOpenVipModal = (inv: Invoice) => {
     setVipInvoice(inv);
     setIsVipModalOpen(true);
+  };
+
+  // Bakong Dynamic KHQR Modal State
+  const [isKHQRModalOpen, setIsKHQRModalOpen] = useState(false);
+  const [khqrInvoice, setKhqrInvoice] = useState<Invoice | null>(null);
+
+  const handleOpenKHQRModal = (inv?: Invoice) => {
+    setKhqrInvoice(inv || null);
+    setIsKHQRModalOpen(true);
   };
 
   // Fast Product Lookup Map for Instant Basket Thumbnail & Image Matching
@@ -515,6 +525,7 @@ export default function App() {
           khmerFont={khmerFont}
           onChangeKhmerFont={handleChangeKhmerFont}
           totalBasketCount={invoices.filter(i => i.status !== 'Cancelled').length}
+          onOpenKHQRModal={() => handleOpenKHQRModal()}
         />
 
         {/* 2. Live Comment Stream Drawer / Simulator */}
@@ -609,6 +620,7 @@ export default function App() {
                 }}
                 onOpenReceiptModal={handleOpenReceiptModal}
                 onOpenVipModal={handleOpenVipModal}
+                onOpenKHQRModal={handleOpenKHQRModal}
                 onOpenZoomModal={(c, n, img, pr, sq) => {
                   setZoomCode(c);
                   setZoomName(n);
@@ -774,6 +786,14 @@ export default function App() {
         }}
       />
 
+      <KHQRModal
+        isOpen={isKHQRModalOpen}
+        onClose={() => setIsKHQRModalOpen(false)}
+        invoice={khqrInvoice}
+        onOpenReceiptModal={handleOpenReceiptModal}
+        onShowToast={showToast}
+      />
+
       <DatabaseModal
         isOpen={isDatabaseModalOpen}
         onClose={() => setIsDatabaseModalOpen(false)}
@@ -781,6 +801,7 @@ export default function App() {
           setSearchQuery(selectedDate);
           showToast(`📅 បានជ្រើសរើសផ្ទៀងផ្ទាត់កាលបរិច្ឆេទ៖ ${selectedDate}`);
         }}
+        onShowToast={showToast}
       />
 
       <ManageLiveSessionsModal

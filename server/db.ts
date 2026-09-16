@@ -93,8 +93,13 @@ export const settings: AppSettings = {
   free_ship_threshold: 0.0, // 0 = disabled (no free shipping under any condition)
   bulk_discount_qty: 0,
   bulk_discount_amount: 0.0,
-  bakong_id: '000474559@aba',
-  merchant_name: 'KARI ARNETT',
+  bakong_id: 'abaakhppxxx@abaa',
+  merchant_name: 'Kari Arnett',
+  account_name: 'Proel Toch',
+  account_number: '000474559',
+  bank_name: 'ABA Bank',
+  khqr_city: 'Phnom Penh',
+  khqr_enabled: true,
   exchange_rate: 4100,
   telegram_token: process.env.TELEGRAM_BOT_TOKEN || '',
   telegram_chat_id: process.env.TELEGRAM_CHAT_ID || ''

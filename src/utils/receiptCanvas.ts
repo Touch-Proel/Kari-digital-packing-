@@ -4,6 +4,8 @@
  * Styled with LARGE, BOLD typography for crystal-clear readability on 80mm thermal paper.
  */
 
+import { generateBakongKHQRString, drawKHQRToCanvas, getKHQRConfig } from './khqr';
+
 export interface InvoiceItem {
   product_code: string;
   product_name?: string;
@@ -33,6 +35,8 @@ export interface InvoiceData {
 
 export interface RenderCanvasOptions {
   rielRate?: number;
+  showKHQR?: boolean;
+  khqrCurrency?: 'USD' | 'KHR';
 }
 
 /**
@@ -44,11 +48,15 @@ export function renderInvoiceTo576Canvas(
 ): HTMLCanvasElement {
   const rielRate = options.rielRate || 4100;
   const items = invoice.items || [];
+  const khqrConfig = getKHQRConfig();
+  const showKHQR = options.showKHQR !== undefined ? options.showKHQR : khqrConfig.enabled;
+  const khqrCurrency = options.khqrCurrency || khqrConfig.currency || 'USD';
   
   // 1. Calculate height dynamically with extra breathing room for larger text
   const headerHeight = 500;
   const itemHeight = items.reduce((acc, it) => acc + (it.item_comment ? 95 : 65), 0);
-  const footerHeight = 420;
+  const khqrHeight = showKHQR ? 370 : 0;
+  const footerHeight = 420 + khqrHeight;
   const totalHeight = headerHeight + itemHeight + footerHeight;
 
   const width = 576;
@@ -262,6 +270,39 @@ export function renderInvoiceTo576Canvas(
   ctx.font = `900 42px ${fontMono}`;
   ctx.fillText(`( ${formattedRiel} R )`, width / 2, y);
   y += 55;
+
+  // 7.5. BAKONG DYNAMIC KHQR (80mm Thermal Optimized)
+  if (showKHQR && exactTotal > 0) {
+    drawLine(y, 3);
+    y += 14;
+
+    ctx.textAlign = 'center';
+    ctx.font = `900 24px ${fontKhmer}`;
+    ctx.fillText('ស្កេនបង់ប្រាក់ KHQR (ABA BANK)', width / 2, y);
+    y += 30;
+
+    // Currency for QR
+    const qrAmount = khqrCurrency === 'KHR' ? rielTotal : exactTotal;
+    const qrString = generateBakongKHQRString({
+      amount: qrAmount,
+      currency: khqrCurrency,
+      billNumber: invoice.basket_no || invoice.invoice_id,
+      storeLabel: khqrConfig.merchantName || 'Kari Arnett',
+      config: khqrConfig
+    });
+
+    // Draw QR Code centered (240px wide)
+    const { actualHeight } = drawKHQRToCanvas(ctx, qrString, width / 2, y + 10, 230);
+    y += (actualHeight || 230) + 24;
+
+    ctx.font = `900 22px ${fontMono}`;
+    ctx.fillText(`${khqrConfig.bankName}: ${khqrConfig.accountNumber} (${khqrConfig.accountName})`, width / 2, y);
+    y += 28;
+
+    ctx.font = `800 20px ${fontKhmer}`;
+    ctx.fillText(`ហាង ៖ ${khqrConfig.merchantName} ‧ ទឹកប្រាក់ ៖ ${khqrCurrency === 'KHR' ? `${formattedRiel} ៛` : `$${exactTotal.toFixed(2)}`}`, width / 2, y);
+    y += 32;
+  }
 
   // 8. FOOTER POLICY & CUT LINE
   ctx.font = `900 24px ${fontKhmer}`;
