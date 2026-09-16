@@ -250,22 +250,51 @@ export function VipInvoiceModal({
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const a = document.createElement('a');
-                  a.href = khqrDataUrl;
-                  a.download = `KHQR_Basket_${invoice.basket_no || invoice.invoice_id}.png`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  onShowToast('📥 បានទាញយក QR code សម្រាប់ផ្ញើ!');
-                }}
-                className="px-2.5 py-1.5 rounded-xl bg-red-950/80 hover:bg-red-900 text-red-200 border border-red-500/60 text-xs font-bold flex items-center gap-1 active:scale-95 transition-all cursor-pointer"
-              >
-                <span>📥</span>
-                <span>ទាញយក QR</span>
-              </button>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`/api/khqr/image/${invoice.invoice_id}`);
+                      const blob = await res.blob();
+                      if (navigator.clipboard && (window as any).ClipboardItem) {
+                        await navigator.clipboard.write([
+                          new (window as any).ClipboardItem({
+                            'image/png': blob
+                          })
+                        ]);
+                        playSuccessFanfare();
+                        onShowToast('🖼️ បានចម្លង (Copy) រូបភាព KHQR រួចរាល់! អាចចុច Paste ក្នុង Chat បាន!', 'success');
+                      } else {
+                        onShowToast('សូមប្រើប៊ូតុងទាញយក QR');
+                      }
+                    } catch {
+                      onShowToast('បរាជ័យក្នុងការ Copy រូបភាព', 'error');
+                    }
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-red-900/90 hover:bg-red-800 text-white border border-red-400 text-xs font-bold flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm"
+                  title="Copy រូបភាព KHQR ចូល Clipboard ដើម្បី Paste ក្នុង Messenger"
+                >
+                  <span>🖼️</span>
+                  <span>Copy រូប QR</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = `/api/khqr/image/${invoice.invoice_id}`;
+                    a.download = `KHQR_Basket_${invoice.basket_no || invoice.invoice_id}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    onShowToast('📥 បានទាញយក QR code សម្រាប់ផ្ញើ!');
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold flex items-center gap-1 active:scale-95 transition-all cursor-pointer"
+                >
+                  <span>📥</span>
+                  <span>ទាញយក</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -273,7 +302,7 @@ export function VipInvoiceModal({
           <div className="bg-purple-950/40 border border-purple-800/40 rounded-xl p-2.5 text-[11px] text-purple-200 flex items-start gap-2">
             <span>💡</span>
             <div>
-              ចុច <strong>«🚀 ផ្ញើ & Copy វិក្កយបត្រ VIP»</strong> នោះប្រព័ន្ធនឹងបញ្ជូនសារទៅ Facebook Page Inbox / Comment Reply និង Copy អត្ថបទចូល Clipboard ភ្លាមៗដើម្បីងាយស្រួលបិទភ្ជាប់ (Paste) ក្នុង Messenger ឬ Telegram!
+              ប្រព័ន្ធនឹងភ្ជាប់ <strong>រូបភាព Bakong KHQR (Card PNG)</strong> ទៅជាមួយសារវិក្កយបត្រស្វ័យប្រវត្តិចូល Facebook Messenger។ លោកអ្នកក៏អាចចុច <strong>«🖼️ Copy រូប QR»</strong> ដើម្បី Paste រូបក្នុង Chat ដោយដៃបានគ្រប់ពេល!
             </div>
           </div>
         </div>
@@ -287,7 +316,7 @@ export function VipInvoiceModal({
             className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-[0_4px_22px_rgba(147,51,234,0.45)] active:scale-98 cursor-pointer disabled:opacity-50 transition-all border border-purple-400/40"
           >
             <span className="text-lg">🚀</span>
-            <span>{isSending ? 'កំពុងបញ្ជូនសារ...' : 'ផ្ញើ & Copy វិក្កយបត្រ VIP (1-Tap)'}</span>
+            <span>{isSending ? 'កំពុងបញ្ជូនសារ & រូបភាព KHQR...' : 'ផ្ញើ VIP & រូប KHQR ស្វ័យប្រវត្តិ (1-Tap)'}</span>
           </button>
 
           {/* Secondary Buttons: Copy only & Open Messenger */}

@@ -25,6 +25,7 @@ import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
 import { parseAndAllocateComment } from './parser';
 import { detectDeliveryZone } from './locationHelper';
 import { sendFacebookReply } from './fbAuth';
+import { generateServerKHQRPNG } from './khqrServer';
 import {
   testTelegramBotToken,
   fetchTelegramStockUpdates,
@@ -497,6 +498,11 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
   const exactTotal = Number((subtotal + shippingFee).toFixed(2));
   const totalKhr = Math.round(exactTotal * (settings.exchange_rate || 4100)).toLocaleString('en-US');
 
+  const rawHost = req.get('x-forwarded-host') || req.get('host') || 'localhost:3000';
+  const host = rawHost.split(',')[0].trim();
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
+  const khqrImageUrl = `${proto}://${host}/api/khqr/image/${inv.invoice_id}`;
+
   const vipMsg = custom_message || (
     `🎉 ជម្រាបសួរចា៎បង ${customerName}! អីវ៉ាន់កន្ត្រក #${inv.basket_no || cleanId} ត្រូវបានរៀបចំច្រករួចរាល់ហើយចា៎ 🛍️\n\n` +
     `🧾 វិក្កយបត្រកុម្ម៉ង់ទំនិញ (VIP INVOICE)\n` +
@@ -516,7 +522,8 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     `━━━━━━━━━━━━━━━━━━\n` +
     `🏦 គណនីវេរប្រាក់ (ABA / KHQR) ៖\n` +
     `💳 លេខកុង ABA ៖ ${settings.account_number || '000474559'}\n` +
-    `👤 ឈ្មោះគណនី ៖ ${settings.account_name || 'Proel Toch'} (${settings.merchant_name || 'Kari Arnett'})\n\n` +
+    `👤 ឈ្មោះគណនី ៖ ${settings.account_name || 'Proel Toch'} (${settings.merchant_name || 'Kari Arnett'})\n` +
+    `📲 រូបភាព KHQR ស្កែនទូទាត់ ៖ ${khqrImageUrl}\n\n` +
     `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`
   );
 
@@ -532,7 +539,7 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
 
   let replyRes: { success: boolean; error?: string } = { success: true };
   try {
-    replyRes = await sendFacebookReply(commentId, inv.facebook_user_id, vipMsg);
+    replyRes = await sendFacebookReply(commentId, inv.facebook_user_id, vipMsg, undefined, khqrImageUrl);
   } catch (err: any) {
     console.warn('[VIP] sendFacebookReply error:', err);
     replyRes = { success: false, error: err?.message || 'Meta API error' };
@@ -553,8 +560,9 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     success: replyRes.success,
     msg_status: inv.msg_status,
     error: replyRes.error,
-    message: replyRes.success ? 'បានផ្ញើវិក្កយបត្រ VIP ទៅកាន់ Messenger ជោគជ័យ!' : (replyRes.error || 'មិនអាចផ្ញើសារបានទេ ➔ សូមចុចឆាតផ្ទាល់'),
+    message: replyRes.success ? 'បានផ្ញើវិក្កយបត្រ VIP & រូបភាព KHQR ទៅកាន់ Messenger ជោគជ័យ!' : (replyRes.error || 'មិនអាចផ្ញើសារបានទេ ➔ សូមចុចឆាតផ្ទាល់'),
     vip_message: vipMsg,
+    khqr_image_url: khqrImageUrl,
     recipient_name: customerName,
     facebook_user_id: inv.facebook_user_id,
     fb_delivery: replyRes
@@ -2358,6 +2366,72 @@ router.post('/khqr/config', (req: Request, res: Response) => {
       enabled: settings.khqr_enabled
     }
   });
+});
+
+// GET /api/khqr/image/:invoice_id - Return high-res Bakong KHQR image PNG for an invoice
+router.get('/khqr/image/:invoice_id', async (req: Request, res: Response) => {
+  try {
+    const cleanId = parseInt(String(req.params.invoice_id).replace('#', '').trim(), 10);
+    const inv = invoices.find(i => i.invoice_id === cleanId || i.basket_no === cleanId);
+    const currency = (req.query.currency as string)?.toUpperCase() === 'KHR' ? 'KHR' : 'USD';
+
+    let amount = 0;
+    let billNumber: string | number = cleanId;
+    let customerName = 'VIP Customer';
+
+    if (inv) {
+      const subtotal = inv.items.reduce((s, it) => s + (it.price * it.quantity), 0);
+      const freeShipLimit = settings.free_ship_threshold || 0.0;
+      const isFreeShip = freeShipLimit > 0 && subtotal >= freeShipLimit;
+      const shippingFee = isFreeShip ? 0.0 : (inv.shipping_fee && inv.shipping_fee > 0 ? inv.shipping_fee : (settings.default_shipping_fee || 2.0));
+      const exactUsd = Number((subtotal + shippingFee).toFixed(2));
+      amount = currency === 'KHR' ? Math.round(exactUsd * (settings.exchange_rate || 4100)) : exactUsd;
+      billNumber = inv.basket_no || inv.invoice_id;
+      customerName = inv.facebook_name || customerName;
+    } else if (req.query.amount) {
+      amount = parseFloat(String(req.query.amount)) || 0;
+    }
+
+    const pngBuffer = await generateServerKHQRPNG({
+      amount,
+      currency,
+      billNumber,
+      customerName,
+      storeLabel: settings.merchant_name || 'Kari Arnett'
+    });
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.send(pngBuffer);
+  } catch (err: any) {
+    console.error('Error generating KHQR image PNG:', err);
+    res.status(500).json({ success: false, error: 'Failed to generate KHQR image' });
+  }
+});
+
+// GET /api/khqr/image - Dynamic query-based KHQR Image
+router.get('/khqr/image', async (req: Request, res: Response) => {
+  try {
+    const amount = parseFloat(String(req.query.amount || 0)) || 0;
+    const currency = (req.query.currency as string)?.toUpperCase() === 'KHR' ? 'KHR' : 'USD';
+    const billNumber = (req.query.basket || req.query.bill || '0') as string;
+    const customerName = (req.query.customer || 'Customer') as string;
+
+    const pngBuffer = await generateServerKHQRPNG({
+      amount,
+      currency,
+      billNumber,
+      customerName,
+      storeLabel: settings.merchant_name || 'Kari Arnett'
+    });
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.send(pngBuffer);
+  } catch (err: any) {
+    console.error('Error generating generic KHQR image:', err);
+    res.status(500).json({ success: false, error: 'Failed to generate KHQR image' });
+  }
 });
 
 export default router;

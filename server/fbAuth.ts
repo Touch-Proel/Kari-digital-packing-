@@ -382,12 +382,13 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
   }
 }
 
-// Send Messenger Private Reply or Comment Reply with Dual-Layer Fallback
+// Send Messenger Private Reply or Comment Reply with Dual-Layer Fallback & KHQR Image Attachment
 export async function sendFacebookReply(
   commentId: string | null,
   userId: string | null,
   messageText: string,
-  token?: string
+  token?: string,
+  imageUrl?: string
 ): Promise<{ success: boolean; error?: string; method?: 'PRIVATE_REPLY' | 'SEND_API' | 'PUBLIC_COMMENT' | 'SIMULATED' }> {
   const activeToken = token || activeFacebookPage?.access_token;
   if (!activeToken || activeToken.startsWith('simulated_') || activeToken.length < 20) {
@@ -406,10 +407,39 @@ export async function sendFacebookReply(
   );
 
   console.log(`\n=======================================================`);
-  console.log(`🚀 [VIP DISPATCH]: Sending VIP message...`);
+  console.log(`🚀 [VIP DISPATCH]: Sending VIP message & KHQR...`);
   console.log(`   ↳ User ID: ${cleanUid || 'None'} | Comment IDs: ${commentIdCandidates.join(', ') || 'None'}`);
+  if (imageUrl) console.log(`   ↳ Image Attachment: ${imageUrl}`);
 
   let lastApiError = '';
+
+  // Helper to send image attachment via Send API
+  const sendImageAttachment = async (recipientId: string) => {
+    if (!imageUrl) return;
+    try {
+      await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientId },
+          message: {
+            attachment: {
+              type: 'image',
+              payload: {
+                url: imageUrl,
+                is_reusable: true
+              }
+            }
+          },
+          messaging_type: 'MESSAGE_TAG',
+          tag: 'POST_PURCHASE_UPDATE'
+        })
+      });
+      console.log(`📸 [KHQR IMAGE SENT]: Successfully attached KHQR image to User ID (${recipientId})`);
+    } catch (imgErr) {
+      console.warn(`[KHQR IMAGE ATTACH NOTE]:`, imgErr);
+    }
+  };
 
   // ---------------------------------------------------------------------
   // Layer 1 (PRIORITY FOR LIVE ORDERS): Private Reply by Comment ID
@@ -428,6 +458,9 @@ export async function sendFacebookReply(
       const data = await res.json();
       if (data.message_id || data.recipient_id) {
         console.log(`🎉 [PRIVATE REPLY SUCCESS]: Sent VIP message via Comment ID (${cid}) - 24h Window Bypassed!`);
+        if (data.recipient_id && imageUrl) {
+          await sendImageAttachment(data.recipient_id);
+        }
         console.log(`=======================================================\n`);
         return { success: true, method: 'PRIVATE_REPLY' };
       } else if (data.error) {
@@ -460,6 +493,9 @@ export async function sendFacebookReply(
       const dataTagged = await resTagged.json();
       if (dataTagged.message_id) {
         console.log(`📩 [SEND API TAGGED SUCCESS]: Sent VIP invoice to User ID (${cleanUid}) via POST_PURCHASE_UPDATE`);
+        if (imageUrl) {
+          await sendImageAttachment(cleanUid);
+        }
         console.log(`=======================================================\n`);
         return { success: true, method: 'SEND_API' };
       } else if (dataTagged.error) {
@@ -483,6 +519,9 @@ export async function sendFacebookReply(
       const data = await res.json();
       if (data.message_id) {
         console.log(`📩 [SEND API SUCCESS]: Sent VIP message to User ID (${cleanUid})`);
+        if (imageUrl) {
+          await sendImageAttachment(cleanUid);
+        }
         console.log(`=======================================================\n`);
         return { success: true, method: 'SEND_API' };
       } else if (data.error) {
