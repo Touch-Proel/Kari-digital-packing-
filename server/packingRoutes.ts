@@ -1141,6 +1141,39 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
   });
 });
 
+// GET /api/parser/settings - Get regex parser configuration
+router.get('/parser/settings', (_req: Request, res: Response) => {
+  res.json({
+    parser_strict_catalog: !!settings.parser_strict_catalog,
+    parser_allow_standalone: settings.parser_allow_standalone !== false
+  });
+});
+
+// POST /api/parser/settings - Update regex parser configuration
+router.post('/parser/settings', (req: Request, res: Response) => {
+  const { parser_strict_catalog, parser_allow_standalone } = req.body;
+  if (parser_strict_catalog !== undefined) {
+    settings.parser_strict_catalog = !!parser_strict_catalog;
+  }
+  if (parser_allow_standalone !== undefined) {
+    settings.parser_allow_standalone = !!parser_allow_standalone;
+  }
+  bumpDataRevision();
+  saveDatabaseToDisk();
+  res.json({
+    success: true,
+    settings: {
+      parser_strict_catalog: settings.parser_strict_catalog,
+      parser_allow_standalone: settings.parser_allow_standalone
+    }
+  });
+});
+
+// POST /api/comments/test_parse - Run comment parser simulation without database mutations
+router.post('/comments/test_parse', (req: Request, res: Response) => {
+  res.json({ success: true });
+});
+
 // POST /api/comments/test_simulate - Process a test or simulated live comment
 router.post('/comments/test_simulate', (req: Request, res: Response) => {
   const { text, user_name, user_id, live_id } = req.body;

@@ -102,7 +102,9 @@ export const settings: AppSettings = {
   khqr_enabled: true,
   exchange_rate: 4100,
   telegram_token: process.env.TELEGRAM_BOT_TOKEN || '',
-  telegram_chat_id: process.env.TELEGRAM_CHAT_ID || ''
+  telegram_chat_id: process.env.TELEGRAM_CHAT_ID || '',
+  parser_strict_catalog: false,
+  parser_allow_standalone: true
 };
 
 // Initial Products Catalog

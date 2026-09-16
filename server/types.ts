@@ -109,6 +109,8 @@ export interface AppSettings {
   exchange_rate: number;
   telegram_token: string;
   telegram_chat_id: string;
+  parser_strict_catalog?: boolean;
+  parser_allow_standalone?: boolean;
 }
 
 export interface FacebookPage {

@@ -30,53 +30,49 @@ const KHMER_DIGITS_MAP: Record<string, string> = {
   '៥': '5', '៦': '6', '៧': '7', '៨': '8', '៩': '9'
 };
 
-const KHMER_WORD_NUMBERS: [string, number][] = [
-  ['ប្រាំបួន', 9], ['ប្រាំបី', 8], ['ប្រាំពីរ', 7], ['ប្រាំមួយ', 6],
-  ['ប្រាំ', 5], ['បួន', 4], ['បី', 3], ['ពីរ', 2], ['ពី', 2], ['មួយ', 1], ['មូយ', 1], ['ដប់', 10]
-];
-
 const ACTION_WORDS = ['យក', 'យល', 'ចង់បាន', 'កាត់', 'សុំ', 'ថែម', 'ដាក់', 'កក់', 'បូក', 'សុំយក'];
 
-export function normalizeKhmerText(text: string): string {
-  if (!text) return '';
-  let s = text.trim();
-  for (const [kh, ar] of Object.entries(KHMER_DIGITS_MAP)) {
-    s = s.split(kh).join(ar);
-  }
-  s = s.replace(/ឆុត/g, 'ឈុត').replace(/កូត/g, 'កូដ').replace(/ខូត/g, 'កូដ').replace(/យល/g, 'យក');
-
-  for (const [word, num] of KHMER_WORD_NUMBERS) {
-    s = s.split(word).join(` ${num} `);
-  }
-  return s;
-}
+const SIZE_COLOR_SUFFIXES = [
+  'XXL', 'XXS', 'XL', 'XS', 'M', 'L', 'S',
+  'ស', 'ខ្មៅ', 'ក្រហម', 'ខៀវ', 'លឿង', 'ផ្កាឈូក', 'ស្វាយ', 'បៃតង', 'ត្នោត', 'ប្រផេះ'
+];
 
 export function convertKhmerDigitsToArabic(text: string): string {
   if (!text) return '';
   return text.replace(/[០-៩]/g, ch => KHMER_DIGITS_MAP[ch] || ch);
 }
 
-// 7-Digit Subscriber Numbers (Total 10 Digits with leading 0)
-// Smart: 096 | Cellcard: 076 | Metfone: 031, 071, 088, 097 | Seatel: 018
+export function normalizeKhmerText(text: string): string {
+  if (!text) return '';
+  let s = convertKhmerDigitsToArabic(text.trim());
+
+  // កែពាក្យខុសទូទៅ
+  s = s.replace(/ឆុត/g, 'ឈុត')
+       .replace(/កូត|ខូត/g, 'កូដ')
+       .replace(/យល/g, 'យក');
+
+  // បម្លែងពាក្យខ្មែរទៅលេខ (មិនដោត space នាំឱ្យខូចលេខកូដឡើយ)
+  s = s.replace(/ប្រាំបួន/g, '9')
+       .replace(/ប្រាំបី/g, '8')
+       .replace(/ប្រាំពីរ/g, '7')
+       .replace(/ប្រាំមួយ/g, '6')
+       .replace(/ប្រាំ/g, '5')
+       .replace(/បួន/g, '4')
+       .replace(/បី/g, '3')
+       .replace(/ពីរ|ពី/g, '2')
+       .replace(/មួយ|មូយ/g, '1');
+
+  return s;
+}
+
 const RE_CAMBODIA_7_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:18|31|71|76|88|96|97)(?:[\s.\-()]*\d){7}\b/i;
-
-// 6-Digit Subscriber Numbers (Total 9 Digits with leading 0)
-// Smart: 010, 015, 016, 069, 070, 081, 086, 087, 093, 098
-// Cellcard: 011, 012, 014, 017, 061, 077, 078, 085, 089, 092, 095, 099
-// Metfone: 060, 066, 067, 068, 090
-// Cootel: 038
 const RE_CAMBODIA_6_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:10|11|12|14|15|16|17|38|60|61|66|67|68|69|70|77|78|81|85|86|87|89|90|92|93|95|98|99)(?:[\s.\-()]*\d){6}\b/i;
-
-// General Cambodian phone number fallback (9 or 10 digits starting with 0 or +855)
 const RE_CAMBODIA_GENERAL = /(?:\+?855[\s.\-()]*|0)[1-9]\d(?:[\s.\-()]*\d){6,7}\b/i;
 
 export function extractPhoneNumber(text: string): { phone: string | null; cleanText: string } {
   if (!text) return { phone: null, cleanText: text };
 
-  // Convert Khmer digits (០-៩) to Arabic digits (0-9) preserving 1:1 character indices
   const normalized = convertKhmerDigitsToArabic(text);
-
-  // Match in priority: 7-digit subscriber, 6-digit subscriber, then general fallback
   const match = normalized.match(RE_CAMBODIA_7_DIGIT)
              || normalized.match(RE_CAMBODIA_6_DIGIT)
              || normalized.match(RE_CAMBODIA_GENERAL);
@@ -86,16 +82,12 @@ export function extractPhoneNumber(text: string): { phone: string | null; cleanT
     const matchIndex = match.index ?? normalized.indexOf(matchedStr);
     const matchLength = matchedStr.length;
 
-    // Get original raw substring from `text` (retaining original Khmer/Arabic digits or separators)
-    const rawInOriginal = text.substring(matchIndex, matchIndex + matchLength);
-
-    // Extract digits only
     let digits = matchedStr.replace(/\D/g, '');
     if (digits.startsWith('855')) {
       digits = '0' + digits.slice(3);
     }
 
-    if ((digits.length === 9 || digits.length === 10) && digits.startsWith('0')) {
+    if ((digits.length === 8 || digits.length === 9 || digits.length === 10) && digits.startsWith('0')) {
       const cleanText = (text.substring(0, matchIndex) + ' ' + text.substring(matchIndex + matchLength))
         .replace(/\s+/g, ' ')
         .trim();
@@ -106,11 +98,8 @@ export function extractPhoneNumber(text: string): { phone: string | null; cleanT
   return { phone: null, cleanText: text };
 }
 
-
-
 export function isQuestionComment(text: string): boolean {
   if (!text) return false;
-  // If it has connector syntax like 30=2, it is not just a question
   if (/[:=*xX+\-]/.test(text)) return false;
 
   const lower = text.toLowerCase();
@@ -123,81 +112,74 @@ export function isQuestionComment(text: string): boolean {
   return false;
 }
 
-export function extractCodeQtyPairs(text: string): { code: string; qty: number }[] {
+export interface ExtractedItemPair {
+  code: string;
+  qty: number;
+  variant?: string;
+}
+
+export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
   if (!text) return [];
 
-  const norm = normalizeKhmerText(text);
-  const clean = norm.toUpperCase().trim();
-  const pairs: { code: string; qty: number }[] = [];
+  const s = normalizeKhmerText(text);
+  // បំបែក segments តាមក្បៀស បន្ទាត់ថ្មី ឬពាក្យកាត់ទំនិញ
+  const segments = s.split(/[\n,;+]+|\s{2,}|\s+(?=\d+[a-zA-Z]*\s*(?:យក|កាត់|=|\*))/i);
+  const pairs: ExtractedItemPair[] = [];
   const seenCodes = new Set<string>();
 
-  // Explicit connector: 30=2, 30*2, 30x2, 30:2, 30-2, 30+2, 118_1
-  const reConnector = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})/g;
-  let match: RegExpExecArray | null;
-  while ((match = reConnector.exec(clean)) !== null) {
-    const c = match[1].trim().replace(/^\./, '');
-    const q = parseInt(match[2], 10) || 1;
-    if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 5) {
-      pairs.push({ code: c, qty: q });
-      seenCodes.add(c);
-    }
-  }
+  // តម្រៀបកូដពីវែងទៅខ្លី ដើម្បីការពារការចាប់ជាន់លើគ្នា
+  const sortedCatalog = [...products]
+    .filter(p => p.code && p.code.trim().length > 0)
+    .sort((a, b) => b.code.length - a.code.length);
 
-  // Khmer Action Word attached or spaced after code: ១១៩យក១, 119យក2, 119 យក 1, 119យក
-  const reCodeAction = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(\d{1,2})?/g;
-  while ((match = reCodeAction.exec(clean)) !== null) {
-    const c = match[1].trim().replace(/^\./, '');
-    const q = match[2] ? (parseInt(match[2], 10) || 1) : 1;
-    if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 5) {
-      pairs.push({ code: c, qty: q });
-      seenCodes.add(c);
-    }
-  }
+  const suffixRegex = `(?:[\\s_-]*(${SIZE_COLOR_SUFFIXES.join('|')}))?`;
 
-  // Action word before code: យក 119 2 or យក 119 or កាត់ 30 2
-  const reActionBefore = /(?:ថែម|យក|កាត់|ដាក់|កក់|បូក)\s*(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})(?:\s+(\d{1,2}))?/g;
-  while ((match = reActionBefore.exec(clean)) !== null) {
-    const c = match[1].trim().replace(/^\./, '');
-    const q = match[2] ? (parseInt(match[2], 10) || 1) : 1;
-    if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 5) {
-      pairs.push({ code: c, qty: q });
-      seenCodes.add(c);
-    }
-  }
+  for (let seg of segments) {
+    seg = seg.trim();
+    if (!seg) continue;
 
-  // Space pattern: 30 2 or A12 1
-  const reSpace = /\b([A-Za-z0-9]{1,5})\s+(\d{1,2})\b/g;
-  while ((match = reSpace.exec(clean)) !== null) {
-    const c = match[1].trim().replace(/^\./, '');
-    const q = parseInt(match[2], 10) || 1;
-    // Don't mistake phone fragments as code
-    if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && !/^\d{3,}$/.test(c)) {
-      pairs.push({ code: c, qty: q });
-      seenCodes.add(c);
-    }
-  }
+    for (const prod of sortedCatalog) {
+      const pCode = prod.code.toUpperCase().trim();
+      if (COMMON_GREETINGS.has(pCode) || seenCodes.has(pCode)) continue;
 
-  // Standalone code or code with variant/color: e.g. "120", "119", "A12", "កូដ 120", "120 ស"
-  const reStandalone = /^\s*(?:កូដលេខ|លេខកូដ|កូដ|code|លេខ)?\s*([A-Za-z0-9]{1,5})(?:[_\s]+([ក-អA-Za-z0-9_]+))?\s*$/i;
-  const standaloneMatch = clean.match(reStandalone);
-  if (standaloneMatch) {
-    const c = standaloneMatch[1].trim();
-    if (!COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 5 && !/^\d{8,}$/.test(c)) {
-      pairs.push({ code: c, qty: 1 });
-      seenCodes.add(c);
-    }
-  }
+      const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  if (pairs.length > 0) return pairs;
+      // ១. កូដ + Variant (Optional) + ចំនួន (ឧ. 28យក2, 31M 1, 40=2, 49M)
+      const reWithQtyAndVariant = new RegExp(
+        `(?:(?:កូដលេខ|លេខកូដ|កូដ|CODE)?\\s*)` +
+        `(?<![A-Za-z0-9])(${esc})` +
+        `${suffixRegex}` +
+        `\\s*(?:[*xX=:_\\-\\s/.,+«»~]|យក|កាត់|ថែម|ដាក់|កក់|បូក)*\\s*(\\d{1,2})?(?![A-Za-z0-9])`,
+        'i'
+      );
 
-  // Direct product code match if exists in stock catalog
-  for (const prod of products) {
-    const pCode = prod.code.toUpperCase();
-    const regex = new RegExp(`\\b${pCode}\\b`, 'i');
-    if (regex.test(clean) && !seenCodes.has(pCode)) {
-      pairs.push({ code: pCode, qty: 1 });
-      seenCodes.add(pCode);
-      break;
+      // ២. ពាក្យ Action ខាងមុខ (ឧ. យក 28 2, កាត់ 40)
+      const reActionBefore = new RegExp(
+        `(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*` +
+        `(?:កូដលេខ|លេខកូដ|កូដ|CODE)?\\s*` +
+        `(?<![A-Za-z0-9])(${esc})` +
+        `${suffixRegex}` +
+        `(?:\\s*[*xX=:_\\-\\s/.,+«»~]\\s*|\\s+)?(\\d{1,2})?(?![A-Za-z0-9])`,
+        'i'
+      );
+
+      const match = seg.match(reWithQtyAndVariant) || seg.match(reActionBefore);
+
+      if (match) {
+        const detectedCode = pCode;
+        const variant = match[2] ? match[2].toUpperCase().trim() : undefined;
+        const qty = match[3] ? (parseInt(match[3], 10) || 1) : 1;
+
+        pairs.push({
+          code: detectedCode,
+          qty,
+          variant
+        });
+
+        seenCodes.add(detectedCode);
+        seg = seg.replace(match[0], ' ');
+        break;
+      }
     }
   }
 
@@ -220,7 +202,6 @@ export interface ParseCommentResult {
   total_amount?: number;
 }
 
-// Memory cache of processed comment keys to prevent duplicate quantity additions when syncing comments
 const processedCommentKeys = new Set<string>();
 
 export function parseAndAllocateComment(
@@ -240,11 +221,9 @@ export function parseAndAllocateComment(
 
   const { phone, cleanText } = extractPhoneNumber(rawText);
 
-  // Deduplication check: Prevent re-allocating items if comment was fetched multiple times
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
 
-  // Check if this comment was already processed in customer's existing basket for this live session
   const existingInv = invoices.find(
     i => i.live_id === liveId &&
          i.status !== 'Cancelled' &&
@@ -278,7 +257,6 @@ export function parseAndAllocateComment(
     };
   }
 
-  // 1. Permanently record into rawComments list & processed cache
   processedCommentKeys.add(savedCommentId);
   if (commentId) processedCommentKeys.add(commentId);
   processedCommentKeys.add(signatureKey);
@@ -295,8 +273,11 @@ export function parseAndAllocateComment(
 
   const { zone, label } = detectDeliveryZone(rawText);
 
-  // 2. Update or create customer profile
-  let cust = customers.find(c => c.facebook_name.toLowerCase() === cleanFbName.toLowerCase());
+  let cust = customers.find(c => 
+    (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && c.facebook_user_id === fbUserId) ||
+    c.facebook_name.toLowerCase() === cleanFbName.toLowerCase()
+  );
+
   if (!cust) {
     cust = {
       customer_id: customers.length + 1,
@@ -317,11 +298,9 @@ export function parseAndAllocateComment(
     cust.last_interaction_at = new Date().toISOString();
   }
 
-  // 3. Extract item code and quantity pairs & check if question
   const isQuestion = isQuestionComment(rawText);
   const pairs = extractCodeQtyPairs(cleanText);
 
-  // Find existing active basket for this customer in current live session
   let inv = invoices.find(
     i => i.live_id === liveId &&
          i.status !== 'Packed' &&
@@ -334,7 +313,7 @@ export function parseAndAllocateComment(
          )
   );
 
-  // Rule 1: Do NOT create empty baskets for customers who only ask questions or haven't ordered any product codes!
+  // ប្រសិនបើជាសំណួរ ឬគ្មានកូដទំនិញដែលត្រូវនឹង Catalog មិនត្រូវបង្កើតកន្ត្រកឡើយ
   if (isQuestion || pairs.length === 0) {
     if (inv) {
       if (!inv.comments) inv.comments = [];
@@ -347,14 +326,13 @@ export function parseAndAllocateComment(
 
     return {
       status: isQuestion ? 'QUESTION_SAVED' : 'UNMATCHED_SAVED',
-      message: `💬 កត់ត្រាខមិន${isQuestion ? 'សួរ' : ''} (មិនទាន់កាត់កន្ត្រក) ៖ «${cleanFbName}» ៖ "${rawText}"`,
+      message: `💬 កត់ត្រាខមិន${isQuestion ? 'សួរ' : ''} (មិនមានកូដទំនិញត្រូវ) ៖ «${cleanFbName}» ៖ "${rawText}"`,
       customer_name: cleanFbName,
       phone_number: phone || cust.phone_number,
       address: cust.address
     };
   }
 
-  // Rule 2: Customer ordered product code(s) (pairs.length > 0) -> Create basket now if none exists!
   if (!inv) {
     const nextId = invoices.length > 0 ? Math.max(...invoices.map(i => i.invoice_id)) + 1 : 101;
     inv = {
@@ -367,8 +345,8 @@ export function parseAndAllocateComment(
       picture_url: userPicUrl || cust?.picture_url,
       phone_number: phone || cust.phone_number || 'គ្មានលេខ',
       address: cust.address || (zone !== 'UNKNOWN' ? label : '⚠️ មិនទាន់មានអាសយដ្ឋាន'),
-      location_zone: zone !== 'UNKNOWN' ? zone : (cust.address && /ខេត្ត|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពត|កណ្តាល|ស្វាយរៀង/i.test(cust.address) ? 'PROVINCE' : (cust.address && /ភ្នំពេញ|pp|ទួលគោក|ដូនពេញ|ចំការមន/i.test(cust.address) ? 'PP' : 'UNKNOWN')),
-      location_label: zone !== 'UNKNOWN' ? label : (cust.address && /ខេត្ត|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពត/i.test(cust.address) ? '🏞️ តាមខេត្ត' : (cust.address && /ភ្នំពេញ|pp|ទួលគោក|ដូនពេញ/i.test(cust.address) ? '🏙️ ភ្នំពេញ' : '❓ មិនទាន់ដឹង')),
+      location_zone: zone !== 'UNKNOWN' ? zone : 'UNKNOWN',
+      location_label: zone !== 'UNKNOWN' ? label : '❓ មិនទាន់ដឹង',
       total_amount: 0,
       status: 'Pending',
       packing_stage: 'UNPICKED',
@@ -379,42 +357,25 @@ export function parseAndAllocateComment(
     };
     invoices.unshift(inv);
   } else {
-    if (userPicUrl && !inv.picture_url) {
-      inv.picture_url = userPicUrl;
-    }
-    if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) {
-      inv.phone_number = phone;
-    }
+    if (userPicUrl && !inv.picture_url) inv.picture_url = userPicUrl;
+    if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) inv.phone_number = phone;
     if (zone !== 'UNKNOWN' && (!inv.address || inv.address.includes('មិនទាន់មាន'))) {
       inv.location_zone = zone;
       inv.location_label = label;
       inv.address = label;
     }
     if (!inv.comments) inv.comments = [];
-    if (!inv.comments.includes(rawText)) {
-      inv.comments.push(rawText);
-    }
+    if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
   }
 
-  // 6. Allocate items into customer's basket
   const allocated: { code: string; product_name: string; quantity: number; price: number }[] = [];
   const soldOut: string[] = [];
 
   for (const pair of pairs) {
-    // Find product in catalog or auto-register new live product
-    let prod = products.find(p => p.code.toUpperCase() === pair.code.toUpperCase());
-    if (!prod) {
-      const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
-      prod = {
-        id: nextProdId,
-        code: pair.code.toUpperCase(),
-        name: `កូដ [${pair.code.toUpperCase()}]`,
-        stock_qty: 100,
-        price: 5.0,
-        cost_price: 3.0
-      };
-      products.push(prod);
-    }
+    const prod = products.find(p => p.code.toUpperCase() === pair.code.toUpperCase());
+
+    // មិនស្គាល់កូដ -> រំលង (មិនបង្កើត product ផ្តេសផ្តាសឡើយ)
+    if (!prod) continue;
 
     if (prod.stock_qty <= 0) {
       soldOut.push(prod.code);
@@ -424,8 +385,12 @@ export function parseAndAllocateComment(
     const qtyToTake = Math.min(pair.qty, prod.stock_qty);
     prod.stock_qty -= qtyToTake;
 
-    // Add or update item in invoice
-    const existingItem = inv.items.find(it => it.product_code.toUpperCase() === prod.code.toUpperCase());
+    const displayName = pair.variant ? `${prod.name} (${pair.variant})` : prod.name;
+    const existingItem = inv.items.find(
+      it => it.product_code.toUpperCase() === prod.code.toUpperCase() &&
+            it.product_name === displayName
+    );
+
     if (existingItem) {
       existingItem.quantity += qtyToTake;
       existingItem.item_comment = rawText;
@@ -437,7 +402,7 @@ export function parseAndAllocateComment(
         invoice_id: inv.invoice_id,
         product_id: prod.id,
         product_code: prod.code,
-        product_name: prod.name,
+        product_name: displayName,
         quantity: qtyToTake,
         price: prod.price,
         is_packed: false,
@@ -448,7 +413,7 @@ export function parseAndAllocateComment(
 
     allocated.push({
       code: prod.code,
-      product_name: prod.name,
+      product_name: displayName,
       quantity: qtyToTake,
       price: prod.price
     });
@@ -457,12 +422,16 @@ export function parseAndAllocateComment(
   recalculateInvoice(inv);
   bumpDataRevision();
 
-  // If items could not be allocated (e.g. sold out), make sure the comment is in unmatched_comments
-  if (allocated.length === 0) {
+  if (allocated.length === 0 && soldOut.length > 0) {
     if (!inv.unmatched_comments) inv.unmatched_comments = [];
-    if (!inv.unmatched_comments.includes(rawText)) {
-      inv.unmatched_comments.push(rawText);
-    }
+    if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
+
+    return {
+      status: 'SOLD_OUT',
+      message: `⚠️ កូដ [${soldOut.join(', ')}] អស់ស្តុកហើយ!`,
+      invoice_id: inv.invoice_id,
+      customer_name: cleanFbName
+    };
   }
 
   if (allocated.length > 0) {
@@ -476,15 +445,6 @@ export function parseAndAllocateComment(
       address: inv.address,
       allocated_items: allocated,
       total_amount: inv.total_amount
-    };
-  }
-
-  if (soldOut.length > 0) {
-    return {
-      status: 'SOLD_OUT',
-      message: `⚠️ កូដ [${soldOut.join(', ')}] អស់ស្តុកហើយ! (បានរក្សាទុកខមិន)`,
-      invoice_id: inv.invoice_id,
-      customer_name: cleanFbName
     };
   }
 
