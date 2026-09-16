@@ -40,8 +40,8 @@ export function VipInvoiceModal({
           .replace(/\s*ទំនិញ$/i, '')
           .trim();
         const hasCustom = custom && custom !== 'ទំនិញ';
-        const label = hasCustom ? `កូដ [${it.product_code}] ${custom}` : `កូដ [${it.product_code}]`;
-        return `  🔹 ${label} x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`;
+        const label = hasCustom ? `[${it.product_code}] ${custom}` : `[${it.product_code}]`;
+        return `• ${label} x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`;
       }).join('\n');
 
       const totalQty = invoice.items.reduce((s, it) => s + it.quantity, 0);
@@ -49,32 +49,19 @@ export function VipInvoiceModal({
       const shippingFee = invoice.shipping_fee !== undefined ? invoice.shipping_fee : 2.0;
       const exactTotal = Number((subtotal + shippingFee).toFixed(2));
       const totalKhr = Math.round(exactTotal * 4100).toLocaleString('en-US');
+      const phoneText = phone !== 'មិនទាន់មាន' ? ` (${phone})` : '';
 
       const defaultText =
-        `🎉 ជម្រាបសួរចា៎បង ${customerName}! អីវ៉ាន់កន្ត្រក #${invoice.basket_no || invoice.invoice_id} ត្រូវបានរៀបចំច្រករួចរាល់ហើយចា៎ 🛍️\n\n` +
-        `🧾 វិក្កយបត្រកុម្ម៉ង់ទំនិញ (VIP INVOICE)\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `👤 អតិថិជន ៖ ${customerName}\n` +
-        `📞 ទូរស័ព្ទ  ៖ ${phone}\n` +
-        `📍 ទីតាំង   ៖ ${address}\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `📋 បញ្ជីទំនិញកាត់បាន ៖\n` +
-        `${itemsList || '  🔹 ទំនិញទូទៅ'}\n` +
-        `----------------------------------\n` +
-        `📦 ចំនួនសរុប ៖ ${totalQty} ឈុត\n` +
-        `💵 តម្លៃទំនិញ ៖ $${subtotal.toFixed(2)}\n` +
-        `🚚 សេវាដឹកជញ្ជូន ៖ ${shippingFee === 0 ? 'FREE ហ្វ្រីដឹក' : `+$${shippingFee.toFixed(2)}`}\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `💰 សរុបត្រូវទូទាត់ ៖ $${exactTotal.toFixed(2)} / ${totalKhr} រៀល\n` +
-        `━━━━━━━━━━━━━━━━━━\n` +
-        `🏦 គណនីវេរប្រាក់ (ABA / KHQR) ៖\n` +
-        `💳 ធនាគារ      ៖ ${khqrCfg.bankName}\n` +
-        `🔢 លេខគណនី ABA ៖ ${khqrCfg.accountNumber}\n` +
-        `👤 ឈ្មោះម្ចាស់កុង ៖ ${khqrCfg.accountName}\n` +
-        `🏪 ឈ្មោះហាង     ៖ ${khqrCfg.merchantName}\n` +
-        `🔗 Bakong ID    ៖ ${khqrCfg.bakongAccountId}\n` +
-        `📲 រូបភាព KHQR ស្កែនទូទាត់ ៖ ${window.location.origin}/api/khqr/image/${invoice.invoice_id}\n\n` +
-        `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`;
+        `🛍️ វិក្កយបត្រកន្ត្រក #${invoice.basket_no || invoice.invoice_id} (${customerName})\n` +
+        `📍 ទីតាំង ៖ ${address}${phoneText}\n\n` +
+        `📋 បញ្ជីទំនិញ ៖\n` +
+        `${itemsList || '• ទំនិញទូទៅ'}\n` +
+        `------------------------\n` +
+        `📦 សរុប ${totalQty} ឈុត ៖ $${subtotal.toFixed(2)}${shippingFee === 0 ? ' (ហ្វ្រីដឹក)' : ` + ដឹក $${shippingFee.toFixed(2)}`} = $${exactTotal.toFixed(2)}\n` +
+        `💰 ទឹកប្រាក់ត្រូវបង់ ៖ $${exactTotal.toFixed(2)} (${totalKhr}៛)\n\n` +
+        `💳 វេរមក ABA ៖ ${khqrCfg.accountNumber || '124072117063906'} (${khqrCfg.accountName || 'TOCH PROEL'})\n` +
+        `📲 ស្កែន QR ៖ ${window.location.origin}/pay/${invoice.invoice_id}\n\n` +
+        `🙏 វេររួចសូមផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះចា៎ 🥰`;
 
       setCustomMsg(defaultText);
       setIsEditingCustom(false);

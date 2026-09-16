@@ -486,8 +486,8 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
       .replace(/\s*ទំនិញ$/i, '')
       .trim();
     const hasCustom = custom && custom !== 'ទំនិញ';
-    const label = hasCustom ? `កូដ [${it.product_code}] ${custom}` : `កូដ [${it.product_code}]`;
-    return `  🔹 ${label} x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`;
+    const label = hasCustom ? `[${it.product_code}] ${custom}` : `[${it.product_code}]`;
+    return `• ${label} x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`;
   }).join('\n');
 
   const totalQty = inv.items.reduce((s, it) => s + it.quantity, 0);
@@ -497,34 +497,25 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
   const shippingFee = isFreeShip ? 0.0 : (inv.shipping_fee && inv.shipping_fee > 0 ? inv.shipping_fee : (settings.default_shipping_fee || 2.0));
   const exactTotal = Number((subtotal + shippingFee).toFixed(2));
   const totalKhr = Math.round(exactTotal * (settings.exchange_rate || 4100)).toLocaleString('en-US');
+  const phoneText = phone !== 'មិនទាន់មាន' ? ` (${phone})` : '';
 
   const rawHost = req.get('x-forwarded-host') || req.get('host') || 'localhost:3000';
   const host = rawHost.split(',')[0].trim();
   const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
   const khqrImageUrl = `${proto}://${host}/api/khqr/image/${inv.invoice_id}`;
+  const payUrl = `${proto}://${host}/pay/${inv.invoice_id}`;
 
   const vipMsg = custom_message || (
-    `🎉 ជម្រាបសួរចា៎បង ${customerName}! អីវ៉ាន់កន្ត្រក #${inv.basket_no || cleanId} ត្រូវបានរៀបចំច្រករួចរាល់ហើយចា៎ 🛍️\n\n` +
-    `🧾 វិក្កយបត្រកុម្ម៉ង់ទំនិញ (VIP INVOICE)\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `👤 អតិថិជន ៖ ${customerName}\n` +
-    `📞 ទូរស័ព្ទ  ៖ ${phone}\n` +
-    `📍 ទីតាំង   ៖ ${address}\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `📋 បញ្ជីទំនិញកាត់បាន ៖\n` +
-    `${itemsList || '  🔹 ទំនិញទូទៅ'}\n` +
-    `----------------------------------\n` +
-    `📦 ចំនួនសរុប ៖ ${totalQty} ឈុត\n` +
-    `💵 តម្លៃទំនិញ ៖ $${subtotal.toFixed(2)}\n` +
-    `🚚 សេវាដឹកជញ្ជូន ៖ ${shippingFee === 0 ? 'FREE ហ្វ្រីដឹក' : `+$${shippingFee.toFixed(2)}`}\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `💰 សរុបត្រូវទូទាត់ ៖ $${exactTotal.toFixed(2)} / ${totalKhr} រៀល\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `🏦 គណនីវេរប្រាក់ (ABA / KHQR) ៖\n` +
-    `💳 លេខកុង ABA ៖ ${settings.account_number || '000474559'}\n` +
-    `👤 ឈ្មោះគណនី ៖ ${settings.account_name || 'Proel Toch'} (${settings.merchant_name || 'Kari Arnett'})\n` +
-    `📲 រូបភាព KHQR ស្កែនទូទាត់ ៖ ${khqrImageUrl}\n\n` +
-    `🙏 សូមបងជួយវេរប្រាក់ និងផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះ ដើម្បីខាងប្អូនបញ្ចេញកញ្ចប់អីវ៉ាន់ជូន Delivery ដឹកជូនភ្លាមៗចា៎ 🥰`
+    `🛍️ វិក្កយបត្រកន្ត្រក #${inv.basket_no || cleanId} (${customerName})\n` +
+    `📍 ទីតាំង ៖ ${address}${phoneText}\n\n` +
+    `📋 បញ្ជីទំនិញ ៖\n` +
+    `${itemsList || '• ទំនិញទូទៅ'}\n` +
+    `------------------------\n` +
+    `📦 សរុប ${totalQty} ឈុត ៖ $${subtotal.toFixed(2)}${shippingFee === 0 ? ' (ហ្វ្រីដឹក)' : ` + ដឹក $${shippingFee.toFixed(2)}`} = $${exactTotal.toFixed(2)}\n` +
+    `💰 ទឹកប្រាក់ត្រូវបង់ ៖ $${exactTotal.toFixed(2)} (${totalKhr}៛)\n\n` +
+    `💳 វេរមក ABA ៖ ${settings.account_number || '124072117063906'} (${settings.account_name || 'TOCH PROEL'})\n` +
+    `📲 ស្កែន QR ៖ ${payUrl}\n\n` +
+    `🙏 វេររួចសូមផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះចា៎ 🥰`
   );
 
   // Find recent comment ID if any
@@ -2448,4 +2439,139 @@ router.get('/khqr/image', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/pay/:invoice_id - Rich Mobile Web Payment Screen with OpenGraph Metadata & Deep Links
+router.get(['/pay/:invoice_id', '/invoice/pay/:invoice_id'], (req: Request, res: Response) => {
+  const cleanId = parseInt(String(req.params.invoice_id).replace('#', '').trim(), 10);
+  const inv = invoices.find(i => i.invoice_id === cleanId || i.basket_no === cleanId);
+
+  const rawHost = req.get('x-forwarded-host') || req.get('host') || 'localhost:3000';
+  const host = rawHost.split(',')[0].trim();
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
+  const baseUrl = `${proto}://${host}`;
+  const khqrImgUrl = `${baseUrl}/api/khqr/image/${cleanId}`;
+
+  const customerName = inv?.facebook_name || 'អតិថិជន VIP';
+  const basketNo = inv?.basket_no || cleanId;
+  const subtotal = inv ? inv.items.reduce((s, it) => s + (it.price * it.quantity), 0) : 0;
+  const freeShipLimit = settings.free_ship_threshold || 0.0;
+  const isFreeShip = freeShipLimit > 0 && subtotal >= freeShipLimit;
+  const shippingFee = isFreeShip ? 0.0 : (inv?.shipping_fee !== undefined ? inv.shipping_fee : (settings.default_shipping_fee || 2.0));
+  const exactUsd = Number((subtotal + shippingFee).toFixed(2));
+  const exactKhr = Math.round(exactUsd * (settings.exchange_rate || 4100)).toLocaleString('en-US');
+  const storeName = settings.merchant_name || 'Kari Arnett';
+  const phone = inv?.phone_number || 'មិនទាន់បញ្ជាក់';
+  const address = inv?.address || 'មិនទាន់បញ្ជាក់';
+
+  const itemsHtml = inv && inv.items.length > 0
+    ? inv.items.map(it => `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed rgba(255,255,255,0.1); font-size: 14px;">
+        <div style="color: #F1F5F9;">🔹 កូដ [${it.product_code}] x${it.quantity}</div>
+        <div style="color: #38BDF8; font-weight: 700;">$${(it.price * it.quantity).toFixed(2)}</div>
+      </div>
+    `).join('')
+    : '<div style="color: #94A3B8; text-align: center; padding: 12px 0;">ទំនិញកុម្ម៉ង់ទូទៅ</div>';
+
+  const messengerUrl = inv?.facebook_user_id && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE'].includes(inv.facebook_user_id)
+    ? `https://www.facebook.com/messages/t/${inv.facebook_user_id}`
+    : 'https://www.facebook.com/messages';
+
+  const html = `<!DOCTYPE html>
+<html lang="km">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>💳 ទូទាត់ប្រាក់ KHQR - កន្ត្រក #${basketNo} | ${storeName}</title>
+  
+  <!-- OpenGraph Metadata for Facebook Messenger Previews -->
+  <meta property="og:title" content="💳 ស្កែនទូទាត់ប្រាក់ Bakong KHQR ($${exactUsd.toFixed(2)}) - ${storeName}">
+  <meta property="og:description" content="វិក្កយបត្រកន្ត្រក #${basketNo} សម្រាប់ ${customerName} | សរុប $${exactUsd.toFixed(2)} / ${exactKhr} រៀល">
+  <meta property="og:image" content="${khqrImgUrl}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="500">
+  <meta property="og:image:height" content="700">
+  <meta property="og:type" content="website">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Kantumruy Pro', -apple-system, sans-serif; }
+    body { background: #060B14; color: #F8FAFC; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 16px; }
+    .card { width: 100%; max-width: 440px; background: #0F172A; border: 1px solid #1E293B; border-radius: 28px; padding: 24px 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); text-align: center; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(225, 29, 72, 0.15); border: 1px solid rgba(225, 29, 72, 0.4); color: #FDA4AF; padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 12px; }
+    .title { font-size: 20px; font-weight: 800; color: #FFFFFF; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: #94A3B8; margin-bottom: 18px; }
+    .qr-container { background: #FFFFFF; border-radius: 20px; padding: 12px; display: inline-block; box-shadow: 0 8px 24px rgba(0,0,0,0.4); margin-bottom: 18px; width: 100%; max-width: 280px; }
+    .qr-img { width: 100%; height: auto; border-radius: 12px; display: block; }
+    .amount-box { background: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9)); border: 1px solid #334155; border-radius: 18px; padding: 14px; margin-bottom: 18px; }
+    .amount-usd { font-size: 28px; font-weight: 900; color: #22C55E; }
+    .amount-khr { font-size: 14px; font-weight: 700; color: #FCD34D; margin-top: 2px; }
+    .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 14px; border-radius: 16px; font-size: 14px; font-weight: 800; text-decoration: none; border: none; cursor: pointer; transition: all 0.2s; margin-bottom: 10px; }
+    .btn-download { background: #E11D48; color: white; box-shadow: 0 4px 16px rgba(225, 29, 72, 0.4); }
+    .btn-download:hover { background: #BE123C; }
+    .btn-messenger { background: #2563EB; color: white; box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4); }
+    .btn-messenger:hover { background: #1D4ED8; }
+    .info-box { background: rgba(15, 23, 42, 0.6); border: 1px solid #1E293B; border-radius: 16px; padding: 14px; text-align: left; margin-top: 14px; font-size: 13px; }
+    .info-row { display: flex; justify-content: space-between; margin-bottom: 6px; color: #94A3B8; }
+    .info-val { color: #E2E8F0; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">🇰🇭 BAKONG KHQR PAYMENT</div>
+    <div class="title">${storeName}</div>
+    <div class="subtitle">អតិថិជន ៖ <strong>${customerName}</strong> (កន្ត្រក #${basketNo})</div>
+
+    <!-- QR Code Image Card -->
+    <div class="qr-container">
+      <img src="${khqrImgUrl}" alt="KHQR Payment" class="qr-img">
+    </div>
+
+    <!-- Total Amount -->
+    <div class="amount-box">
+      <div style="font-size: 11px; color: #94A3B8; text-transform: uppercase; font-weight: 700;">ទឹកប្រាក់ត្រូវទូទាត់</div>
+      <div class="amount-usd">$${exactUsd.toFixed(2)}</div>
+      <div class="amount-khr">${exactKhr} រៀល</div>
+    </div>
+
+    <!-- Action Buttons -->
+    <a href="${khqrImgUrl}" download="KHQR_Basket_${basketNo}.png" class="btn btn-download">
+      <span>📥</span>
+      <span>រក្សាទុករូបភាព QR (Save QR Code)</span>
+    </a>
+
+    <a href="${messengerUrl}" target="_blank" class="btn btn-messenger">
+      <span>💬</span>
+      <span>ផ្ញើ Slip ចូល Messenger ហាងវិញ</span>
+    </a>
+
+    <!-- Order Items Summary -->
+    <div class="info-box">
+      <div style="font-weight: 800; color: #F1F5F9; margin-bottom: 8px; border-bottom: 1px solid #334155; padding-bottom: 4px;">
+        📦 បញ្ជីទំនិញក្នុងកន្ត្រក
+      </div>
+      ${itemsHtml}
+      <div style="display: flex; justify-content: space-between; padding-top: 8px; font-size: 13px;">
+        <span style="color: #94A3B8;">សេវាដឹកជញ្ជូន ៖</span>
+        <span style="color: ${shippingFee === 0 ? '#4ADE80' : '#E2E8F0'}; font-weight: 700;">${shippingFee === 0 ? 'FREE ហ្វ្រីដឹក' : `$${shippingFee.toFixed(2)}`}</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; padding-top: 4px; font-size: 13px; color: #94A3B8;">
+        <span>ទូរស័ព្ទ / ទីតាំង ៖</span>
+        <span style="color: #E2E8F0; font-weight: 600;">${phone} (${address})</span>
+      </div>
+    </div>
+
+    <div style="font-size: 11px; color: #64748B; margin-top: 14px;">
+      ✨ ស្កែនជាមួយកម្មវិធី ABA Mobile, ACLEDA ឬគ្រប់ធនាគារសមាជិកបាគង (Bakong)
+    </div>
+  </div>
+</body>
+</html>`;
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
+});
+
 export default router;
+

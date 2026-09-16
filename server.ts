@@ -289,9 +289,13 @@ app.get('/api/download/:filename', (req: Request, res: Response) => {
 // -------------------------------------------------------------
 app.use('/api', packingRoutes);
 
-// Shortcut routes for printing slips directly in any tab
+// Shortcut routes for printing slips and payment screen directly in any tab
 app.get(['/print/:invoice_id', '/print_slip/:invoice_id'], (req: Request, res: Response) => {
   res.redirect(`/api/print_slip/${req.params.invoice_id}`);
+});
+
+app.get(['/pay/:invoice_id', '/khqr/:invoice_id'], (req: Request, res: Response) => {
+  res.redirect(`/api/pay/${req.params.invoice_id}`);
 });
 
 // Health check endpoint
