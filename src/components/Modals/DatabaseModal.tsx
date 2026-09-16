@@ -120,8 +120,45 @@ export function DatabaseModal({ isOpen, onClose, onSelectDateFilter, onShowToast
 
   const handleDownloadBackup = () => {
     setDownloading(true);
-    window.location.href = '/api/db/backup';
+    window.location.href = '/api/backup/download';
     setTimeout(() => setDownloading(false), 2000);
+  };
+
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
+  const [restoring, setRestoring] = useState(false);
+
+  const handleRestoreJsonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!confirm('តើអ្នកពិតជាចង់ Restore ទិន្នន័យពីឯកសារ Backup នេះមែនទេ? ទិន្នន័យបច្ចុប្បន្ននឹងត្រូវជំនួសដោយឯកសារនេះ។')) {
+      e.target.value = '';
+      return;
+    }
+
+    setRestoring(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      const res = await fetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed)
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast(data.message, 'success');
+        fetchDbInfo();
+      } else {
+        if (onShowToast) onShowToast(data.error || 'Restore បរាជ័យ', 'error');
+      }
+    } catch (err: any) {
+      if (onShowToast) onShowToast('បរាជ័យក្នុងការអានឯកសារ JSON: ' + err.message, 'error');
+    } finally {
+      setRestoring(false);
+      e.target.value = '';
+    }
   };
 
   // Handle uploaded real KHQR screenshot
@@ -206,6 +243,13 @@ export function DatabaseModal({ isOpen, onClose, onSelectDateFilter, onShowToast
           accept="image/*"
           className="hidden"
           onChange={handleFileChange}
+        />
+        <input
+          ref={jsonFileInputRef}
+          type="file"
+          accept=".json"
+          className="hidden"
+          onChange={handleRestoreJsonFile}
         />
 
         {/* Modal Header */}
@@ -484,15 +528,24 @@ export function DatabaseModal({ isOpen, onClose, onSelectDateFilter, onShowToast
                   </div>
                 </div>
 
-                {/* 1-Click Backup Button */}
-                <div className="pt-2 flex gap-2">
+                {/* 1-Click Backup & Restore Buttons */}
+                <div className="pt-2 grid grid-cols-2 gap-2">
                   <button
                     onClick={handleDownloadBackup}
                     disabled={downloading}
-                    className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
                   >
                     <span>💾</span>
-                    <span>{downloading ? 'កំពុងទាញយក...' : 'ទាញយក Backup SQLite (.db) 1-Click'}</span>
+                    <span>{downloading ? 'កំពុងទាញយក...' : 'ទាញយក Backup (.json)'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => jsonFileInputRef.current?.click()}
+                    disabled={restoring}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
+                  >
+                    <span>📂</span>
+                    <span>{restoring ? 'កំពុង Restore...' : 'បញ្ចូលទិន្នន័យ (Restore)'}</span>
                   </button>
                 </div>
               </div>

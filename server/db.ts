@@ -17,6 +17,66 @@ let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;
 
 const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
+const BACKUP_DIR = path.join(process.cwd(), 'server', 'backups');
+
+// Ensure backup directory exists
+if (!fs.existsSync(BACKUP_DIR)) {
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Function to create a timestamped backup of the database
+export function createDatabaseSnapshot(label = 'auto') {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    }
+    const now = new Date();
+    const ts = now.toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(BACKUP_DIR, `db_backup_${label}_${ts}.json`);
+
+    const payload = {
+      timestamp: now.toISOString(),
+      label,
+      dataRevision,
+      activeLiveId,
+      settings,
+      products,
+      invoices,
+      rawComments,
+      customers,
+      packerLogs,
+      activeFacebookPage
+    };
+
+    fs.writeFileSync(backupPath, JSON.stringify(payload, null, 2), 'utf8');
+
+    // Keep only the latest 20 backup files to avoid filling disk
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith('db_backup_') && f.endsWith('.json'))
+      .sort()
+      .reverse();
+
+    if (files.length > 20) {
+      files.slice(20).forEach(f => {
+        try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch (e) {}
+      });
+    }
+    console.log(`[Backup] Created snapshot ${backupPath} (${invoices.length} invoices, ${products.length} products)`);
+  } catch (err) {
+    console.error('[Backup] Failed to create database snapshot:', err);
+  }
+}
+
+// Periodic snapshot every 15 minutes
+setInterval(() => {
+  if (invoices.length > 0 || products.length > 0) {
+    createDatabaseSnapshot('periodic');
+  }
+}, 15 * 60 * 1000);
 
 export function saveDatabaseToDisk() {
   try {

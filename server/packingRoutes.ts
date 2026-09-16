@@ -2337,4 +2337,76 @@ router.post('/khqr/config', (req: Request, res: Response) => {
   });
 });
 
+// GET /api/backup/download - Export Full Database as JSON file
+router.get('/backup/download', (_req: Request, res: Response) => {
+  try {
+    const payload = {
+      backup_date: new Date().toISOString(),
+      activeLiveId,
+      settings,
+      products,
+      invoices,
+      rawComments,
+      customers,
+      packerLogs,
+      activeFacebookPage
+    };
+    const filename = `KariShop_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/json');
+    return res.send(JSON.stringify(payload, null, 2));
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/backup/restore - Restore Full Database from uploaded JSON
+router.post('/backup/restore', (req: Request, res: Response) => {
+  try {
+    const data = req.body;
+    if (!data || (!data.invoices && !data.products)) {
+      return res.status(400).json({ success: false, error: 'Invalid backup file structure' });
+    }
+
+    if (Array.isArray(data.invoices)) {
+      invoices.length = 0;
+      invoices.push(...data.invoices);
+    }
+    if (Array.isArray(data.products)) {
+      products.length = 0;
+      products.push(...data.products);
+    }
+    if (Array.isArray(data.customers)) {
+      customers.length = 0;
+      customers.push(...data.customers);
+    }
+    if (Array.isArray(data.rawComments)) {
+      rawComments.length = 0;
+      rawComments.push(...data.rawComments);
+    }
+    if (Array.isArray(data.packerLogs)) {
+      packerLogs.length = 0;
+      packerLogs.push(...data.packerLogs);
+    }
+    if (data.settings) {
+      Object.assign(settings, data.settings);
+    }
+    if (data.activeLiveId) {
+      setActiveLiveId(data.activeLiveId);
+    }
+
+    bumpDataRevision();
+    saveDatabaseToDisk();
+
+    return res.json({
+      success: true,
+      message: `បានទាញយកទិន្នន័យ (Restore) ជោគជ័យ! (${invoices.length} កន្ត្រក, ${products.length} មុខទំនិញ)`,
+      invoicesCount: invoices.length,
+      productsCount: products.length
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
