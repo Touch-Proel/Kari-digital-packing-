@@ -232,12 +232,56 @@ export function BasketCard({
 
   const [isSendingVip, setIsSendingVip] = useState(false);
 
-  // Open Facebook Messenger or Page Inbox directly
-  const openFacebookDirectChat = (e: React.MouseEvent) => {
+  // Toggle Manual Sent Status
+  const handleToggleMsgSent = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    try {
+      const res = await fetch('/api/toggle_msg_sent_status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: invoice.invoice_id
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        invoice.msg_status = data.msg_status;
+        if (data.msg_status === 'SENT') {
+          playSuccessFanfare();
+          onShowToast('✅ បានសម្គាល់ថាបានឆាតផ្ញើរួចរាល់!', 'success');
+        } else {
+          onShowToast('🔄 បានប្តូរទៅស្ថានភាពមិនទាន់ឆាត');
+        }
+        onDataChanged();
+      }
+    } catch (err) {
+      onShowToast('Error updating chat status', 'error');
+    }
+  };
+
+  // Open Facebook Messenger or Page Inbox directly and copy VIP invoice text
+  const openFacebookDirectChat = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch('/api/send_vip_invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: invoice.invoice_id,
+          facebook_name: invoice.facebook_name,
+          total_amount: invoice.total_amount
+        })
+      });
+      const data = await res.json();
+      if (data.vip_message && navigator.clipboard) {
+        await navigator.clipboard.writeText(data.vip_message);
+        onShowToast('📋 បាន Copy វិក្កយបត្ររួចរាល់! កំពុងបើក Messenger...', 'success');
+      }
+    } catch {}
+
     const cleanUid = String(invoice.facebook_user_id || '').trim();
     let chatUrl = '';
-    if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None'].includes(cleanUid) && cleanUid.length > 4) {
+    if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None', 'undefined', 'null'].includes(cleanUid) && cleanUid.length > 4) {
       chatUrl = `https://m.me/${cleanUid}`;
     } else {
       chatUrl = `https://www.facebook.com/messages`;
@@ -273,12 +317,12 @@ export function BasketCard({
       if (data.success) {
         invoice.msg_status = 'SENT';
         playSuccessFanfare();
-        onShowToast(`✅ បានផ្ញើ VIP ទៅ ${invoice.facebook_name} ជោគជ័យ & Copy ចូល Clipboard រួចរាល់!`, 'success');
+        onShowToast(`✅ បានផ្ញើ VIP ទៅ ${invoice.facebook_name} ជោគជ័យ!`, 'success');
         onDataChanged();
       } else {
         invoice.msg_status = 'FAILED';
         playPureTone(320, 0.18, 'sawtooth');
-        onShowToast(`❌ ផ្ញើបរាជ័យ (បាន Copy សារ) ➔ សូមចុច «ឆាតផ្ទាល់»!`, 'error');
+        onShowToast(`❌ មិនអាចផ្ញើស្វ័យប្រវត្តិ (បាន Copy សាររួច) ➔ សូមចុច «ឆាតផ្ទាល់»!`, 'error');
         onDataChanged();
       }
     } catch (err: any) {
@@ -846,28 +890,20 @@ export function BasketCard({
               <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onOpenVipModal) {
-                      onOpenVipModal(invoice);
-                    } else {
-                      handleNotifyVIP(e);
-                    }
-                  }}
-                  title="ផ្ញើមិនបានជោគជ័យ (ចុចដើម្បីមើល ឬផ្ញើឡើងវិញ)"
-                  className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 border transition-all shadow-sm active:scale-95 cursor-pointer bg-rose-950/90 border-rose-500/80 text-rose-300 hover:bg-rose-900/80"
+                  onClick={openFacebookDirectChat}
+                  title="ចុចចូលទៅកាន់ Facebook Messenger / Page Inbox ផ្ទាល់ (Copy សាររួចរាល់)"
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 border transition-all shadow-sm active:scale-95 cursor-pointer bg-rose-950/90 border-rose-500/80 text-rose-200 hover:bg-rose-900/80 animate-pulse"
                 >
-                  <span className="text-rose-400 text-xs">✕</span>
-                  <span>ផ្ញើបរាជ័យ</span>
+                  <span className="text-rose-400 text-xs">❌</span>
+                  <span>ផ្ញើបរាជ័យ (ឆាតផ្ទាល់)</span>
                 </button>
                 <button
                   type="button"
-                  onClick={openFacebookDirectChat}
-                  title="ចុចចូលទៅកាន់ Facebook Messenger / Page Inbox ផ្ទាល់"
-                  className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-md active:scale-95 cursor-pointer"
+                  onClick={handleToggleMsgSent}
+                  title="សម្គាល់ថាបានឆាតផ្ញើរួចរាល់"
+                  className="text-xs font-bold px-2 py-1.5 rounded-xl flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 shadow-sm active:scale-95 cursor-pointer"
                 >
-                  <span>💬</span>
-                  <span>ឆាតផ្ទាល់</span>
+                  <span>✓</span>
                 </button>
               </div>
             ) : (
@@ -1372,19 +1408,30 @@ export function BasketCard({
                       </div>
                     </button>
                   ) : invoice.msg_status === 'FAILED' ? (
-                    <button
-                      type="button"
-                      onClick={openFacebookDirectChat}
-                      className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-800/90 via-rose-700/90 to-cyan-800/90 hover:from-rose-700 hover:to-cyan-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-rose-500/50 active:scale-[0.98] transition-all cursor-pointer"
-                    >
-                      <span className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-sm flex-shrink-0">
-                        💬
-                      </span>
-                      <div className="flex flex-col items-start min-w-0 text-left leading-tight">
-                        <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតផ្ទាល់</span>
-                        <span className="text-[10px] text-rose-200/90 font-medium">បើក Messenger</span>
-                      </div>
-                    </button>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={openFacebookDirectChat}
+                        className="flex-1 py-2.5 px-2.5 rounded-2xl bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-cyan-900/90 hover:from-rose-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md border border-rose-500/60 active:scale-[0.98] transition-all cursor-pointer min-w-0"
+                        title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បីបើក Messenger និង Paste សារ (Copy រួចរាល់)"
+                      >
+                        <span className="w-7 h-7 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-sm flex-shrink-0 animate-pulse">
+                          💬
+                        </span>
+                        <div className="flex flex-col items-start min-w-0 text-left leading-tight truncate">
+                          <span className="font-black text-rose-100 text-xs truncate">ឆាតផ្ទាល់ (Copy រួច)</span>
+                          <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យ · បើក Messenger</span>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleToggleMsgSent}
+                        className="h-full py-2.5 px-2.5 rounded-2xl bg-slate-800/90 hover:bg-slate-700 text-emerald-400 border border-slate-600/80 font-bold text-xs flex items-center justify-center active:scale-95 transition-all cursor-pointer shadow-sm flex-shrink-0"
+                        title="សម្គាល់ថាបានឆាតផ្ញើរួចរាល់"
+                      >
+                        <span className="text-sm font-black">✓</span>
+                      </button>
+                    </div>
                   ) : (
                     <button
                       type="button"
@@ -1450,19 +1497,30 @@ export function BasketCard({
                     </div>
                   </button>
                 ) : invoice.msg_status === 'FAILED' ? (
-                  <button
-                    type="button"
-                    onClick={openFacebookDirectChat}
-                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-800/90 via-rose-700/90 to-cyan-800/90 hover:from-rose-700 hover:to-cyan-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-rose-500/50 active:scale-[0.98] transition-all cursor-pointer"
-                  >
-                    <span className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-sm flex-shrink-0">
-                      💬
-                    </span>
-                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
-                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតផ្ទាល់</span>
-                      <span className="text-[10px] text-rose-200/90 font-medium">បើក Messenger</span>
-                    </div>
-                  </button>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <button
+                      type="button"
+                      onClick={openFacebookDirectChat}
+                      className="flex-1 py-2.5 px-2.5 rounded-2xl bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-cyan-900/90 hover:from-rose-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md border border-rose-500/60 active:scale-[0.98] transition-all cursor-pointer min-w-0"
+                      title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បីបើក Messenger និង Paste សារ (Copy រួចរាល់)"
+                    >
+                      <span className="w-7 h-7 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-sm flex-shrink-0 animate-pulse">
+                        💬
+                      </span>
+                      <div className="flex flex-col items-start min-w-0 text-left leading-tight truncate">
+                        <span className="font-black text-rose-100 text-xs truncate">ឆាតផ្ទាល់ (Copy រួច)</span>
+                        <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យ · បើក Messenger</span>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleToggleMsgSent}
+                      className="h-full py-2.5 px-2.5 rounded-2xl bg-slate-800/90 hover:bg-slate-700 text-emerald-400 border border-slate-600/80 font-bold text-xs flex items-center justify-center active:scale-95 transition-all cursor-pointer shadow-sm flex-shrink-0"
+                      title="សម្គាល់ថាបានឆាតផ្ញើរួចរាល់"
+                    >
+                      <span className="text-sm font-black">✓</span>
+                    </button>
+                  </div>
                 ) : (
                   <button
                     type="button"
@@ -1526,19 +1584,30 @@ export function BasketCard({
                     </div>
                   </button>
                 ) : invoice.msg_status === 'FAILED' ? (
-                  <button
-                    type="button"
-                    onClick={openFacebookDirectChat}
-                    className="py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-800/90 via-rose-700/90 to-cyan-800/90 hover:from-rose-700 hover:to-cyan-700 text-white font-bold text-xs sm:text-sm flex items-center gap-2.5 shadow-md border border-rose-500/50 active:scale-[0.98] transition-all cursor-pointer"
-                  >
-                    <span className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-sm flex-shrink-0">
-                      💬
-                    </span>
-                    <div className="flex flex-col items-start min-w-0 text-left leading-tight">
-                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតផ្ទាល់</span>
-                      <span className="text-[10px] text-rose-200/90 font-medium">បើក Messenger</span>
-                    </div>
-                  </button>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <button
+                      type="button"
+                      onClick={openFacebookDirectChat}
+                      className="flex-1 py-2.5 px-2.5 rounded-2xl bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-cyan-900/90 hover:from-rose-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md border border-rose-500/60 active:scale-[0.98] transition-all cursor-pointer min-w-0"
+                      title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បីបើក Messenger និង Paste សារ (Copy រួចរាល់)"
+                    >
+                      <span className="w-7 h-7 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-sm flex-shrink-0 animate-pulse">
+                        💬
+                      </span>
+                      <div className="flex flex-col items-start min-w-0 text-left leading-tight truncate">
+                        <span className="font-black text-rose-100 text-xs truncate">ឆាតផ្ទាល់ (Copy រួច)</span>
+                        <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យ · បើក Messenger</span>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleToggleMsgSent}
+                      className="h-full py-2.5 px-2.5 rounded-2xl bg-slate-800/90 hover:bg-slate-700 text-emerald-400 border border-slate-600/80 font-bold text-xs flex items-center justify-center active:scale-95 transition-all cursor-pointer shadow-sm flex-shrink-0"
+                      title="សម្គាល់ថាបានឆាតផ្ញើរួចរាល់"
+                    >
+                      <span className="text-sm font-black">✓</span>
+                    </button>
+                  </div>
                 ) : (
                   <button
                     type="button"

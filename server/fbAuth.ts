@@ -390,9 +390,12 @@ export async function sendFacebookReply(
   token?: string
 ): Promise<{ success: boolean; error?: string; method?: 'PRIVATE_REPLY' | 'SEND_API' | 'PUBLIC_COMMENT' | 'SIMULATED' }> {
   const activeToken = token || activeFacebookPage?.access_token;
-  if (!activeToken || activeToken.startsWith('simulated_')) {
-    console.log(`[VIP INVOICE SIMULATION] Dispatching simulated message to ${userId || commentId || 'Customer'}`);
-    return { success: true, method: 'SIMULATED' };
+  if (!activeToken || activeToken.startsWith('simulated_') || activeToken.length < 20) {
+    console.log(`[VIP INVOICE NOTICE] No real Facebook Page Access Token configured. Message prepared for manual copy.`);
+    return {
+      success: false,
+      error: 'មិនទាន់បានភ្ជាប់ Facebook Page Token (ឬ Token មិនត្រឹមត្រូវ) ➔ បានចម្លងអត្ថបទវិក្កយបត្ររួចរាល់ សូមចុច «ឆាតផ្ទាល់» ដើម្បីផ្ញើទៅកាន់ Messenger!'
+    };
   }
 
   const cleanUid = String(userId || '').trim();
@@ -513,20 +516,13 @@ export async function sendFacebookReply(
     }
   }
 
-  const isRealToken = activeToken && !activeToken.startsWith('simulated_') && activeToken.length > 20;
-  if (isRealToken) {
-    console.log(`ℹ️ [DISPATCH RESULT]: Direct automated delivery unavailable for this specific recipient (${lastApiError || 'No active 24h thread'}). Text copied to clipboard for 1-click manual send.`);
-    console.log(`=======================================================\n`);
-    const reasonDetail = lastApiError ? ` (${lastApiError})` : '';
-    return {
-      success: false,
-      error: `Facebook API មិនទាន់អាចផ្ញើសារស្វ័យប្រវត្តិចូល Inbox បានទេ${reasonDetail} (ដោយសារច្បាប់ Facebook 24h Window ឬខ្វះ Chat ID) ➔ អត្ថបទត្រូវបាន Copy រួចរាល់ សូមចុច "បើក Chat" ដើម្បី Paste ផ្ញើជូនភ្ញៀវផ្ទាល់!`
-    };
-  }
-
-  console.log(`🚨 [DISPATCH RESULT]: Simulated test message delivered.`);
+  const reasonDetail = lastApiError ? ` (${lastApiError})` : '';
+  console.log(`ℹ️ [DISPATCH RESULT]: Direct automated delivery unavailable for this specific recipient: ${lastApiError || 'Facebook 24h Window / permissions restriction'}`);
   console.log(`=======================================================\n`);
-  return { success: true, method: 'SIMULATED' };
+  return {
+    success: false,
+    error: `Facebook API មិនទាន់អាចផ្ញើសារស្វ័យប្រវត្តិចូល Inbox បានទេ${reasonDetail} ➔ អត្ថបទត្រូវបាន Copy រួចរាល់ សូមចុច "ឆាតផ្ទាល់" ដើម្បី Paste ផ្ញើជូនភ្ញៀវ!`
+  };
 }
 
 

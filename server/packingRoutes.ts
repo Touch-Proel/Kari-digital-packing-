@@ -561,6 +561,32 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
   });
 });
 
+// POST /api/toggle_msg_sent_status - Manually mark as SENT or UNSENT/FAILED
+router.post('/toggle_msg_sent_status', (req: Request, res: Response) => {
+  const { invoice_id, status } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+  const inv = invoices.find(i => i.invoice_id === cleanId);
+
+  if (!inv) {
+    return res.status(404).json({ success: false, error: 'រកមិនឃើញវិក្កយបត្រទេ' });
+  }
+
+  const targetStatus = status || (inv.msg_status === 'SENT' ? 'UNSENT' : 'SENT');
+  inv.msg_status = targetStatus;
+  if (targetStatus === 'SENT') {
+    inv.msg_error = '';
+  }
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  res.json({
+    success: true,
+    invoice_id: inv.invoice_id,
+    msg_status: inv.msg_status,
+    message: inv.msg_status === 'SENT' ? 'បានសម្គាល់ថាបានផ្ញើឆាតជូនភ្ញៀវរួចរាល់' : 'បានដោះស្ថានភាពផ្ញើសារ'
+  });
+});
+
 // POST /api/update_customer_contact
 router.post('/update_customer_contact', (req: Request, res: Response) => {
   const { invoice_id, facebook_name, phone, address } = req.body;
