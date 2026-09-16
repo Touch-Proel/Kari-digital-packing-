@@ -637,6 +637,95 @@ function isInvoiceLockedByOther(invoiceId: number, reqPackerName?: string): { lo
   return { locked: false };
 }
 
+// POST /api/edit_basket_item_code - Directly change product code/price/qty on a basket item
+router.post('/edit_basket_item_code', (req: Request, res: Response) => {
+  const { invoice_id, old_code, new_code, new_qty, new_price, packer_name } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+  const cleanOldCode = String(old_code || '').trim().toUpperCase();
+  const cleanNewCode = String(new_code || '').trim().toUpperCase();
+
+  if (!cleanNewCode) {
+    return res.status(400).json({ success: false, message: 'សូមបញ្ចូលកូដថ្មី' });
+  }
+
+  const lockCheck = isInvoiceLockedByOther(cleanId, packer_name);
+  if (lockCheck.locked) {
+    return res.status(409).json({
+      success: false,
+      message: `កន្ត្រកនេះត្រូវបានចាក់សោដោយ «${lockCheck.lockedBy}»!`
+    });
+  }
+
+  const inv = invoices.find(i => i.invoice_id === cleanId);
+  if (!inv) {
+    return res.status(404).json({ success: false, message: 'រកមិនឃើញវិក្កយបត្រ' });
+  }
+
+  const item = inv.items.find(it => it.product_code.toUpperCase() === cleanOldCode);
+  if (!item) {
+    return res.status(404).json({ success: false, message: `រកមិនឃើញកូដ [${cleanOldCode}] ក្នុងកន្ត្រកនេះទេ` });
+  }
+
+  // If changing to another code
+  if (cleanOldCode !== cleanNewCode) {
+    // Return old product stock if tracked
+    const oldProd = products.find(p => p.code.toUpperCase() === cleanOldCode);
+    if (oldProd) {
+      oldProd.stock_qty += item.quantity;
+    }
+
+    // Find or create new product
+    let newProd = products.find(p => p.code.toUpperCase() === cleanNewCode);
+    if (!newProd) {
+      const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
+      newProd = {
+        id: nextProdId,
+        code: cleanNewCode,
+        name: `កូដ [${cleanNewCode}]`,
+        stock_qty: 100,
+        price: typeof new_price === 'number' && new_price > 0 ? new_price : (item.price || 5.0),
+        cost_price: 3.0
+      };
+      products.push(newProd);
+    }
+
+    item.product_id = newProd.id;
+    item.product_code = newProd.code;
+    item.product_name = newProd.name;
+    // Always pull image and price from stock product
+    if (newProd.image_file && newProd.image_file.trim() !== '') {
+      item.image_file = newProd.image_file;
+    } else {
+      delete (item as any).image_file;
+    }
+
+    if (typeof newProd.price === 'number' && newProd.price > 0) {
+      item.price = newProd.price;
+    } else if (typeof new_price === 'number' && new_price > 0) {
+      item.price = new_price;
+    }
+  } else {
+    // Same code, update price if provided
+    if (typeof new_price === 'number' && new_price > 0) {
+      item.price = new_price;
+    }
+  }
+
+  if (typeof new_qty === 'number' && new_qty > 0) {
+    item.quantity = new_qty;
+  }
+
+  recalculateInvoice(inv);
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  res.json({
+    success: true,
+    message: `បានកែប្រែកូដ [${cleanOldCode}] ទៅជា [${item.product_code}] រួចរាល់!`,
+    item
+  });
+});
+
 // POST /api/set_item_qty_direct
 router.post('/set_item_qty_direct', (req: Request, res: Response) => {
   const { invoice_id, code, new_qty, packer_name } = req.body;

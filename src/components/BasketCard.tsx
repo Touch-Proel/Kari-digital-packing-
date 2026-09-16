@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
+import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
 
 interface BasketCardProps {
   key?: any;
@@ -43,6 +44,15 @@ export function BasketCard({
   // Stepper & Item Delete States
   const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
   const [activeQuickQtyCode, setActiveQuickQtyCode] = useState<string | null>(null);
+
+  // Direct Item Code & Details Editing State
+  const [editingCodeItem, setEditingCodeItem] = useState<{
+    oldCode: string;
+    newCode: string;
+    price: number;
+    qty: number;
+  } | null>(null);
+  const [isSavingCode, setIsSavingCode] = useState(false);
 
   // Manual Add Item States
   const [isAddingManualCode, setIsAddingManualCode] = useState(false);
@@ -530,6 +540,64 @@ export function BasketCard({
     }
   };
 
+  // Start Editing Item Code, Price, or Qty
+  const handleStartEditCode = (item: OrderItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!checkLockGuard()) return;
+    setEditingCodeItem({
+      oldCode: item.product_code,
+      newCode: item.product_code,
+      price: item.price,
+      qty: item.quantity
+    });
+  };
+
+  // Save Item Code Changes
+  const handleSaveItemCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCodeItem) return;
+    if (!checkLockGuard()) return;
+
+    const targetCode = convertKhmerNumeralsToGlobal(editingCodeItem.newCode).trim().toUpperCase();
+    if (!targetCode) {
+      onShowToast('សូមបញ្ចូលកូដទំនិញ', 'error');
+      return;
+    }
+
+    const stockProd = productMap ? productMap[targetCode] : undefined;
+    const finalPrice = stockProd?.price ?? editingCodeItem.price;
+
+    setIsSavingCode(true);
+    try {
+      const res = await fetch('/api/edit_basket_item_code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: invoice.invoice_id,
+          old_code: editingCodeItem.oldCode,
+          new_code: targetCode,
+          new_qty: editingCodeItem.qty,
+          new_price: finalPrice,
+          packer_name: myPackerName
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast(data.message || `✅ បានកែប្រែកូដ [${targetCode}] (តម្លៃ $${finalPrice.toFixed(2)}) រួចរាល់!`, 'success');
+        setEditingCodeItem(null);
+        onDataChanged();
+      } else {
+        playWarningBuzzer();
+        onShowToast(`⚠️ ${data.message || 'មិនអាចកែប្រែកូដបានទេ'}`, 'error');
+      }
+    } catch (err) {
+      onShowToast('⚠️ មានបញ្ហាបណ្តាញ WiFi!', 'error');
+    } finally {
+      setIsSavingCode(false);
+    }
+  };
+
   // Smart cut from comment
   const handleSmartCut = async (commentText: string, autoCode: string, autoQty: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -967,15 +1035,30 @@ export function BasketCard({
               // 1. If this specific item has an image snapshot from this order, use it.
               // 2. If no image snapshot exists, ONLY fallback to productMap if this invoice is from the currently active live.
               //    Past live orders will NOT pull new live images even if codes match!
+              const isEditingThisCode = editingCodeItem?.oldCode === item.product_code;
+              const activeTypedCode = isEditingThisCode
+                ? convertKhmerNumeralsToGlobal(editingCodeItem.newCode).trim().toUpperCase()
+                : item.product_code.toUpperCase();
+              const activeProd = productMap ? productMap[activeTypedCode] : prod;
+
               const isCurrentLiveOrder = !activeLiveId || invoice.live_id === activeLiveId;
-              const displayImage = (item.image_file && item.image_file.trim() !== '')
+
+              // Session-Isolated Image with real-time quick edit preview
+              const displayImage = (item.image_file && item.image_file.trim() !== '' && !isEditingThisCode)
                 ? item.image_file
-                : (isCurrentLiveOrder && invoice.packing_stage === 'UNPICKED' ? prod?.image_file : undefined);
+                : (isCurrentLiveOrder && invoice.packing_stage === 'UNPICKED' ? activeProd?.image_file : undefined);
+
+              const displayPrice = isEditingThisCode && typeof activeProd?.price === 'number'
+                ? activeProd.price
+                : item.price;
+
               const matchingComment = invoice.comments?.find(c => {
+                const converted = convertKhmerNumeralsToGlobal(c || '');
                 const codeRegex = new RegExp(`(^|\\D)${item.product_code}(\\D|$)`, 'i');
-                return codeRegex.test(c);
+                return codeRegex.test(converted);
               });
-              const noteText = item.item_comment || matchingComment || (invoice.comments && invoice.comments[0]) || '';
+              const rawNoteText = item.item_comment || matchingComment || (invoice.comments && invoice.comments[0]) || '';
+              const noteText = convertKhmerNumeralsToGlobal(rawNoteText);
 
               return (
                 <div key={idx} className="flex flex-col">
@@ -1000,11 +1083,11 @@ export function BasketCard({
                       onClick={e => {
                         e.stopPropagation();
                         onOpenZoomModal(
-                          item.product_code,
+                          activeTypedCode || item.product_code,
                           item.product_name,
                           displayImage,
-                          item.price,
-                          prod?.stock_qty
+                          displayPrice,
+                          activeProd?.stock_qty
                         );
                       }}
                       title="ចុចដើម្បីមើលរូបធំ ឬថតរូបទំនិញនេះ (80x80)"
@@ -1023,18 +1106,68 @@ export function BasketCard({
                       )}
                     </div>
 
-                    {/* MIDDLE COLUMN: Code badge + Name, Price · Qty, Note */}
-                    <div className="flex-1 overflow-hidden flex flex-col justify-center min-w-0">
+                    {/* MIDDLE COLUMN: Code badge + Name, Note (directly below code), Price · Qty */}
+                    <div className="flex-1 min-w-0 overflow-hidden flex flex-col justify-center">
                       {/* Row 1: [ Code ] and Name */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`border px-2.5 py-1 rounded-xl text-xs sm:text-sm font-bold tracking-wider shadow-sm flex items-center gap-1 ${
-                          isChecked
-                            ? 'bg-emerald-950/90 border-emerald-500/70 text-emerald-300'
-                            : 'bg-[#0B1E3D] border-blue-400/80 text-blue-200'
-                        }`}>
-                          <span className="text-[11px] font-bold opacity-80">កូដ</span>
-                          <span className="font-mono font-black text-sm text-cyan-300">[{item.product_code}]</span>
-                        </span>
+                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                        {/* Interactive In-Place Quick Edit for Code */}
+                        {isEditingThisCode ? (
+                          <form
+                            onSubmit={handleSaveItemCode}
+                            onClick={e => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 bg-[#0B1E3D] border border-cyan-400/90 px-1.5 py-0.5 rounded-xl shadow-md flex-shrink-0 max-w-full"
+                          >
+                            <span className="text-[11px] font-bold text-cyan-300 select-none">កូដ</span>
+                            <input
+                              type="text"
+                              value={editingCodeItem.newCode}
+                              onChange={e => {
+                                const val = convertKhmerNumeralsToGlobal(e.target.value).toUpperCase();
+                                setEditingCodeItem({
+                                  ...editingCodeItem,
+                                  newCode: val
+                                });
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'Escape') setEditingCodeItem(null);
+                              }}
+                              className="w-12 sm:w-14 bg-slate-950 border border-cyan-500/80 rounded-lg px-1 py-0.5 text-xs font-mono font-black text-cyan-200 uppercase outline-none focus:ring-1 focus:ring-cyan-300 text-center"
+                              autoFocus
+                              placeholder="កូដ"
+                            />
+                            <button
+                              type="submit"
+                              disabled={isSavingCode}
+                              className="w-5 h-5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-md text-[11px] font-black flex items-center justify-center active:scale-90 transition-all shadow cursor-pointer flex-shrink-0"
+                              title="រក្សាទុក (Enter)"
+                            >
+                              {isSavingCode ? '⏳' : '✓'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCodeItem(null)}
+                              className="w-5 h-5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-md text-[10px] font-bold flex items-center justify-center active:scale-90 transition-all cursor-pointer flex-shrink-0"
+                              title="បោះបង់ (Esc)"
+                            >
+                              ✕
+                            </button>
+                          </form>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={e => handleStartEditCode(item, e)}
+                            className={`border px-2.5 py-1 rounded-xl text-xs sm:text-sm font-bold tracking-wider shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group/code cursor-pointer flex-shrink-0 ${
+                              isChecked
+                                ? 'bg-emerald-950/90 border-emerald-500/70 text-emerald-300 hover:border-emerald-300'
+                                : 'bg-[#0B1E3D] border-blue-400/80 text-blue-200 hover:border-cyan-400 hover:bg-[#0e274f]'
+                            }`}
+                            title="ចុចត្រង់នេះដើម្បីកែប្រែកូដទំនិញរហ័ស (តម្លៃ & រូបភាពនឹងទាញតាមស្តុកស្វ័យប្រវត្តិ)"
+                          >
+                            <span className="text-[11px] font-bold opacity-80">កូដ</span>
+                            <span className="font-mono font-black text-sm text-cyan-300">[{item.product_code}]</span>
+                            <span className="text-[10px] text-amber-400 opacity-70 group-hover/code:opacity-100 group-hover/code:scale-110 transition-all">✏️</span>
+                          </button>
+                        )}
                         {(() => {
                           const custom = (item.product_name || '')
                             .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${item.product_code}\\]?`, 'i'), '')
@@ -1044,17 +1177,30 @@ export function BasketCard({
                             .replace(/\s*ទំនិញ$/i, '')
                             .trim();
                           return custom && custom !== 'ទំនិញ' ? (
-                            <span className={`font-bold text-xs sm:text-sm truncate ${isChecked ? 'text-slate-300 line-through' : 'text-white'}`}>
+                            <span className={`font-bold text-xs sm:text-sm truncate min-w-0 flex-1 ${isChecked ? 'text-slate-300 line-through' : 'text-white'}`}>
                               {custom}
                             </span>
                           ) : null;
                         })()}
                       </div>
 
-                      {/* Row 2: Price & High-Visibility Quantity Pill */}
+                      {/* Row 2: Note with Full Text Wrap & Converted Global Numbers (Directly below Code) */}
+                      {noteText && (
+                        <div className="text-amber-200 text-xs font-medium mt-1.5 break-words whitespace-normal bg-amber-950/50 px-2.5 py-1 rounded-lg border border-amber-500/40 leading-relaxed shadow-sm">
+                          <span className="text-amber-400 font-bold mr-1">↳ Note:</span>
+                          <span className="text-amber-100 font-medium">"{noteText}"</span>
+                        </div>
+                      )}
+
+                      {/* Row 3: Price & High-Visibility Quantity Pill (Pushed below Note) */}
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <span className="text-amber-400 font-mono font-black text-sm sm:text-base tracking-wide drop-shadow-sm">
-                          ${item.price.toFixed(2)}
+                        <span className="text-amber-400 font-mono font-black text-sm sm:text-base tracking-wide drop-shadow-sm flex items-center gap-1">
+                          <span>${displayPrice.toFixed(2)}</span>
+                          {isEditingThisCode && activeProd && (
+                            <span className="text-[10px] font-sans font-bold text-emerald-400 bg-emerald-950/80 px-1 py-0.2 rounded border border-emerald-500/40">
+                              (ស្តុក)
+                            </span>
+                          )}
                         </span>
                         <span className={`px-2 py-0.5 rounded-lg text-xs font-black font-mono flex items-center gap-1 border ${
                           isChecked
@@ -1065,19 +1211,11 @@ export function BasketCard({
                           <span className="text-sm font-black">{item.quantity}</span>
                         </span>
                       </div>
-
-                      {/* Row 3: Note with Full Text Wrap (No Truncation) */}
-                      {noteText && (
-                        <div className="text-amber-200 text-xs font-medium mt-1.5 break-words whitespace-normal bg-amber-950/50 px-2.5 py-1 rounded-lg border border-amber-500/40 leading-relaxed shadow-sm">
-                          <span className="text-amber-400 font-bold mr-1">↳ Note:</span>
-                          <span className="text-amber-100 font-medium">"{noteText}"</span>
-                        </div>
-                      )}
                     </div>
 
                     {/* RIGHT COLUMN: Tactile Picking Checkbox Button (Top) + Qty Edit & Delete (Bottom) */}
                     <div
-                      className="flex flex-col items-end justify-between self-stretch gap-2 flex-shrink-0"
+                      className="flex flex-col items-end justify-between self-stretch gap-2 flex-shrink-0 z-10"
                       onClick={e => e.stopPropagation()}
                     >
                       {/* Big Tactile Picking Button */}
@@ -1220,6 +1358,7 @@ export function BasketCard({
             {/* Unmatched / Unallocated Comments List (Capture.PNG match) */}
             {unallocatedComments.map((unm, cIdx) => {
               const detected = parseQuickComment(unm);
+              const displayUnm = convertKhmerNumeralsToGlobal(unm);
               return (
                 <div
                   key={cIdx}
@@ -1230,8 +1369,8 @@ export function BasketCard({
                     className="flex items-center gap-2 overflow-hidden flex-1 min-w-0 cursor-pointer"
                     onClick={() => {
                       setIsAddingManualCode(true);
-                      setManualCommentSource(unm);
-                      setManualCodeInput(detected?.code || unm.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8));
+                      setManualCommentSource(displayUnm);
+                      setManualCodeInput(detected?.code || displayUnm.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8));
                       setManualQtyInput(detected?.qty || 1);
                     }}
                     title="ចុចដើម្បីកែប្រែកូដ ឬចំនួនដោយដៃ"
@@ -1240,7 +1379,7 @@ export function BasketCard({
                       [ N/A ]
                     </span>
                     <span className="text-amber-200 font-bold text-xs sm:text-sm font-mono truncate select-all">
-                      "{unm}"
+                      "{displayUnm}"
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -1359,16 +1498,26 @@ export function BasketCard({
                       <span>ខមិនសួរ & កូដទាំងអស់ក្នុង Live នេះ ៖</span>
                       <span className="text-[10px] text-emerald-400 font-mono">✓ មិនបាត់សូម្បីតែ១</span>
                     </div>
-                    {invoice.comments.map((comm, idx) => (
-                      <div key={idx} className="flex items-start gap-2 text-xs py-1.5 border-b border-slate-800/40 last:border-0">
-                        <span className="text-cyan-400 font-mono text-[10px] font-bold select-none pt-0.5 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/40">
-                          #{idx + 1}
-                        </span>
-                        <span className="text-slate-100 font-medium select-all break-words flex-1 leading-relaxed">
-                          "{comm}"
-                        </span>
-                      </div>
-                    ))}
+                    {invoice.comments.map((comm, idx) => {
+                      const convertedComm = convertKhmerNumeralsToGlobal(comm);
+                      return (
+                        <div key={idx} className="flex items-start gap-2 text-xs py-1.5 border-b border-slate-800/40 last:border-0">
+                          <span className="text-cyan-400 font-mono text-[10px] font-bold select-none pt-0.5 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/40">
+                            #{idx + 1}
+                          </span>
+                          <div className="flex-1 flex flex-col">
+                            <span className="text-slate-100 font-medium select-all break-words leading-relaxed">
+                              "{convertedComm}"
+                            </span>
+                            {convertedComm !== comm && (
+                              <span className="text-[10px] text-slate-500 font-mono italic">
+                                ដើម ៖ "{comm}"
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
