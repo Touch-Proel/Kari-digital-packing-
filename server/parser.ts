@@ -41,15 +41,37 @@ const ACTION_WORDS = ['យក', 'យល', 'ចង់បាន', 'កាត់', 
 export function normalizeKhmerText(text: string): string {
   if (!text) return '';
   let s = text.trim();
+
+  // Replace common typos for 'កូដ' (Code) and 'សាយ' (Size)
+  s = s.replace(/ឆុត/g, 'ឈុត')
+       .replace(/កូត/g, 'កូដ')
+       .replace(/ខូត/g, 'កូដ')
+       .replace(/កូន\s*(?=\d)/g, 'កូដ ')
+       .replace(/កូនលេខ/g, 'កូដលេខ')
+       .replace(/រឿងកូដ/g, 'កូដ')
+       .replace(/យល/g, 'យក')
+       .replace(/ស្តាយ(?=\s*[A-Za-z])/gi, 'សាយ')
+       .replace(/[×✕✖]/g, 'x');
+
+  // Insert space between Arabic code and Khmer digit + unit word (e.g., "78២ឈុត" -> "78 2 ឈុត")
+  s = s.replace(/([A-Za-z0-9]{1,5})([០-៩]+)\s*(ឈុត|អាវ|គូ|គូរ|រូប|កញ្ចប់|ដុំ)/g, '$1 $2 $3');
+
+  // Split Khmer digits concatenated like "១០៨១០" -> "108 10" when 5 digits start with 3-digit code + 2-digit qty
+  s = s.replace(/([១-៩][០-៩]{2})([១-៩០][០-៩]?)\b/g, (_m, g1, g2) => {
+    const d1 = convertKhmerDigitsToArabic(g1);
+    const d2 = convertKhmerDigitsToArabic(g2);
+    return `${d1} ${d2}`;
+  });
+
+  // Convert Khmer digits to Arabic
   for (const [kh, ar] of Object.entries(KHMER_DIGITS_MAP)) {
     s = s.split(kh).join(ar);
   }
-  s = s.replace(/ឆុត/g, 'ឈុត').replace(/កូត/g, 'កូដ').replace(/ខូត/g, 'កូដ').replace(/យល/g, 'យក');
-  // Normalize multiplication symbols to x
-  s = s.replace(/[×✕✖]/g, 'x');
+
+  // Split Arabic 5 digits concatenated like "10810" -> "108 10" or "11510" -> "115 10"
+  s = s.replace(/\b([1-9]\d{2})(10|20|30|40|50|[1-9])\b/g, '$1 $2');
 
   // Convert "ពី" to "2" ONLY when preceded by an action verb (e.g. "យកពី" -> "យក 2")
-  // Do NOT convert standalone "ពី" because "ពីភ្នំពេញ", "សួរពី..." means "from"
   s = s.replace(/(យក|ថែម|កាត់|ដាក់|កក់|សុំ)\s*ពី(?![[\u1780-\u17FF])/g, '$1 2');
 
   for (const [word, num] of KHMER_WORD_NUMBERS) {
@@ -63,41 +85,80 @@ export function convertKhmerDigitsToArabic(text: string): string {
   return text.replace(/[០-៩]/g, ch => KHMER_DIGITS_MAP[ch] || ch);
 }
 
-// 7-Digit Subscriber Numbers (Total 10 Digits with leading 0)
-const RE_CAMBODIA_7_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:18|31|71|76|88|96|97)(?:[\s.\-()]*\d){7}\b/i;
+// Cambodian mobile prefixes for 9-digit (e.g. 012345678) and 10-digit (e.g. 0961234567) numbers
+const CAMBODIA_MOBILE_PREFIXES = '(?:10|11|12|13|14|15|16|17|18|31|38|60|61|66|67|68|69|70|71|76|77|78|81|85|86|87|88|89|90|92|93|95|96|97|98|99)';
 
-// 6-Digit Subscriber Numbers (Total 9 Digits with leading 0)
-const RE_CAMBODIA_6_DIGIT = /(?:\+?855[\s.\-()]*|0)(?:10|11|12|14|15|16|17|38|60|61|66|67|68|69|70|77|78|81|85|86|87|89|90|92|93|95|98|99)(?:[\s.\-()]*\d){6}\b/i;
+// 1. Phone number starting with 0 or +855 or 855
+const RE_CAMBODIA_STANDARD = new RegExp(`(?:\\+?855[\\s.\\-()]*|0)${CAMBODIA_MOBILE_PREFIXES}(?:[\\s.\\-()]*\\d){6,7}\\b`, 'i');
 
-// General Cambodian phone number fallback (9 or 10 digits starting with 0 or +855)
-const RE_CAMBODIA_GENERAL = /(?:\+?855[\s.\-()]*|0)[1-9]\d(?:[\s.\-()]*\d){6,7}\b/i;
+// 2. Phone number preceded by a quantity digit without space (e.g. "3089331833" = qty 3 + phone 089331833)
+const RE_CAMBODIA_ATTACHED_QTY = new RegExp(`\\b[1-9]\\d?(0${CAMBODIA_MOBILE_PREFIXES}\\d{6,7})\\b`, 'i');
+
+// 3. Spaced phone numbers like "070 40 41 69" or "015 88 42 38"
+const RE_CAMBODIA_SPACED = new RegExp(`\\b0${CAMBODIA_MOBILE_PREFIXES}\\s+\\d{2,3}\\s+\\d{2,3}\\s+\\d{2,3}\\b`, 'i');
+
+// 4. 9-digit Cambodian phone number missing leading 0 (e.g. "768949962" -> "0768949962")
+const RE_CAMBODIA_MISSING_ZERO = new RegExp(`\\b(${CAMBODIA_MOBILE_PREFIXES}\\d{6,7})\\b`, 'i');
 
 export function extractPhoneNumber(text: string): { phone: string | null; cleanText: string } {
   if (!text) return { phone: null, cleanText: text };
 
-  // Convert Khmer digits (០-៩) to Arabic digits (0-9) preserving 1:1 character indices
-  const normalized = convertKhmerDigitsToArabic(text);
+  // Convert Khmer digits (០-៩) to Arabic digits (0-9)
+  let normalized = convertKhmerDigitsToArabic(text);
 
-  // Match in priority: 7-digit subscriber, 6-digit subscriber, then general fallback
-  const match = normalized.match(RE_CAMBODIA_7_DIGIT)
-             || normalized.match(RE_CAMBODIA_6_DIGIT)
-             || normalized.match(RE_CAMBODIA_GENERAL);
+  // Normalize dots or slashes attached right before '0' (e.g. "1.069926846" -> "1 069926846", "35.093868110" -> "35 093868110")
+  normalized = normalized.replace(/(\d)\.(0[1-9]\d{7,8})/g, '$1 $2')
+                         .replace(/\/(0[1-9]\d{7,8})/g, ' $1');
 
-  if (match) {
-    const matchedStr = match[0];
-    const matchIndex = match.index ?? normalized.indexOf(matchedStr);
-    const matchLength = matchedStr.length;
+  // Match 1: Attached quantity + phone (e.g. "3089331833")
+  const mAttached = normalized.match(RE_CAMBODIA_ATTACHED_QTY);
+  if (mAttached && mAttached[1]) {
+    const rawPhone = mAttached[1];
+    const matchIndex = mAttached.index ?? normalized.indexOf(mAttached[0]);
+    // Replace full match with just the attached quantity prefix
+    const qtyPrefix = mAttached[0].slice(0, mAttached[0].length - rawPhone.length);
+    const before = normalized.substring(0, matchIndex);
+    const after = normalized.substring(matchIndex + mAttached[0].length);
+    const cleanText = `${before} ${qtyPrefix} ${after}`.replace(/\s+/g, ' ').trim();
+    return { phone: rawPhone, cleanText };
+  }
 
-    // Extract digits only
+  // Match 2: Spaced phone numbers (e.g. "070 40 41 69")
+  const mSpaced = normalized.match(RE_CAMBODIA_SPACED);
+  if (mSpaced) {
+    const matchedStr = mSpaced[0];
+    const digits = matchedStr.replace(/\D/g, '');
+    const matchIndex = mSpaced.index ?? normalized.indexOf(matchedStr);
+    const before = normalized.substring(0, matchIndex);
+    const after = normalized.substring(matchIndex + matchedStr.length);
+    const cleanText = `${before} ${after}`.replace(/\s+/g, ' ').trim();
+    return { phone: digits, cleanText };
+  }
+
+  // Match 3: Standard phone number starting with 0 or +855
+  const mStandard = normalized.match(RE_CAMBODIA_STANDARD);
+  if (mStandard) {
+    const matchedStr = mStandard[0];
     let digits = matchedStr.replace(/\D/g, '');
     if (digits.startsWith('855')) {
       digits = '0' + digits.slice(3);
     }
+    const matchIndex = mStandard.index ?? normalized.indexOf(matchedStr);
+    const before = normalized.substring(0, matchIndex).replace(/[\s_\-:=/,]+$/, '');
+    const after = normalized.substring(matchIndex + matchedStr.length).replace(/^[\s_\-:=/,]+/, '');
+    const cleanText = `${before} ${after}`.replace(/\s+/g, ' ').trim();
+    return { phone: digits, cleanText };
+  }
 
-    if ((digits.length === 9 || digits.length === 10) && digits.startsWith('0')) {
-      // Strip trailing separators right before phone number (e.g. 17_0883784999 -> 17)
-      const before = text.substring(0, matchIndex).replace(/[\s_\-:=/,]+$/, '');
-      const after = text.substring(matchIndex + matchLength).replace(/^[\s_\-:=/,]+/, '');
+  // Match 4: 9-digit phone missing leading 0 (e.g. "768949962")
+  const mMissing = normalized.match(RE_CAMBODIA_MISSING_ZERO);
+  if (mMissing) {
+    const matchedStr = mMissing[0];
+    const digits = '0' + matchedStr.replace(/\D/g, '');
+    if (digits.length === 9 || digits.length === 10) {
+      const matchIndex = mMissing.index ?? normalized.indexOf(matchedStr);
+      const before = normalized.substring(0, matchIndex);
+      const after = normalized.substring(matchIndex + matchedStr.length);
       const cleanText = `${before} ${after}`.replace(/\s+/g, ' ').trim();
       return { phone: digits, cleanText };
     }
@@ -113,11 +174,12 @@ export function extractPhoneNumber(text: string): { phone: string | null; cleanT
 export function extractAddressShield(text: string): { address: string | null; cleanText: string } {
   if (!text) return { address: null, cleanText: text };
 
+  // Address pattern, excluding order action keywords
   const reAddr = /(?:ទីតាំង|ផ្ទះ\s*(?:លេខ|№)?|ផ្លូវ\s*(?:លេខ)?|ផ្លូវលំ|បន្ទប់\s*(?:លេខ)?|ផ្សារ|ភូមិ|ឃុំ|សង្កាត់|ខណ្ឌ|បុរី|st(?:reet|\.)?)\s*[:=]?\s*[\u1780-\u17FFA-Za-z0-9._\-\/]+(?:\s+[\u1780-\u17FFA-Za-z0-9._\-\/]+)*/gi;
   let foundAddr: string | null = null;
   const clean = text.replace(reAddr, (match) => {
-    // Only shield if it does not contain explicit order action words
-    if (!/(?:យក|កាត់|ថែម|ដាក់|កក់)/.test(match)) {
+    // Only shield if it does not contain explicit order action words or product codes like "121/1"
+    if (!/(?:យក|កាត់|ថែម|ដាក់|កក់|\b\d+\/\d+\b|\b\d+=\d+\b)/.test(match)) {
       if (!foundAddr) foundAddr = match.trim();
       return ' ';
     }
@@ -130,14 +192,23 @@ export function extractAddressShield(text: string): { address: string | null; cl
 /**
  * Extract weight in kg (e.g. "37គីឡូ54", "37 គីឡូ 54", "118គីឡូ68យក១", "55kg")
  * and remove it from text so weight numbers are never parsed as product codes or quantities.
+ * Shields location "គីឡូលេខ" / "គីឡូទី" / "នៅគីឡូ" (Kilometer 10) from being misparsed as weight.
  */
 export function extractWeight(text: string): { weight: string | null; cleanText: string } {
   if (!text) return { weight: null, cleanText: text };
   let weightVal: string | null = null;
 
+  // Protect location terms like "គីឡូលេខ១០", "នៅគីឡូ10"
+  let processText = text.replace(/(?:នៅ|ផ្លូវ|ស្តុប|ជិត|ពី)?\s*គីឡូ\s*(?:លេខ|ទី)?\s*\d+\b/g, (m) => {
+    if (/នៅ|ផ្លូវ|ស្តុប|ជិត|លេខ|ទី/.test(m)) {
+      return m.replace(/គីឡូ/g, 'KILOMETER_LOCATION');
+    }
+    return m;
+  });
+
   // 1. Weight AFTER គីឡូ / kg (e.g. "37គីឡូ54", "37 គីឡូ 54", "118គីឡូ68", "គីឡូ 54", "kg 54")
   const reAfter = /(?:គីឡូ(?:ក្រាម)?|kilo|kgs?)\s*[:=]?\s*(\d{2,3}(?:\.\d+)?)(?![A-Za-z0-9])/gi;
-  let clean = text.replace(reAfter, (_match, g1) => {
+  let clean = processText.replace(reAfter, (_match, g1) => {
     weightVal = `${g1}kg`;
     return ' ';
   });
@@ -151,15 +222,15 @@ export function extractWeight(text: string): { weight: string | null; cleanText:
     });
   }
 
-  // Remove any remaining standalone គីឡូ / kg words
-  clean = clean.replace(/(?:គីឡូ(?:ក្រាម)?|kilo|kgs?)/gi, ' ');
+  // Restore protected location terms & remove leftover standalone weight words
+  clean = clean.replace(/KILOMETER_LOCATION/g, 'គីឡូ').replace(/(?:គីឡូ(?:ក្រាម)?|kilo|kgs?)/gi, ' ');
   return { weight: weightVal, cleanText: clean.replace(/\s+/g, ' ').trim() };
 }
 
 export function isQuestionComment(text: string): boolean {
   if (!text) return false;
   // If it has explicit digit-connector-digit syntax like 30=2 or 30x2, it's not a question
-  if (/\d\s*[*=:+\-]\s*\d|\d\s*[xX]\s*\d/.test(text)) return false;
+  if (/\d\s*[*=:+\-«»]\s*\d|\d\s*[xX]\s*\d/.test(text)) return false;
 
   const lower = text.toLowerCase();
 
@@ -181,6 +252,15 @@ export function isQuestionComment(text: string): boolean {
 }
 
 /**
+ * Mask prices/amounts like "$2.5", "2.5$", "(2.7$)", "3000៛", "13000៛"
+ * so price numbers are never mistaken for quantity or product codes.
+ */
+function maskPrices(text: string): string {
+  if (!text) return text;
+  return text.replace(/\(?\d+(?:\.\d+)?\s*[\$៛]\)?|\(?[\$៛]\s*\d+(?:\.\d+)?\)?/gi, ' ');
+}
+
+/**
  * Replace a substring match range with whitespace so downstream regexes cannot re-match it.
  */
 function maskMatch(str: string, matchIndex: number, matchLength: number): string {
@@ -196,13 +276,19 @@ export interface ExtractedPair {
 export function extractCodeQtyPairs(text: string): ExtractedPair[] {
   if (!text) return [];
 
+  // Check for cancellation / refusal phrases ("អត់យកទេ", "សុំអត់យក", "សុំលុប", "បោះបង់")
+  if (/(?:អត់យក|មិនយក|សុំអត់យក|សុំលុប|បោះបង់)/i.test(text)) {
+    return [];
+  }
+
   const norm = normalizeKhmerText(text);
-  let clean = norm.toUpperCase().trim();
+  const textNoPrices = maskPrices(norm);
+  let clean = textNoPrices.toUpperCase().trim();
   const pairs: ExtractedPair[] = [];
   const seenCodes = new Set<string>();
 
   function addPair(rawCode: string, rawQty: string | number, sizeOption?: string) {
-    const c = rawCode.trim().replace(/^\./, '').replace(/^[_\-:=]+|[_\-:=]+$/g, '');
+    const c = rawCode.trim().replace(/^\./, '').replace(/^[_\-:=«»]+|[_\-:=«»]+$/g, '');
     const q = typeof rawQty === 'number' ? rawQty : (parseInt(rawQty, 10) || 1);
     if (c && !COMMON_GREETINGS.has(c) && !seenCodes.has(c) && c.length <= 6) {
       // Exclude standalone telephone numbers
@@ -212,9 +298,25 @@ export function extractCodeQtyPairs(text: string): ExtractedPair[] {
     }
   }
 
-  // Pass 1: Code with Size / Variant: e.g. "12xL", "12×L", "12 size L", "12 L", "48/1xL"
-  const reSize = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:[*xX=:_\-\/,.\+«»~]|size|\/)\s*([1-9]\d*)?\s*(?:[*xX=:_\-\/,.\+«»~]|size|\/)?\s*(XS|S|M|L|XL|XXL|2XL|3XL)\b/gi;
   let m: RegExpExecArray | null;
+
+  // Pass 0: Quantity unit words attached to code: e.g. "78 2ឈុត", "132 3ឈុត", "87 20អាវ", "78 10គូរ", "49 2រូប"
+  const reUnitWord = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:[*xX=:_\-\/,.\+«»~]|size|\/)?\s*(\d{1,3})\s*(?:ឈុត|ឆុត|អាវ|គូ|គូរ|រូប|កញ្ចប់|ដុំ|set|sets|pcs?)\b/gi;
+  while ((m = reUnitWord.exec(clean)) !== null) {
+    addPair(m[1], m[2]);
+    clean = maskMatch(clean, m.index, m[0].length);
+    reUnitWord.lastIndex = 0;
+  }
+
+  // Pass 1: Code with Size / Variant: e.g. "12xL", "12×L", "12 size L", "12 L", "48/1xL", "94sML"
+  const reSizeCombo = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:[*xX=:_\-\/,.\+«»~]|size|\/)?\s*(SML|S\s*M\s*L|S\/M\/L)\b/gi;
+  while ((m = reSizeCombo.exec(clean)) !== null) {
+    addPair(m[1], 3); // 3 items (S, M, L)
+    clean = maskMatch(clean, m.index, m[0].length);
+    reSizeCombo.lastIndex = 0;
+  }
+
+  const reSize = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:[*xX=:_\-\/,.\+«»~]|size|\/)\s*([1-9]\d*)?\s*(?:[*xX=:_\-\/,.\+«»~]|size|\/)?\s*(XS|S|M|L|XL|XXL|2XL|3XL)\b/gi;
   while ((m = reSize.exec(clean)) !== null) {
     const codePart = m[1];
     const qtyPart = m[2] || '1';
@@ -224,8 +326,8 @@ export function extractCodeQtyPairs(text: string): ExtractedPair[] {
     reSize.lastIndex = 0;
   }
 
-  // Pass 2: Explicit connector with quantity: e.g. "30=2", "30*2", "30x2", "30:2", "30-2", "36/1", "118_1", "40=2"
-  const reConnector = /(?:ថែម|យក|កាត់|ដាក់|កក់)?\s*(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})\b/g;
+  // Pass 2: Explicit connector with quantity: e.g. "30=2", "30*2", "30x2", "30:2", "30-2", "36/1", "118_1", "40=2", "96«2", "85»2"
+  const reConnector = /(?:ថែម|យក|កាត់|ដាក់|កក់)?\s*(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,3})\b/g;
   while ((m = reConnector.exec(clean)) !== null) {
     addPair(m[1], m[2]);
     clean = maskMatch(clean, m.index, m[0].length);
@@ -233,7 +335,7 @@ export function extractCodeQtyPairs(text: string): ExtractedPair[] {
   }
 
   // Pass 3: Khmer Action Word attached or spaced after code: "28 យក 2", "57យក1", "24យក 1", "119យក"
-  const reCodeAction = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(\d{1,2})?\b/g;
+  const reCodeAction = /(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(\d{1,3})?\b/g;
   while ((m = reCodeAction.exec(clean)) !== null) {
     addPair(m[1], m[2] || '1');
     clean = maskMatch(clean, m.index, m[0].length);
@@ -241,7 +343,7 @@ export function extractCodeQtyPairs(text: string): ExtractedPair[] {
   }
 
   // Pass 4: Action word before code: "ថែម 57 យក 1" or "យក 119 2" or "ថែម 106"
-  const reActionBefore = /(?:ថែម|យក|កាត់|ដាក់|កក់|បូក)\s*(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})(?:\s+(\d{1,2}))?\b/g;
+  const reActionBefore = /(?:ថែម|យក|កាត់|ដាក់|កក់|បូក)\s*(?:កូដលេខ|លេខកូដ|កូដ|code)?\s*([A-Za-z0-9]{1,5})(?:\s+(\d{1,3}))?\b/g;
   while ((m = reActionBefore.exec(clean)) !== null) {
     addPair(m[1], m[2] || '1');
     clean = maskMatch(clean, m.index, m[0].length);
