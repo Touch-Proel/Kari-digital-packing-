@@ -971,7 +971,11 @@ export function BasketCard({
               const displayImage = (item.image_file && item.image_file.trim() !== '')
                 ? item.image_file
                 : (isCurrentLiveOrder && invoice.packing_stage === 'UNPICKED' ? prod?.image_file : undefined);
-              const noteText = item.item_comment || (invoice.comments && invoice.comments[0]) || '';
+              const matchingComment = invoice.comments?.find(c => {
+                const codeRegex = new RegExp(`(^|\\D)${item.product_code}(\\D|$)`, 'i');
+                return codeRegex.test(c);
+              });
+              const noteText = item.item_comment || matchingComment || (invoice.comments && invoice.comments[0]) || '';
 
               return (
                 <div key={idx} className="flex flex-col">
@@ -1062,10 +1066,11 @@ export function BasketCard({
                         </span>
                       </div>
 
-                      {/* Row 3: Note */}
+                      {/* Row 3: Note with Full Text Wrap (No Truncation) */}
                       {noteText && (
-                        <div className="text-amber-300/90 text-xs font-medium mt-1 truncate bg-amber-950/30 px-2 py-0.5 rounded-lg border border-amber-600/30">
-                          ↳ Note: "{noteText}"
+                        <div className="text-amber-200 text-xs font-medium mt-1.5 break-words whitespace-normal bg-amber-950/50 px-2.5 py-1 rounded-lg border border-amber-500/40 leading-relaxed shadow-sm">
+                          <span className="text-amber-400 font-bold mr-1">↳ Note:</span>
+                          <span className="text-amber-100 font-medium">"{noteText}"</span>
                         </div>
                       )}
                     </div>
