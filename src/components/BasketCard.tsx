@@ -120,17 +120,38 @@ export function BasketCard({
     }
     s = s.replace(/ពីរ/g, '2').replace(/បី/g, '3').replace(/បួន/g, '4').replace(/មួយ/g, '1');
 
-    const m = s.match(/([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})/);
-    if (m) return { code: m[1].toUpperCase(), qty: parseInt(m[2], 10) || 1 };
+    // Helper to test if a matched quantity token is followed by a weight unit (e.g. 70kg, 70 kilo, 70គីឡូ)
+    const isWeightUnit = (fullStr: string, matchEndIndex: number): boolean => {
+      const afterMatch = fullStr.slice(matchEndIndex);
+      return /^\s*(?:KG|KGS|KILO|KILOGRAM|គីឡូ|គីឡូក្រាម|ក្រាម|G|GM)\b/i.test(afterMatch)
+          || /^\s*(?:គីឡូ|គីឡូក្រាម|ក្រាម)/i.test(afterMatch);
+    };
+
+    const m = s.match(/([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})(?!\d)/);
+    if (m && m.index !== undefined) {
+      const matchEnd = m.index + m[0].length;
+      if (!isWeightUnit(s, matchEnd)) {
+        return { code: m[1].toUpperCase(), qty: parseInt(m[2], 10) || 1 };
+      }
+    }
 
     const mSpace = s.match(/\b([A-Za-z0-9]{1,5})\s+(\d{1,2})\b/);
-    if (mSpace && !['KG', 'KILO'].includes(mSpace[2].toUpperCase())) {
-      return { code: mSpace[1].toUpperCase(), qty: parseInt(mSpace[2], 10) || 1 };
+    if (mSpace && mSpace.index !== undefined) {
+      const matchEnd = mSpace.index + mSpace[0].length;
+      if (!isWeightUnit(s, matchEnd)) {
+        return { code: mSpace[1].toUpperCase(), qty: parseInt(mSpace[2], 10) || 1 };
+      }
     }
 
     const mSingle = s.match(/\b([A-Za-z0-9]{1,5})\b/);
     if (mSingle && mSingle[1].length <= 4 && !/^(hi|ok|yes|no)$/i.test(mSingle[1])) {
       return { code: mSingle[1].toUpperCase(), qty: 1 };
+    }
+
+    // Match code with weight attached like 132/70kg or 132-65kg
+    const mWeight = s.match(/\b([A-Za-z0-9]{1,5})(?:[\/\s\-_]*\d{1,3}\s*(?:KG|KGS|KILO|KILOGRAM|គីឡូ|គីឡូក្រាម|ក្រាម|G|GM)\b)/i);
+    if (mWeight && mWeight[1].length <= 5 && !/^(hi|ok|yes|no)$/i.test(mWeight[1])) {
+      return { code: mWeight[1].toUpperCase(), qty: 1 };
     }
 
     return null;
