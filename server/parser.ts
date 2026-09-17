@@ -39,8 +39,8 @@ const SIZE_COLOR_SUFFIXES = [
 
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 
-// សម្អាតទម្ងន់ កម្ពស់ ចង្កេះ និងសាយចេញឱ្យអស់មុនគេបង្អស់
-const RE_MEASUREMENTS_CLEANUP = /(?:\d{1,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|(?:គីឡូក្រាម|គីឡូ|គក|kg|kilo|កម្ពស់|ចង្កេះ|សាយ|size)\s*\d{1,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
+// សម្អាតទម្ងន់ទាំងដុំ (ឧ. 1គីឡូ77, 20=1គីឡូ78) មិនឱ្យសល់លេខទោលខាងក្រោយ
+const RE_MEASUREMENTS_CLEANUP = /(?:\d*\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\s*\d*|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2}|(?:សាយ|size)\s*[:=\s]*\d{2}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
 
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
 
@@ -133,7 +133,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
-  // ១. សម្អាតទម្ងន់/គីឡូ និងតម្លៃលុយឱ្យអស់មុនគេ
+  // ១. សម្អាតទម្ងន់/គីឡូ (រួមទាំងលេខសងខាង) និងតម្លៃលុយឱ្យអស់មុនគេ
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
@@ -164,7 +164,6 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const isSingleDigit = /^\d$/.test(pCode);
 
-      // ការពារកូដ ១ ខ្ទង់ មិនឱ្យទៅស៊ីជាប់ក្នុងលេខធំ ឬពាក្យបរិមាណ
       if (isSingleDigit) {
         const falseQtyPattern = new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់)?\\s*${esc}\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌|ពណ៍)`, 'i');
         if (falseQtyPattern.test(seg) && !new RegExp(`(?:កូដ|កូដលេខ|CODE)\\s*${esc}\\b`, 'i').test(seg)) {
@@ -172,7 +171,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         }
       }
 
-      // កូដ ១ ខ្ទង់ និងច្រើនខ្ទង់ត្រូវមានព្រំដែនតឹងរឹង មិនឱ្យនៅជាប់លេខដទៃទៀតឡើយ
+      // ប្រើប្រាស់ព្រំដែនតឹងរឹងការពារកុំឱ្យលេខកូដទៅស៊ីជាប់លេខផ្សេង
       const codePattern = isSingleDigit
         ? `(?:(?:កូដ|កូដលេខ|CODE|យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*${esc}|(?<!\\d)${esc}(?!\\d))`
         : `(?<!\\d)(${esc})(?!\\d)`;
