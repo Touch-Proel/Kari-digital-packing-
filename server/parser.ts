@@ -159,7 +159,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const isSingleDigit = /^\d$/.test(pCode);
 
-      // ការពារកូដ ១ ខ្ទង់ (ដូចជា 5) មិនឱ្យច្រឡំជាមួយពាក្យបរិមាណ "5អាវ"
+      // ការពារកូដ ១ ខ្ទង់ មិនឱ្យច្រឡំជាមួយពាក្យបរិមាណ "5អាវ"
       if (isSingleDigit) {
         const falseQtyPattern = new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់)?\\s*${esc}\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌|ពណ៍)`, 'i');
         if (falseQtyPattern.test(seg) && !new RegExp(`(?:កូដ|កូដលេខ|CODE)\\s*${esc}\\b`, 'i').test(seg)) {
@@ -193,22 +193,23 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         continue;
       }
 
-      // ២. ឆែកទម្រង់មានបរិមាណច្បាស់លាស់ (Strict With-Qty Pattern: 59=20, 103-2, 25...យក5)
+      // ២. ឆែកទម្រង់មានបរិមាណច្បាស់លាស់ (ឧ. 59=20, 103-2, 25...យក5)
       const reWithQty = new RegExp(
         `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
         `(?<![A-Za-z0-9])(${esc})` +
-        `(?:[\\s_-]*(?:${validSuffixes}))?` +
-        `(?:\\s*[:=xX*\\-_\\.,+«»~]|\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)|[\\s\\S]*?(?:យក|កាត់|ថែម|ដាក់|កក់|បូក))` +
+        `(?:[\\s_-]*(${validSuffixes}))?` +
+        `(?:\\s*[:=xX*\\-_.,+«»~]|\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)|[\\s\\S]*?(?:យក|កាត់|ថែម|ដាក់|កក់|បូក))` +
         `\\s*(\\d{1,2})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ៍))?`,
         'i'
       );
 
       const matchWithQty = seg.match(reWithQty);
-      if (matchWithQty && matchWithQty[2]) {
-        let rawQty = parseInt(matchWithQty[2], 10) || 1;
+      // matchWithQty[3] គឺជាបរិមាណ Quantity (matchWithQty[2] ជា Variant)
+      if (matchWithQty && matchWithQty[3]) {
+        let rawQty = parseInt(matchWithQty[3], 10) || 1;
         pairs.push({ code: pCode, qty: rawQty });
         seenCodes.add(pCode);
-        // សំខាន់៖ កាត់ឃ្លា "59=20" ទាំងមូលចេញ ដើម្បីកុំឱ្យលេខ 20 ក្លាយជាកូដ 20
+        // លុបឃ្លា "59=20" ចេញ ដើម្បីកុំឱ្យលេខ 20 ក្លាយជាកូដ 20
         seg = seg.replace(matchWithQty[0], ' ');
         continue;
       }
