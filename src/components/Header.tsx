@@ -1,15 +1,14 @@
+import React from 'react';
 import { FacebookPage } from '../types';
-import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
+  onOpenSystemSettings: () => void;
+  onOpenFullStockManager: () => void;
+  productsCount?: number;
+  outStockCount?: number;
   activePage: FacebookPage | null;
-  onOpenFbModal: () => void;
-  dispatchedCount: number;
-  onOpenDispatchModal: () => void;
-  onOpenDatabaseModal?: () => void;
   packerName: string;
-  onOpenPackerHistory: () => void;
-  onChangePackerName?: () => void;
+  dispatchedCount: number;
   liveSessions: { live_id: string; created_at: string; basket_count?: number }[];
   selectedLiveId: string;
   onSelectLiveId: (id: string) => void;
@@ -18,24 +17,17 @@ interface HeaderProps {
   onOpenPickingModal: () => void;
   onToggleCommentStream: () => void;
   isStreamOpen: boolean;
-  fontScale?: number;
-  onAdjustFontSize: (delta: number) => void;
-  onResetFontSize?: () => void;
-  khmerFont?: string;
-  onChangeKhmerFont?: (font: string) => void;
   totalBasketCount?: number;
-  onOpenKHQRModal?: () => void;
 }
 
 export function Header({
+  onOpenSystemSettings,
+  onOpenFullStockManager,
+  productsCount = 0,
+  outStockCount = 0,
   activePage,
-  onOpenFbModal,
-  dispatchedCount,
-  onOpenDispatchModal,
-  onOpenDatabaseModal,
   packerName,
-  onOpenPackerHistory,
-  onChangePackerName,
+  dispatchedCount,
   liveSessions,
   selectedLiveId,
   onSelectLiveId,
@@ -44,117 +36,82 @@ export function Header({
   onOpenPickingModal,
   onToggleCommentStream,
   isStreamOpen,
-  fontScale = 1,
-  onAdjustFontSize,
-  onResetFontSize,
-  khmerFont = 'kantumruy',
-  onChangeKhmerFont,
-  totalBasketCount,
-  onOpenKHQRModal
+  totalBasketCount
 }: HeaderProps) {
   return (
-    <div className="bg-[#0B1325]/95 backdrop-blur-md border border-[#1C2B4B] p-2.5 rounded-2xl flex flex-col gap-2 shadow-[0_8px_25px_rgba(0,0,0,0.6)]">
-      {/* Top Row: Brand & Badges */}
-      <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-2">
-        {/* Brand & Open Fullscreen */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="flex items-center gap-1 font-black text-xs sm:text-sm bg-gradient-to-r from-[#00F0FF] to-[#38BDF8] bg-clip-text text-transparent">
-            <span>⚡</span>
-            <span>KARI ARNETT OS</span>
+    <div className="bg-[#081122]/95 backdrop-blur-md border border-[#182848] p-2.5 rounded-3xl flex flex-col gap-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
+      {/* 2 Big Top Buttons Side-by-Side (ទទឹមគ្នា ២ ប៊ូតុងធំៗ) */}
+      <div className="grid grid-cols-2 gap-2">
+        {/* Button 1 (Left): KARI ARNETT OS (Settings & System) */}
+        <button
+          type="button"
+          onClick={onOpenSystemSettings}
+          className="bg-gradient-to-br from-[#0B1E3D] via-[#102A54] to-[#0A1830] hover:from-[#0E264D] hover:to-[#0F203D] border-[1.5px] border-cyan-500/60 hover:border-cyan-400 p-2.5 rounded-2xl flex flex-col justify-between items-start text-left shadow-[0_4px_15px_rgba(6,182,212,0.15)] active:scale-[0.98] transition-all cursor-pointer group min-h-[72px]"
+          title="ចុចដើម្បីបើកការកំណត់ទូទៅ ប្រព័ន្ធ និង Profile អ្នកច្រក"
+        >
+          <div className="w-full flex items-center justify-between">
+            <div className="flex items-center gap-1 font-black text-xs sm:text-sm bg-gradient-to-r from-[#00F0FF] to-[#38BDF8] bg-clip-text text-transparent truncate">
+              <span>⚡</span>
+              <span className="truncate">KARI ARNETT OS</span>
+            </div>
+            <span className="text-[11px] text-cyan-400 bg-cyan-950/80 px-1.5 py-0.2 rounded-md border border-cyan-500/40 font-bold group-hover:scale-105 transition-transform flex-shrink-0">
+              ⚙️ កំណត់
+            </span>
           </div>
 
-          {/* PWA Install Button */}
-          <PWAInstallButton />
-
-          <a
-            href={window.location.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 flex items-center gap-1 active:scale-95 transition-all shadow-sm"
-            title="បើកក្នុង Tab ថ្មីពេញលេញរបស់ Google Chrome"
-          >
-            <span>↗️</span>
-            <span className="hidden xs:inline">ផ្ទាំងពេញ</span>
-          </a>
-        </div>
-
-        {/* Action Pills */}
-        <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap justify-end">
-          {/* KHQR Quick Scan Button */}
-          {onOpenKHQRModal && (
-            <button
-              onClick={onOpenKHQRModal}
-              className="px-2.5 py-1 rounded-xl text-[11px] font-black border border-red-500/80 bg-[#E11925] hover:bg-[#c91420] text-white flex items-center gap-1 transition-all shadow-[0_0_12px_rgba(225,25,37,0.45)] active:scale-95 cursor-pointer"
-              title="បើកស្កេន Bakong KHQR (ABA Bank)"
-            >
-              <span className="bg-white text-[#E11925] text-[10px] font-black px-1 rounded shadow-sm">
-                KHQR
-              </span>
-              <span className="hidden xs:inline">ស្កេន ABA</span>
-            </button>
-          )}
-
-          {/* Facebook Connection Status Button */}
-          <button
-            onClick={onOpenFbModal}
-            className={`px-2 py-1 rounded-xl text-[11px] font-bold border flex items-center gap-1 transition-all ${
-              activePage
-                ? 'bg-blue-950/80 border-blue-500/60 text-sky-300'
-                : 'bg-slate-900 border-slate-700 text-slate-400'
-            }`}
-            title="គ្រប់គ្រង Facebook Page & Live"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"></span>
-            <span className="truncate max-w-[70px] sm:max-w-[100px]">{activePage ? activePage.name : 'FB Page'}</span>
-          </button>
-
-          {/* Settings & Database Button */}
-          {onOpenDatabaseModal && (
-            <button
-              onClick={onOpenDatabaseModal}
-              className="px-2.5 py-1 rounded-xl text-[11px] font-bold border bg-cyan-950/70 border-cyan-500/50 text-cyan-300 hover:bg-cyan-900 flex items-center gap-1 transition-all shadow-sm active:scale-95 cursor-pointer"
-              title="ការកំណត់ហាង, កំណត់ KHQR (Upload) & ទិន្នន័យ SQLite"
-            >
-              <span>⚙️</span>
-              <span className="hidden xs:inline">Settings</span>
-            </button>
-          )}
-
-          {/* Dispatched Count Pill */}
-          <button
-            onClick={onOpenDispatchModal}
-            className="bg-emerald-950/70 border border-emerald-500/60 text-emerald-300 rounded-xl px-2 py-1 text-xs font-bold flex items-center gap-1 shadow-sm active:scale-95 transition-all"
-            title="ផ្ទៀងផ្ទាត់កញ្ចប់ចេញដឹកថ្ងៃនេះ"
-          >
-            <span>🚀</span>
-            <span id="cnt-dispatched-today" className="text-emerald-400 font-mono font-black">
-              {dispatchedCount}
+          {/* Subtitle & Quick Status Info */}
+          <div className="w-full flex items-center justify-between gap-1 text-[10.5px] text-slate-300 font-medium pt-1 border-t border-cyan-900/40">
+            <span className="truncate flex items-center gap-1">
+              <span className="text-slate-400">👤</span>
+              <span className="truncate text-cyan-200 font-bold">{packerName || 'កំណត់ឈ្មោះ'}</span>
             </span>
-          </button>
+            <span className="flex items-center gap-1 flex-shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-emerald-400 font-bold">ON</span>
+            </span>
+          </div>
+        </button>
 
-          {/* Packer Tag */}
-          <button
-            onClick={() => {
-              if (onChangePackerName) {
-                onChangePackerName();
-              } else {
-                onOpenPackerHistory();
-              }
-            }}
-            className="bg-[#0D2847] hover:bg-[#12365E] text-cyan-200 border border-cyan-400/80 px-2.5 py-1 rounded-xl text-xs font-bold shadow-sm active:scale-95 transition-all truncate max-w-[100px] sm:max-w-[120px] flex items-center gap-1 cursor-pointer"
-            title="ចុចដើម្បីប្តូរឈ្មោះអ្នករៀបអីវ៉ាន់"
-          >
-            <span>👤</span>
-            <span className="truncate">{packerName || 'កំណត់ឈ្មោះ'}</span>
-            <span className="text-[10px] text-amber-400">✏️</span>
-          </button>
-        </div>
+        {/* Button 2 (Right): គ្រប់គ្រងស្តុក LIVE (Stock Management Full-Screen) */}
+        <button
+          type="button"
+          onClick={onOpenFullStockManager}
+          className="bg-gradient-to-br from-[#0B2544] via-[#0E325C] to-[#081B33] hover:from-[#0D2D52] hover:to-[#0B2444] border-[1.5px] border-[#0284C7] hover:border-sky-400 p-2.5 rounded-2xl flex flex-col justify-between items-start text-left shadow-[0_4px_15px_rgba(2,132,199,0.2)] active:scale-[0.98] transition-all cursor-pointer group min-h-[72px]"
+          title="ចុចដើម្បីបើកផ្ទាំងគ្រប់គ្រងស្តុកធំពេញអេក្រង់ (Full Screen Stock Manager)"
+        >
+          <div className="w-full flex items-center justify-between">
+            <div className="flex items-center gap-1 font-black text-xs sm:text-sm text-sky-300 group-hover:text-cyan-200 truncate">
+              <span>📦</span>
+              <span className="truncate">គ្រប់គ្រងស្តុក LIVE</span>
+            </div>
+            <span className="text-[10.5px] bg-sky-950/90 text-cyan-300 border border-sky-500/50 px-1.5 py-0.2 rounded-md font-mono font-bold flex-shrink-0">
+              {productsCount} មុខ
+            </span>
+          </div>
+
+          {/* Subtitle & Stock Quick Alert */}
+          <div className="w-full flex items-center justify-between gap-1 text-[10.5px] font-medium pt-1 border-t border-sky-900/40">
+            <span className="text-emerald-400 font-bold flex items-center gap-1 truncate">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+              <span>REAL-TIME</span>
+            </span>
+            {outStockCount > 0 ? (
+              <span className="text-rose-300 bg-rose-950/80 px-1.5 py-0.2 rounded text-[9.5px] font-bold border border-rose-500/50 flex-shrink-0">
+                🔴 អស់ ({outStockCount})
+              </span>
+            ) : (
+              <span className="text-cyan-400 text-[10px] font-bold flex-shrink-0">
+                🔍 បើកមើល ➔
+              </span>
+            )}
+          </div>
+        </button>
       </div>
 
-      {/* Bottom Row: Tools & Selectors (Clean Flex Wrap Layout) */}
-      <div className="flex flex-wrap items-center gap-1.5 pt-0.5 border-t border-slate-800/60">
-        {/* Live Session Selector + Quick Manage Buttons */}
-        <div className="flex items-center gap-1 min-w-[160px] flex-1">
+      {/* Sleek Live Session Bar (បន្ទាត់ជ្រើសរើស Live ខាងក្រោម) */}
+      <div className="flex items-center gap-1.5 pt-1 border-t border-[#15233E]">
+        {/* Live Session Selector */}
+        <div className="flex-1 min-w-0">
           {(() => {
             const currentLiveSession = liveSessions.find(s => s.live_id === selectedLiveId);
             let liveDisplayTitle = '🌐 គ្រប់ Live (ទាំងអស់)';
@@ -177,108 +134,53 @@ export function Header({
               <button
                 type="button"
                 onClick={onOpenManageLiveModal}
-                className="bg-slate-950/90 text-sky-400 border border-sky-600/40 hover:border-cyan-400 px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none truncate flex-1 shadow-inner flex items-center justify-between gap-1 active:scale-[0.98] transition-all cursor-pointer text-left h-8"
+                className="w-full bg-[#050B16] hover:bg-[#091428] text-sky-300 border border-sky-600/40 hover:border-cyan-400 px-3 py-1.5 rounded-xl text-xs font-bold truncate flex items-center justify-between gap-1 shadow-inner active:scale-[0.98] transition-all cursor-pointer text-left h-8.5"
                 title="ចុចដើម្បីប្តូរ ឬលុបវគ្គ Live"
               >
                 <span className="truncate">{liveDisplayTitle}</span>
-                <span className="text-[10px] text-sky-500/80 flex-shrink-0">▼</span>
+                <span className="text-[10px] text-sky-400/80 flex-shrink-0">▼</span>
               </button>
             );
           })()}
-
-          {onCreateLiveSession && (
-            <button
-              onClick={onCreateLiveSession}
-              className="px-2 py-1.5 rounded-xl bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm h-8"
-              title="បង្កើតវគ្គ Live ថ្មី"
-            >
-              <span>➕</span>
-            </button>
-          )}
-
-          {onOpenManageLiveModal && (
-            <button
-              onClick={onOpenManageLiveModal}
-              className="px-2 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-cyan-300 text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm h-8"
-              title="គ្រប់គ្រង ឬលុបវគ្គ Live ចាស់ៗ"
-            >
-              <span>⚙️</span>
-            </button>
-          )}
         </div>
 
-        {/* Right side buttons container */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {/* Live Comment Stream Toggle */}
+        {/* Add New Live Button */}
+        {onCreateLiveSession && (
           <button
-            onClick={onToggleCommentStream}
-            className={`px-2.5 py-1.5 rounded-xl font-bold text-xs border flex items-center gap-1 transition-all h-8 ${
-              isStreamOpen
-                ? 'bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
-                : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
-            }`}
-            title="បើក/បិទ ផ្ទាំងចាប់ខំមិន Live"
+            type="button"
+            onClick={onCreateLiveSession}
+            className="w-8.5 h-8.5 rounded-xl bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm"
+            title="បង្កើតវគ្គ Live ថ្មី"
           >
-            <span>💬</span>
-            <span className="hidden xs:inline">ខំមិន</span>
+            <span>➕</span>
           </button>
+        )}
 
-          {/* Picking List */}
-          <button
-            onClick={onOpenPickingModal}
-            className="bg-[#064E3B]/90 hover:bg-[#064E3B] text-emerald-300 border border-emerald-500/70 px-2.5 py-1.5 rounded-xl font-bold text-xs whitespace-nowrap active:scale-95 transition-all shadow-sm flex items-center gap-1 h-8"
-            title="បើកបញ្ជីប្រមូលទំនិញ"
-          >
-            <span>📋</span>
-            <span>ប្រមូល</span>
-          </button>
+        {/* Picking List (ប្រមូល) Button */}
+        <button
+          type="button"
+          onClick={onOpenPickingModal}
+          className="bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/70 px-2.5 py-1.5 rounded-xl font-bold text-xs whitespace-nowrap active:scale-95 transition-all shadow-sm flex items-center gap-1 h-8.5 flex-shrink-0 cursor-pointer"
+          title="បើកបញ្ជីប្រមូលទំនិញ (Picking List)"
+        >
+          <span>📋</span>
+          <span>ប្រមូល</span>
+        </button>
 
-          {/* Font & Zoom Controls */}
-          <div className="flex items-center gap-1">
-            {onChangeKhmerFont && (
-              <select
-                value={khmerFont}
-                onChange={e => onChangeKhmerFont(e.target.value)}
-                className="bg-[#121E38] text-cyan-300 border border-[#1C2B4B] hover:border-cyan-400/80 px-2 py-1 rounded-xl font-bold text-xs outline-none cursor-pointer shadow-sm transition-all h-8 max-w-[105px] sm:max-w-[140px]"
-                title="ជ្រើសរើសពុម្ពអក្សរខ្មែរ"
-              >
-                <option value="kantumruy">✨ Kantumruy</option>
-                <option value="santepheap">🌿 Santepheap</option>
-                <option value="battambang">🏛️ Battambang</option>
-                <option value="koulen">🔥 Koulen</option>
-              </select>
-            )}
-
-            <div className="flex items-center h-8 bg-[#121E38] border border-[#1C2B4B] rounded-xl overflow-hidden shadow-sm">
-              <button
-                type="button"
-                onClick={() => onAdjustFontSize(-0.1)}
-                className="bg-[#121E38] hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-300 px-2 py-1 font-black text-xs active:scale-95 transition-all h-full flex items-center justify-center cursor-pointer border-r border-[#1C2B4B]"
-                title="បង្រួមអក្សរ (Decrease Font: A-)"
-              >
-                A-
-              </button>
-              {onResetFontSize && (
-                <button
-                  type="button"
-                  onClick={onResetFontSize}
-                  className="bg-[#0B1325] hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-200 px-1.5 py-1 font-mono font-bold text-[10px] active:scale-95 transition-all h-full flex items-center justify-center cursor-pointer border-r border-[#1C2B4B]"
-                  title="កំណត់ទំហំដើម 100% (Reset Font: 100%)"
-                >
-                  {Math.round(fontScale * 100)}%
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onAdjustFontSize(0.1)}
-                className="bg-[#121E38] hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-300 px-2 py-1 font-black text-xs active:scale-95 transition-all h-full flex items-center justify-center cursor-pointer"
-                title="ពង្រីកអក្សរ (Increase Font: A+)"
-              >
-                A+
-              </button>
-            </div>
-          </div>
-        </div>
+        {/* Live Comments Toggle (ខំមិន) */}
+        <button
+          type="button"
+          onClick={onToggleCommentStream}
+          className={`px-2.5 py-1.5 rounded-xl font-bold text-xs border flex items-center gap-1 transition-all h-8.5 flex-shrink-0 cursor-pointer ${
+            isStreamOpen
+              ? 'bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
+              : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:border-slate-500'
+          }`}
+          title="បើក/បិទ ផ្ទាំងចាប់ខំមិន Live"
+        >
+          <span>💬</span>
+          <span className="hidden xs:inline">ខំមិន</span>
+        </button>
       </div>
     </div>
   );

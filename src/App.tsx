@@ -14,6 +14,8 @@ import { QCModal } from './components/Modals/QCModal';
 import { DispatchModal } from './components/Modals/DispatchModal';
 import { StockModal } from './components/Modals/StockModal';
 import { StockSyncModal } from './components/Modals/StockSyncModal';
+import { FullStockManagerModal } from './components/Modals/FullStockManagerModal';
+import { SystemSettingsModal } from './components/Modals/SystemSettingsModal';
 import { PickingModal } from './components/Modals/PickingModal';
 import { PackerModal } from './components/Modals/PackerModal';
 import { FacebookAuthModal } from './components/Modals/FacebookAuthModal';
@@ -89,6 +91,8 @@ export default function App() {
   const [dispatchedCount, setDispatchedCount] = useState<number>(0);
 
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
+  const [isFullStockManagerOpen, setIsFullStockManagerOpen] = useState(false);
+  const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
   const [isAddingNewStock, setIsAddingNewStock] = useState(false);
   const [selectedStockProduct, setSelectedStockProduct] = useState<Product | null>(null);
 
@@ -554,19 +558,15 @@ export default function App() {
 
       {/* Main Viewport Container (Strictly Mobile UI Max-width 480px) */}
       <div className="w-full max-w-[480px] flex flex-col gap-2.5 pb-16">
-        {/* 1. Header */}
+        {/* 1. Sleek 2-Button Header */}
         <Header
+          onOpenSystemSettings={() => setIsSystemSettingsOpen(true)}
+          onOpenFullStockManager={() => setIsFullStockManagerOpen(true)}
+          productsCount={products.length}
+          outStockCount={products.filter(p => (p.stock_qty ?? 0) <= 0).length}
           activePage={activePage}
-          onOpenFbModal={() => setIsFbModalOpen(true)}
-          dispatchedCount={dispatchedCount}
-          onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
-          onOpenDatabaseModal={() => setIsDatabaseModalOpen(true)}
           packerName={packerName}
-          onChangePackerName={() => setIsRequirePackerModalOpen(true)}
-          onOpenPackerHistory={() => {
-            setPackerModalMode('history');
-            setIsPackerModalOpen(true);
-          }}
+          dispatchedCount={dispatchedCount}
           liveSessions={liveSessions}
           selectedLiveId={selectedLiveId}
           onSelectLiveId={id => {
@@ -578,13 +578,7 @@ export default function App() {
           onOpenPickingModal={() => setIsPickingModalOpen(true)}
           onToggleCommentStream={() => setIsCommentStreamOpen(!isCommentStreamOpen)}
           isStreamOpen={isCommentStreamOpen}
-          fontScale={fontScale}
-          onAdjustFontSize={handleAdjustFontSize}
-          onResetFontSize={handleResetFontSize}
-          khmerFont={khmerFont}
-          onChangeKhmerFont={handleChangeKhmerFont}
           totalBasketCount={invoices.filter(i => i.status !== 'Cancelled').length}
-          onOpenKHQRModal={() => handleOpenKHQRModal()}
         />
 
         {/* 2. Live Comment Stream Drawer / Simulator */}
@@ -600,23 +594,7 @@ export default function App() {
           onShowToast={showToast}
         />
 
-        {/* 3. Stock Management Dock */}
-        <StockDock
-          products={products}
-          onSelectProduct={p => {
-            setIsAddingNewStock(false);
-            setSelectedStockProduct(p);
-            setIsStockModalOpen(true);
-          }}
-          onOpenAddStockPrompt={() => {
-            setIsAddingNewStock(true);
-            setSelectedStockProduct(null);
-            setIsStockModalOpen(true);
-          }}
-          onOpenStockSync={handleOpenStockSync}
-        />
-
-        {/* 4. Gamified HUD Strip */}
+        {/* 3. Gamified HUD Strip */}
         <GamifiedHud
           topPackerName={topPackerName}
           mySessionPacks={mySessionPacks}
@@ -892,6 +870,64 @@ export default function App() {
         onSavePackerName={name => {
           handleChangePackerName(name);
           setIsRequirePackerModalOpen(false);
+        }}
+      />
+
+      {/* System & Settings Modal (Button 1) */}
+      <SystemSettingsModal
+        isOpen={isSystemSettingsOpen}
+        onClose={() => setIsSystemSettingsOpen(false)}
+        packerName={packerName}
+        onChangePackerName={() => setIsRequirePackerModalOpen(true)}
+        onOpenPackerHistory={() => {
+          setPackerModalMode('history');
+          setIsPackerModalOpen(true);
+        }}
+        onOpenPackerLeaderboard={() => {
+          setPackerModalMode('leaderboard');
+          setIsPackerModalOpen(true);
+        }}
+        onOpenKHQRModal={() => handleOpenKHQRModal()}
+        dispatchedCount={dispatchedCount}
+        onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
+        activePage={activePage}
+        onOpenFbModal={() => setIsFbModalOpen(true)}
+        onOpenDatabaseModal={() => setIsDatabaseModalOpen(true)}
+        khmerFont={khmerFont}
+        onChangeKhmerFont={handleChangeKhmerFont}
+        fontScale={fontScale}
+        onAdjustFontSize={handleAdjustFontSize}
+        onResetFontSize={handleResetFontSize}
+      />
+
+      {/* Full-Screen Stock Management Modal (Button 2) */}
+      <FullStockManagerModal
+        isOpen={isFullStockManagerOpen}
+        onClose={() => setIsFullStockManagerOpen(false)}
+        products={products}
+        onSelectProductToEdit={p => {
+          setIsAddingNewStock(false);
+          setSelectedStockProduct(p);
+          setIsStockModalOpen(true);
+        }}
+        onOpenAddNewStock={() => {
+          setIsAddingNewStock(true);
+          setSelectedStockProduct(null);
+          setIsStockModalOpen(true);
+        }}
+        onOpenStockSync={handleOpenStockSync}
+        onStockUpdated={() => {
+          fetchStock();
+          fetchInvoices();
+        }}
+        onShowToast={showToast}
+        onOpenZoomModal={(code, name, image, price, stockQty) => {
+          setZoomCode(code);
+          setZoomName(name || '');
+          setZoomImageUrl(image);
+          setZoomPrice(price);
+          setZoomStockQty(stockQty);
+          setIsZoomModalOpen(true);
         }}
       />
     </div>
