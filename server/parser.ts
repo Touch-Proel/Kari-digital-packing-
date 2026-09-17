@@ -39,8 +39,8 @@ const SIZE_COLOR_SUFFIXES = [
 
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 
-// សម្អាតទម្ងន់ កម្ពស់ ចង្កេះ និងសាយ (លុបទាំងពាក្យ និងលេខទម្ងន់ខាងក្រោយដូចជា គីឡូ77, 1kg)
-const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{1,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|(?:គីឡូក្រាម|គីឡូ|គក|kg|kilo|កម្ពស់|ចង្កេះ|សាយ|size)\s*\d{1,3}|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
+// សម្អាតទម្ងន់ដោយគ្មាន \b ដើម្បីការពារកុំឱ្យបន្សល់ទុកលេខទោល (ឧ. គីឡូ77, 1kg)
+const RE_MEASUREMENTS_CLEANUP = /(?:\d{1,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|(?:គីឡូក្រាម|គីឡូ|គក|kg|kilo|កម្ពស់|ចង្កេះ|សាយ|size)\s*\d{1,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
 
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
 
@@ -133,13 +133,13 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
-  // ១. សម្អាតតម្លៃលុយ អាសយដ្ឋាន និងទម្ងន់/គីឡូ (មុននឹងកែទម្រង់សញ្ញាស្មើ =)
-  s = s.replace(RE_PRICE_CLEANUP, ' ');
-  s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
+  // ១. សម្អាតទម្ងន់/គីឡូ និងតម្លៃលុយមុនគេបង្អស់
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(/គីឡូ\s*\d{1,3}/gi, ' ');
+  s = s.replace(RE_PRICE_CLEANUP, ' ');
+  s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // ២. បំប្លែងទម្រង់ CODE.QTY និងសញ្ញាផ្សេងៗ
+  // ២. កែទម្រង់សញ្ញាស្មើ និងបំបែកセgment
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/\//g, ' ');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
@@ -174,7 +174,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
       const codePattern = isSingleDigit
         ? `(?:(?:កូដ|កូដលេខ|CODE)\\s*${esc}|(?:យក|កាត់|ថែម)\\s*${esc}\\b)`
-        : `(?<![A-Za-z0-9])(${esc})(?=(?:[\\s_-]*(?:${validSuffixes}))?(?:\\b|[^A-Za-z0-9]|$))`;
+        : `(${esc})\\b`;
 
       const codeMatch = seg.match(new RegExp(codePattern, 'i'));
       if (!codeMatch) continue;
@@ -199,7 +199,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
       const reWithQty = new RegExp(
         `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
-        `(?<![A-Za-z0-9])(${esc})` +
+        `(${esc})\\b` +
         `(?:[\\s_-]*(${validSuffixes}))?` +
         `(?:\\s*[:=xX*\\-_.,+«»~]|\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)|[\\s\\S]*?(?:យក|កាត់|ថែម|ដាក់|កក់|បូក))` +
         `\\s*(\\d{1,2})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ៍))?`,
