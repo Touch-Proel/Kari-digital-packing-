@@ -28,6 +28,8 @@ export interface TelegramBotInfo {
 }
 
 // 1. Verify Telegram Bot Token
+const downloadedPhotoCache = new Map<string, string>();
+
 export async function testTelegramBotToken(token: string): Promise<{ success: boolean; bot?: TelegramBotInfo; error?: string }> {
   const cleanToken = token.trim();
   if (!cleanToken) {
@@ -62,6 +64,13 @@ async function downloadTelegramPhoto(
   codeHint: string,
   dateHint?: string | number
 ): Promise<string | undefined> {
+  if (downloadedPhotoCache.has(fileId)) {
+    const cached = downloadedPhotoCache.get(fileId);
+    if (cached && fs.existsSync(path.join(process.cwd(), 'public', cached.replace(/^\//, '')))) {
+      return cached;
+    }
+  }
+
   try {
     const fileInfoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
     const fileInfo = await fileInfoRes.json();
@@ -128,7 +137,9 @@ async function downloadTelegramPhoto(
       .toBuffer();
 
     fs.writeFileSync(localSavePath, processedBuffer);
-    return `/uploads/${filename}`;
+    const resultUrl = `/uploads/${filename}`;
+    downloadedPhotoCache.set(fileId, resultUrl);
+    return resultUrl;
   } catch (err) {
     console.error('[Telegram Photo Download Error]:', err);
     return undefined;
@@ -567,3 +578,143 @@ export function bulkImportStockItems(
     total: products.length
   };
 }
+
+// -------------------------------------------------------------
+// 🔄 Auto Real-Time Telegram Stock Sync Manager
+// -------------------------------------------------------------
+export interface TelegramAutoSyncStatus {
+  enabled: boolean;
+  intervalSec: number;
+  lastSyncAt: string | null;
+  lastScannedCount: number;
+  lastImportedCount: number;
+  totalProductsCount: number;
+  lastError: string | null;
+  running: boolean;
+}
+
+const tgAutoSyncState: TelegramAutoSyncStatus = {
+  enabled: false,
+  intervalSec: 10,
+  lastSyncAt: null,
+  lastScannedCount: 0,
+  lastImportedCount: 0,
+  totalProductsCount: products.length,
+  lastError: null,
+  running: false
+};
+
+let tgAutoSyncTimer: NodeJS.Timeout | null = null;
+
+export async function executeTelegramAutoSyncOnce(): Promise<{
+  success: boolean;
+  imported: number;
+  scanned: number;
+  error?: string;
+}> {
+  if (tgAutoSyncState.running) {
+    return { success: true, imported: 0, scanned: 0 };
+  }
+
+  const activeToken = (settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  if (!activeToken) {
+    tgAutoSyncState.lastError = 'សូមបញ្ចូល Telegram Bot Token ជាមុនសិន';
+    return { success: false, imported: 0, scanned: 0, error: tgAutoSyncState.lastError };
+  }
+
+  tgAutoSyncState.running = true;
+
+  try {
+    const res = await fetchTelegramStockUpdates({
+      token: activeToken,
+      defaultQty: 200,
+      markRead: false,
+      clearCache: false
+    });
+
+    if (!res.success) {
+      tgAutoSyncState.lastError = res.error || 'Auto-sync error';
+      tgAutoSyncState.lastSyncAt = new Date().toISOString();
+      return { success: false, imported: 0, scanned: 0, error: res.error };
+    }
+
+    let importedCount = 0;
+    if (res.items.length > 0) {
+      const impRes = bulkImportStockItems(
+        res.items.map(it => ({
+          code: it.code,
+          name: it.name,
+          price: it.price,
+          stock_qty: it.stock_qty,
+          image_file: it.image_url
+        })),
+        'merge',
+        { keepExistingStockQty: true }
+      );
+      importedCount = impRes.imported + impRes.updated;
+    }
+
+    tgAutoSyncState.lastSyncAt = new Date().toISOString();
+    tgAutoSyncState.lastScannedCount = res.messagesScanned;
+    tgAutoSyncState.lastImportedCount = importedCount;
+    tgAutoSyncState.totalProductsCount = products.length;
+    tgAutoSyncState.lastError = null;
+
+    if (importedCount > 0) {
+      console.log(`🔄 [Telegram Stock Auto-Sync]: Successfully synced ${importedCount} items (codes, photos, prices) into catalog!`);
+    }
+
+    return {
+      success: true,
+      imported: importedCount,
+      scanned: res.messagesScanned
+    };
+  } catch (err: any) {
+    tgAutoSyncState.lastError = err.message || 'Auto sync network error';
+    tgAutoSyncState.lastSyncAt = new Date().toISOString();
+    return { success: false, imported: 0, scanned: 0, error: err.message };
+  } finally {
+    tgAutoSyncState.running = false;
+  }
+}
+
+export function startTelegramAutoSync(intervalSec = 10) {
+  if (intervalSec < 5) intervalSec = 5;
+  tgAutoSyncState.intervalSec = intervalSec;
+  tgAutoSyncState.enabled = true;
+
+  if (tgAutoSyncTimer) {
+    clearInterval(tgAutoSyncTimer);
+    tgAutoSyncTimer = null;
+  }
+
+  // Trigger immediate background sync
+  executeTelegramAutoSyncOnce();
+
+  tgAutoSyncTimer = setInterval(() => {
+    if (tgAutoSyncState.enabled) {
+      executeTelegramAutoSyncOnce();
+    }
+  }, tgAutoSyncState.intervalSec * 1000);
+
+  console.log(`🔄 [Telegram Stock Auto-Sync STARTED]: Polling Telegram every ${tgAutoSyncState.intervalSec}s`);
+  return getTelegramAutoSyncStatus();
+}
+
+export function stopTelegramAutoSync() {
+  tgAutoSyncState.enabled = false;
+  if (tgAutoSyncTimer) {
+    clearInterval(tgAutoSyncTimer);
+    tgAutoSyncTimer = null;
+  }
+  console.log(`⏹️ [Telegram Stock Auto-Sync STOPPED]`);
+  return getTelegramAutoSyncStatus();
+}
+
+export function getTelegramAutoSyncStatus(): TelegramAutoSyncStatus {
+  return {
+    ...tgAutoSyncState,
+    totalProductsCount: products.length
+  };
+}
+

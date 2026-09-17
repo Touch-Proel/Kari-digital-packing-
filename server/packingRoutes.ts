@@ -29,8 +29,18 @@ import { generateServerKHQRPNG } from './khqrServer';
 import {
   testTelegramBotToken,
   fetchTelegramStockUpdates,
-  bulkImportStockItems
+  bulkImportStockItems,
+  startTelegramAutoSync,
+  stopTelegramAutoSync,
+  getTelegramAutoSyncStatus,
+  executeTelegramAutoSyncOnce
 } from './telegramSync';
+import {
+  startLiveCommentsAutoSync,
+  stopLiveCommentsAutoSync,
+  getLiveCommentsAutoSyncStatus,
+  executeLiveCommentsSyncOnce
+} from './liveSync';
 
 const router = Router();
 
@@ -1325,6 +1335,62 @@ router.post('/telegram/fetch_stock', async (req: Request, res: Response) => {
     auto_imported: !!auto_import,
     imported_count: importedCount
   });
+});
+
+// GET /api/telegram/auto_sync - Get current Telegram Stock Auto-Sync Status
+router.get('/telegram/auto_sync', (_req: Request, res: Response) => {
+  res.json(getTelegramAutoSyncStatus());
+});
+
+// POST /api/telegram/auto_sync - Toggle or trigger Telegram Stock Auto-Sync
+router.post('/telegram/auto_sync', async (req: Request, res: Response) => {
+  const { enabled, interval_sec, trigger_now } = req.body;
+
+  if (trigger_now) {
+    const triggerRes = await executeTelegramAutoSyncOnce();
+    return res.json({
+      ...triggerRes,
+      status: getTelegramAutoSyncStatus()
+    });
+  }
+
+  if (enabled === true) {
+    const status = startTelegramAutoSync(Number(interval_sec || 10));
+    return res.json({ success: true, message: 'បានបើក Telegram Stock Auto-Sync!', status });
+  } else if (enabled === false) {
+    const status = stopTelegramAutoSync();
+    return res.json({ success: true, message: 'បានបិទ Telegram Stock Auto-Sync!', status });
+  }
+
+  res.json({ success: true, status: getTelegramAutoSyncStatus() });
+});
+
+// GET /api/fb/live_auto_sync - Get current Facebook Live Comments Auto-Sync Status
+router.get('/fb/live_auto_sync', (_req: Request, res: Response) => {
+  res.json(getLiveCommentsAutoSyncStatus());
+});
+
+// POST /api/fb/live_auto_sync - Toggle or trigger Facebook Live Comments Auto-Sync
+router.post('/fb/live_auto_sync', async (req: Request, res: Response) => {
+  const { enabled, interval_sec, live_id, trigger_now } = req.body;
+
+  if (trigger_now) {
+    const syncRes = await executeLiveCommentsSyncOnce(live_id);
+    return res.json({
+      ...syncRes,
+      status: getLiveCommentsAutoSyncStatus()
+    });
+  }
+
+  if (enabled === true) {
+    const status = startLiveCommentsAutoSync(Number(interval_sec || 3), live_id);
+    return res.json({ success: true, message: 'បានបើក Real-time Live Comments Sync!', status });
+  } else if (enabled === false) {
+    const status = stopLiveCommentsAutoSync();
+    return res.json({ success: true, message: 'បានបិទ Real-time Live Comments Sync!', status });
+  }
+
+  res.json({ success: true, status: getLiveCommentsAutoSyncStatus() });
 });
 
 // -------------------------------------------------------------
