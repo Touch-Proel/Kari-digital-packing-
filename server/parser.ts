@@ -37,13 +37,13 @@ const SIZE_COLOR_SUFFIXES = [
   'ស', 'ខ្មៅ', 'ក្រហម', 'ខៀវ', 'លឿង', 'ផ្កាឈូក', 'ស្វាយ', 'បៃតង', 'ត្នោត', 'ប្រផេះ', 'ទឹកដោះគោ', 'សូកូឡា', 'កាហ្វេ', 'ឈាមជ្រូក'
 ];
 
-// ១. សម្អាតតម្លៃលុយ (ឧ. 4,5$ / 2.3$ / 10$ / 9000៛ / 8500)
+// ១. សម្អាតតម្លៃលុយ
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 
-// ២. សម្អាតទម្ងន់ កម្ពស់ និងចង្កេះ (កុំឱ្យលេខ 60kg ឬ ចង្កេះ 32 ក្លាយជាចំនួនទំនិញ)
+// ២. សម្អាតទម្ងន់ កម្ពស់ និងចង្កេះ
 const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{2,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2})/gi;
 
-// ៣. សម្អាតឈ្មោះផ្សារ ផ្លូវ ផ្ទះ និងបុរីដែលមានលេខ (កុំឱ្យលេខផ្លូវ 608 ឬ ផ្សារ 115 ក្លាយជាកូដ)
+// ៣. សម្អាតឈ្មោះផ្សារ ផ្លូវ ផ្ទះ និងបុរីដែលមានលេខ
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
 
 export function convertKhmerDigitsToArabic(text: string): string {
@@ -61,20 +61,18 @@ export function normalizeKhmerText(text: string): string {
   // បម្លែងលេខខ្មែរទៅលេខអារ៉ាប់
   s = convertKhmerDigitsToArabic(s);
 
-  // កែតម្រូវពាក្យខុសទូទៅ (Typos)
+  // កែតម្រូវពាក្យខុសទូទៅ
   s = s.replace(/ឆុត/g, 'ឈុត')
        .replace(/កូត|ខូត|កូក/g, 'កូដ')
        .replace(/យល/g, 'យក');
 
-  // ដោះស្រាយចន្លោះប្រហោង៖ ពាក្យខ្មែរនៅជាប់លេខ (ឧ. 43មួយ -> 43=1, 23យកពីរ -> 23 យក 2)
-  // ការពារកុំឱ្យ "43មួយ" ក្លាយជាលេខ "431"
+  // ការពារកុំឱ្យ "43មួយ" ក្លាយជា "431"
   s = s.replace(/(\d+)\s*(?:មួយ|មូយ)/g, '$1=1 ')
        .replace(/(\d+)\s*(?:ពីរ|ពី)/g, '$1=2 ')
        .replace(/(\d+)\s*(?:បី)/g, '$1=3 ')
        .replace(/(\d+)\s*(?:បួន)/g, '$1=4 ')
        .replace(/(\d+)\s*(?:ប្រាំ)/g, '$1=5 ');
 
-  // បម្លែងពាក្យខ្មែរទោលដែលនៅសល់
   s = s.replace(/ប្រាំបួន/g, ' 9 ')
        .replace(/ប្រាំបី/g, ' 8 ')
        .replace(/ប្រាំពីរ/g, ' 7 ')
@@ -85,13 +83,11 @@ export function normalizeKhmerText(text: string): string {
        .replace(/ពីរ/g, ' 2 ')
        .replace(/មួយ|មូយ/g, ' 1 ');
 
-  // សម្អាតសញ្ញាផ្កាយបិទបាំងលេខទូរស័ព្ទ
   s = s.replace(/\*{3,}/g, ' ');
 
   return s;
 }
 
-// Regex ចាប់លេខទូរស័ព្ទកម្ពុជា
 const RE_CAMBODIAN_PHONE = /(?:\+?855[\s.\-()]*|0)(?:1\d|3[18]|6[016-9]|7[016-9]|8[15-9]|9[0-8])(?:[\s.\-()]*\d){6,7}(?!\d)/i;
 
 export function extractPhoneNumber(text: string): { phone: string | null; cleanText: string } {
@@ -145,21 +141,19 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
-  // ១. សម្អាតតម្លៃលុយ ទម្ងន់/ចង្កេះ និងលេខផ្លូវ/ផ្សារ
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // ២. បម្លែងទម្រង់ CODE.QTY ឱ្យទៅជា CODE=QTY (ឧ. 28.4 -> 28=4, 35.5 -> 35=5)
+  // បម្លែង CODE.QTY ទៅជា CODE=QTY (ឧ. 28.4 -> 28=4, 35.5 -> 35=5)
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
 
-  // ៣. បំបែកសញ្ញា / ឱ្យក្លាយជាដកឃ្លា (ការពារកូដ 80/82)
+  // បំបែកសញ្ញា / ជាដកឃ្លា
   s = s.replace(/\//g, ' ');
 
-  // ៤. ជួសជុលសញ្ញាស្មើទទេនៅកន្ទុយកូដ (ឧ. 103= ឬ 54=- ឱ្យទៅជា 103=1)
+  // សញ្ញាស្មើទទេនៅកន្ទុយកូដ (ឧ. 103= -> 103=1)
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
 
-  // ៥. បំបែកឃ្លាជា Segments តាមបន្ទាត់ថ្មី សញ្ញាក្បៀស សញ្ញាបូក ឬពាក្យ "និង"
   const segments = s.split(/[\n;+]+|\s+និង\s+|\s{2,}/i);
   const pairs: ExtractedItemPair[] = [];
   const seenCodes = new Set<string>();
@@ -182,7 +176,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const isSingleDigit = /^\d$/.test(pCode);
 
-      // ដោះស្រាយចន្លោះប្រហោង៖ អនុញ្ញាតឱ្យកូដជាប់គ្នាជាមួយ Size (ឧ. 31L, 31M, 12xL, 49M)
+      // អនុញ្ញាតឱ្យ Size ជាប់កូដបាន (ដូចជា 31L, 31M, 12xL, 49M)
       const codePattern = isSingleDigit
         ? `(?:(?:កូដ|កូដលេខ|CODE)\\s*${esc}|(?:យក|កាត់|ថែម)\\s*${esc}\\b)`
         : `(?<![A-Za-z0-9])(${esc})(?=(?:[\\s_-]*(?:${validSuffixes}))?(?:\\b|[^A-Za-z0-9]|$))`;
@@ -190,7 +184,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const codeMatch = seg.match(new RegExp(codePattern, 'i'));
       if (!codeMatch) continue;
 
-      // ឆែកមើល Multi-Size (ឧ. S1 M1 L1 ឬ S M L XL)
+      // ឆែក Multi-Size (ឧ. S1 M1 L1 ឬ S M L XL) -> បូកចំនួនចូលកូដតែមួយ
       const multiVariantRegex = /\b(XXL|XXS|4XL|3XL|2XL|XL|XS|[SML])\s*(\d{1,2})?\b/gi;
       let varMatch: RegExpExecArray | null;
       let multiTotalQty = 0;
@@ -209,7 +203,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         continue;
       }
 
-      // ឆែកមើលការកុម្ម៉ង់ទូទៅ (ឧ. 31L, 49M, 36m=1, 17=2, 32យក5, 42-5ពណ៌)
+      // ឆែកការកុម្ម៉ង់ទូទៅ (ឧ. 31L, 49M, 36m=1, 17=2, 32យក5)
       const reStandard = new RegExp(
         `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
         `(?<![A-Za-z0-9])(${esc})` +
@@ -222,12 +216,10 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       if (match) {
         let rawQty = match[3] ? parseInt(match[3], 10) : 1;
 
-        // ប្រសិនបើលេខបរិមាណជាកូដទំនិញក្នុងស្តុកដែរ (ឧ. 80 82) -> ចំនួនគឺ 1
         if (match[3] && catalogCodeSet.has(match[3])) {
           rawQty = 1;
         }
 
-        // ការពារចំនួនខុសពីធម្មជាតិ (លើសពី 10 អាវដោយគ្មានបញ្ជាក់ច្បាស់)
         if (rawQty > 10 && !/(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌)/.test(seg)) {
           rawQty = 1;
         }
@@ -287,7 +279,6 @@ export function parseAndAllocateComment(
 
   const { phone, cleanText } = extractPhoneNumber(rawText);
 
-  // ពិនិត្យ Comment ស្ទួន
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
 
@@ -434,7 +425,7 @@ export function parseAndAllocateComment(
     if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
   }
 
-  // ដំណើរការកាត់ស្តុក (បូកបញ្ចូលក្នុង Item តែមួយតាម Code រក្សាទុក Note Comments ដើម)
+  // កាត់ស្តុកចូលកន្ត្រកតែ ១ ជួរតាមកូដ ដោយរក្សាទុក Note ដើមពេញលេញ
   const allocated: { code: string; product_name: string; quantity: number; price: number }[] = [];
   const soldOut: string[] = [];
 
