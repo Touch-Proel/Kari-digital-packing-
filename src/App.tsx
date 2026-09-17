@@ -719,6 +719,11 @@ export default function App() {
         isOpen={isPickingModalOpen}
         onClose={() => setIsPickingModalOpen(false)}
         liveId={selectedLiveId}
+        onStockUpdated={() => {
+          fetchStock();
+          fetchInvoices();
+        }}
+        onShowToast={showToast}
       />
 
       <PackerModal

@@ -91,4 +91,6 @@ export interface PickingItem {
   product_name: string;
   price: number;
   total_qty: number;
+  exists_in_stock?: boolean;
+  stock_qty?: number;
 }

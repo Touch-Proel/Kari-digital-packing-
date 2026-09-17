@@ -192,25 +192,62 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
 
 // POST /api/delete_product
 router.post('/delete_product', (req: Request, res: Response) => {
-  const { code } = req.body;
+  const { code, remove_from_baskets, live_id } = req.body;
   if (!code) {
     return res.status(400).json({ success: false, error: 'Code is required' });
   }
 
   const cleanCode = String(code).trim().toUpperCase();
-  const idx = products.findIndex(p => p.code.toUpperCase() === cleanCode);
-  if (idx === -1) {
-    return res.status(404).json({ success: false, error: `រកមិនឃើញកូដ [${cleanCode}] ក្នុងស្តុកឡើយ!` });
+  const withoutBrackets = cleanCode.replace(/^\[|\]$/g, '');
+
+  const idx = products.findIndex(p => {
+    const pCode = p.code.toUpperCase().trim();
+    return pCode === cleanCode || pCode === withoutBrackets || pCode.replace(/^\[|\]$/g, '') === withoutBrackets;
+  });
+
+  let removed: any = null;
+  if (idx !== -1) {
+    removed = products.splice(idx, 1)[0];
   }
 
-  const removed = products.splice(idx, 1)[0];
+  let removedFromBasketsCount = 0;
+  if (remove_from_baskets) {
+    const targetInvoices = live_id ? invoices.filter(i => i.live_id === live_id) : invoices;
+    for (const inv of targetInvoices) {
+      const beforeLen = inv.items.length;
+      inv.items = inv.items.filter(it => {
+        const itCode = it.product_code.toUpperCase().trim();
+        return itCode !== cleanCode && itCode !== withoutBrackets && itCode.replace(/^\[|\]$/g, '') !== withoutBrackets;
+      });
+      if (inv.items.length !== beforeLen) {
+        removedFromBasketsCount += (beforeLen - inv.items.length);
+        recalculateInvoice(inv);
+      }
+    }
+  }
+
+  if (idx === -1 && removedFromBasketsCount === 0) {
+    return res.status(404).json({ success: false, error: `រកមិនឃើញកូដ [${cleanCode}] ក្នុងស្តុក ឬក្នុងកន្ត្រកឡើយ!` });
+  }
+
   bumpDataRevision();
 
-  console.log(`[Product Deleted] Removed product [${cleanCode}] from stock.`);
+  console.log(`[Product Deleted] Removed product [${cleanCode}] from stock (${removed ? 'found in stock' : 'not in stock table'}), removed from ${removedFromBasketsCount} items in baskets.`);
+  
+  let msg = '';
+  if (removed && removedFromBasketsCount > 0) {
+    msg = `បានលុបកូដ [${cleanCode}] ចេញពីស្តុក និងដកចេញពី ${removedFromBasketsCount} កន្ត្រក Live ជោគជ័យ!`;
+  } else if (removed) {
+    msg = `បានលុបកូដ [${cleanCode}] ចេញពីស្តុកជោគជ័យ!`;
+  } else {
+    msg = `កូដ [${cleanCode}] គ្មានក្នុងតារាងស្តុកទេ ប៉ុន្តែបានដកចេញពី ${removedFromBasketsCount} កន្ត្រក Live រួចរាល់!`;
+  }
+
   res.json({
     success: true,
-    message: `បានលុបកូដ [${cleanCode}] ចេញពីស្តុកជោគជ័យ!`,
-    deleted: removed
+    message: msg,
+    deleted: removed,
+    removed_from_baskets_count: removedFromBasketsCount
   });
 });
 
@@ -886,7 +923,14 @@ router.get('/picking_list', (req: Request, res: Response) => {
   const liveId = (req.query.live_id as string) || activeLiveId;
   const targetInvoices = liveId ? invoices.filter(i => i.live_id === liveId && i.status !== 'Cancelled') : invoices;
 
-  const summaryMap = new Map<string, { code: string; product_name: string; price: number; total_qty: number }>();
+  const summaryMap = new Map<string, {
+    code: string;
+    product_name: string;
+    price: number;
+    total_qty: number;
+    exists_in_stock: boolean;
+    stock_qty: number;
+  }>();
 
   for (const inv of targetInvoices) {
     for (const it of inv.items) {
@@ -894,11 +938,20 @@ router.get('/picking_list', (req: Request, res: Response) => {
       if (existing) {
         existing.total_qty += it.quantity;
       } else {
+        const prod = products.find(p => {
+          const pCode = p.code.toUpperCase().trim();
+          const itCode = it.product_code.toUpperCase().trim();
+          const cleanItCode = itCode.replace(/^\[|\]$/g, '');
+          return pCode === itCode || pCode === cleanItCode || pCode.replace(/^\[|\]$/g, '') === cleanItCode;
+        });
+
         summaryMap.set(it.product_code, {
           code: it.product_code,
           product_name: it.product_name,
           price: it.price,
-          total_qty: it.quantity
+          total_qty: it.quantity,
+          exists_in_stock: !!prod,
+          stock_qty: prod ? prod.stock_qty : 0
         });
       }
     }
