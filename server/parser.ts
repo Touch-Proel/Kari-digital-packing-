@@ -38,7 +38,10 @@ const SIZE_COLOR_SUFFIXES = [
 ];
 
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
-const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{2,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2}|(?:សាយ|size)\s*[:=\s]*\d{2})/gi;
+
+// សម្អាតទម្ងន់ កម្ពស់ ចង្កេះ និងសាយ (ទាំងលេខមុខ និងលេខក្រោយពាក្យ)
+const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{1,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|(?:គីឡូក្រាម|គីឡូ|គក|kg|kilo|កម្ពស់|ចង្កេះ|សាយ|size)\s*\d{1,3}|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
+
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
 
 export function convertKhmerDigitsToArabic(text: string): string {
@@ -173,7 +176,6 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const codeMatch = seg.match(new RegExp(codePattern, 'i'));
       if (!codeMatch) continue;
 
-      // ១. ឆែក Multi-Size (ឧ. S1 M1 L1)
       const multiVariantRegex = /\b(XXL|XXS|4XL|3XL|2XL|XL|XS|[SML])\s*(\d{1,2})?\b/gi;
       let varMatch: RegExpExecArray | null;
       let multiTotalQty = 0;
@@ -188,11 +190,10 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       if (multiTotalQty > 0) {
         pairs.push({ code: pCode, qty: multiTotalQty });
         seenCodes.add(pCode);
-        seg = ''; // សំខាន់៖ កាត់ផ្ដាច់ Segment ນີ້ចោលទាំងស្រុង មិនឱ្យលេខកន្ទុយរត់ចូល Catalog ទៀតឡើយ
+        seg = '';
         break;
       }
 
-      // ២. ឆែកទម្រង់มีបរិមាណច្បាស់លាស់ (ឧ. 28=10, 59=20, 103-2)
       const reWithQty = new RegExp(
         `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
         `(?<![A-Za-z0-9])(${esc})` +
@@ -207,14 +208,13 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         let rawQty = parseInt(matchWithQty[3], 10) || 1;
         pairs.push({ code: pCode, qty: rawQty });
         seenCodes.add(pCode);
-        seg = ''; // សំខាន់៖ កាត់ផ្ដាច់ Segment ນີ້ចោលទាំងស្រុង
+        seg = '';
         break;
       }
 
-      // ៣. កូដទោល (Qty = 1)
       pairs.push({ code: pCode, qty: 1 });
       seenCodes.add(pCode);
-      seg = ''; // កាត់ផ្ដាច់ Segment ນີ້ចោល
+      seg = '';
       break;
     }
   }
