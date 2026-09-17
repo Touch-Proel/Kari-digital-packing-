@@ -37,11 +37,11 @@ const SIZE_COLOR_SUFFIXES = [
   'ស', 'ខ្មៅ', 'ក្រហម', 'ខៀវ', 'លឿង', 'ផ្កាឈូក', 'ស្វាយ', 'បៃតង', 'ត្នោត', 'ប្រផេះ', 'ទឹកដោះគោ', 'សូកូឡា', 'កាហ្វេ', 'ឈាមជ្រូក'
 ];
 
-// ១. សម្អាតតម្លៃលុយ
+// ១. សម្អាតតម្លៃលុយ (ឧ. 4,5$ / 2.3$ / 10$ / 9000៛ / 9000 / 8500)
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 
-// ២. សម្អាតទម្ងន់ កម្ពស់ និងចង្កេះ
-const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{2,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2})/gi;
+// ២. សម្អាតទម្ងន់ កម្ពស់ ចង្កេះ និងសាយខោ
+const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{2,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2}|(?:សាយ|size)\s*[:=\s]*\d{2})/gi;
 
 // ៣. សម្អាតឈ្មោះផ្សារ ផ្លូវ ផ្ទះ និងបុរីដែលមានលេខ
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
@@ -55,18 +55,13 @@ export function normalizeKhmerText(text: string): string {
   if (!text) return '';
   let s = text.trim();
 
-  // ភ្ជាប់លេខទូរស័ព្ទដែលដាច់បន្ទាត់
   s = s.replace(/(\d{3,4})\s*\n\s*(\d{3,6})/g, '$1$2');
-
-  // បម្លែងលេខខ្មែរទៅលេខអារ៉ាប់
   s = convertKhmerDigitsToArabic(s);
 
-  // កែតម្រូវពាក្យខុសទូទៅ
   s = s.replace(/ឆុត/g, 'ឈុត')
        .replace(/កូត|ខូត|កូក/g, 'កូដ')
        .replace(/យល/g, 'យក');
 
-  // ការពារកុំឱ្យ "43មួយ" ក្លាយជា "431"
   s = s.replace(/(\d+)\s*(?:មួយ|មូយ)/g, '$1=1 ')
        .replace(/(\d+)\s*(?:ពីរ|ពី)/g, '$1=2 ')
        .replace(/(\d+)\s*(?:បី)/g, '$1=3 ')
@@ -84,7 +79,6 @@ export function normalizeKhmerText(text: string): string {
        .replace(/មួយ|មូយ/g, ' 1 ');
 
   s = s.replace(/\*{3,}/g, ' ');
-
   return s;
 }
 
@@ -145,13 +139,9 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // បម្លែង CODE.QTY ទៅជា CODE=QTY (ឧ. 28.4 -> 28=4, 35.5 -> 35=5)
+  // បម្លែង CODE.QTY ទៅជា CODE=QTY (ឧ. 28.4 -> 28=4)
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
-
-  // បំបែកសញ្ញា / ជាដកឃ្លា
   s = s.replace(/\//g, ' ');
-
-  // សញ្ញាស្មើទទេនៅកន្ទុយកូដ (ឧ. 103= -> 103=1)
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
 
   const segments = s.split(/[\n;+]+|\s+និង\s+|\s{2,}/i);
@@ -162,7 +152,6 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
     .filter(p => p.code && p.code.trim().length > 0)
     .sort((a, b) => b.code.length - a.code.length);
 
-  const catalogCodeSet = new Set(sortedCatalog.map(p => p.code.toUpperCase().trim()));
   const validSuffixes = SIZE_COLOR_SUFFIXES.join('|');
 
   for (let seg of segments) {
@@ -176,7 +165,15 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const isSingleDigit = /^\d$/.test(pCode);
 
-      // អនុញ្ញាតឱ្យ Size ជាប់កូដបាន (ដូចជា 31L, 31M, 12xL, 49M)
+      // ការពារកូដ ១ ខ្ទង់ (ដូចជាកូដ 5) មិនឱ្យច្រឡំជាមួយពាក្យបរិមាណដូចជា "5អាវ" ឬ "5ខោ"
+      if (isSingleDigit) {
+        const falseQtyPattern = new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់)?\\s*${esc}\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌|ពណ៍)`, 'i');
+        // បើឃើញ "5អាវ" នៅឯករាជ្យ នោះមិនមែនជាកូដ 5 ទេ
+        if (falseQtyPattern.test(seg) && !new RegExp(`(?:កូដ|កូដលេខ|CODE)\\s*${esc}\\b`, 'i').test(seg)) {
+          continue;
+        }
+      }
+
       const codePattern = isSingleDigit
         ? `(?:(?:កូដ|កូដលេខ|CODE)\\s*${esc}|(?:យក|កាត់|ថែម)\\s*${esc}\\b)`
         : `(?<![A-Za-z0-9])(${esc})(?=(?:[\\s_-]*(?:${validSuffixes}))?(?:\\b|[^A-Za-z0-9]|$))`;
@@ -184,7 +181,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const codeMatch = seg.match(new RegExp(codePattern, 'i'));
       if (!codeMatch) continue;
 
-      // ឆែក Multi-Size (ឧ. S1 M1 L1 ឬ S M L XL) -> បូកចំនួនចូលកូដតែមួយ
+      // ឆែក Multi-Size (ឧ. S1 M1 L1)
       const multiVariantRegex = /\b(XXL|XXS|4XL|3XL|2XL|XL|XS|[SML])\s*(\d{1,2})?\b/gi;
       let varMatch: RegExpExecArray | null;
       let multiTotalQty = 0;
@@ -203,28 +200,30 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         continue;
       }
 
-      // ឆែកការកុម្ម៉ង់ទូទៅ (ឧ. 31L, 49M, 36m=1, 17=2, 32យក5)
+      // ឆែកការកុម្ម៉ង់ទូទៅ (អាចឆ្លងកាត់ពាក្យអាសយដ្ឋានបាន ដូចជា "25 ... យក5អាវ")
       const reStandard = new RegExp(
         `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
         `(?<![A-Za-z0-9])(${esc})` +
         `(?:[\\s_-]*(${validSuffixes}))?` +
-        `(?:\\s*(?:[*xX=:_\\-\\s.,+«»~]|:=|យក|កាត់|ថែម|ដាក់|កក់|បូក|អាវ|ខោ|ឈុត|ពណ៌|ពណ៍)+\\s*(\\d{1,2}))?`,
+        `(?:[\\s\\S]*?(?:[*xX=:_\\-\\.,+«»~]|:=|យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*(\\d{1,2})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ៍))?)?`,
         'i'
       );
 
       const match = seg.match(reStandard);
-      if (match) {
-        let rawQty = match[3] ? parseInt(match[3], 10) : 1;
-
-        if (match[3] && catalogCodeSet.has(match[3])) {
-          rawQty = 1;
-        }
-
+      if (match && match[3]) {
+        let rawQty = parseInt(match[3], 10) || 1;
         if (rawQty > 10 && !/(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌)/.test(seg)) {
           rawQty = 1;
         }
 
         pairs.push({ code: pCode, qty: rawQty });
+        seenCodes.add(pCode);
+        // លុបកូដ និងឃ្លាបរិមាណចេញ ដើម្បីកុំឱ្យជុំក្រោយច្រឡំយក "5អាវ" ធ្វើជាកូដ 5
+        seg = seg.replace(match[0], ' ');
+        break;
+      } else {
+        // បើគ្មានបរិមាណខាងក្រោយ គឺយក 1
+        pairs.push({ code: pCode, qty: 1 });
         seenCodes.add(pCode);
         seg = seg.replace(new RegExp(esc, 'i'), ' ');
       }
@@ -263,7 +262,6 @@ export function parseAndAllocateComment(
   const cleanFbName = (fbName || 'អតិថិជន Facebook').trim();
   const rawText = (commentText || '').trim();
 
-  // ការពារការ Sync ខមិនវិក្កយបត្ររបស់ Bot ខ្លួនឯង
   if (
     fbUserId === '102094263212256' ||
     cleanFbName.toLowerCase().includes('kari arnett') ||
@@ -425,7 +423,6 @@ export function parseAndAllocateComment(
     if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
   }
 
-  // កាត់ស្តុកចូលកន្ត្រកតែ ១ ជួរតាមកូដ ដោយរក្សាទុក Note ដើមពេញលេញ
   const allocated: { code: string; product_name: string; quantity: number; price: number }[] = [];
   const soldOut: string[] = [];
 
