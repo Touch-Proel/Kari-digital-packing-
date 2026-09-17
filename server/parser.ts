@@ -37,13 +37,8 @@ const SIZE_COLOR_SUFFIXES = [
   'ស', 'ខ្មៅ', 'ក្រហម', 'ខៀវ', 'លឿង', 'ផ្កាឈូក', 'ស្វាយ', 'បៃតង', 'ត្នោត', 'ប្រផេះ', 'ទឹកដោះគោ', 'សូកូឡា', 'កាហ្វេ', 'ឈាមជ្រូក'
 ];
 
-// ១. សម្អាតតម្លៃលុយ (ឧ. 4,5$ / 2.3$ / 10$ / 9000៛ / 9000 / 8500)
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
-
-// ២. សម្អាតទម្ងន់ កម្ពស់ ចង្កេះ និងសាយខោ
 const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{2,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2}|(?:សាយ|size)\s*[:=\s]*\d{2})/gi;
-
-// ៣. សម្អាតឈ្មោះផ្សារ ផ្លូវ ផ្ទះ និងបុរីដែលមានលេខ
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
 
 export function convertKhmerDigitsToArabic(text: string): string {
@@ -139,7 +134,6 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // បម្លែង CODE.QTY ទៅជា CODE=QTY (ឧ. 28.4 -> 28=4)
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/\//g, ' ');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
@@ -165,10 +159,9 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const isSingleDigit = /^\d$/.test(pCode);
 
-      // ការពារកូដ ១ ខ្ទង់ (ដូចជាកូដ 5) មិនឱ្យច្រឡំជាមួយពាក្យបរិមាណដូចជា "5អាវ" ឬ "5ខោ"
+      // ការពារកូដ ១ ខ្ទង់ (ដូចជា 5) មិនឱ្យច្រឡំជាមួយពាក្យបរិមាណ "5អាវ"
       if (isSingleDigit) {
         const falseQtyPattern = new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់)?\\s*${esc}\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌|ពណ៍)`, 'i');
-        // បើឃើញ "5អាវ" នៅឯករាជ្យ នោះមិនមែនជាកូដ 5 ទេ
         if (falseQtyPattern.test(seg) && !new RegExp(`(?:កូដ|កូដលេខ|CODE)\\s*${esc}\\b`, 'i').test(seg)) {
           continue;
         }
@@ -181,7 +174,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const codeMatch = seg.match(new RegExp(codePattern, 'i'));
       if (!codeMatch) continue;
 
-      // ឆែក Multi-Size (ឧ. S1 M1 L1)
+      // ១. ឆែក Multi-Size (ឧ. S1 M1 L1)
       const multiVariantRegex = /\b(XXL|XXS|4XL|3XL|2XL|XL|XS|[SML])\s*(\d{1,2})?\b/gi;
       let varMatch: RegExpExecArray | null;
       let multiTotalQty = 0;
@@ -200,33 +193,30 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         continue;
       }
 
-      // ឆែកការកុម្ម៉ង់ទូទៅ (អាចឆ្លងកាត់ពាក្យអាសយដ្ឋានបាន ដូចជា "25 ... យក5អាវ")
-      const reStandard = new RegExp(
+      // ២. ឆែកទម្រង់មានបរិមាណច្បាស់លាស់ (Strict With-Qty Pattern: 59=20, 103-2, 25...យក5)
+      const reWithQty = new RegExp(
         `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
         `(?<![A-Za-z0-9])(${esc})` +
-        `(?:[\\s_-]*(${validSuffixes}))?` +
-        `(?:[\\s\\S]*?(?:[*xX=:_\\-\\.,+«»~]|:=|យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*(\\d{1,2})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ៍))?)?`,
+        `(?:[\\s_-]*(?:${validSuffixes}))?` +
+        `(?:\\s*[:=xX*\\-_\\.,+«»~]|\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)|[\\s\\S]*?(?:យក|កាត់|ថែម|ដាក់|កក់|បូក))` +
+        `\\s*(\\d{1,2})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ៍))?`,
         'i'
       );
 
-      const match = seg.match(reStandard);
-      if (match && match[3]) {
-        let rawQty = parseInt(match[3], 10) || 1;
-        if (rawQty > 10 && !/(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌)/.test(seg)) {
-          rawQty = 1;
-        }
-
+      const matchWithQty = seg.match(reWithQty);
+      if (matchWithQty && matchWithQty[2]) {
+        let rawQty = parseInt(matchWithQty[2], 10) || 1;
         pairs.push({ code: pCode, qty: rawQty });
         seenCodes.add(pCode);
-        // លុបកូដ និងឃ្លាបរិមាណចេញ ដើម្បីកុំឱ្យជុំក្រោយច្រឡំយក "5អាវ" ធ្វើជាកូដ 5
-        seg = seg.replace(match[0], ' ');
-        break;
-      } else {
-        // បើគ្មានបរិមាណខាងក្រោយ គឺយក 1
-        pairs.push({ code: pCode, qty: 1 });
-        seenCodes.add(pCode);
-        seg = seg.replace(new RegExp(esc, 'i'), ' ');
+        // សំខាន់៖ កាត់ឃ្លា "59=20" ទាំងមូលចេញ ដើម្បីកុំឱ្យលេខ 20 ក្លាយជាកូដ 20
+        seg = seg.replace(matchWithQty[0], ' ');
+        continue;
       }
+
+      // ៣. បើគ្មានសញ្ញាបរិមាណខាងក្រោយ ទើបចាត់ទុកជាកូដទោល (Qty = 1)
+      pairs.push({ code: pCode, qty: 1 });
+      seenCodes.add(pCode);
+      seg = seg.replace(new RegExp(esc, 'i'), ' ');
     }
   }
 
