@@ -506,7 +506,7 @@ export function bulkImportStockItems(
         const newPrice = Number(it.price);
         existing.price = newPrice;
 
-        // Auto-update price for this code in all pending unpicked baskets of active live
+        // Fill price into unpicked pending baskets of active live ONLY IF price is missing/zero or name was generic
         for (const inv of invoices) {
           if (
             inv.live_id === activeLiveId &&
@@ -516,11 +516,21 @@ export function bulkImportStockItems(
             let invChanged = false;
             for (const orderItem of inv.items) {
               if (orderItem.product_code.toUpperCase() === cleanCode) {
-                orderItem.price = newPrice;
-                if (it.name && it.name !== `កូដ ${cleanCode}`) {
-                  orderItem.product_name = it.name.trim();
+                const isGenericName = !orderItem.product_name ||
+                  orderItem.product_name.startsWith('កូដ ') ||
+                  orderItem.product_name.startsWith('ទំនិញកូដ ');
+                const isZeroPrice = !orderItem.price || orderItem.price === 0;
+
+                // Only update price & name if the item was created as a generic/placeholder item
+                if (isZeroPrice || isGenericName) {
+                  if (isZeroPrice && newPrice > 0) {
+                    orderItem.price = newPrice;
+                  }
+                  if (isGenericName && it.name && it.name !== `កូដ ${cleanCode}`) {
+                    orderItem.product_name = it.name.trim();
+                  }
+                  invChanged = true;
                 }
-                invChanged = true;
               }
             }
             if (invChanged) {
@@ -536,7 +546,7 @@ export function bulkImportStockItems(
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
       if (it.image_file) {
         existing.image_file = it.image_file;
-        // Cascade image only to unpicked pending invoices of the currently active live session
+        // Cascade image ONLY IF order item currently has no image
         for (const inv of invoices) {
           if (
             inv.live_id === activeLiveId &&
@@ -545,7 +555,9 @@ export function bulkImportStockItems(
           ) {
             for (const orderItem of inv.items) {
               if (orderItem.product_code.toUpperCase() === cleanCode) {
-                orderItem.image_file = it.image_file;
+                if (!orderItem.image_file) {
+                  orderItem.image_file = it.image_file;
+                }
               }
             }
           }
@@ -606,12 +618,16 @@ const tgAutoSyncState: TelegramAutoSyncStatus = {
 
 let tgAutoSyncTimer: NodeJS.Timeout | null = null;
 
-export async function executeTelegramAutoSyncOnce(): Promise<{
+export async function executeTelegramAutoSyncOnce(force = false): Promise<{
   success: boolean;
   imported: number;
   scanned: number;
   error?: string;
 }> {
+  if (!force && !tgAutoSyncState.enabled) {
+    return { success: true, imported: 0, scanned: 0 };
+  }
+
   if (tgAutoSyncState.running) {
     return { success: true, imported: 0, scanned: 0 };
   }

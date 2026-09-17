@@ -45,6 +45,41 @@ export function StockSyncModal({
   const [fetchingTg, setFetchingTg] = useState<boolean>(false);
   const [tgItems, setTgItems] = useState<ParsedTelegramItem[]>([]);
   const [importingTg, setImportingTg] = useState<boolean>(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(false);
+
+  const fetchAutoSyncStatus = async () => {
+    try {
+      const res = await fetch('/api/telegram/auto_sync');
+      const data = await res.json();
+      if (data && typeof data.enabled === 'boolean') {
+        setAutoSyncEnabled(data.enabled);
+      }
+    } catch (e) {}
+  };
+
+  const toggleAutoSync = async () => {
+    const next = !autoSyncEnabled;
+    try {
+      const res = await fetch('/api/telegram/auto_sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next, interval_sec: 10 })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutoSyncEnabled(next);
+        if (next) {
+          playSuccessFanfare();
+          onShowToast('🟢 បានបើក Telegram Auto-Sync រួចរាល់!');
+        } else {
+          playWarningBuzzer();
+          onShowToast('🔴 បានបិទ Telegram Auto-Sync!');
+        }
+      }
+    } catch (e) {
+      onShowToast('⚠️ មិនអាចប្តូរស្ថានភាព Auto-Sync បានទេ', 'error');
+    }
+  };
 
   // Paste Text States
   const [pasteText, setPasteText] = useState<string>('');
@@ -90,6 +125,7 @@ export function StockSyncModal({
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
+      fetchAutoSyncStatus();
       // Fetch current telegram config from server
       fetch('/api/telegram/config')
         .then(res => res.json())
@@ -494,6 +530,40 @@ export function StockSyncModal({
           {/* TAB 1: TELEGRAM BOT SYNC */}
           {activeTab === 'telegram' && (
             <div className="flex flex-col gap-3.5 animate-fadeIn">
+              {/* Telegram Auto-Sync Switch */}
+              <div className="bg-slate-900 border border-sky-800/60 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                <div className="flex flex-col gap-0.5">
+                  <div className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                    <span>🔄 Telegram Stock Auto-Sync (ទាញកូដ រូបភាព តម្លៃស្វ័យប្រវត្តិ)</span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    {autoSyncEnabled ? (
+                      <span className="text-emerald-400 font-bold flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        កំពុងបើក៖ ប្រព័ន្ធស្កេន និងទាញកូដ/រូបភាព/តម្លៃពី Telegram ស្វ័យប្រវត្តិរៀងរាល់ 10s
+                      </span>
+                    ) : (
+                      <span className="text-rose-400 font-bold flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                        ត្រូវបានបិទ៖ ប្រព័ន្ធមិនទាញយកទិន្នន័យពី Telegram ស្វ័យប្រវត្តិទេ (ទាល់តែចុច Manual)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleAutoSync}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 border shadow-sm flex-shrink-0 ${
+                    autoSyncEnabled
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-emerald-950/50'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600'
+                  }`}
+                >
+                  <span className={`w-2.5 h-2.5 rounded-full ${autoSyncEnabled ? 'bg-white animate-pulse' : 'bg-rose-500'}`} />
+                  <span>{autoSyncEnabled ? 'បើក (ENABLED)' : 'បិទ (DISABLED)'}</span>
+                </button>
+              </div>
+
               {/* Instructions Banner */}
               <div className="bg-sky-950/40 border border-sky-600/40 rounded-xl p-3 text-xs text-sky-200 flex flex-col gap-1 leading-relaxed">
                 <div className="font-bold text-cyan-300 flex items-center gap-1.5 text-xs">
