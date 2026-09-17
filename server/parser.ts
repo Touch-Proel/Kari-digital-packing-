@@ -39,7 +39,7 @@ const SIZE_COLOR_SUFFIXES = [
 
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 
-// សម្អាតទម្ងន់ដោយគ្មាន \b ដើម្បីការពារកុំឱ្យបន្សល់ទុកលេខទោល (ឧ. គីឡូ77, 1kg)
+// សម្អាតទម្ងន់ កម្ពស់ ចង្កេះ និងសាយចេញឱ្យអស់មុនគេបង្អស់
 const RE_MEASUREMENTS_CLEANUP = /(?:\d{1,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|(?:គីឡូក្រាម|គីឡូ|គក|kg|kilo|កម្ពស់|ចង្កេះ|សាយ|size)\s*\d{1,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
 
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
@@ -133,13 +133,13 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
-  // ១. សម្អាតទម្ងន់/គីឡូ និងតម្លៃលុយមុនគេបង្អស់
+  // ១. សម្អាតទម្ងន់/គីឡូ ឱ្យអស់ដាច់ស្រឡះមុនគេបង្អស់ (ការពារលេខទម្ងន់ក្លាយជាចំនួន)
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(/គីឡូ\s*\d{1,3}/gi, ' ');
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // ២. កែទម្រង់សញ្ញាស្មើ និងបំបែកセgment
+  // ២. បំប្លែងទម្រង់ CODE.QTY និងសញ្ញាផ្សេងៗ
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/\//g, ' ');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
@@ -172,10 +172,7 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         }
       }
 
-      const codePattern = isSingleDigit
-        ? `(?:(?:កូដ|កូដលេខ|CODE)\\s*${esc}|(?:យក|កាត់|ថែម)\\s*${esc}\\b)`
-        : `(${esc})\\b`;
-
+      const codePattern = `(${esc})\\b`;
       const codeMatch = seg.match(new RegExp(codePattern, 'i'));
       if (!codeMatch) continue;
 
