@@ -59,7 +59,7 @@ function recordRecentOrder(order: RecentLiveOrder) {
 /**
  * Execute one iteration of pulling Facebook comments and allocating to baskets
  */
-export async function executeLiveCommentsSyncOnce(customLiveId?: string): Promise<{
+export async function executeLiveCommentsSyncOnce(customLiveId?: string, force = false): Promise<{
   success: boolean;
   target_live_id: string;
   total_synced: number;
@@ -68,6 +68,16 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string): Promis
   error?: string;
   is_simulated?: boolean;
 }> {
+  if (!force && !liveSyncState.enabled) {
+    return {
+      success: true,
+      target_live_id: customLiveId || liveSyncState.activeLiveId || activeLiveId,
+      total_synced: 0,
+      new_orders: 0,
+      total_baskets: invoices.filter(i => i.live_id === (customLiveId || activeLiveId) && i.status !== 'Cancelled').length
+    };
+  }
+
   if (liveSyncState.running) {
     return {
       success: true,

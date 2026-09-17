@@ -18,7 +18,9 @@ interface HeaderProps {
   onOpenPickingModal: () => void;
   onToggleCommentStream: () => void;
   isStreamOpen: boolean;
+  fontScale?: number;
   onAdjustFontSize: (delta: number) => void;
+  onResetFontSize?: () => void;
   khmerFont?: string;
   onChangeKhmerFont?: (font: string) => void;
   totalBasketCount?: number;
@@ -42,7 +44,9 @@ export function Header({
   onOpenPickingModal,
   onToggleCommentStream,
   isStreamOpen,
+  fontScale = 1,
   onAdjustFontSize,
+  onResetFontSize,
   khmerFont = 'kantumruy',
   onChangeKhmerFont,
   totalBasketCount,
@@ -245,20 +249,32 @@ export function Header({
               </select>
             )}
 
-            <div className="flex items-center h-8">
+            <div className="flex items-center h-8 bg-[#121E38] border border-[#1C2B4B] rounded-xl overflow-hidden shadow-sm">
               <button
-                onClick={() => onAdjustFontSize(0.08)}
-                className="bg-[#121E38] text-white border border-[#1C2B4B] px-1.5 py-1 rounded-l-xl font-black text-xs hover:border-cyan-400 active:scale-95 transition-all h-full"
-                title="ពង្រីកអក្សរ (Increase Font)"
-              >
-                A+
-              </button>
-              <button
-                onClick={() => onAdjustFontSize(-0.08)}
-                className="bg-[#121E38] text-white border-y border-r border-[#1C2B4B] px-1.5 py-1 rounded-r-xl font-black text-xs hover:border-cyan-400 active:scale-95 transition-all h-full"
-                title="បង្រួមអក្សរ (Decrease Font)"
+                type="button"
+                onClick={() => onAdjustFontSize(-0.1)}
+                className="bg-[#121E38] hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-300 px-2 py-1 font-black text-xs active:scale-95 transition-all h-full flex items-center justify-center cursor-pointer border-r border-[#1C2B4B]"
+                title="បង្រួមអក្សរ (Decrease Font: A-)"
               >
                 A-
+              </button>
+              {onResetFontSize && (
+                <button
+                  type="button"
+                  onClick={onResetFontSize}
+                  className="bg-[#0B1325] hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-200 px-1.5 py-1 font-mono font-bold text-[10px] active:scale-95 transition-all h-full flex items-center justify-center cursor-pointer border-r border-[#1C2B4B]"
+                  title="កំណត់ទំហំដើម 100% (Reset Font: 100%)"
+                >
+                  {Math.round(fontScale * 100)}%
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onAdjustFontSize(0.1)}
+                className="bg-[#121E38] hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-300 px-2 py-1 font-black text-xs active:scale-95 transition-all h-full flex items-center justify-center cursor-pointer"
+                title="ពង្រីកអក្សរ (Increase Font: A+)"
+              >
+                A+
               </button>
             </div>
           </div>

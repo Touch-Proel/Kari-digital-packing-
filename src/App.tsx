@@ -53,6 +53,12 @@ export default function App() {
   useEffect(() => {
     document.body.setAttribute('data-khmer-font', khmerFont);
   }, [khmerFont]);
+
+  useEffect(() => {
+    const validScale = Number.isFinite(fontScale) && fontScale >= 0.7 && fontScale <= 1.8 ? fontScale : 1;
+    document.documentElement.style.fontSize = `${validScale * 100}%`;
+    document.documentElement.style.setProperty('--font-scale', String(validScale));
+  }, [fontScale]);
   const [checkedState, setCheckedState] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem('checkedItemsState') || '{}');
@@ -153,9 +159,18 @@ export default function App() {
 
   // Save font scale and packer name
   const handleAdjustFontSize = (delta: number) => {
-    const next = Math.max(0.85, Math.min(1.3, fontScale + delta));
+    const next = Math.round(Math.max(0.75, Math.min(1.6, fontScale + delta)) * 100) / 100;
     setFontScale(next);
     localStorage.setItem('fontScale', String(next));
+    playPureTone(Math.round(450 + next * 300), 0.04);
+    showToast(`🔎 ទំហំអក្សរ (Font Size)៖ ${Math.round(next * 100)}%`);
+  };
+
+  const handleResetFontSize = () => {
+    setFontScale(1);
+    localStorage.setItem('fontScale', '1');
+    playPureTone(600, 0.05);
+    showToast('🔄 បានកំណត់ទំហំអក្សរដើម 100% វិញ');
   };
 
   const handleChangeKhmerFont = (font: string) => {
@@ -563,7 +578,9 @@ export default function App() {
           onOpenPickingModal={() => setIsPickingModalOpen(true)}
           onToggleCommentStream={() => setIsCommentStreamOpen(!isCommentStreamOpen)}
           isStreamOpen={isCommentStreamOpen}
+          fontScale={fontScale}
           onAdjustFontSize={handleAdjustFontSize}
+          onResetFontSize={handleResetFontSize}
           khmerFont={khmerFont}
           onChangeKhmerFont={handleChangeKhmerFont}
           totalBasketCount={invoices.filter(i => i.status !== 'Cancelled').length}

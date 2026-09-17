@@ -3,6 +3,36 @@ import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
 
+function renderCommentWithHighlightedCode(comment: string, code: string) {
+  if (!comment) return null;
+  const cleanCode = (code || '').trim();
+  if (!cleanCode) return `"${comment}"`;
+
+  const escaped = cleanCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'gi');
+  const parts = comment.split(regex);
+
+  return (
+    <span>
+      &ldquo;
+      {parts.map((part, i) =>
+        part.toUpperCase() === cleanCode.toUpperCase() ? (
+          <span
+            key={i}
+            className="text-cyan-300 font-mono font-black underline underline-offset-2 decoration-cyan-400"
+            title="កូដផ្ទៀងត្រូវ"
+          >
+            {part}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+      &rdquo;
+    </span>
+  );
+}
+
 interface BasketCardProps {
   key?: any;
   invoice: Invoice;
@@ -598,6 +628,48 @@ export function BasketCard({
     }
   };
 
+  // Quick 1-Click Switch Code when Mismatch Detected in Customer Comment
+  const handleQuickSwitchCode = async (item: OrderItem, newCode: string, newQty?: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!checkLockGuard()) return;
+
+    const targetCode = convertKhmerNumeralsToGlobal(newCode).trim().toUpperCase();
+    if (!targetCode) return;
+
+    const finalQty = newQty && newQty > 0 ? newQty : item.quantity;
+    const stockProd = productMap ? productMap[targetCode] : undefined;
+    const finalPrice = stockProd?.price ?? item.price;
+
+    setIsSavingCode(true);
+    try {
+      const res = await fetch('/api/edit_basket_item_code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: invoice.invoice_id,
+          old_code: item.product_code,
+          new_code: targetCode,
+          new_qty: finalQty,
+          new_price: finalPrice,
+          packer_name: myPackerName
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast(data.message || `✅ បានប្តូរទៅកូដ [${targetCode}] រួចរាល់!`, 'success');
+        onDataChanged();
+      } else {
+        playWarningBuzzer();
+        onShowToast(`⚠️ ${data.message || 'មិនអាចប្តូរកូដបានទេ'}`, 'error');
+      }
+    } catch (err) {
+      onShowToast('⚠️ មានបញ្ហាបណ្តាញ WiFi!', 'error');
+    } finally {
+      setIsSavingCode(false);
+    }
+  };
+
   // Smart cut from comment
   const handleSmartCut = async (commentText: string, autoCode: string, autoQty: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1060,6 +1132,18 @@ export function BasketCard({
               const rawNoteText = item.item_comment || matchingComment || (invoice.comments && invoice.comments[0]) || '';
               const noteText = convertKhmerNumeralsToGlobal(rawNoteText);
 
+              // Smart Code Mismatch Detection
+              const isCodeInNote = Boolean(
+                noteText && new RegExp(`(^|\\D)${item.product_code}(\\D|$)`, 'i').test(noteText)
+              );
+              const detectedInNote = noteText ? parseQuickComment(noteText) : null;
+              const hasMismatchCode = Boolean(
+                noteText &&
+                !isCodeInNote &&
+                detectedInNote?.code &&
+                detectedInNote.code.toUpperCase() !== item.product_code.toUpperCase()
+              );
+
               return (
                 <div key={idx} className="flex flex-col">
                   {/* Outer Item Card matching Capture.PNG */}
@@ -1072,6 +1156,8 @@ export function BasketCard({
                     className={`p-3 rounded-2xl border-2 flex items-center gap-3 transition-all cursor-pointer select-none relative ${
                       isChecked
                         ? 'bg-[#041A14]/95 border-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.25)] ring-1 ring-emerald-500/30'
+                        : hasMismatchCode
+                        ? 'bg-[#18080C]/95 border-rose-500/80 shadow-[0_0_14px_rgba(244,63,94,0.2)]'
                         : 'bg-[#060E1E]/95 border-slate-800 hover:border-cyan-500/60 shadow-md'
                     }`}
                   >
@@ -1109,7 +1195,7 @@ export function BasketCard({
                     {/* MIDDLE COLUMN: Code badge + Name, Note (directly below code), Price · Qty */}
                     <div className="flex-1 min-w-0 overflow-hidden flex flex-col justify-center">
                       {/* Row 1: [ Code ] and Name */}
-                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
                         {/* Interactive In-Place Quick Edit for Code */}
                         {isEditingThisCode ? (
                           <form
@@ -1159,13 +1245,21 @@ export function BasketCard({
                             className={`border px-2.5 py-1 rounded-xl text-xs sm:text-sm font-bold tracking-wider shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group/code cursor-pointer flex-shrink-0 ${
                               isChecked
                                 ? 'bg-emerald-950/90 border-emerald-500/70 text-emerald-300 hover:border-emerald-300'
+                                : hasMismatchCode
+                                ? 'bg-rose-950/90 border-rose-500/90 text-rose-200 hover:border-rose-300 shadow-[0_0_10px_rgba(244,63,94,0.3)] animate-pulse'
                                 : 'bg-[#0B1E3D] border-blue-400/80 text-blue-200 hover:border-cyan-400 hover:bg-[#0e274f]'
                             }`}
-                            title="ចុចត្រង់នេះដើម្បីកែប្រែកូដទំនិញរហ័ស (តម្លៃ & រូបភាពនឹងទាញតាមស្តុកស្វ័យប្រវត្តិ)"
+                            title="ចុចត្រង់នេះដើម្បីកែប្រែកូដទំនិញរហ័ស"
                           >
                             <span className="text-[11px] font-bold opacity-80">កូដ</span>
-                            <span className="font-mono font-black text-sm text-cyan-300">[{item.product_code}]</span>
-                            <span className="text-[10px] text-amber-400 opacity-70 group-hover/code:opacity-100 group-hover/code:scale-110 transition-all">✏️</span>
+                            <span className={`font-mono font-black text-sm ${hasMismatchCode ? 'text-rose-300' : 'text-cyan-300'}`}>
+                              [{item.product_code}]
+                            </span>
+                            {hasMismatchCode ? (
+                              <span className="text-amber-300 text-xs" title="កូដមិនត្រូវនឹងខមិន">⚠️</span>
+                            ) : (
+                              <span className="text-[10px] text-amber-400 opacity-70 group-hover/code:opacity-100 group-hover/code:scale-110 transition-all">✏️</span>
+                            )}
                           </button>
                         )}
                         {(() => {
@@ -1184,15 +1278,37 @@ export function BasketCard({
                         })()}
                       </div>
 
-                      {/* Row 2: Note with Full Text Wrap & Converted Global Numbers (Directly below Code) */}
+                      {/* Row 2: Customer Comment Text with Smart Mismatch Alert & 1-Click Fix */}
                       {noteText && (
-                        <div className="text-amber-200 text-xs font-medium mt-1.5 break-words whitespace-normal bg-amber-950/50 px-2.5 py-1 rounded-lg border border-amber-500/40 leading-relaxed shadow-sm">
-                          <span className="text-amber-400 font-bold mr-1">↳ Note:</span>
-                          <span className="text-amber-100 font-medium">"{noteText}"</span>
+                        <div className={`text-xs font-medium mt-1.5 break-words whitespace-normal px-2.5 py-1.5 rounded-lg border leading-relaxed shadow-sm flex flex-col gap-1.5 ${
+                          hasMismatchCode
+                            ? 'bg-rose-950/60 border-rose-500/70 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.2)]'
+                            : 'bg-amber-950/40 border-amber-500/35 text-amber-100'
+                        }`}>
+                          <div>{renderCommentWithHighlightedCode(noteText, activeTypedCode || item.product_code)}</div>
+
+                          {/* Instant 1-Click Code Correction when Mismatch Detected */}
+                          {hasMismatchCode && detectedInNote && (
+                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-rose-500/40 text-[11px] font-bold text-rose-200">
+                              <span className="flex items-center gap-1 min-w-0 truncate">
+                                <span className="text-amber-300 flex-shrink-0">⚠️</span>
+                                <span className="truncate">ខមិនកូដ [{detectedInNote.code}] មិនមែន [{item.product_code}]</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleQuickSwitchCode(item, detectedInNote.code, detectedInNote.qty, e)}
+                                disabled={isSavingCode}
+                                className="bg-rose-500 hover:bg-rose-400 active:scale-95 text-slate-950 px-2 py-0.5 rounded-md font-black text-[10px] shadow transition-all cursor-pointer flex-shrink-0"
+                                title={`ចុចដើម្បីប្តូរកូដទំនិញនេះទៅ [${detectedInNote.code}] ភ្លាមៗ`}
+                              >
+                                👉 ប្តូរទៅ [{detectedInNote.code}] ភ្លាម
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {/* Row 3: Price & High-Visibility Quantity Pill (Pushed below Note) */}
+                      {/* Row 3: Price */}
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                         <span className="text-amber-400 font-mono font-black text-sm sm:text-base tracking-wide drop-shadow-sm flex items-center gap-1">
                           <span>${displayPrice.toFixed(2)}</span>
@@ -1201,14 +1317,6 @@ export function BasketCard({
                               (ស្តុក)
                             </span>
                           )}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-lg text-xs font-black font-mono flex items-center gap-1 border ${
-                          isChecked
-                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50'
-                            : 'bg-amber-950/90 text-amber-300 border-amber-500/70 shadow-sm'
-                        }`}>
-                          <span>ចំនួន ៖</span>
-                          <span className="text-sm font-black">{item.quantity}</span>
                         </span>
                       </div>
                     </div>

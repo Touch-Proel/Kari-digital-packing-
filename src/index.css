@@ -6,6 +6,11 @@
   --font-battambang: 'Battambang', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-koulen: 'Koulen', 'Kantumruy Pro', cursive, sans-serif;
   --app-font: var(--font-kantumruy);
+  --font-scale: 1;
+}
+
+html {
+  font-size: calc(16px * var(--font-scale, 1));
 }
 
 html, body {
