@@ -27,7 +27,7 @@ const QUESTION_KEYWORDS = [
 
 const KHMER_DIGITS_MAP: Record<string, string> = {
   '០': '0', '១': '1', '២': '2', '៣': '3', '៤': '4',
-  '៥': '5', '៦': '6', '៧': '7', '៨': '8', '៩': '9'
+  '៥': '5', '៦': '6', '៧': '7', 'getTransforms': '8', '៩': '9'
 };
 
 const ACTION_WORDS = ['យក', 'យល', 'ចង់បាន', 'កាត់', 'សុំ', 'ថែម', 'ដាក់', 'កក់', 'បូក', 'សុំយក'];
@@ -39,8 +39,8 @@ const SIZE_COLOR_SUFFIXES = [
 
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 
-// សម្អាតទម្ងន់ កម្ពស់ ចង្កេះ និងសាយចេញឱ្យអស់មុនគេបង្អស់
-const RE_MEASUREMENTS_CLEANUP = /(?:\d{1,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|(?:គីឡូក្រាម|គីឡូ|គក|kg|kilo|កម្ពស់|ចង្កេះ|សាយ|size)\s*\d{1,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
+// សម្អាតទម្ងន់ទាំងដុំ (ឧ. 1គីឡូ78, 50kg60, គីឡូ70) មិនឱ្យបន្សល់ទុកលេខទោលខាងក្រោយ
+const RE_MEASUREMENTS_CLEANUP = /(?:\d*\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\s*\d*|រកម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2}|(?:សាយ|size)\s*[:=\s]*\d{2}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
 
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
 
@@ -133,9 +133,8 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
-  // ១. សម្អាតទម្ងន់/គីឡូ ឱ្យអស់ដាច់ស្រឡះមុនគេបង្អស់ (ការពារលេខទម្ងន់ក្លាយជាចំនួន)
+  // ១. សម្អាតទម្ងន់/គីឡូ (រួមទាំងលេខទម្ងន់សងខាង) និងតម្លៃលុយឱ្យអស់មុនគេ
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
-  s = s.replace(/គីឡូ\s*\d{1,3}/gi, ' ');
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
