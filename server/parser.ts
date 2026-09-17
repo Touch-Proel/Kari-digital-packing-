@@ -39,7 +39,7 @@ const SIZE_COLOR_SUFFIXES = [
 
 const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 
-// បន្ថែមលក្ខខណ្ឌសម្អាតគ្រប់ទម្រង់ពាក្យ គីឡូ/kg ទាំងមុខទាំងក្រោយ
+// សម្អាតទម្ងន់ទាំងឃ្លា "គីឡូ70", "1kg", "kg65" មិនឱ្យសល់លេខទោល
 const RE_MEASUREMENTS_CLEANUP = /(?:\b\d{1,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\b|(?:គីឡូក្រាម|គីឡូ|គក|kg|kilo|កម្ពស់|ចង្កេះ|សាយ|size)\s*\d{1,3}|\b1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
 
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
@@ -133,13 +133,18 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
+  // ១. សម្អាតតម្លៃលុយ និងលេខផ្លូវ/ផ្សារមុនគេ
   s = s.replace(RE_PRICE_CLEANUP, ' ');
-  s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
+  // ២. បំប្លែងទម្រង់ CODE.QTY (ឧ. 28.4 -> 28=4)
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/\//g, ' ');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
+
+  // ៣. សម្អាតទម្ងន់ និងគីឡូ (រួមទាំងលេខជាប់ពាក្យ គីឡូ70) បន្ទាប់ពីកែទម្រង់ = ស្មើរួច
+  s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
+  s = s.replace(/គីឡូ\s*\d{1,3}/gi, ' ');
 
   const segments = s.split(/[\n;+]+|\s+និង\s+|\s{2,}/i);
   const pairs: ExtractedItemPair[] = [];
