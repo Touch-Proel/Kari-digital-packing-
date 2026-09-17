@@ -49,7 +49,8 @@ export function renderInvoiceTo576Canvas(
   const rielRate = options.rielRate || 4100;
   const items = invoice.items || [];
   const khqrConfig = getKHQRConfig();
-  const showKHQR = options.showKHQR !== undefined ? options.showKHQR : khqrConfig.enabled;
+  // By default, NEVER print KHQR on POS paper slips to save thermal paper & vertical space
+  const showKHQR = options.showKHQR !== undefined ? options.showKHQR : false;
   const khqrCurrency = options.khqrCurrency || khqrConfig.currency || 'USD';
   
   // 1. Calculate height dynamically with extra breathing room for larger text
