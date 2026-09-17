@@ -159,7 +159,6 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const isSingleDigit = /^\d$/.test(pCode);
 
-      // ការពារកូដ ១ ខ្ទង់ មិនឱ្យច្រឡំជាមួយពាក្យបរិមាណ "5អាវ"
       if (isSingleDigit) {
         const falseQtyPattern = new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់)?\\s*${esc}\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌|ពណ៍)`, 'i');
         if (falseQtyPattern.test(seg) && !new RegExp(`(?:កូដ|កូដលេខ|CODE)\\s*${esc}\\b`, 'i').test(seg)) {
@@ -189,11 +188,11 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       if (multiTotalQty > 0) {
         pairs.push({ code: pCode, qty: multiTotalQty });
         seenCodes.add(pCode);
-        seg = seg.replace(new RegExp(esc, 'i'), ' ');
-        continue;
+        seg = ''; // សំខាន់៖ កាត់ផ្ដាច់ Segment ນີ້ចោលទាំងស្រុង មិនឱ្យលេខកន្ទុយរត់ចូល Catalog ទៀតឡើយ
+        break;
       }
 
-      // ២. ឆែកទម្រង់មានបរិមាណច្បាស់លាស់ (ឧ. 59=20, 103-2, 25...យក5)
+      // ២. ឆែកទម្រង់มีបរិមាណច្បាស់លាស់ (ឧ. 28=10, 59=20, 103-2)
       const reWithQty = new RegExp(
         `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
         `(?<![A-Za-z0-9])(${esc})` +
@@ -204,20 +203,19 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
       );
 
       const matchWithQty = seg.match(reWithQty);
-      // matchWithQty[3] គឺជាបរិមាណ Quantity (matchWithQty[2] ជា Variant)
       if (matchWithQty && matchWithQty[3]) {
         let rawQty = parseInt(matchWithQty[3], 10) || 1;
         pairs.push({ code: pCode, qty: rawQty });
         seenCodes.add(pCode);
-        // លុបឃ្លា "59=20" ចេញ ដើម្បីកុំឱ្យលេខ 20 ក្លាយជាកូដ 20
-        seg = seg.replace(matchWithQty[0], ' ');
-        continue;
+        seg = ''; // សំខាន់៖ កាត់ផ្ដាច់ Segment ນີ້ចោលទាំងស្រុង
+        break;
       }
 
-      // ៣. បើគ្មានសញ្ញាបរិមាណខាងក្រោយ ទើបចាត់ទុកជាកូដទោល (Qty = 1)
+      // ៣. កូដទោល (Qty = 1)
       pairs.push({ code: pCode, qty: 1 });
       seenCodes.add(pCode);
-      seg = seg.replace(new RegExp(esc, 'i'), ' ');
+      seg = ''; // កាត់ផ្ដាច់ Segment ນີ້ចោល
+      break;
     }
   }
 
