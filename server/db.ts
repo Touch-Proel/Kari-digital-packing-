@@ -514,6 +514,9 @@ export async function loadDatabaseFromDisk() {
       }
     });
 
+    // Natural sort products by code (1, 2, 3... 10... 100... A1, B1...)
+    products.sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
+
     // Persist normalized data to disk and SQLite
     saveDatabaseToDisk();
   } catch (err) {
@@ -523,7 +526,9 @@ export async function loadDatabaseFromDisk() {
 
 export function getProductsForLive(liveId?: string): Product[] {
   const targetLive = liveId || activeLiveId;
-  return products.filter(p => (p.live_id || activeLiveId) === targetLive);
+  return products
+    .filter(p => (p.live_id || activeLiveId) === targetLive)
+    .sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
 }
 
 export function cleanupEmptyZeroItemInvoices() {

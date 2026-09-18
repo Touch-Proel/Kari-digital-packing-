@@ -21,6 +21,18 @@ interface FullStockManagerModalProps {
   ) => void;
 }
 
+export function naturalCompareCodes(a?: string, b?: string): number {
+  return (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' });
+}
+
+export type ProductSortOption =
+  | 'CODE_ASC'
+  | 'CODE_DESC'
+  | 'QTY_DESC'
+  | 'QTY_ASC'
+  | 'PRICE_DESC'
+  | 'PRICE_ASC';
+
 export function FullStockManagerModal({
   isOpen,
   onClose,
@@ -35,6 +47,7 @@ export function FullStockManagerModal({
 }: FullStockManagerModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'ALL' | 'IN_STOCK' | 'LOW' | 'OUT'>('ALL');
+  const [sortOption, setSortOption] = useState<ProductSortOption>('CODE_ASC');
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [updatingCode, setUpdatingCode] = useState<string | null>(null);
   const [deletingCode, setDeletingCode] = useState<string | null>(null);
@@ -61,7 +74,7 @@ export function FullStockManagerModal({
   const inStockCount = useMemo(() => products.filter(p => p.stock_qty > 5).length, [products]);
 
   const filteredProducts = useMemo(() => {
-    return products.filter(p => {
+    const list = products.filter(p => {
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         const matchCode = (p.code || '').toLowerCase().includes(q);
@@ -74,7 +87,26 @@ export function FullStockManagerModal({
       if (filterTab === 'IN_STOCK') return p.stock_qty > 5;
       return true;
     });
-  }, [products, searchQuery, filterTab]);
+
+    return [...list].sort((a, b) => {
+      switch (sortOption) {
+        case 'CODE_ASC':
+          return naturalCompareCodes(a.code, b.code);
+        case 'CODE_DESC':
+          return naturalCompareCodes(b.code, a.code);
+        case 'QTY_DESC':
+          return (b.stock_qty ?? 0) - (a.stock_qty ?? 0) || naturalCompareCodes(a.code, b.code);
+        case 'QTY_ASC':
+          return (a.stock_qty ?? 0) - (b.stock_qty ?? 0) || naturalCompareCodes(a.code, b.code);
+        case 'PRICE_DESC':
+          return (b.price ?? 0) - (a.price ?? 0) || naturalCompareCodes(a.code, b.code);
+        case 'PRICE_ASC':
+          return (a.price ?? 0) - (b.price ?? 0) || naturalCompareCodes(a.code, b.code);
+        default:
+          return naturalCompareCodes(a.code, b.code);
+      }
+    });
+  }, [products, searchQuery, filterTab, sortOption]);
 
   // Quick adjust stock quantity (+1, -1, +10, etc.)
   const handleQuickAdjustStock = async (p: Product, delta: number, e: React.MouseEvent) => {
@@ -271,51 +303,85 @@ export function FullStockManagerModal({
             </button>
           </div>
 
-          {/* Row 2: Filter Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            <button
-              onClick={() => setFilterTab('ALL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                filterTab === 'ALL'
-                  ? 'bg-cyan-500 text-slate-950 font-black shadow-md'
-                  : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              ទាំងអស់ ({products.length})
-            </button>
+          {/* Row 2: Filter Tabs & Sort Control */}
+          <div className="flex flex-wrap items-center justify-between gap-2 py-0.5">
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+              <button
+                onClick={() => setFilterTab('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  filterTab === 'ALL'
+                    ? 'bg-cyan-500 text-slate-950 font-black shadow-md'
+                    : 'bg-slate-900 text-slate-300 border border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                ទាំងអស់ ({products.length})
+              </button>
 
-            <button
-              onClick={() => setFilterTab('IN_STOCK')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                filterTab === 'IN_STOCK'
-                  ? 'bg-emerald-500 text-slate-950 font-black shadow-md'
-                  : 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/60'
-              }`}
-            >
-              🟢 នៅសល់ ({inStockCount})
-            </button>
+              <button
+                onClick={() => setFilterTab('IN_STOCK')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  filterTab === 'IN_STOCK'
+                    ? 'bg-emerald-500 text-slate-950 font-black shadow-md'
+                    : 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/60'
+                }`}
+              >
+                🟢 នៅសល់ ({inStockCount})
+              </button>
 
-            <button
-              onClick={() => setFilterTab('LOW')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                filterTab === 'LOW'
-                  ? 'bg-amber-500 text-slate-950 font-black shadow-md'
-                  : 'bg-amber-950/40 text-amber-300 border border-amber-800/60 hover:bg-amber-900/60'
-              }`}
-            >
-              ⚠️ ជិតអស់ ({lowCount})
-            </button>
+              <button
+                onClick={() => setFilterTab('LOW')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  filterTab === 'LOW'
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                    : 'bg-amber-950/40 text-amber-300 border border-amber-800/60 hover:bg-amber-900/60'
+                }`}
+              >
+                ⚠️ ជិតអស់ ({lowCount})
+              </button>
 
-            <button
-              onClick={() => setFilterTab('OUT')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                filterTab === 'OUT'
-                  ? 'bg-rose-600 text-white font-black shadow-md'
-                  : 'bg-rose-950/40 text-rose-300 border border-rose-800/60 hover:bg-rose-900/60'
-              }`}
-            >
-              🔴 អស់ស្តុក ({outCount})
-            </button>
+              <button
+                onClick={() => setFilterTab('OUT')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  filterTab === 'OUT'
+                    ? 'bg-rose-600 text-white font-black shadow-md'
+                    : 'bg-rose-950/40 text-rose-300 border border-rose-800/60 hover:bg-rose-900/60'
+                }`}
+              >
+                🔴 អស់ស្តុក ({outCount})
+              </button>
+            </div>
+
+            {/* Sort Dropdown & Quick Toggle Buttons */}
+            <div className="flex items-center gap-1.5 ml-auto flex-shrink-0">
+              <span className="text-[11px] text-slate-400 font-bold hidden xs:inline">តម្រៀប ៖</span>
+              <div className="relative flex items-center">
+                <select
+                  id="product-sort-select"
+                  value={sortOption}
+                  onChange={e => setSortOption(e.target.value as ProductSortOption)}
+                  className="bg-slate-900 hover:bg-slate-800 text-sky-300 border border-sky-600/70 rounded-xl pl-2.5 pr-7 py-1.5 text-xs font-bold outline-none cursor-pointer focus:border-cyan-400 shadow-sm appearance-none"
+                >
+                  <option value="CODE_ASC">🔢 កូដ (1 → 9, A → Z)</option>
+                  <option value="CODE_DESC">🔤 កូដ (9 → 1, Z → A)</option>
+                  <option value="QTY_DESC">📦 ស្តុកច្រើនមុន (High)</option>
+                  <option value="QTY_ASC">⚠️ ស្តុកតិចមុន (Low)</option>
+                  <option value="PRICE_DESC">💵 តម្លៃខ្ពស់មុន</option>
+                  <option value="PRICE_ASC">🏷️ តម្លៃទាបមុន</option>
+                </select>
+                <span className="absolute right-2 pointer-events-none text-[10px] text-sky-400">▼</span>
+              </div>
+
+              {/* Quick toggle 1->9 / 9->1 */}
+              <button
+                type="button"
+                onClick={() => setSortOption(prev => (prev === 'CODE_ASC' ? 'CODE_DESC' : 'CODE_ASC'))}
+                className="px-2.5 py-1.5 rounded-xl bg-sky-950 hover:bg-sky-900 border border-sky-500/70 text-cyan-300 text-xs font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm transition-all whitespace-nowrap"
+                title="ចុចដើម្បីប្តូរទិសដៅតម្រៀបកូដ (Toggle Sort Order)"
+              >
+                <span>{sortOption === 'CODE_DESC' ? '🔤 9→1' : '🔢 1→9'}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -466,13 +532,24 @@ export function FullStockManagerModal({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-5 py-3 bg-[#08101E] border-t border-slate-800 flex items-center justify-between">
-          <span className="text-xs text-slate-400 font-medium">
-            សរុប {filteredProducts.length} / {products.length} មុខទំនិញ
-          </span>
+        <div className="px-5 py-3 bg-[#08101E] border-t border-slate-800 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+            <span>
+              សរុប {filteredProducts.length} / {products.length} មុខទំនិញ
+            </span>
+            <span className="text-slate-600 hidden sm:inline">•</span>
+            <span className="text-cyan-400 font-bold hidden sm:inline">
+              {sortOption === 'CODE_ASC' && 'តម្រៀបកូដ ៖ 1 → 9 (A → Z)'}
+              {sortOption === 'CODE_DESC' && 'តម្រៀបកូដ ៖ 9 → 1 (Z → A)'}
+              {sortOption === 'QTY_DESC' && 'តម្រៀប ៖ ស្តុកច្រើនមុន'}
+              {sortOption === 'QTY_ASC' && 'តម្រៀប ៖ ស្តុកតិចមុន'}
+              {sortOption === 'PRICE_DESC' && 'តម្រៀប ៖ តម្លៃខ្ពស់មុន'}
+              {sortOption === 'PRICE_ASC' && 'តម្រៀប ៖ តម្លៃទាបមុន'}
+            </span>
+          </div>
           <button
             onClick={onClose}
-            className="bg-sky-600 hover:bg-sky-500 text-slate-950 font-black px-6 py-2 rounded-xl text-xs active:scale-95 transition-all cursor-pointer shadow-md"
+            className="bg-sky-600 hover:bg-sky-500 text-slate-950 font-black px-6 py-2 rounded-xl text-xs active:scale-95 transition-all cursor-pointer shadow-md flex-shrink-0"
           >
             រួចរាល់ (Done)
           </button>

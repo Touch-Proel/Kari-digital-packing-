@@ -11,6 +11,7 @@ interface StockDockProps {
 export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onOpenStockSync }: StockDockProps) {
   const [filterSearch, setFilterSearch] = useState<string>('');
   const [filterMode, setFilterMode] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(false);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
   }, []);
 
   const filteredProducts = useMemo(() => {
-    return products.filter(p => {
+    const list = products.filter(p => {
       if (filterSearch.trim()) {
         const q = filterSearch.trim().toLowerCase();
         const matchCode = (p.code || '').toLowerCase().includes(q);
@@ -42,7 +43,12 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
       if (filterMode === 'LOW') return p.stock_qty > 0 && p.stock_qty <= 5;
       return true;
     });
-  }, [products, filterSearch, filterMode]);
+
+    return [...list].sort((a, b) => {
+      const cmp = (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' });
+      return sortAsc ? cmp : -cmp;
+    });
+  }, [products, filterSearch, filterMode, sortAsc]);
 
   const outCount = useMemo(() => products.filter(p => p.stock_qty <= 0).length, [products]);
   const lowCount = useMemo(() => products.filter(p => p.stock_qty > 0 && p.stock_qty <= 5).length, [products]);
@@ -129,7 +135,7 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
       {/* Quick Search & Scroller */}
       <div className="flex gap-2 items-center">
         {/* Search input */}
-        <div className="relative w-36 sm:w-44 flex-shrink-0">
+        <div className="relative w-32 sm:w-40 flex-shrink-0">
           <input
             type="text"
             placeholder="🔍 ស្វែងរកកូដ..."
@@ -146,6 +152,16 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
             </button>
           )}
         </div>
+
+        {/* Sort Toggle Button */}
+        <button
+          type="button"
+          onClick={() => setSortAsc(prev => !prev)}
+          className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-sky-700/60 rounded-xl text-[10.5px] font-mono font-bold flex items-center gap-1 flex-shrink-0 cursor-pointer active:scale-95 shadow-sm transition-all"
+          title={sortAsc ? 'កូដតម្រៀប 1→9 (ចុចដើម្បីប្តូរ 9→1)' : 'កូដតម្រៀប 9→1 (ចុចដើម្បីប្តូរ 1→9)'}
+        >
+          <span>{sortAsc ? '🔢 1→9' : '🔤 9→1'}</span>
+        </button>
 
         {/* Horizontal Items Scroller */}
         <div className="flex gap-2 overflow-x-auto no-scrollbar py-0.5 scroll-smooth flex-1 items-center">

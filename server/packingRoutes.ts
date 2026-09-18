@@ -118,7 +118,9 @@ router.get('/obs_data', (req: Request, res: Response) => {
 // GET /api/products
 router.get('/products', (req: Request, res: Response) => {
   const targetLiveId = (req.query.live_id as string) || activeLiveId;
-  const liveProducts = products.filter(p => (p.live_id || activeLiveId) === targetLiveId);
+  const liveProducts = products
+    .filter(p => (p.live_id || activeLiveId) === targetLiveId)
+    .sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
   res.json(liveProducts);
 });
 
