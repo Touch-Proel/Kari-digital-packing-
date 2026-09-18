@@ -34,9 +34,9 @@ export interface LiveCommentsAutoSyncStatus {
 }
 
 const liveSyncState: LiveCommentsAutoSyncStatus = {
-  enabled: false,
+  enabled: true,
   intervalSec: 3, // Default 3 seconds for real-time live comments
-  activeLiveId: activeLiveId || 'LIVE_20260913_VIP',
+  activeLiveId: activeLiveId || '1630588828526235',
   lastSyncAt: null,
   totalCommentsSynced: 0,
   totalOrdersAllocated: 0,
@@ -47,6 +47,13 @@ const liveSyncState: LiveCommentsAutoSyncStatus = {
 };
 
 let liveSyncTimer: NodeJS.Timeout | null = null;
+
+// Auto-boot background sync loop
+setTimeout(() => {
+  if (!liveSyncTimer && liveSyncState.enabled) {
+    startLiveCommentsAutoSync(3, liveSyncState.activeLiveId);
+  }
+}, 3000);
 
 // Keep last 25 recent orders for real-time live feed
 function recordRecentOrder(order: RecentLiveOrder) {

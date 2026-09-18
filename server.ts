@@ -21,6 +21,7 @@ import {
   invoices
 } from './server/db';
 import { parseAndAllocateComment } from './server/parser';
+import { startLiveCommentsAutoSync } from './server/liveSync';
 
 dotenv.config();
 
@@ -108,9 +109,11 @@ app.post('/api/fb/manual_connect', async (req: Request, res: Response) => {
 app.post('/api/fb/active_live', (req: Request, res: Response) => {
   const { live_id } = req.body;
   if (live_id) {
-    setActiveLiveId(String(live_id).trim());
+    const cleanId = String(live_id).trim();
+    setActiveLiveId(cleanId);
+    startLiveCommentsAutoSync(3, cleanId);
     bumpDataRevision();
-    return res.json({ success: true, activeLiveId: String(live_id).trim() });
+    return res.json({ success: true, activeLiveId: cleanId });
   }
   res.status(400).json({ success: false, error: 'live_id is required' });
 });

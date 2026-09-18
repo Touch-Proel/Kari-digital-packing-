@@ -5,6 +5,7 @@ import {
   rawComments,
   recalculateInvoice,
   bumpDataRevision,
+  saveDatabaseToDisk,
   activeLiveId
 } from './db';
 import { DeliveryZone, Invoice, OrderItem } from './types';
@@ -125,6 +126,25 @@ export interface ExtractedItemPair {
   qty: number;
 }
 
+const INVALID_DYNAMIC_CODES = new Set([
+  'KG', 'CM', 'MM', 'M', 'G', 'L', 'ML',
+  'PM', 'AM', 'MIN', 'SEC', 'HR',
+  'OK', 'NO', 'HI', 'HELLO', 'BYE', 'FB', 'LIVE', 'VIP', 'VOD',
+  'SIZE', 'COLOR', 'PAGE', 'POST', 'POSTS',
+  'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'XS', 'XXL'
+]);
+
+function isValidDynamicOrderCode(code: string): boolean {
+  if (!code || code.length === 0 || code.length > 5) return false;
+  if (INVALID_DYNAMIC_CODES.has(code)) return false;
+  if (COMMON_GREETINGS.has(code)) return false;
+  if (/^\d+$/.test(code)) {
+    const num = parseInt(code, 10);
+    if (num <= 0 || num > 999) return false;
+  }
+  return true;
+}
+
 export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedItemPair[] {
   if (!text) return [];
 
@@ -218,6 +238,42 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
       seenCodes.add(pCode);
       seg = '';
       break;
+    }
+  }
+
+  // 🎯 Dynamic extraction: capture live order codes even before seller creates them in catalog
+  // Pattern 1: CODE = QTY (e.g. 10=1, 12=5, 10=2, A12=2)
+  const reEq = /(?<!\d)([A-Za-z0-9]{1,4})\s*[:=xX*]\s*(\d{1,2})(?!\d)/g;
+  let mEq: RegExpExecArray | null;
+  while ((mEq = reEq.exec(s)) !== null) {
+    const rawCode = mEq[1].toUpperCase().trim();
+    const qty = parseInt(mEq[2], 10) || 1;
+    if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
+      pairs.push({ code: rawCode, qty });
+      seenCodes.add(rawCode);
+    }
+  }
+
+  // Pattern 2: កូដ/កូត CODE (e.g. កូត10, កូដ 10, កូដ 12=5)
+  const reKod = /(?:កូដ|កូត|CODE)\s*([A-Za-z0-9]{1,4})(?:\s*[:=xX*]?\s*(\d{1,2}))?/gi;
+  let mKod: RegExpExecArray | null;
+  while ((mKod = reKod.exec(s)) !== null) {
+    const rawCode = mKod[1].toUpperCase().trim();
+    const qty = mKod[2] ? (parseInt(mKod[2], 10) || 1) : 1;
+    if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
+      pairs.push({ code: rawCode, qty });
+      seenCodes.add(rawCode);
+    }
+  }
+
+  // Pattern 3: CODE = Khmer color/text (e.g. 10=សុកូឡា ស្វាយ)
+  const reEqDesc = /(?<!\d)([A-Za-z0-9]{1,4})\s*=\s*(?=[^\d\s])/g;
+  let mDesc: RegExpExecArray | null;
+  while ((mDesc = reEqDesc.exec(s)) !== null) {
+    const rawCode = mDesc[1].toUpperCase().trim();
+    if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
+      pairs.push({ code: rawCode, qty: 1 });
+      seenCodes.add(rawCode);
     }
   }
 
@@ -418,11 +474,29 @@ export function parseAndAllocateComment(
   const soldOut: string[] = [];
 
   for (const pair of pairs) {
-    const prod = products.find(
+    let prod = products.find(
       p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === pair.code.toUpperCase()
     );
 
-    if (!prod) continue;
+    if (!prod) {
+      // Find template in existing products from other lives or create fresh
+      const templateProd = products.find(p => p.code.toUpperCase() === pair.code.toUpperCase());
+      const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
+      prod = {
+        id: nextId,
+        code: pair.code.toUpperCase(),
+        name: templateProd ? templateProd.name : `ទំនិញកូដ ${pair.code.toUpperCase()}`,
+        stock_qty: templateProd && templateProd.stock_qty > 0 ? templateProd.stock_qty : 99,
+        price: templateProd ? templateProd.price : 0,
+        cost_price: templateProd ? templateProd.cost_price : 0,
+        image_file: templateProd ? templateProd.image_file : '',
+        live_id: liveId
+      };
+      products.push(prod);
+      saveDatabaseToDisk();
+      bumpDataRevision();
+      console.log(`[Auto Stock Register] Auto-created product ${prod.code} (${prod.name}) for Live #${liveId}`);
+    }
 
     if (prod.stock_qty <= 0) {
       soldOut.push(prod.code);

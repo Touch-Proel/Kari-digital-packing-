@@ -1155,9 +1155,11 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
 router.post('/set_active_live_id', (req: Request, res: Response) => {
   const { live_id } = req.body;
   if (live_id) {
-    setActiveLiveId(live_id);
+    const clean = String(live_id).trim();
+    setActiveLiveId(clean);
+    startLiveCommentsAutoSync(3, clean);
     bumpDataRevision();
-    return res.json({ success: true, active_live_id: live_id });
+    return res.json({ success: true, active_live_id: clean });
   }
   res.status(400).json({ success: false, error: 'Missing live_id' });
 });
@@ -1446,7 +1448,7 @@ router.post('/fb/live_auto_sync', async (req: Request, res: Response) => {
   const { enabled, interval_sec, live_id, trigger_now } = req.body;
 
   if (trigger_now) {
-    const syncRes = await executeLiveCommentsSyncOnce(live_id);
+    const syncRes = await executeLiveCommentsSyncOnce(live_id, true);
     return res.json({
       ...syncRes,
       status: getLiveCommentsAutoSyncStatus()
