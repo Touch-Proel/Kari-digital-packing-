@@ -36,6 +36,8 @@ export function FullStockManagerModal({
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [updatingCode, setUpdatingCode] = useState<string | null>(null);
   const [deletingCode, setDeletingCode] = useState<string | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [removeFromBasketsToo, setRemoveFromBasketsToo] = useState(true);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -104,23 +106,34 @@ export function FullStockManagerModal({
     }
   };
 
-  // Delete product with confirmation
-  const handleDeleteProduct = async (p: Product, e: React.MouseEvent) => {
+  // Click delete button -> open custom in-app confirm dialog
+  const promptDeleteProduct = (p: Product, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`តើអ្នកពិតជាចង់លុបកូដ [${p.code}] ចេញពីស្តុកមែនទេ?`)) return;
+    playPureTone(380, 0.05);
+    setProductToDelete(p);
+  };
 
-    setDeletingCode(p.code);
+  // Perform confirmed deletion
+  const handleConfirmDelete = async () => {
+    if (!productToDelete) return;
+    const targetCode = productToDelete.code;
+
+    setDeletingCode(targetCode);
     try {
       const res = await fetch('/api/delete_product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: p.code })
+        body: JSON.stringify({
+          code: targetCode,
+          remove_from_baskets: removeFromBasketsToo
+        })
       });
       const data = await res.json();
       if (data.success) {
         playPureTone(400, 0.08);
-        onShowToast(`🗑️ បានលុបកូដ [${p.code}] ចេញពីស្តុកជោគជ័យ!`);
+        onShowToast(data.message || `🗑️ បានលុបកូដ [${targetCode}] ចេញពីស្តុកជោគជ័យ!`);
         onStockUpdated();
+        setProductToDelete(null);
       } else {
         playWarningBuzzer();
         onShowToast(data.error || 'មិនអាចលុបកូដនេះបានទេ', 'error');
@@ -429,7 +442,7 @@ export function FullStockManagerModal({
                       <button
                         type="button"
                         disabled={isDeleting}
-                        onClick={e => handleDeleteProduct(p, e)}
+                        onClick={e => promptDeleteProduct(p, e)}
                         className="w-8 h-8 rounded-xl bg-rose-950/70 hover:bg-rose-900 border border-rose-500/50 text-rose-300 flex items-center justify-center text-xs active:scale-90 transition-all shadow cursor-pointer"
                         title="លុបកូដនេះចេញពីស្តុក"
                       >
@@ -455,6 +468,109 @@ export function FullStockManagerModal({
             រួចរាល់ (Done)
           </button>
         </div>
+
+        {/* Custom In-App Delete Confirmation Modal (Bypasses browser window.confirm) */}
+        {productToDelete && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+            onClick={e => {
+              e.stopPropagation();
+              setProductToDelete(null);
+            }}
+          >
+            <div
+              className="bg-[#12080D] border-2 border-rose-500/80 rounded-3xl p-5 w-full max-w-md shadow-[0_20px_50px_rgba(225,29,72,0.4)] flex flex-col gap-4 animate-scale-up"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-950 border border-rose-500/60 flex items-center justify-center text-2xl flex-shrink-0">
+                  🗑️
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-rose-200">
+                    បញ្ជាក់ការលុបកូដទំនិញ
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    សកម្មភាពនេះនឹងលុបទិន្នន័យមុខទំនិញចេញពីស្តុក Live!
+                  </p>
+                </div>
+              </div>
+
+              {/* Product Preview Card */}
+              <div className="bg-[#1A0C14] border border-rose-900/60 rounded-2xl p-3.5 flex items-center gap-3">
+                {productToDelete.image_file ? (
+                  <img
+                    src={productToDelete.image_file}
+                    alt={productToDelete.code}
+                    className="w-14 h-14 rounded-xl object-cover border border-rose-800"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-xl">
+                    📦
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-rose-950 border border-rose-500 text-rose-300 font-mono font-black text-sm px-2 py-0.5 rounded-lg">
+                      [{productToDelete.code}]
+                    </span>
+                    <span className="font-bold text-xs text-white truncate">
+                      {productToDelete.name || `កូដ ${productToDelete.code}`}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-300 mt-1 flex gap-2">
+                    <span>តម្លៃ: <b className="text-amber-400 font-mono">${(productToDelete.price ?? 0).toFixed(2)}</b></span>
+                    <span>•</span>
+                    <span>ស្តុកនៅសល់: <b className="text-rose-300 font-mono">{productToDelete.stock_qty ?? 0}</b></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cascade removal option checkbox */}
+              <label className="flex items-center gap-2.5 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={removeFromBasketsToo}
+                  onChange={e => setRemoveFromBasketsToo(e.target.checked)}
+                  className="w-4 h-4 rounded text-rose-500 bg-slate-950 border-slate-700 focus:ring-0 cursor-pointer"
+                />
+                <span className="text-xs text-slate-300 font-medium">
+                  ដកកូដនេះចេញពីកន្ត្រក Live ដែលមិនទាន់វិចខ្ចប់ផងដែរ
+                </span>
+              </label>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2.5 pt-1">
+                <button
+                  type="button"
+                  disabled={deletingCode === productToDelete.code}
+                  onClick={handleConfirmDelete}
+                  className="flex-1 h-11 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-[0_4px_15px_rgba(225,29,72,0.4)] active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {deletingCode === productToDelete.code ? (
+                    <>
+                      <span>⏳</span>
+                      <span>កំពុងលុប...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🗑️</span>
+                      <span>បាទ/ចាស លុបចេញ</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setProductToDelete(null)}
+                  className="px-5 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs active:scale-95 transition-all cursor-pointer"
+                >
+                  ✕ បោះបង់
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

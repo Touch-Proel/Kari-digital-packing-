@@ -214,9 +214,9 @@ app.get('/api/fb/avatar/:userId', async (req: Request, res: Response) => {
 });
 
 // 7. Sync Live Comments from Facebook Graph API and Auto-Allocate into Baskets
-app.post('/api/fb/sync_comments', async (req: Request, res: Response) => {
+app.all('/api/fb/sync_comments', async (req: Request, res: Response) => {
   try {
-    const { post_id } = req.body;
+    const post_id = req.body?.post_id || req.query?.post_id as string;
     const targetId = post_id || activeLiveId;
 
     if (targetId && targetId !== activeLiveId) {
@@ -301,6 +301,14 @@ app.get(['/pay/:invoice_id', '/khqr/:invoice_id'], (req: Request, res: Response)
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Fallback JSON handler for any unmatched /api/* endpoints
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    error: `API route not found: ${req.method} ${req.path}`
+  });
 });
 
 // -------------------------------------------------------------

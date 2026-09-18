@@ -37,11 +37,8 @@ const SIZE_COLOR_SUFFIXES = [
   'ស', 'ខ្មៅ', 'ក្រហម', 'ខៀវ', 'លឿង', 'ផ្កាឈូក', 'ស្វាយ', 'បៃតង', 'ត្នោត', 'ប្រផេះ', 'ទឹកដោះគោ', 'សូកូឡា', 'កាហ្វេ', 'ឈាមជ្រូក'
 ];
 
-const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]|\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
-
-// សម្អាតទម្ងន់ទាំងដុំ (ឧ. 1គីឡូ77, 20=1គីឡូ78) មិនឱ្យសល់លេខទោលខាងក្រោយ
+const RE_PRICE_CLEANUP = /(?:\d+[\.,]\d+\s*[$៛]\vert{}\b\d+\s*[$៛]|\b\d{4,}\s*(?:រៀល|៛)?\b)/gi;
 const RE_MEASUREMENTS_CLEANUP = /(?:\d*\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\s*\d*|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2}|(?:សាយ|size)\s*[:=\s]*\d{2}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
-
 const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
 
 export function convertKhmerDigitsToArabic(text: string): string {
@@ -133,14 +130,18 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
-  // ១. សម្អាតទម្ងន់/គីឡូ (រួមទាំងលេខសងខាង) និងតម្លៃលុយឱ្យអស់មុនគេ
+  // ១. ទាញយក និងលុបលេខទូរស័ព្ទចេញមុនគេបង្អស់ ដើម្បីកុំឱ្យលេខទូរស័ព្ទច្របូកច្របល់ជាមួយកូដទំនិញ
+  const { cleanText: textWithoutPhone } = extractPhoneNumber(s);
+  s = textWithoutPhone;
+
+  // ២. សម្អាតទម្ងន់/គីឡូ តម្លៃលុយ និងអាសយដ្ឋាន
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // ២. បំប្លែងទម្រង់ CODE.QTY និងសញ្ញាផ្សេងៗ
+  // ៣. បំប្លែងទម្រង់សម្រាយ slash (ឧ. 40/1, 45/1) និង dot (ឧ. 28.4) ឱ្យទៅជា CODE=QTY
+  s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})[\/](\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
-  s = s.replace(/\//g, ' ');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
 
   const segments = s.split(/[\n;+]+|\s+និង\s+|\s{2,}/i);
@@ -171,7 +172,6 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
         }
       }
 
-      // ប្រើប្រាស់ព្រំដែនតឹងរឹងការពារកុំឱ្យលេខកូដទៅស៊ីជាប់លេខផ្សេង
       const codePattern = isSingleDigit
         ? `(?:(?:កូដ|កូដលេខ|CODE|យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*${esc}|(?<!\\d)${esc}(?!\\d))`
         : `(?<!\\d)(${esc})(?!\\d)`;

@@ -199,7 +199,12 @@ export function FacebookAuthModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ post_id: activeLiveId })
       });
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = { success: false, error: 'ការឆ្លើយតបពីម៉ាស៊ីនបម្រើមិនត្រឹមត្រូវ' };
+      }
       if (data.success) {
         playSuccessFanfare();
         const targetId = data.target_live_id || activeLiveId;
@@ -211,8 +216,8 @@ export function FacebookAuthModal({
       } else {
         onShowToast(data.error || 'មិនអាចទាញយកខំមិនបានឡើយ', 'error');
       }
-    } catch (e) {
-      onShowToast('Network error while syncing comments', 'error');
+    } catch (e: any) {
+      onShowToast(e?.message || 'Network error while syncing comments', 'error');
     } finally {
       setSyncingComments(false);
     }
