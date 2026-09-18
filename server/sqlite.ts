@@ -55,12 +55,13 @@ function initTables(db: Database) {
 
       CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY,
-        code TEXT UNIQUE,
+        code TEXT,
         name TEXT,
         stock_qty INTEGER DEFAULT 0,
         price REAL DEFAULT 0,
         cost_price REAL DEFAULT 0,
-        image_file TEXT
+        image_file TEXT,
+        live_id TEXT
       );
 
       CREATE TABLE IF NOT EXISTS invoices (
@@ -193,8 +194,44 @@ function initTables(db: Database) {
 
   ensureColumns('products', [
     ['cost_price', 'REAL DEFAULT 0'],
-    ['image_file', 'TEXT']
+    ['image_file', 'TEXT'],
+    ['live_id', 'TEXT']
   ]);
+
+  // Migration: Drop UNIQUE constraint on products.code if it exists from older schema
+  try {
+    const prodTableInfo = db.exec("SELECT sql FROM sqlite_master WHERE tbl_name = 'products' AND type = 'table';");
+    if (prodTableInfo.length > 0 && prodTableInfo[0].values && prodTableInfo[0].values[0]) {
+      const sql = String(prodTableInfo[0].values[0][0] || '');
+      if (sql.includes('code TEXT UNIQUE') || sql.toUpperCase().includes('UNIQUE (CODE)') || sql.toUpperCase().includes('UNIQUE(CODE)')) {
+        console.log('[SQLite Migration] Removing legacy UNIQUE constraint on products.code to support per-live session catalogs...');
+        db.run(`
+          CREATE TABLE products_new (
+            id INTEGER PRIMARY KEY,
+            code TEXT,
+            name TEXT,
+            stock_qty INTEGER DEFAULT 0,
+            price REAL DEFAULT 0,
+            cost_price REAL DEFAULT 0,
+            image_file TEXT,
+            live_id TEXT
+          );
+          INSERT INTO products_new (id, code, name, stock_qty, price, cost_price, image_file, live_id)
+            SELECT id, code, name, stock_qty, price, cost_price, image_file, live_id FROM products;
+          DROP TABLE products;
+          ALTER TABLE products_new RENAME TO products;
+        `);
+        console.log('[SQLite Migration] Successfully removed UNIQUE constraint on products.code.');
+      }
+    }
+  } catch (migProdErr) {
+    console.warn('[SQLite Migration] Warning while migrating products table:', migProdErr);
+  }
+
+  // Ensure index on live_id and code
+  try {
+    db.run('CREATE INDEX IF NOT EXISTS idx_products_live_code ON products(live_id, code);');
+  } catch {}
 
   ensureColumns('customers', [
     ['is_vip', 'INTEGER DEFAULT 0'],
@@ -247,9 +284,14 @@ export async function persistToSqlite(data: {
 
       // 2. Products
       db.run('DELETE FROM products;');
-      const stmtProd = db.prepare('INSERT INTO products (id, code, name, stock_qty, price, cost_price, image_file) VALUES (?, ?, ?, ?, ?, ?, ?);');
+      const stmtProd = db.prepare('INSERT OR REPLACE INTO products (id, code, name, stock_qty, price, cost_price, image_file, live_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?);');
+      let currentMaxId = 0;
       for (const p of data.products) {
-        stmtProd.run([p.id, p.code, p.name, p.stock_qty, p.price, p.cost_price || 0, p.image_file || '']);
+        if (p.id && p.id > currentMaxId) currentMaxId = p.id;
+      }
+      for (const p of data.products) {
+        const prodId = p.id || ++currentMaxId;
+        stmtProd.run([prodId, p.code, p.name, p.stock_qty, p.price, p.cost_price || 0, p.image_file || '', p.live_id || data.activeLiveId || '']);
       }
       stmtProd.free();
 
@@ -435,7 +477,7 @@ export async function loadFromSqlite(): Promise<{
     }
 
     // 2. Products
-    const prodRows = db.exec('SELECT id, code, name, stock_qty, price, cost_price, image_file FROM products ORDER BY id ASC;');
+    const prodRows = db.exec('SELECT id, code, name, stock_qty, price, cost_price, image_file, live_id FROM products ORDER BY id ASC;');
     if (prodRows.length > 0 && prodRows[0].values) {
       result.products = prodRows[0].values.map((r: any) => ({
         id: Number(r[0]),
@@ -444,7 +486,8 @@ export async function loadFromSqlite(): Promise<{
         stock_qty: Number(r[3]),
         price: Number(r[4]),
         cost_price: Number(r[5] || 0),
-        image_file: String(r[6] || '')
+        image_file: String(r[6] || ''),
+        live_id: String(r[7] || '').trim() || (result.activeLiveId || '1626350178950100')
       }));
     }
 

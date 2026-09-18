@@ -6,6 +6,7 @@ interface StockSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   products: Product[];
+  activeLiveId?: string;
   onStockUpdated: () => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   initialTab?: 'telegram' | 'paste' | 'file' | 'export';
@@ -26,6 +27,7 @@ export function StockSyncModal({
   isOpen,
   onClose,
   products,
+  activeLiveId,
   onStockUpdated,
   onShowToast,
   initialTab = 'telegram'
@@ -286,7 +288,8 @@ export function StockSyncModal({
             image_file: it.image_url
           })),
           mode: 'merge',
-          keep_existing_stock_qty: keepExistingStockQty
+          keep_existing_stock_qty: keepExistingStockQty,
+          live_id: activeLiveId
         })
       });
       const data = await res.json();
@@ -327,7 +330,8 @@ export function StockSyncModal({
             stock_qty: defaultQty
           })),
           mode: 'merge',
-          keep_existing_stock_qty: keepExistingStockQty
+          keep_existing_stock_qty: keepExistingStockQty,
+          live_id: activeLiveId
         })
       });
       const data = await res.json();
@@ -411,7 +415,7 @@ export function StockSyncModal({
       const res = await fetch('/api/stock/bulk_import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: fileData, mode: 'merge' })
+        body: JSON.stringify({ items: fileData, mode: 'merge', live_id: activeLiveId })
       });
       const data = await res.json();
       if (data.success) {
@@ -431,7 +435,8 @@ export function StockSyncModal({
 
   // Export CSV
   const handleExportCSV = () => {
-    window.open('/api/stock/export_csv', '_blank');
+    const exportUrl = activeLiveId ? `/api/stock/export_csv?live_id=${encodeURIComponent(activeLiveId)}` : '/api/stock/export_csv';
+    window.open(exportUrl, '_blank');
     playSuccessFanfare();
     onShowToast('📥 កំពុងទាញយកឯកសារ Excel / CSV...');
   };
@@ -462,8 +467,13 @@ export function StockSyncModal({
       <div className="bg-[#0B1426] border-[1.5px] border-sky-500/60 rounded-2xl w-full max-w-[560px] flex flex-col overflow-hidden shadow-2xl max-h-[92vh]">
         {/* Header */}
         <div className="p-3.5 bg-[#121E38] border-b border-slate-700 flex justify-between items-center flex-shrink-0">
-          <div className="font-black text-sm text-cyan-400 flex items-center gap-2">
-            <span>📦 គ្រប់គ្រងស្តុក ៖ នាំចូល & នាំចេញ (Stock Sync & Export)</span>
+          <div className="font-black text-sm text-cyan-400 flex items-center gap-2 flex-wrap">
+            <span>📦 នាំចូល & នាំចេញស្តុក</span>
+            {activeLiveId && (
+              <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950 px-1.5 py-0.5 rounded border border-cyan-700/60">
+                🎥 #{activeLiveId.length > 10 ? activeLiveId.slice(-8) : activeLiveId}
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}

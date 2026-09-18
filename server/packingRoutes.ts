@@ -82,19 +82,23 @@ router.get('/invoices', (req: Request, res: Response) => {
 });
 
 // GET /api/obs_data
-router.get('/obs_data', (_req: Request, res: Response) => {
-  const topProducts = products.map(p => ({
+router.get('/obs_data', (req: Request, res: Response) => {
+  const targetLiveId = (req.query.live_id as string) || activeLiveId;
+  const liveProducts = products.filter(p => (p.live_id || activeLiveId) === targetLiveId);
+  const topProducts = liveProducts.map(p => ({
     id: p.id,
     code: p.code,
     name: p.name,
     price: p.price,
     cost_price: p.cost_price,
     stock_qty: p.stock_qty,
-    image_file: p.image_file || ''
+    image_file: p.image_file || '',
+    live_id: p.live_id || targetLiveId
   }));
 
   // Find recent winner
-  const allItems = invoices.flatMap(inv =>
+  const liveInvoices = invoices.filter(inv => inv.live_id === targetLiveId);
+  const allItems = liveInvoices.flatMap(inv =>
     inv.items.map(it => ({
       customer_name: inv.facebook_name,
       code: it.product_code,
@@ -111,23 +115,27 @@ router.get('/obs_data', (_req: Request, res: Response) => {
 });
 
 // GET /api/products
-router.get('/products', (_req: Request, res: Response) => {
-  res.json(products);
+router.get('/products', (req: Request, res: Response) => {
+  const targetLiveId = (req.query.live_id as string) || activeLiveId;
+  const liveProducts = products.filter(p => (p.live_id || activeLiveId) === targetLiveId);
+  res.json(liveProducts);
 });
 
 // POST /api/update_product_stock_price
 router.post('/update_product_stock_price', (req: Request, res: Response) => {
-  const { code, stock_qty, add_qty, price, name, cost_price, image_file, new_code } = req.body;
+  const { code, stock_qty, add_qty, price, name, cost_price, image_file, new_code, live_id } = req.body;
   if (!code) {
     return res.status(400).json({ success: false, error: 'Code is required' });
   }
 
+  const targetLive = live_id || activeLiveId;
   const cleanCode = String(code).trim().toUpperCase();
-  let prod = products.find(p => p.code.toUpperCase() === cleanCode);
+  let prod = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
 
   if (!prod) {
     prod = {
       id: products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1,
+      live_id: targetLive,
       code: cleanCode,
       name: name?.trim() || `កូដ ${cleanCode}`,
       stock_qty: Number(stock_qty || 50),
@@ -137,15 +145,16 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
     };
     products.push(prod);
   } else {
+    prod.live_id = targetLive;
     if (name) prod.name = name.trim();
     if (cost_price !== undefined) prod.cost_price = Number(cost_price);
     if (image_file !== undefined) {
       const imgVal = image_file || '';
       prod.image_file = imgVal;
-      // Cascade image ONLY to the currently ACTIVE live session and ONLY unpicked pending invoices
+      // Cascade image ONLY to the target live session and ONLY unpicked pending invoices
       for (const inv of invoices) {
         if (
-          inv.live_id === activeLiveId &&
+          inv.live_id === targetLive &&
           inv.status === 'Pending' &&
           inv.packing_stage === 'UNPICKED'
         ) {
@@ -161,9 +170,11 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
     // If user changed the code itself
     if (new_code && String(new_code).trim().toUpperCase() !== cleanCode) {
       const cleanNewCode = String(new_code).trim().toUpperCase();
-      const existingNew = products.find(p => p.code.toUpperCase() === cleanNewCode && p.id !== prod?.id);
+      const existingNew = products.find(
+        p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanNewCode && p.id !== prod?.id
+      );
       if (existingNew) {
-        return res.status(400).json({ success: false, error: `កូដ [${cleanNewCode}] មានរួចហើយក្នុងស្តុក!` });
+        return res.status(400).json({ success: false, error: `កូដ [${cleanNewCode}] មានរួចហើយក្នុងស្តុក Live នេះ!` });
       }
       prod.code = cleanNewCode;
     }
@@ -177,11 +188,10 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
     if (price !== undefined && price !== null) {
       const newPrice = Number(price);
       prod.price = newPrice;
-      // Cascade price ONLY to the currently ACTIVE live session and ONLY unpicked pending invoices
-      // Previous live sessions (e.g. yesterday) are 100% frozen and price-protected!
+      // Cascade price ONLY to the target live session and ONLY unpicked pending invoices
       for (const inv of invoices) {
         if (
-          inv.live_id === activeLiveId &&
+          inv.live_id === targetLive &&
           inv.status === 'Pending' &&
           inv.packing_stage === 'UNPICKED'
         ) {
@@ -197,6 +207,7 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
   }
 
   bumpDataRevision();
+  saveDatabaseToDisk();
   res.json({ success: true, data: prod });
 });
 
@@ -207,10 +218,13 @@ router.post('/delete_product', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'Code is required' });
   }
 
+  const targetLive = live_id || activeLiveId;
   const cleanCode = String(code).trim().toUpperCase();
   const withoutBrackets = cleanCode.replace(/^\[|\]$/g, '');
 
   const idx = products.findIndex(p => {
+    const isLiveMatch = (p.live_id || activeLiveId) === targetLive;
+    if (!isLiveMatch) return false;
     const pCode = p.code.toUpperCase().trim();
     return pCode === cleanCode || pCode === withoutBrackets || pCode.replace(/^\[|\]$/g, '') === withoutBrackets;
   });
@@ -222,7 +236,7 @@ router.post('/delete_product', (req: Request, res: Response) => {
 
   let removedFromBasketsCount = 0;
   if (remove_from_baskets) {
-    const targetInvoices = live_id ? invoices.filter(i => i.live_id === live_id) : invoices;
+    const targetInvoices = invoices.filter(i => i.live_id === targetLive);
     for (const inv of targetInvoices) {
       const beforeLen = inv.items.length;
       inv.items = inv.items.filter(it => {
@@ -237,12 +251,13 @@ router.post('/delete_product', (req: Request, res: Response) => {
   }
 
   if (idx === -1 && removedFromBasketsCount === 0) {
-    return res.status(404).json({ success: false, error: `រកមិនឃើញកូដ [${cleanCode}] ក្នុងស្តុក ឬក្នុងកន្ត្រកឡើយ!` });
+    return res.status(404).json({ success: false, error: `រកមិនឃើញកូដ [${cleanCode}] ក្នុងស្តុក Live #${targetLive.slice(-8)} ឡើយ!` });
   }
 
   bumpDataRevision();
+  saveDatabaseToDisk();
 
-  console.log(`[Product Deleted] Removed product [${cleanCode}] from stock (${removed ? 'found in stock' : 'not in stock table'}), removed from ${removedFromBasketsCount} items in baskets.`);
+  console.log(`[Product Deleted] Removed product [${cleanCode}] from Live #${targetLive.slice(-8)} stock, removed from ${removedFromBasketsCount} items in baskets.`);
   
   let msg = '';
   if (removed && removedFromBasketsCount > 0) {
@@ -264,11 +279,12 @@ router.post('/delete_product', (req: Request, res: Response) => {
 // POST /api/upload_product_image
 router.post('/upload_product_image', async (req: Request, res: Response) => {
   try {
-    const { code, image_data } = req.body;
+    const { code, image_data, live_id } = req.body;
     if (!image_data) {
       return res.status(400).json({ success: false, error: 'No image data provided' });
     }
 
+    const targetLive = live_id || activeLiveId;
     const cleanCode = code ? String(code).trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') : 'item';
     const uploadDir = path.join(process.cwd(), 'public', 'uploads');
     if (!fs.existsSync(uploadDir)) {
@@ -291,10 +307,11 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
       // If it's an external web URL, save directly on product
       if (image_data.startsWith('http://') || image_data.startsWith('https://')) {
         if (code) {
-          const targetProd = products.find(p => p.code.toUpperCase() === String(code).trim().toUpperCase());
+          const targetProd = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === String(code).trim().toUpperCase());
           if (targetProd) {
             targetProd.image_file = image_data;
             bumpDataRevision();
+            saveDatabaseToDisk();
           }
         }
         return res.json({ success: true, image_url: image_data });
@@ -308,8 +325,9 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const dd = String(now.getDate()).padStart(2, '0');
     const dateStr = `${yyyy}${mm}${dd}`;
+    const safeLiveTag = targetLive.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8);
 
-    const filename = `${cleanCode}_${dateStr}.jpg`;
+    const filename = `${cleanCode}_${safeLiveTag}_${dateStr}_${Date.now().toString(36)}.jpg`;
     const filePath = path.join(uploadDir, filename);
 
     // Process image to 500x500 Square HD Center Crop using Sharp
@@ -328,14 +346,14 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
 
     // Automatically update product if code provided
     if (code) {
-      const targetProd = products.find(p => p.code.toUpperCase() === String(code).trim().toUpperCase());
+      const targetProd = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === String(code).trim().toUpperCase());
       if (targetProd) {
         targetProd.image_file = publicUrl;
       }
-      // Cascade to unpicked pending baskets in the active live session only
+      // Cascade to unpicked pending baskets in this target live session only
       for (const inv of invoices) {
         if (
-          inv.live_id === activeLiveId &&
+          inv.live_id === targetLive &&
           inv.status === 'Pending' &&
           inv.packing_stage === 'UNPICKED'
         ) {
@@ -347,6 +365,7 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
         }
       }
       bumpDataRevision();
+      saveDatabaseToDisk();
     }
 
     res.json({
@@ -715,18 +734,20 @@ router.post('/edit_basket_item_code', (req: Request, res: Response) => {
 
   // If changing to another code
   if (cleanOldCode !== cleanNewCode) {
+    const liveId = inv.live_id || activeLiveId;
     // Return old product stock if tracked
-    const oldProd = products.find(p => p.code.toUpperCase() === cleanOldCode);
+    const oldProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanOldCode);
     if (oldProd) {
       oldProd.stock_qty += item.quantity;
     }
 
     // Find or create new product
-    let newProd = products.find(p => p.code.toUpperCase() === cleanNewCode);
+    let newProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanNewCode);
     if (!newProd) {
       const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       newProd = {
         id: nextProdId,
+        live_id: liveId,
         code: cleanNewCode,
         name: `កូដ [${cleanNewCode}]`,
         stock_qty: 100,
@@ -801,7 +822,8 @@ router.post('/set_item_qty_direct', (req: Request, res: Response) => {
   const currentItem = inv.items[itemIdx];
   const delta = targetQty - currentItem.quantity;
 
-  const prod = products.find(p => p.code.toUpperCase() === cleanCode);
+  const liveId = inv.live_id || activeLiveId;
+  const prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
   if (prod) {
     if (delta > 0 && prod.stock_qty < delta) {
       return res.json({ success: false, message: `ខ្វះស្តុក (សល់តែ ${prod.stock_qty})` });
@@ -845,11 +867,13 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
     return res.status(404).json({ success: false, message: 'រកមិនឃើញវិក្កយបត្រ' });
   }
 
-  let prod = products.find(p => p.code.toUpperCase() === cleanCode);
+  const liveId = inv.live_id || activeLiveId;
+  let prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
   if (!prod) {
     const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
     prod = {
       id: nextProdId,
+      live_id: liveId,
       code: cleanCode,
       name: `កូដ [${cleanCode}]`,
       stock_qty: 100,
@@ -949,6 +973,7 @@ router.get('/picking_list', (req: Request, res: Response) => {
         existing.total_qty += it.quantity;
       } else {
         const prod = products.find(p => {
+          if ((p.live_id || activeLiveId) !== liveId) return false;
           const pCode = p.code.toUpperCase().trim();
           const itCode = it.product_code.toUpperCase().trim();
           const cleanItCode = itCode.replace(/^\[|\]$/g, '');
@@ -1095,29 +1120,31 @@ router.get('/packer_leaderboard', (_req: Request, res: Response) => {
   res.json(list);
 });
 
-// GET /api/live_sessions
+// GET /api/live_sessions - Get all live sessions with count of baskets & stock items
 router.get('/live_sessions', (_req: Request, res: Response) => {
-  const uniqueLiveIds = Array.from(new Set(invoices.map(i => i.live_id))).filter(Boolean).map(liveId => {
+  const allLiveIds = Array.from(new Set([
+    ...invoices.map(i => i.live_id),
+    ...products.map(p => p.live_id).filter(Boolean) as string[],
+    activeLiveId
+  ])).filter(Boolean);
+
+  const uniqueLiveIds = allLiveIds.map(liveId => {
     const sample = invoices.find(i => i.live_id === liveId);
     const count = invoices.filter(i => i.live_id === liveId && i.status !== 'Cancelled').length;
+    const sessionProducts = products.filter(p => (p.live_id || activeLiveId) === liveId);
+    const unsoldProducts = sessionProducts.filter(p => p.stock_qty > 0);
     return {
       live_id: liveId,
       created_at: sample?.created_at || new Date().toISOString(),
       basket_count: count,
+      product_count: sessionProducts.length,
+      unsold_product_count: unsoldProducts.length,
       is_active: liveId === activeLiveId
     };
   });
-  if (activeLiveId && !uniqueLiveIds.some(l => l.live_id === activeLiveId)) {
-    const count = invoices.filter(i => i.live_id === activeLiveId && i.status !== 'Cancelled').length;
-    uniqueLiveIds.unshift({
-      live_id: activeLiveId,
-      created_at: new Date().toISOString(),
-      basket_count: count,
-      is_active: true
-    });
-  }
-  // Sort so sessions with baskets come first
-  uniqueLiveIds.sort((a, b) => b.basket_count - a.basket_count);
+
+  // Sort so sessions with baskets or products come first
+  uniqueLiveIds.sort((a, b) => (b.basket_count + b.product_count) - (a.basket_count + a.product_count));
   res.json({
     sessions: uniqueLiveIds,
     active_live_id: activeLiveId
@@ -1137,22 +1164,52 @@ router.post('/set_active_live_id', (req: Request, res: Response) => {
 
 // POST /api/create_live_session
 router.post('/create_live_session', (req: Request, res: Response) => {
-  const { live_id } = req.body;
+  const { live_id, mode, source_live_id } = req.body;
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
   const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
   const newId = (live_id && String(live_id).trim()) || `LIVE_${dateStr}_${timeStr}`;
 
+  const previousLiveId = source_live_id || activeLiveId;
+  let clonedCount = 0;
+
+  if (mode === 'clone_unsold') {
+    // Clone unsold remaining products (stock_qty > 0) from the previous live session
+    const sourceProducts = products.filter(
+      p => (p.live_id || activeLiveId) === previousLiveId && p.stock_qty > 0
+    );
+    for (const sp of sourceProducts) {
+      const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
+      products.push({
+        id: nextId,
+        live_id: newId,
+        code: sp.code,
+        name: sp.name,
+        stock_qty: sp.stock_qty,
+        price: sp.price,
+        cost_price: sp.cost_price,
+        image_file: sp.image_file
+      });
+      clonedCount++;
+    }
+  }
+
   setActiveLiveId(newId);
   bumpDataRevision();
+  saveDatabaseToDisk();
+
   res.json({
     success: true,
-    message: `បានបង្កើត និងប្តូរទៅកាន់វគ្គ Live ថ្មី៖ ${newId}`,
-    live_id: newId
+    message: mode === 'clone_unsold'
+      ? `🎉 បានបង្កើត Live ថ្មី៖ ${newId} និងចម្លងទំនិញសល់បាន ${clonedCount} មុខ!`
+      : `✨ បានបង្កើត Live ថ្មី៖ ${newId} ជាមួយស្តុកទទេស្រឡាង!`,
+    live_id: newId,
+    mode: mode || 'blank',
+    cloned_count: clonedCount
   });
 });
 
-// POST /api/delete_live_session - Delete a live session and all associated baskets
+// POST /api/delete_live_session - Delete a live session, its stock, and all associated baskets
 router.post('/delete_live_session', (req: Request, res: Response) => {
   const { live_id } = req.body;
   if (!live_id) {
@@ -1170,6 +1227,15 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
   }
   const deletedInvoicesCount = initialInvoiceCount - invoices.length;
 
+  // Remove products associated with this live session
+  const initialProductCount = products.length;
+  for (let i = products.length - 1; i >= 0; i--) {
+    if ((products[i].live_id || activeLiveId) === cleanLiveId) {
+      products.splice(i, 1);
+    }
+  }
+  const deletedProductCount = initialProductCount - products.length;
+
   // Remove raw comments associated with this live session
   for (let i = rawComments.length - 1; i >= 0; i--) {
     if (rawComments[i].live_id === cleanLiveId) {
@@ -1179,7 +1245,11 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
 
   // If the deleted session was currently the activeLiveId, switch to another remaining session
   if (activeLiveId === cleanLiveId) {
-    const remainingLiveIds = Array.from(new Set(invoices.map(i => i.live_id))).filter(Boolean);
+    const remainingLiveIds = Array.from(new Set([
+      ...invoices.map(i => i.live_id),
+      ...products.map(p => p.live_id).filter(Boolean) as string[]
+    ])).filter(id => id && id !== cleanLiveId);
+
     if (remainingLiveIds.length > 0) {
       setActiveLiveId(remainingLiveIds[0]);
     } else {
@@ -1193,13 +1263,14 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
   bumpDataRevision();
   saveDatabaseToDisk();
 
-  console.log(`[Live Session Deleted] Deleted live #${cleanLiveId.slice(-8)} with ${deletedInvoicesCount} invoices.`);
+  console.log(`[Live Session Deleted] Deleted live #${cleanLiveId.slice(-8)} with ${deletedInvoicesCount} invoices and ${deletedProductCount} products.`);
 
   res.json({
     success: true,
-    message: `បានលុបវគ្គ Live #${cleanLiveId.slice(-8)} (សរុប ${deletedInvoicesCount} កន្ត្រក) ជោគជ័យ!`,
+    message: `បានលុបវគ្គ Live #${cleanLiveId.slice(-8)} (សរុប ${deletedInvoicesCount} កន្ត្រក, ${deletedProductCount} មុខទំនិញ) ជោគជ័យ!`,
     deleted_live_id: cleanLiveId,
     deleted_baskets_count: deletedInvoicesCount,
+    deleted_products_count: deletedProductCount,
     active_live_id: activeLiveId
   });
 });
@@ -1411,11 +1482,13 @@ router.post('/stock/bulk_import', (req: Request, res: Response) => {
 });
 
 // GET /api/stock/export_csv
-router.get('/stock/export_csv', (_req: Request, res: Response) => {
+router.get('/stock/export_csv', (req: Request, res: Response) => {
+  const targetLive = (req.query.live_id as string) || activeLiveId;
+  const targetProducts = products.filter(p => (p.live_id || activeLiveId) === targetLive);
   // UTF-8 BOM for Excel compatibility with Khmer script
   const BOM = '\uFEFF';
   const header = 'Code,Name,Price,Stock_Qty,Cost_Price,Image_URL\n';
-  const rows = products.map(p => {
+  const rows = targetProducts.map(p => {
     const code = `"${(p.code || '').replace(/"/g, '""')}"`;
     const name = `"${(p.name || '').replace(/"/g, '""')}"`;
     const price = p.price ?? 0;

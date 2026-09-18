@@ -6,6 +6,7 @@ interface FullStockManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
   products: Product[];
+  activeLiveId?: string;
   onSelectProductToEdit: (p: Product) => void;
   onOpenAddNewStock: () => void;
   onOpenStockSync: (tab?: 'telegram' | 'paste' | 'file' | 'export') => void;
@@ -24,6 +25,7 @@ export function FullStockManagerModal({
   isOpen,
   onClose,
   products,
+  activeLiveId,
   onSelectProductToEdit,
   onOpenAddNewStock,
   onOpenStockSync,
@@ -88,7 +90,8 @@ export function FullStockManagerModal({
           name: p.name || `កូដ ${p.code}`,
           stock_qty: newQty,
           price: p.price ?? 0,
-          image_file: p.image_file || ''
+          image_file: p.image_file || '',
+          live_id: activeLiveId
         })
       });
       const data = await res.json();
@@ -125,7 +128,8 @@ export function FullStockManagerModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code: targetCode,
-          remove_from_baskets: removeFromBasketsToo
+          remove_from_baskets: removeFromBasketsToo,
+          live_id: activeLiveId
         })
       });
       const data = await res.json();
@@ -165,7 +169,12 @@ export function FullStockManagerModal({
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">
                   <span>គ្រប់គ្រងស្តុក LIVE</span>
-                  <span className="bg-sky-950 text-cyan-300 border border-sky-500/50 px-2 py-0.5 rounded-lg text-xs font-mono font-bold">
+                  {activeLiveId && (
+                    <span className="bg-cyan-950 text-cyan-300 border border-cyan-500/50 px-2 py-0.5 rounded-lg text-xs font-mono font-bold">
+                      🎥 #{activeLiveId.length > 10 ? activeLiveId.slice(-8) : activeLiveId}
+                    </span>
+                  )}
+                  <span className="bg-sky-950 text-sky-300 border border-sky-500/50 px-2 py-0.5 rounded-lg text-xs font-mono font-bold">
                     {products.length} មុខ
                   </span>
                 </h2>

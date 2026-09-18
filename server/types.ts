@@ -6,6 +6,7 @@ export interface Product {
   price: number;
   cost_price: number;
   image_file?: string;
+  live_id?: string;
 }
 
 export interface OrderItem {

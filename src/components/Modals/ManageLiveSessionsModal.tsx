@@ -5,6 +5,8 @@ interface LiveSessionItem {
   live_id: string;
   created_at: string;
   basket_count?: number;
+  product_count?: number;
+  unsold_product_count?: number;
   is_active?: boolean;
 }
 
@@ -171,6 +173,9 @@ export function ManageLiveSessionsModal({
                         )}
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
                           📦 {session.basket_count || 0} កន្ត្រក
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-700/60">
+                          🏷️ {session.product_count || 0} មុខ (សល់ {session.unsold_product_count || 0})
                         </span>
                       </div>
                       <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">

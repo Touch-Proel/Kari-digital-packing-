@@ -125,7 +125,7 @@ export interface ExtractedItemPair {
   qty: number;
 }
 
-export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
+export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedItemPair[] {
   if (!text) return [];
 
   let s = normalizeKhmerText(text);
@@ -146,8 +146,9 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
   const pairs: ExtractedItemPair[] = [];
   const seenCodes = new Set<string>();
 
-  const sortedCatalog = [...products]
-    .filter(p => p.code && p.code.trim().length > 0)
+  const targetLive = liveId || activeLiveId;
+  const sortedCatalog = products
+    .filter(p => (p.live_id || activeLiveId) === targetLive && p.code && p.code.trim().length > 0)
     .sort((a, b) => b.code.length - a.code.length);
 
   const validSuffixes = SIZE_COLOR_SUFFIXES.join('|');
@@ -345,7 +346,7 @@ export function parseAndAllocateComment(
   }
 
   const isQuestion = isQuestionComment(rawText);
-  const pairs = extractCodeQtyPairs(cleanText);
+  const pairs = extractCodeQtyPairs(cleanText, liveId);
 
   let inv = invoices.find(
     i => i.live_id === liveId &&
@@ -417,7 +418,9 @@ export function parseAndAllocateComment(
   const soldOut: string[] = [];
 
   for (const pair of pairs) {
-    const prod = products.find(p => p.code.toUpperCase() === pair.code.toUpperCase());
+    const prod = products.find(
+      p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === pair.code.toUpperCase()
+    );
 
     if (!prod) continue;
 

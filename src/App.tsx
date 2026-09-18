@@ -26,13 +26,21 @@ import { KHQRModal } from './components/Modals/KHQRModal';
 import { DatabaseModal } from './components/Modals/DatabaseModal';
 import { ManageLiveSessionsModal } from './components/Modals/ManageLiveSessionsModal';
 import { RequirePackerNameModal } from './components/Modals/RequirePackerNameModal';
+import { CreateLiveSessionModal } from './components/Modals/CreateLiveSessionModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
   // Application Data States
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [liveSessions, setLiveSessions] = useState<{ live_id: string; created_at: string; basket_count?: number }[]>([]);
+  const [liveSessions, setLiveSessions] = useState<{
+    live_id: string;
+    created_at: string;
+    basket_count?: number;
+    product_count?: number;
+    unsold_product_count?: number;
+    is_active?: boolean;
+  }[]>([]);
   const [selectedLiveId, setSelectedLiveId] = useState<string>(() => {
     return localStorage.getItem('selectedLiveId') || '1626350178950100';
   });
@@ -114,6 +122,7 @@ export default function App() {
   const [isFbModalOpen, setIsFbModalOpen] = useState(false);
   const [isDatabaseModalOpen, setIsDatabaseModalOpen] = useState(false);
   const [isManageLiveModalOpen, setIsManageLiveModalOpen] = useState(false);
+  const [isCreateLiveModalOpen, setIsCreateLiveModalOpen] = useState(false);
   const [isCommentStreamOpen, setIsCommentStreamOpen] = useState(false);
 
   const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
@@ -258,10 +267,17 @@ export default function App() {
     }
   };
 
-  // Data Fetching: Products and Stock
-  const fetchStock = async () => {
+  // Unsold products count for the active session (stock_qty > 0)
+  const unsoldStockCount = useMemo(() => {
+    return products.filter(p => (p.stock_qty ?? 0) > 0).length;
+  }, [products]);
+
+  // Data Fetching: Products and Stock (filtered by liveId)
+  const fetchStock = async (liveId?: string) => {
     try {
-      const res = await fetch('/api/obs_data');
+      const targetLive = liveId || selectedLiveId;
+      const url = targetLive ? `/api/obs_data?live_id=${encodeURIComponent(targetLive)}` : '/api/obs_data';
+      const res = await fetch(url);
       if (res.ok) {
         const json = await res.json();
         if (json.products) {
@@ -270,6 +286,13 @@ export default function App() {
       }
     } catch (e) {}
   };
+
+  // Keep stock updated when switching session
+  useEffect(() => {
+    if (selectedLiveId) {
+      fetchStock(selectedLiveId);
+    }
+  }, [selectedLiveId]);
 
   // Data Fetching: Live Sessions
   const fetchLiveSessions = async () => {
@@ -296,6 +319,7 @@ export default function App() {
           setSelectedLiveId(chosenId);
           localStorage.setItem('selectedLiveId', chosenId);
           fetchInvoices(chosenId, 0);
+          fetchStock(chosenId);
         }
       }
     } catch (e) {}
@@ -306,6 +330,7 @@ export default function App() {
     localStorage.setItem('selectedLiveId', id);
     setCurrentRevision(0);
     fetchInvoices(id, 0);
+    fetchStock(id);
     fetch('/api/set_active_live_id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -313,17 +338,16 @@ export default function App() {
     }).catch(() => {});
   };
 
-  const handleCreateNewLiveSession = async () => {
+  const handleCreateLiveSessionWithMode = async (options: {
+    live_id?: string;
+    mode: 'blank' | 'clone_unsold';
+    source_live_id: string;
+  }) => {
     try {
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-      const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-      const newLiveId = `LIVE_${dateStr}_${timeStr}`;
-
       const res = await fetch('/api/create_live_session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ live_id: newLiveId })
+        body: JSON.stringify(options)
       });
       const data = await res.json();
       if (data.success) {
@@ -333,11 +357,21 @@ export default function App() {
         setCurrentRevision(0);
         await fetchLiveSessions();
         await fetchInvoices(data.live_id, 0);
-        showToast(`🎉 បានបង្កើត Live ថ្មី! វិក្កយបត្រម្សិលមិញត្រូវបានរក្សាសុវត្ថិភាព។`);
+        await fetchStock(data.live_id);
+        const modeMsg = options.mode === 'clone_unsold'
+          ? `🎉 បានបង្កើត Live ថ្មី & ចម្លងទំនិញសល់ (${data.cloned_products_count || 0} មុខ) ដោយជោគជ័យ!`
+          : `🎉 បានបង្កើត Live ថ្មីជាមួយស្តុកទទេស្រឡាង (ការពារជាន់កូដ 100%)!`;
+        showToast(modeMsg);
+        setIsCreateLiveModalOpen(false);
+      } else {
+        playWarningBuzzer();
+        showToast(data.error || 'មិនអាចបង្កើត Live ថ្មីបានទេ', 'error');
+        throw new Error(data.error);
       }
-    } catch (e) {
+    } catch (e: any) {
       playWarningBuzzer();
-      showToast('⚠️ មិនអាចបង្កើត Live ថ្មីបានទេ', 'error');
+      showToast(e.message || '⚠️ មិនអាចបង្កើត Live ថ្មីបានទេ', 'error');
+      throw e;
     }
   };
 
@@ -573,7 +607,7 @@ export default function App() {
             handleSelectLiveSession(id);
             showToast(`🎥 ប្តូរវគ្គ Live៖ ${id.length > 10 ? id.slice(-8) : id}`);
           }}
-          onCreateLiveSession={handleCreateNewLiveSession}
+          onCreateLiveSession={() => setIsCreateLiveModalOpen(true)}
           onOpenManageLiveModal={() => setIsManageLiveModalOpen(true)}
           onOpenPickingModal={() => setIsPickingModalOpen(true)}
           onToggleCommentStream={() => setIsCommentStreamOpen(!isCommentStreamOpen)}
@@ -732,6 +766,7 @@ export default function App() {
         }}
         product={selectedStockProduct}
         isAddingNew={isAddingNewStock}
+        activeLiveId={selectedLiveId}
         onStockUpdated={() => {
           fetchStock();
           fetchInvoices();
@@ -744,6 +779,7 @@ export default function App() {
         isOpen={isStockSyncModalOpen}
         onClose={() => setIsStockSyncModalOpen(false)}
         products={products}
+        activeLiveId={selectedLiveId}
         onStockUpdated={() => {
           fetchStock();
           fetchInvoices();
@@ -799,6 +835,7 @@ export default function App() {
         imageUrl={zoomImageUrl}
         price={zoomPrice}
         stockQty={zoomStockQty}
+        activeLiveId={selectedLiveId}
         onPhotoUploaded={() => {
           fetchStock();
           fetchInvoices();
@@ -855,7 +892,7 @@ export default function App() {
           handleSelectLiveSession(id);
           showToast(`🎥 បានប្តូរទៅកាន់វគ្គ Live៖ ${id.length > 10 ? id.slice(-8) : id}`);
         }}
-        onCreateNewLive={handleCreateNewLiveSession}
+        onCreateNewLive={() => setIsCreateLiveModalOpen(true)}
         onRefreshLiveSessions={() => {
           fetchLiveSessions();
           fetchInvoices();
@@ -905,6 +942,7 @@ export default function App() {
         isOpen={isFullStockManagerOpen}
         onClose={() => setIsFullStockManagerOpen(false)}
         products={products}
+        activeLiveId={selectedLiveId}
         onSelectProductToEdit={p => {
           setIsAddingNewStock(false);
           setSelectedStockProduct(p);
@@ -929,6 +967,16 @@ export default function App() {
           setZoomStockQty(stockQty);
           setIsZoomModalOpen(true);
         }}
+      />
+
+      {/* Create New Live Session with Stock Isolation Modal */}
+      <CreateLiveSessionModal
+        isOpen={isCreateLiveModalOpen}
+        onClose={() => setIsCreateLiveModalOpen(false)}
+        currentLiveId={selectedLiveId}
+        unsoldStockCount={unsoldStockCount}
+        totalStockCount={products.length}
+        onCreateSession={handleCreateLiveSessionWithMode}
       />
     </div>
   );

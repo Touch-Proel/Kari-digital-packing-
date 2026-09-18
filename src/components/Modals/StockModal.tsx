@@ -7,6 +7,7 @@ interface StockModalProps {
   onClose: () => void;
   product: Product | null;
   isAddingNew?: boolean;
+  activeLiveId?: string;
   onStockUpdated: () => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onOpenSync?: (tab?: 'telegram' | 'paste' | 'file' | 'export') => void;
@@ -17,6 +18,7 @@ export function StockModal({
   onClose,
   product,
   isAddingNew = false,
+  activeLiveId,
   onStockUpdated,
   onShowToast,
   onOpenSync
@@ -104,7 +106,8 @@ export function StockModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   code: cleanCode,
-                  image_data: compressedBase64
+                  image_data: compressedBase64,
+                  live_id: activeLiveId
                 })
               });
               const uploadData = await uploadRes.json();
@@ -147,7 +150,8 @@ export function StockModal({
           name: name.trim() || `កូដ ${cleanCode}`,
           stock_qty: stockQty,
           price: price,
-          image_file: imageFile
+          image_file: imageFile,
+          live_id: activeLiveId
         })
       });
       const data = await res.json();
@@ -176,7 +180,10 @@ export function StockModal({
       const res = await fetch('/api/delete_product', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: product.code })
+        body: JSON.stringify({
+          code: product.code,
+          live_id: activeLiveId
+        })
       });
       const data = await res.json();
       if (data.success) {
@@ -201,8 +208,13 @@ export function StockModal({
       <div className="bg-[#0B1426] border-[1.5px] border-sky-500/50 rounded-2xl w-full max-w-[440px] flex flex-col overflow-hidden shadow-2xl max-h-[92vh]">
         {/* Header */}
         <div className="p-3.5 bg-[#121E38] border-b border-slate-700 flex justify-between items-center flex-shrink-0">
-          <div className="font-black text-sm text-cyan-400 flex items-center gap-2">
+          <div className="font-black text-sm text-cyan-400 flex items-center gap-2 flex-wrap">
             <span>{isNew ? '➕ បន្ថែមកូដទំនិញថ្មីចូលស្តុក' : '📦 កែសម្រួលស្តុក & រូបភាពទំនិញ'}</span>
+            {activeLiveId && (
+              <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950 px-1.5 py-0.5 rounded border border-cyan-700/60">
+                🎥 #{activeLiveId.length > 10 ? activeLiveId.slice(-8) : activeLiveId}
+              </span>
+            )}
             {!isNew && (
               <span className="text-amber-400 font-mono bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-700">
                 [{product?.code}]

@@ -8,6 +8,7 @@ interface ImageZoomModalProps {
   imageUrl?: string;
   price?: number;
   stockQty?: number;
+  activeLiveId?: string;
   onPhotoUploaded?: () => void;
   onShowToast?: (msg: string, type?: 'success' | 'error') => void;
 }
@@ -20,6 +21,7 @@ export function ImageZoomModal({
   imageUrl,
   price,
   stockQty,
+  activeLiveId,
   onPhotoUploaded,
   onShowToast
 }: ImageZoomModalProps) {
@@ -64,7 +66,8 @@ export function ImageZoomModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   code: code,
-                  image_data: compressedBase64
+                  image_data: compressedBase64,
+                  live_id: activeLiveId
                 })
               });
               const data = await res.json();

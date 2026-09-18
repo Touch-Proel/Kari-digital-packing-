@@ -489,7 +489,12 @@ export function bulkImportStockItems(
   }
 
   if (mode === 'replace') {
-    products.length = 0;
+    const targetLive = activeLiveId;
+    for (let i = products.length - 1; i >= 0; i--) {
+      if ((products[i].live_id || activeLiveId) === targetLive) {
+        products.splice(i, 1);
+      }
+    }
   }
 
   let importedCount = 0;
@@ -500,8 +505,10 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
-    const existing = products.find(p => p.code.toUpperCase() === cleanCode);
+    const targetLive = activeLiveId;
+    const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
     if (existing) {
+      existing.live_id = targetLive;
       if (it.price !== undefined && it.price !== null) {
         const newPrice = Number(it.price);
         existing.price = newPrice;
@@ -509,7 +516,7 @@ export function bulkImportStockItems(
         // Fill price into unpicked pending baskets of active live ONLY IF price is missing/zero or name was generic
         for (const inv of invoices) {
           if (
-            inv.live_id === activeLiveId &&
+            inv.live_id === targetLive &&
             inv.status === 'Pending' &&
             inv.packing_stage === 'UNPICKED'
           ) {
@@ -549,7 +556,7 @@ export function bulkImportStockItems(
         // Cascade image ONLY IF order item currently has no image
         for (const inv of invoices) {
           if (
-            inv.live_id === activeLiveId &&
+            inv.live_id === targetLive &&
             inv.status === 'Pending' &&
             inv.packing_stage === 'UNPICKED'
           ) {
@@ -568,6 +575,7 @@ export function bulkImportStockItems(
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       const newProd: Product = {
         id: nextId,
+        live_id: targetLive,
         code: cleanCode,
         name: it.name?.trim() || `កូដ ${cleanCode}`,
         price: Number(it.price || 5.0),
