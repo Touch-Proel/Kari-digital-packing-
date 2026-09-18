@@ -380,12 +380,14 @@ export function parseAndAllocateComment(
     picture_url: userPicUrl
   });
 
-  const { zone, label } = detectDeliveryZone(rawText);
+  const { zone, label, detectedLocation } = detectDeliveryZone(rawText);
 
   let cust = customers.find(c => 
     (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && c.facebook_user_id === fbUserId) ||
     c.facebook_name.toLowerCase() === cleanFbName.toLowerCase()
   );
+
+  const initialCustAddress = detectedLocation || (zone !== 'UNKNOWN' ? label : undefined);
 
   if (!cust) {
     cust = {
@@ -394,7 +396,7 @@ export function parseAndAllocateComment(
       facebook_name: cleanFbName,
       picture_url: userPicUrl,
       phone_number: phone || undefined,
-      address: zone !== 'UNKNOWN' ? label : undefined,
+      address: initialCustAddress,
       is_vip: false,
       is_blacklist: false,
       last_interaction_at: new Date().toISOString()
@@ -403,7 +405,13 @@ export function parseAndAllocateComment(
   } else {
     if (userPicUrl) cust.picture_url = userPicUrl;
     if (phone) cust.phone_number = phone;
-    if (zone !== 'UNKNOWN' && !cust.address) cust.address = label;
+    if (detectedLocation) {
+      if (!cust.address || cust.address.includes('មិនទាន់មាន') || cust.address === '🏙️ ភ្នំពេញ' || cust.address === 'ភ្នំពេញ' || cust.address === '🏞️ តាមខេត្ត') {
+        cust.address = detectedLocation;
+      }
+    } else if (zone !== 'UNKNOWN' && !cust.address) {
+      cust.address = label;
+    }
     cust.last_interaction_at = new Date().toISOString();
   }
 
@@ -428,6 +436,18 @@ export function parseAndAllocateComment(
       if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
       if (!inv.unmatched_comments) inv.unmatched_comments = [];
       if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
+
+      // Auto-extract location from question or supplementary comments
+      if (zone !== 'UNKNOWN') {
+        inv.location_zone = zone;
+        inv.location_label = label;
+        if (detectedLocation) {
+          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
+            inv.address = detectedLocation;
+          }
+        }
+      }
+
       recalculateInvoice(inv);
       bumpDataRevision();
     }
@@ -443,6 +463,10 @@ export function parseAndAllocateComment(
 
   if (!inv) {
     const nextId = invoices.length > 0 ? Math.max(...invoices.map(i => i.invoice_id)) + 1 : 101;
+    const resolvedAddress = (cust?.address && !cust.address.includes('មិនទាន់មាន') && cust.address !== '🏙️ ភ្នំពេញ' && cust.address !== '🏞️ តាមខេត្ត')
+      ? cust.address
+      : (detectedLocation || cust?.address || (zone !== 'UNKNOWN' ? label : '⚠️ មិនទាន់មានអាសយដ្ឋាន'));
+
     inv = {
       invoice_id: nextId,
       basket_no: nextId,
@@ -452,7 +476,7 @@ export function parseAndAllocateComment(
       facebook_name: cleanFbName,
       picture_url: userPicUrl || cust?.picture_url,
       phone_number: phone || cust.phone_number || 'គ្មានលេខ',
-      address: cust.address || (zone !== 'UNKNOWN' ? label : '⚠️ មិនទាន់មានអាសយដ្ឋាន'),
+      address: resolvedAddress,
       location_zone: zone !== 'UNKNOWN' ? zone : 'UNKNOWN',
       location_label: zone !== 'UNKNOWN' ? label : '❓ មិនទាន់ដឹង',
       total_amount: 0,
@@ -467,10 +491,16 @@ export function parseAndAllocateComment(
   } else {
     if (userPicUrl && !inv.picture_url) inv.picture_url = userPicUrl;
     if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) inv.phone_number = phone;
-    if (zone !== 'UNKNOWN' && (!inv.address || inv.address.includes('មិនទាន់មាន'))) {
+    if (zone !== 'UNKNOWN') {
       inv.location_zone = zone;
       inv.location_label = label;
-      inv.address = label;
+      if (detectedLocation) {
+        if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
+          inv.address = detectedLocation;
+        }
+      } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
+        inv.address = label;
+      }
     }
     if (!inv.comments) inv.comments = [];
     if (!inv.comments.includes(rawText)) inv.comments.push(rawText);

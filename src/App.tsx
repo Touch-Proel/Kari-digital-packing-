@@ -231,12 +231,35 @@ export default function App() {
           }
         }
         const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
-        const ship = inv.is_free_shipping ? 0 : (inv.shipping_fee || (inv.zone === 'PROVINCE' ? 2.0 : 1.25));
+        const ship = inv.is_free_ship ? 0 : (inv.shipping_fee || (inv.location_zone === 'PROVINCE' ? 2.0 : 1.25));
         const total = subtotal + ship;
         return {
           ...inv,
           items: updatedItems,
-          subtotal_amount: subtotal,
+          total_amount: total
+        };
+      })
+    );
+  };
+
+  // Immediate Optimistic Zone Update for Silky-Smooth 0ms Switching
+  const handleOptimisticZoneUpdate = (
+    invoiceId: number,
+    newZone: 'PP' | 'PROVINCE',
+    serverTotal?: number,
+    serverShipping?: number
+  ) => {
+    setInvoices(prev =>
+      prev.map(inv => {
+        if (inv.invoice_id !== invoiceId) return inv;
+        const shipping = serverShipping !== undefined ? serverShipping : (inv.shipping_fee || 2.0);
+        const subtotal = (inv.items || []).reduce((s, it) => s + (it.price * it.quantity), 0);
+        const total = serverTotal !== undefined ? serverTotal : (subtotal + shipping);
+        return {
+          ...inv,
+          location_zone: newZone,
+          location_label: newZone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត',
+          shipping_fee: shipping,
           total_amount: total
         };
       })
@@ -705,6 +728,7 @@ export default function App() {
                   fetchStock();
                 }}
                 onOptimisticItemUpdate={handleOptimisticItemUpdate}
+                onOptimisticZoneUpdate={handleOptimisticZoneUpdate}
                 onShowToast={showToast}
               />
             ))

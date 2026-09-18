@@ -680,9 +680,12 @@ router.post('/update_customer_contact', (req: Request, res: Response) => {
     if (address !== undefined) {
       inv.address = String(address).trim();
       const allText = `${inv.address || ''} ${(inv.comments || []).join(' ')} ${inv.phone_number || ''}`.trim();
-      const { zone, label } = detectDeliveryZone(allText);
+      const { zone, label, detectedLocation } = detectDeliveryZone(allText);
       inv.location_zone = zone;
       inv.location_label = label;
+      if (detectedLocation && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត')) {
+        inv.address = detectedLocation;
+      }
     }
   }
 

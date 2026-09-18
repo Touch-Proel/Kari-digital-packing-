@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
@@ -49,6 +49,7 @@ interface BasketCardProps {
   onOpenZoomModal: (code: string, name: string, imageUrl?: string, price?: number, stockQty?: number) => void;
   onDataChanged: () => void;
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
+  onOptimisticZoneUpdate?: (invoiceId: number, newZone: 'PP' | 'PROVINCE', serverTotal?: number, serverShipping?: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
@@ -67,9 +68,19 @@ export function BasketCard({
   onOpenZoomModal,
   onDataChanged,
   onOptimisticItemUpdate,
+  onOptimisticZoneUpdate,
   onShowToast
 }: BasketCardProps) {
   const [isOpen, setIsOpen] = useState(true);
+
+  // Optimistic Zone State for Instant Smooth Switching
+  const [currentZone, setCurrentZone] = useState<'PP' | 'PROVINCE'>(
+    invoice.location_zone === 'PROVINCE' ? 'PROVINCE' : 'PP'
+  );
+
+  useEffect(() => {
+    setCurrentZone(invoice.location_zone === 'PROVINCE' ? 'PROVINCE' : 'PP');
+  }, [invoice.location_zone]);
 
   // Stepper & Item Delete States
   const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
@@ -211,9 +222,20 @@ export function BasketCard({
     return list;
   }, [invoice.unmatched_comments, invoice.comments, invoice.items]);
 
-  // Change zone: PP vs PROVINCE
+  // Change zone: PP vs PROVINCE with 0ms Instant Feedback & Smooth Glide
   const handleSetZone = async (newZone: 'PP' | 'PROVINCE', e: React.MouseEvent) => {
     e.stopPropagation();
+    if (currentZone === newZone) return;
+
+    const prevZone = currentZone;
+    // 1. Instant 0ms visual update & tactile audio chime
+    setCurrentZone(newZone);
+    playPureTone(newZone === 'PP' ? 640 : 480, 0.035);
+
+    // 2. Optimistically update parent store immediately (0ms lag, no screen flash)
+    onOptimisticZoneUpdate?.(invoice.invoice_id, newZone);
+
+    // 3. Persist to server in background
     try {
       const res = await fetch('/api/update_invoice_zone', {
         method: 'POST',
@@ -221,10 +243,21 @@ export function BasketCard({
         body: JSON.stringify({ invoice_id: invoice.invoice_id, zone: newZone })
       });
       if (res.ok) {
-        onDataChanged();
+        const data = await res.json();
+        if (data && data.success) {
+          onOptimisticZoneUpdate?.(invoice.invoice_id, newZone, data.total_amount, data.shipping_fee);
+        }
+      } else {
+        // Rollback on server error
+        setCurrentZone(prevZone);
+        onOptimisticZoneUpdate?.(invoice.invoice_id, prevZone);
+        onShowToast('មិនអាចប្តូរទីតាំងបានទេ', 'error');
       }
     } catch (err) {
       console.error(err);
+      setCurrentZone(prevZone);
+      onOptimisticZoneUpdate?.(invoice.invoice_id, prevZone);
+      onShowToast('បញ្ហាបណ្តាញ៖ មិនអាចប្តូរទីតាំងបានទេ', 'error');
     }
   };
 
@@ -852,31 +885,40 @@ export function BasketCard({
 
         {/* Sub Header Row: Location Zone buttons (Left) + Total Price (Right) */}
         <div className="flex items-center justify-between gap-2 pt-1">
-          {/* Location Zone Segmented Control */}
+          {/* Location Zone Segmented Control with Smooth Sliding Animation */}
           <div
-            className="flex items-center bg-[#040914] p-0.5 rounded-xl border border-slate-800/90 shadow-inner"
+            className="relative flex items-center bg-[#040914] p-0.5 rounded-xl border border-slate-700/80 shadow-inner select-none overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
-            <button
-              onClick={e => handleSetZone('PP', e)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                invoice.location_zone === 'PP'
-                  ? 'bg-emerald-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
+            {/* Fluid Sliding Pill Background Indicator */}
+            <div
+              className={`absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-lg transition-all duration-200 ease-out pointer-events-none shadow-md ${
+                currentZone === 'PP'
+                  ? 'left-0.5 bg-gradient-to-r from-emerald-600 to-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.45)] border border-emerald-400/40'
+                  : 'left-[calc(50%+1px)] bg-gradient-to-r from-amber-600 to-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.45)] border border-amber-400/40'
               }`}
+            />
+
+            <button
+              type="button"
+              onClick={e => handleSetZone('PP', e)}
+              className={`relative z-10 flex-1 min-w-[76px] px-2.5 py-1 rounded-lg text-xs font-black transition-colors duration-150 flex items-center justify-center gap-1 cursor-pointer active:scale-95 ${
+                currentZone === 'PP' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="ជ្រើសរើសភ្នំពេញ (PP)"
             >
-              <span>🏙️</span>
+              <span className="text-xs">🏙️</span>
               <span>ភ្នំពេញ</span>
             </button>
             <button
+              type="button"
               onClick={e => handleSetZone('PROVINCE', e)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                invoice.location_zone === 'PROVINCE'
-                  ? 'bg-amber-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
+              className={`relative z-10 flex-1 min-w-[76px] px-2.5 py-1 rounded-lg text-xs font-black transition-colors duration-150 flex items-center justify-center gap-1 cursor-pointer active:scale-95 ${
+                currentZone === 'PROVINCE' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
+              title="ជ្រើសរើសខេត្ត (Province)"
             >
-              <span>🏕️</span>
+              <span className="text-xs">🏕️</span>
               <span>ខេត្ត</span>
             </button>
           </div>
