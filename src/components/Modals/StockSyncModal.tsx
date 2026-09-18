@@ -205,6 +205,15 @@ export function StockSyncModal({
     } catch (e) {}
   };
 
+  // Clear preview items and server cache completely
+  const handleClearPreview = async () => {
+    setTgItems([]);
+    try {
+      await fetch('/api/telegram/clear_cache', { method: 'POST' });
+    } catch (e) {}
+    onShowToast('🗑️ បានសម្អាតបញ្ជីកូដ Preview អស់ហើយ (0 មុខ)!');
+  };
+
   // Fetch Stock & Photos from Telegram Group
   const handleFetchTelegramStock = async (autoImport: boolean = false, clearCache: boolean = false) => {
     const clean = botToken.trim();
@@ -212,6 +221,10 @@ export function StockSyncModal({
       onShowToast('⚠️ សូមបញ្ចូល Telegram Bot Token ជាមុនសិន!', 'error');
       playWarningBuzzer();
       return;
+    }
+
+    if (clearCache) {
+      setTgItems([]);
     }
 
     setFetchingTg(true);
@@ -752,47 +765,65 @@ export function StockSyncModal({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => handleFetchTelegramStock(false)}
+                  onClick={() => handleFetchTelegramStock(false, false)}
                   disabled={fetchingTg}
                   className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 text-white font-black text-xs flex items-center justify-center gap-1.5 active:scale-98 transition-all disabled:opacity-50 cursor-pointer shadow-md"
                 >
-                  <span>{fetchingTg ? '⏳ កំពុងស្កេន...' : '🔍 ស្កេនទាញកូដ និងរូបភាព (Preview)'}</span>
+                  <span>{fetchingTg ? '⏳ កំពុងស្កេន...' : '🔍 ស្កេនទាញកូដ (Preview)'}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleFetchTelegramStock(true)}
+                  onClick={() => handleFetchTelegramStock(false, true)}
+                  disabled={fetchingTg}
+                  className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-sky-500/50 text-sky-200 font-bold text-xs flex items-center justify-center gap-1 active:scale-98 transition-all disabled:opacity-50 cursor-pointer shadow-md flex-shrink-0"
+                  title="សម្អាតទិន្នន័យចាស់ទាំងអស់ ហើយស្កេនទាញថ្មីពី Telegram ឡើងវិញ"
+                >
+                  <span>🔄 ស្កេនថ្មីទាំងអស់</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleFetchTelegramStock(true, false)}
                   disabled={fetchingTg}
                   className="py-2.5 px-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-black text-xs flex items-center justify-center gap-1 active:scale-98 transition-all disabled:opacity-50 cursor-pointer shadow-md flex-shrink-0"
                   title="ស្កេន និងបញ្ចូលចូលក្នុងស្តុកភ្លាមៗតែ ១ ឃ្លីក"
                 >
-                  <span>⚡ ស្កេន & នាំចូលភ្លាមៗ</span>
+                  <span>⚡ ស្កេន & នាំចូល</span>
                 </button>
               </div>
 
               {/* Telegram Scanned Items Preview */}
               {tgItems.length > 0 && (
                 <div className="flex flex-col gap-2 mt-1 border-t border-slate-800 pt-3">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap justify-between items-center gap-2 bg-slate-900/90 p-2 rounded-xl border border-slate-800">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-bold text-emerald-400">
-                        ✅ រកឃើញ {tgItems.length} មុខទំនិញ ៖
+                        ✅ រកឃើញ {tgItems.length} មុខ ៖
                       </span>
+                      <button
+                        type="button"
+                        onClick={handleClearPreview}
+                        className="text-[11px] font-bold text-rose-300 hover:text-rose-100 bg-rose-950/70 hover:bg-rose-900 border border-rose-600/60 px-2.5 py-1 rounded-lg cursor-pointer transition-all active:scale-95 shadow-sm flex items-center gap-1"
+                        title="សម្អាតបញ្ជីកូដដែលកំពុង Preview ចោលទាំងអស់ (Reset ទៅ 0 មុខ)"
+                      >
+                        <span>🗑️ សម្អាតចោល (0 មុខ)</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleFetchTelegramStock(false, true)}
                         disabled={fetchingTg}
-                        className="text-[10px] text-slate-400 hover:text-rose-400 underline cursor-pointer"
-                        title="សម្អាតបញ្ជីដែលបានស្កេនរួច ហើយស្កេនសារថ្មីឡើងវិញ"
+                        className="text-[11px] font-bold text-sky-300 hover:text-sky-100 bg-sky-950/70 hover:bg-sky-900 border border-sky-600/60 px-2.5 py-1 rounded-lg cursor-pointer transition-all active:scale-95 shadow-sm flex items-center gap-1"
+                        title="សម្អាតបញ្ជីដែលបានស្កេនរួច ហើយស្កេនទាញថ្មីទាំងអស់ពី Telegram"
                       >
-                        🗑️ សម្អាតបញ្ជីស្កេន
+                        <span>🔄 ស្កេនទាញថ្មី</span>
                       </button>
                     </div>
                     <button
                       type="button"
                       onClick={handleImportTgItems}
                       disabled={importingTg}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs active:scale-95 transition-all shadow-md cursor-pointer"
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs active:scale-95 transition-all shadow-md cursor-pointer flex items-center gap-1.5"
                     >
                       {importingTg ? '⏳ កំពុងបញ្ចូល...' : `✅ នាំចូល ${tgItems.length} មុខនេះទៅក្នុងស្តុក`}
                     </button>

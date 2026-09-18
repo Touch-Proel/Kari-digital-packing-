@@ -29,6 +29,7 @@ import { generateServerKHQRPNG } from './khqrServer';
 import {
   testTelegramBotToken,
   fetchTelegramStockUpdates,
+  clearScannedTelegramCache,
   bulkImportStockItems,
   startTelegramAutoSync,
   stopTelegramAutoSync,
@@ -1442,6 +1443,12 @@ router.post('/telegram/fetch_stock', async (req: Request, res: Response) => {
     auto_imported: !!auto_import,
     imported_count: importedCount
   });
+});
+
+// POST /api/telegram/clear_cache - Clear cached scanned Telegram items
+router.post('/telegram/clear_cache', (_req: Request, res: Response) => {
+  clearScannedTelegramCache();
+  res.json({ success: true, message: 'បានសម្អាតបញ្ជីកូដ Preview / Cache រួចរាល់' });
 });
 
 // GET /api/telegram/auto_sync - Get current Telegram Stock Auto-Sync Status
