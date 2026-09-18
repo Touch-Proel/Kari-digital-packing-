@@ -221,7 +221,7 @@ export default function App() {
       prev.map(inv => {
         if (inv.invoice_id !== invoiceId) return inv;
         const cleanCode = code.toUpperCase();
-        let updatedItems = [...inv.items];
+        let updatedItems = [...(inv.items || [])];
         const idx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanCode);
         if (idx !== -1) {
           if (targetQty <= 0) {

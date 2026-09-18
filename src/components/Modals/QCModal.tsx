@@ -95,7 +95,7 @@ export function QCModal({
 
         {/* Body Items List */}
         <div className="p-3 overflow-y-auto flex flex-col gap-2.5 max-h-[60vh]">
-          {invoice.items.map(it => {
+          {(invoice.items || []).map(it => {
             const isVerified = verifiedMap[it.product_code] ?? true;
             return (
               <div

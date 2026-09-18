@@ -31,7 +31,7 @@ export function VipInvoiceModal({
       const phone = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : 'មិនទាន់មាន';
       const address = invoice.address && !invoice.address.includes('មិនទាន់មាន') ? invoice.address : 'មិនទាន់មាន';
 
-      const itemsList = invoice.items.map(it => {
+      const itemsList = (invoice.items || []).map(it => {
         const custom = (it.product_name || '')
           .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
           .replace(new RegExp(`^កូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')

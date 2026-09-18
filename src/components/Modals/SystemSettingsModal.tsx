@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FacebookPage } from '../../types';
 import { PWAInstallButton } from '../PWAInstallButton';
 import { playPureTone } from '../../utils/audio';
@@ -42,6 +42,42 @@ export function SystemSettingsModal({
   onAdjustFontSize,
   onResetFontSize
 }: SystemSettingsModalProps) {
+  const [strictCatalogMode, setStrictCatalogMode] = useState(false);
+  const [loadingStrict, setLoadingStrict] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch('/api/parser/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data && typeof data.parser_strict_catalog === 'boolean') {
+          setStrictCatalogMode(data.parser_strict_catalog);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
+
+  const handleToggleStrict = async () => {
+    const nextVal = !strictCatalogMode;
+    setLoadingStrict(true);
+    try {
+      const res = await fetch('/api/parser/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parser_strict_catalog: nextVal })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStrictCatalogMode(nextVal);
+        playPureTone(nextVal ? 800 : 600, 0.05);
+      }
+    } catch {
+      // silent
+    } finally {
+      setLoadingStrict(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -206,6 +242,44 @@ export function SystemSettingsModal({
                 className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 font-bold py-1.5 rounded-xl active:scale-95 transition-all cursor-pointer"
               >
                 ⚙️ បើកការកំណត់ហាង
+              </button>
+            </div>
+          </div>
+
+          {/* Section 3.5: Safety Guardrail - Strict Catalog vs Auto-Create Products */}
+          <div className={`border rounded-2xl p-3.5 flex flex-col gap-2 transition-all ${
+            strictCatalogMode
+              ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+              : 'bg-[#081527] border-cyan-500/40 text-cyan-200'
+          }`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">{strictCatalogMode ? '🛡️' : '⚡'}</span>
+                <div>
+                  <div className="font-bold text-sm flex items-center gap-2">
+                    <span>{strictCatalogMode ? 'របៀបសុវត្ថិភាព ៖ ចាប់តែកូដក្នុងស្តុក (Strict Mode)' : 'របៀបទូលាយ ៖ បង្កើតកូដ Auto (Flexible Mode)'}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    {strictCatalogMode
+                      ? '🔒 ប្រព័ន្ធចាប់កាត់តែកូដទំនិញណាដែលមានក្នុងស្តុកប៉ុណ្ណោះ ការពារមិនឱ្យច្រឡំខំមិនសួរនាំ'
+                      : '⚡ អនុញ្ញាតឱ្យចាប់កូដថ្មីៗស្វ័យប្រវត្តិ (ឧ. 10=1, 12=5) ទោះមិនទាន់បញ្ចូលកូដទុកមុន'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggle Switch */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={strictCatalogMode}
+                disabled={loadingStrict}
+                onClick={handleToggleStrict}
+                className={`w-13 h-7 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 focus:outline-none shadow-inner flex-shrink-0 ${
+                  strictCatalogMode ? 'bg-amber-500 justify-end' : 'bg-slate-700 justify-start'
+                }`}
+                title="ចុចដើម្បីប្តូររបៀបចាប់កូដទំនិញ"
+              >
+                <div className="bg-white w-5 h-5 rounded-full shadow-md transform transition-transform duration-300" />
               </button>
             </div>
           </div>

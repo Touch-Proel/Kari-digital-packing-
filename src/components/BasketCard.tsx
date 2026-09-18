@@ -192,7 +192,7 @@ export function BasketCard({
 
     // 2. Comments from customer during live stream that are not already assigned as note for an item
     const allocatedNotes = new Set(
-      invoice.items
+      (invoice.items || [])
         .map(it => (it.item_comment || '').trim())
         .filter(Boolean)
     );
@@ -1100,7 +1100,7 @@ export function BasketCard({
 
           {/* ITEM ROWS LIST */}
           <div className="flex flex-col gap-2.5">
-            {invoice.items.map((item, idx) => {
+            {(invoice.items || []).map((item, idx) => {
               const isChecked = !!checkedState[`${invoice.invoice_id}_${item.product_code}`];
               const prod = productMap ? productMap[item.product_code.toUpperCase()] : undefined;
               // Session-Isolated Image:
@@ -1464,7 +1464,7 @@ export function BasketCard({
             })}
 
             {/* Unmatched / Unallocated Comments List (Capture.PNG match) */}
-            {unallocatedComments.map((unm, cIdx) => {
+            {(unallocatedComments || []).map((unm, cIdx) => {
               const detected = parseQuickComment(unm);
               const displayUnm = convertKhmerNumeralsToGlobal(unm);
               return (
@@ -1606,7 +1606,7 @@ export function BasketCard({
                       <span>ខមិនសួរ & កូដទាំងអស់ក្នុង Live នេះ ៖</span>
                       <span className="text-[10px] text-emerald-400 font-mono">✓ មិនបាត់សូម្បីតែ១</span>
                     </div>
-                    {invoice.comments.map((comm, idx) => {
+                    {(invoice.comments || []).map((comm, idx) => {
                       const convertedComm = convertKhmerNumeralsToGlobal(comm);
                       return (
                         <div key={idx} className="flex items-start gap-2 text-xs py-1.5 border-b border-slate-800/40 last:border-0">

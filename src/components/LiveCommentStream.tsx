@@ -6,19 +6,21 @@ interface RecentLiveOrder {
   customer_name: string;
   picture_url?: string;
   comment_text: string;
-  created_at: string;
-  invoice_id: number;
-  basket_no: number;
-  allocated_items: {
+  created_at?: string;
+  timestamp?: string;
+  invoice_id?: number;
+  basket_no: number | string;
+  allocated_items?: {
     code: string;
     product_name: string;
     quantity: number;
     price: number;
   }[];
+  codes?: string[];
   phone_number?: string;
   address?: string;
   location_label?: string;
-  total_amount: number;
+  total_amount?: number;
 }
 
 interface LiveCommentStreamProps {
@@ -42,11 +44,49 @@ export function LiveCommentStream({
   const [submitting, setSubmitting] = useState(false);
   const [syncingNow, setSyncingNow] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  const [strictCatalogMode, setStrictCatalogMode] = useState(false);
   const [recentOrders, setRecentOrders] = useState<RecentLiveOrder[]>([]);
   const [totalSynced, setTotalSynced] = useState(0);
   const [recentLogs, setRecentLogs] = useState<string[]>([
     '🟢 ប្រព័ន្ធទាញខំមិន Real-time Auto-Sync កំពុងរង់ចាំខំមិន...',
   ]);
+
+  // Fetch parser settings (strict catalog mode vs auto-create new codes)
+  const fetchParserSettings = async () => {
+    try {
+      const res = await fetch('/api/parser/settings');
+      const data = await res.json();
+      if (data && typeof data.parser_strict_catalog === 'boolean') {
+        setStrictCatalogMode(data.parser_strict_catalog);
+      }
+    } catch {
+      // silent catch
+    }
+  };
+
+  // Toggle strict catalog mode vs auto dynamic creation
+  const handleToggleStrictCatalog = async () => {
+    const nextVal = !strictCatalogMode;
+    try {
+      const res = await fetch('/api/parser/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parser_strict_catalog: nextVal })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStrictCatalogMode(nextVal);
+        playPureTone(nextVal ? 800 : 600, 0.05);
+        onShowToast(
+          nextVal
+            ? '🔒 បានបើក Strict Mode: ចាប់តែកូដដែលមានក្នុងស្តុកប៉ុណ្ណោះ (ការពារខុស)'
+            : '⚡ បានបើក Auto Mode: បង្កើតកូដស្វ័យប្រវត្តិកាត់ចូលកន្ត្រកភ្លាមៗ'
+        );
+      }
+    } catch {
+      onShowToast('បរាជ័យក្នុងការផ្លាស់ប្តូររបៀបចាប់កូដ', 'error');
+    }
+  };
 
   // Fetch live auto-sync status and recent orders
   const fetchLiveSyncStatus = async () => {
@@ -68,6 +108,7 @@ export function LiveCommentStream({
   useEffect(() => {
     if (!isOpen) return;
     fetchLiveSyncStatus();
+    fetchParserSettings();
     const timer = setInterval(fetchLiveSyncStatus, 2500);
     return () => clearInterval(timer);
   }, [isOpen, activeLiveId]);
@@ -231,6 +272,57 @@ export function LiveCommentStream({
         </div>
       </div>
 
+      {/* Safety Guardrail Toggle Switch: Strict Stock Catalog vs Auto-Create New Codes */}
+      <div className={`p-2.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+        strictCatalogMode
+          ? 'bg-amber-950/40 border-amber-500/50 text-amber-200'
+          : 'bg-cyan-950/40 border-cyan-500/50 text-cyan-200'
+      }`}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="text-xl flex-shrink-0">{strictCatalogMode ? '🛡️' : '⚡'}</span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-xs">
+                {strictCatalogMode
+                  ? 'របៀបសុវត្ថិភាព ៖ ចាប់តែកូដក្នុងស្តុក (Strict Mode)'
+                  : 'របៀបទូលាយ ៖ បង្កើតកូដស្វ័យប្រវត្តិ (Auto Mode)'}
+              </span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md border ${
+                strictCatalogMode
+                  ? 'bg-amber-900/60 text-amber-300 border-amber-500/50'
+                  : 'bg-cyan-900/60 text-cyan-300 border-cyan-500/50'
+              }`}>
+                {strictCatalogMode ? 'ការពារកាត់ច្រឡំ' : 'កាត់រហ័សទោះគ្មានស្តុក'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300 leading-tight mt-0.5">
+              {strictCatalogMode
+                ? '✅ កាត់ចូលកន្ត្រកតែខំមិនណាត្រូវនឹងកូដទំនិញក្នុងស្តុកប៉ុណ្ណោះ (ខំមិនសួរនាំមិនច្រឡំកាត់ឡើយ)'
+                : '💡 អនុញ្ញាតឱ្យបង្កើតកូដថ្មីភ្លាមៗ (ឧ. 10=1, 12=5) ទោះបីមិនទាន់បានបញ្ចូលកូដក្នុងស្តុកទុកមុន'}
+            </p>
+          </div>
+        </div>
+
+        {/* Toggle Switch */}
+        <div className="flex items-center gap-2 self-end sm:self-center flex-shrink-0">
+          <span className="text-[11px] font-bold text-slate-300">
+            {strictCatalogMode ? 'ស្តុកជាក់លាក់' : 'Auto ទាំងអស់'}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={strictCatalogMode}
+            onClick={handleToggleStrictCatalog}
+            className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 focus:outline-none shadow-inner ${
+              strictCatalogMode ? 'bg-amber-500 justify-end' : 'bg-slate-700 justify-start'
+            }`}
+            title="ចុចដើម្បីប្តូររបៀបចាប់កូដ (Toggle Switch)"
+          >
+            <div className="bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300" />
+          </button>
+        </div>
+      </div>
+
       {/* Tabs */}
       <div className="flex border-b border-slate-800 gap-2">
         <button
@@ -281,7 +373,7 @@ export function LiveCommentStream({
             </div>
           ) : (
             <div className="max-h-[220px] overflow-y-auto flex flex-col gap-1.5 pr-0.5">
-              {recentOrders.map((order, idx) => (
+              {(recentOrders || []).map((order, idx) => (
                 <div
                   key={order.id || idx}
                   className="bg-slate-950/90 border border-slate-800 hover:border-cyan-500/50 rounded-xl p-2 flex items-center justify-between gap-2 shadow-sm transition-all"
@@ -320,7 +412,11 @@ export function LiveCommentStream({
                         កន្ត្រក #{order.basket_no}
                       </span>
                       <div className="text-[10px] text-emerald-400 font-bold mt-0.5">
-                        {order.allocated_items.map(it => `${it.code}x${it.quantity}`).join(', ')}
+                        {order.allocated_items && order.allocated_items.length > 0
+                          ? order.allocated_items.map(it => `${it.code}x${it.quantity}`).join(', ')
+                          : Array.isArray(order.codes) && order.codes.length > 0
+                          ? order.codes.join(', ')
+                          : 'កាត់បានជោគជ័យ'}
                       </div>
                     </div>
                   </div>

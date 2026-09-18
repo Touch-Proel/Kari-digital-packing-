@@ -6,7 +6,8 @@ import {
   recalculateInvoice,
   bumpDataRevision,
   saveDatabaseToDisk,
-  activeLiveId
+  activeLiveId,
+  settings
 } from './db';
 import { DeliveryZone, Invoice, OrderItem } from './types';
 import { detectDeliveryZone } from './locationHelper';
@@ -234,46 +235,51 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
         break;
       }
 
-      pairs.push({ code: pCode, qty: 1 });
-      seenCodes.add(pCode);
-      seg = '';
-      break;
+      if (settings.parser_allow_standalone !== false) {
+        pairs.push({ code: pCode, qty: 1 });
+        seenCodes.add(pCode);
+        seg = '';
+        break;
+      }
     }
   }
 
   // 🎯 Dynamic extraction: capture live order codes even before seller creates them in catalog
-  // Pattern 1: CODE = QTY (e.g. 10=1, 12=5, 10=2, A12=2)
-  const reEq = /(?<!\d)([A-Za-z0-9]{1,4})\s*[:=xX*]\s*(\d{1,2})(?!\d)/g;
-  let mEq: RegExpExecArray | null;
-  while ((mEq = reEq.exec(s)) !== null) {
-    const rawCode = mEq[1].toUpperCase().trim();
-    const qty = parseInt(mEq[2], 10) || 1;
-    if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
-      pairs.push({ code: rawCode, qty });
-      seenCodes.add(rawCode);
+  // Only active when parser_strict_catalog is false
+  if (!settings.parser_strict_catalog) {
+    // Pattern 1: CODE = QTY (e.g. 10=1, 12=5, 10=2, A12=2)
+    const reEq = /(?<!\d)([A-Za-z0-9]{1,4})\s*[:=xX*]\s*(\d{1,2})(?!\d)/g;
+    let mEq: RegExpExecArray | null;
+    while ((mEq = reEq.exec(s)) !== null) {
+      const rawCode = mEq[1].toUpperCase().trim();
+      const qty = parseInt(mEq[2], 10) || 1;
+      if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
+        pairs.push({ code: rawCode, qty });
+        seenCodes.add(rawCode);
+      }
     }
-  }
 
-  // Pattern 2: កូដ/កូត CODE (e.g. កូត10, កូដ 10, កូដ 12=5)
-  const reKod = /(?:កូដ|កូត|CODE)\s*([A-Za-z0-9]{1,4})(?:\s*[:=xX*]?\s*(\d{1,2}))?/gi;
-  let mKod: RegExpExecArray | null;
-  while ((mKod = reKod.exec(s)) !== null) {
-    const rawCode = mKod[1].toUpperCase().trim();
-    const qty = mKod[2] ? (parseInt(mKod[2], 10) || 1) : 1;
-    if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
-      pairs.push({ code: rawCode, qty });
-      seenCodes.add(rawCode);
+    // Pattern 2: កូដ/កូត CODE (e.g. កូត10, កូដ 10, កូដ 12=5)
+    const reKod = /(?:កូដ|កូត|CODE)\s*([A-Za-z0-9]{1,4})(?:\s*[:=xX*]?\s*(\d{1,2}))?/gi;
+    let mKod: RegExpExecArray | null;
+    while ((mKod = reKod.exec(s)) !== null) {
+      const rawCode = mKod[1].toUpperCase().trim();
+      const qty = mKod[2] ? (parseInt(mKod[2], 10) || 1) : 1;
+      if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
+        pairs.push({ code: rawCode, qty });
+        seenCodes.add(rawCode);
+      }
     }
-  }
 
-  // Pattern 3: CODE = Khmer color/text (e.g. 10=សុកូឡា ស្វាយ)
-  const reEqDesc = /(?<!\d)([A-Za-z0-9]{1,4})\s*=\s*(?=[^\d\s])/g;
-  let mDesc: RegExpExecArray | null;
-  while ((mDesc = reEqDesc.exec(s)) !== null) {
-    const rawCode = mDesc[1].toUpperCase().trim();
-    if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
-      pairs.push({ code: rawCode, qty: 1 });
-      seenCodes.add(rawCode);
+    // Pattern 3: CODE = Khmer color/text (e.g. 10=សុកូឡា ស្វាយ)
+    const reEqDesc = /(?<!\d)([A-Za-z0-9]{1,4})\s*=\s*(?=[^\d\s])/g;
+    let mDesc: RegExpExecArray | null;
+    while ((mDesc = reEqDesc.exec(s)) !== null) {
+      const rawCode = mDesc[1].toUpperCase().trim();
+      if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
+        pairs.push({ code: rawCode, qty: 1 });
+        seenCodes.add(rawCode);
+      }
     }
   }
 
@@ -479,6 +485,10 @@ export function parseAndAllocateComment(
     );
 
     if (!prod) {
+      if (settings.parser_strict_catalog) {
+        // In strict mode, do not auto-create products that do not exist in live inventory
+        continue;
+      }
       // Find template in existing products from other lives or create fresh
       const templateProd = products.find(p => p.code.toUpperCase() === pair.code.toUpperCase());
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;

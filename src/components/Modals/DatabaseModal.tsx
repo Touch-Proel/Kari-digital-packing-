@@ -520,7 +520,7 @@ export function DatabaseModal({ isOpen, onClose, onSelectDateFilter, onShowToast
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    {dates.map(item => (
+                    {(dates || []).map(item => (
                       <div
                         key={item.date}
                         className="p-3 bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 rounded-xl flex items-center justify-between transition-all"
@@ -531,7 +531,7 @@ export function DatabaseModal({ isOpen, onClose, onSelectDateFilter, onShowToast
                               📆 {item.date}
                             </span>
                             <span className="text-[11px] text-slate-400">
-                              ({item.live_ids.length} វគ្គ Live)
+                              ({(item.live_ids || []).length} វគ្គ Live)
                             </span>
                           </div>
                           <div className="flex items-center gap-3 text-[11px] text-slate-300">

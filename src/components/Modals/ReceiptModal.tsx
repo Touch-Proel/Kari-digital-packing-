@@ -863,7 +863,7 @@ export function ReceiptModal({
               </div>
 
               <div className="flex flex-col gap-3">
-                {invoice.items.map((it, idx) => {
+                {(invoice.items || []).map((it, idx) => {
                   const custom = (it.product_name || '')
                     .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
                     .replace(new RegExp(`^កូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
@@ -1160,7 +1160,7 @@ export function ReceiptModal({
 
               {/* Items List */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {invoice.items.map((it, idx) => {
+                {(invoice.items || []).map((it, idx) => {
                   const custom = (it.product_name || '')
                     .replace(new RegExp(`^ទំនិញកូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')
                     .replace(new RegExp(`^កូដ\\s*\\[?${it.product_code}\\]?`, 'i'), '')

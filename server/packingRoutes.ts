@@ -39,7 +39,8 @@ import {
   startLiveCommentsAutoSync,
   stopLiveCommentsAutoSync,
   getLiveCommentsAutoSyncStatus,
-  executeLiveCommentsSyncOnce
+  executeLiveCommentsSyncOnce,
+  recordRecentOrder
 } from './liveSync';
 
 const router = Router();
@@ -1313,12 +1314,38 @@ router.post('/comments/test_parse', (req: Request, res: Response) => {
 // POST /api/comments/test_simulate - Process a test or simulated live comment
 router.post('/comments/test_simulate', (req: Request, res: Response) => {
   const { text, user_name, user_id, live_id } = req.body;
+  const targetLiveId = live_id || activeLiveId;
   const result = parseAndAllocateComment(
     user_id || `sim_${Date.now()}`,
     user_name || 'អតិថិជន Live',
     text || '',
-    live_id || activeLiveId
+    targetLiveId
   );
+
+  if (result.status === 'SUCCESS') {
+    const matchingInv = invoices.find(i => i.invoice_id === result.invoice_id);
+    recordRecentOrder({
+      id: `ord_sim_${Date.now()}_${Math.random()}`,
+      timestamp: new Date().toISOString(),
+      customer_name: user_name || 'អតិថិជន Live',
+      customer_id: user_id,
+      picture_url: matchingInv?.picture_url,
+      comment_text: text || '',
+      basket_no: matchingInv?.basket_no || '?',
+      codes: (matchingInv?.items || []).map(it => `${it.product_code}x${it.quantity}`),
+      allocated_items: (matchingInv?.items || []).map(it => ({
+        code: it.product_code,
+        product_name: it.product_name,
+        quantity: it.quantity,
+        price: it.price
+      })),
+      phone_number: matchingInv?.phone_number,
+      address: matchingInv?.address,
+      location_label: matchingInv?.location_label,
+      total_amount: matchingInv?.total_amount || 0
+    });
+  }
+
   res.json(result);
 });
 

@@ -14,9 +14,19 @@ export interface RecentLiveOrder {
   timestamp: string;
   customer_name: string;
   customer_id?: string;
+  picture_url?: string;
   comment_text: string;
   basket_no: number | string;
   codes: string[];
+  allocated_items?: {
+    code: string;
+    product_name: string;
+    quantity: number;
+    price: number;
+  }[];
+  phone_number?: string;
+  address?: string;
+  location_label?: string;
   total_amount: number;
 }
 
@@ -56,7 +66,7 @@ setTimeout(() => {
 }, 3000);
 
 // Keep last 25 recent orders for real-time live feed
-function recordRecentOrder(order: RecentLiveOrder) {
+export function recordRecentOrder(order: RecentLiveOrder) {
   liveSyncState.recentOrders.unshift(order);
   if (liveSyncState.recentOrders.length > 25) {
     liveSyncState.recentOrders.pop();
@@ -157,9 +167,19 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
           timestamp: new Date().toISOString(),
           customer_name: c.from?.name || 'អតិថិជន Facebook',
           customer_id: c.from?.id,
+          picture_url: c.from?.picture?.data?.url || matchingInv?.picture_url,
           comment_text: c.message || '',
           basket_no: matchingInv?.basket_no || '?',
-          codes: matchingInv?.items.map(it => `${it.product_code}x${it.quantity}`) || [],
+          codes: (matchingInv?.items || []).map(it => `${it.product_code}x${it.quantity}`),
+          allocated_items: (matchingInv?.items || []).map(it => ({
+            code: it.product_code,
+            product_name: it.product_name,
+            quantity: it.quantity,
+            price: it.price
+          })),
+          phone_number: matchingInv?.phone_number,
+          address: matchingInv?.address,
+          location_label: matchingInv?.location_label,
           total_amount: matchingInv?.total_amount || 0
         });
       }
