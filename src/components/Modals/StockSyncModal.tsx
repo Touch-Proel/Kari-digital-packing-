@@ -65,7 +65,7 @@ export function StockSyncModal({
       const res = await fetch('/api/telegram/auto_sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: next, interval_sec: 10 })
+        body: JSON.stringify({ enabled: next, interval_sec: 10, live_id: activeLiveId })
       });
       const data = await res.json();
       if (data.success) {
@@ -226,7 +226,8 @@ export function StockSyncModal({
           mark_read: markRead,
           save_token: true,
           clear_cache: clearCache,
-          keep_existing_stock_qty: keepExistingStockQty
+          keep_existing_stock_qty: keepExistingStockQty,
+          live_id: activeLiveId
         })
       });
       const data = await res.json();

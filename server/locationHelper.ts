@@ -5,6 +5,7 @@ export interface DeliveryZoneResult {
   label: string;
   detectedLocation?: string;
   matchedKeyword?: string;
+  hasExplicitLocation?: boolean;
 }
 
 // ១. បញ្ជីឈ្មោះខេត្តទាំង ២៤
@@ -172,7 +173,7 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
           detectedProv = clean;
         }
       }
-      return { zone: 'PROVINCE', label: '🏞️ តាមខេត្ត', detectedLocation: detectedProv, matchedKeyword: prov };
+      return { zone: 'PROVINCE', label: '🏞️ តាមខេត្ត', detectedLocation: detectedProv, matchedKeyword: prov, hasExplicitLocation: true };
     }
   }
 
@@ -194,7 +195,8 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
           zone: 'PP',
           label: '🏙️ ភ្នំពេញ',
           detectedLocation: fullMatch[0].trim(),
-          matchedKeyword: loc
+          matchedKeyword: loc,
+          hasExplicitLocation: true
         };
       }
 
@@ -202,7 +204,8 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
         zone: 'PP',
         label: '🏙️ ភ្នំពេញ',
         detectedLocation: canonical,
-        matchedKeyword: loc
+        matchedKeyword: loc,
+        hasExplicitLocation: true
       };
     }
   }
@@ -223,7 +226,8 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
         zone: 'PP',
         label: '🏙️ ភ្នំពេញ',
         detectedLocation: match[0].trim(),
-        matchedKeyword: match[0].trim()
+        matchedKeyword: match[0].trim(),
+        hasExplicitLocation: true
       };
     }
   }
@@ -240,11 +244,12 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
         zone: 'PP',
         label: '🏙️ ភ្នំពេញ',
         detectedLocation: 'ភ្នំពេញ',
-        matchedKeyword: kw
+        matchedKeyword: kw,
+        hasExplicitLocation: true
       };
     }
   }
 
-  // ៥. ក្រៅពីនេះចាត់ចូលតាមខេត្តទាំងអស់
-  return { zone: 'PROVINCE', label: '🏞️ តាមខេត្ត' };
+  // ៥. ក្រៅពីនេះ ប្រសិនបើគ្មានពាក្យទីតាំងណាមួយទេ
+  return { zone: 'PROVINCE', label: '🏞️ តាមខេត្ត', hasExplicitLocation: false };
 }

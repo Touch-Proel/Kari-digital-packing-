@@ -1423,6 +1423,7 @@ router.post('/telegram/fetch_stock', async (req: Request, res: Response) => {
 
   let importedCount = 0;
   if (auto_import && result.items.length > 0) {
+    const targetLive = (req.body.live_id as string) || activeLiveId;
     const importRes = bulkImportStockItems(result.items.map(it => ({
       code: it.code,
       name: it.name,
@@ -1430,7 +1431,8 @@ router.post('/telegram/fetch_stock', async (req: Request, res: Response) => {
       stock_qty: it.stock_qty,
       image_file: it.image_url
     })), 'merge', {
-      keepExistingStockQty: req.body.keep_existing_stock_qty !== false
+      keepExistingStockQty: req.body.keep_existing_stock_qty !== false,
+      targetLiveId: targetLive
     });
     importedCount = importRes.imported + importRes.updated;
   }
@@ -1460,7 +1462,8 @@ router.post('/telegram/auto_sync', async (req: Request, res: Response) => {
   }
 
   if (enabled === true) {
-    const status = startTelegramAutoSync(Number(interval_sec || 10));
+    const targetLive = (req.body.live_id as string) || activeLiveId;
+    const status = startTelegramAutoSync(Number(interval_sec || 10), targetLive);
     return res.json({ success: true, message: 'បានបើក Telegram Stock Auto-Sync!', status });
   } else if (enabled === false) {
     const status = stopTelegramAutoSync();
@@ -1504,13 +1507,14 @@ router.post('/fb/live_auto_sync', async (req: Request, res: Response) => {
 
 // POST /api/stock/bulk_import
 router.post('/stock/bulk_import', (req: Request, res: Response) => {
-  const { items, mode, keep_existing_stock_qty } = req.body;
+  const { items, mode, keep_existing_stock_qty, live_id } = req.body;
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ success: false, error: 'មិនមានទិន្នន័យសម្រាប់នាំចូលឡើយ' });
   }
 
   const result = bulkImportStockItems(items, mode || 'merge', {
-    keepExistingStockQty: keep_existing_stock_qty !== false
+    keepExistingStockQty: keep_existing_stock_qty !== false,
+    targetLiveId: (live_id as string) || activeLiveId
   });
   res.json(result);
 });

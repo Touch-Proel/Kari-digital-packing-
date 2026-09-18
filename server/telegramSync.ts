@@ -482,14 +482,16 @@ export function bulkImportStockItems(
   mode: 'merge' | 'replace' = 'merge',
   options?: {
     keepExistingStockQty?: boolean;
+    targetLiveId?: string;
   }
 ): { success: boolean; imported: number; updated: number; total: number } {
   if (!Array.isArray(items) || items.length === 0) {
     return { success: false, imported: 0, updated: 0, total: products.length };
   }
 
+  const targetLive = options?.targetLiveId || activeLiveId;
+
   if (mode === 'replace') {
-    const targetLive = activeLiveId;
     for (let i = products.length - 1; i >= 0; i--) {
       if ((products[i].live_id || activeLiveId) === targetLive) {
         products.splice(i, 1);
@@ -505,7 +507,6 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
-    const targetLive = activeLiveId;
     const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
     if (existing) {
       existing.live_id = targetLive;
@@ -611,6 +612,7 @@ export interface TelegramAutoSyncStatus {
   totalProductsCount: number;
   lastError: string | null;
   running: boolean;
+  targetLiveId?: string | null;
 }
 
 const tgAutoSyncState: TelegramAutoSyncStatus = {
@@ -621,7 +623,8 @@ const tgAutoSyncState: TelegramAutoSyncStatus = {
   lastImportedCount: 0,
   totalProductsCount: products.length,
   lastError: null,
-  running: false
+  running: false,
+  targetLiveId: null
 };
 
 let tgAutoSyncTimer: NodeJS.Timeout | null = null;
@@ -664,6 +667,7 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
 
     let importedCount = 0;
     if (res.items.length > 0) {
+      const targetLive = tgAutoSyncState.targetLiveId || activeLiveId;
       const impRes = bulkImportStockItems(
         res.items.map(it => ({
           code: it.code,
@@ -673,7 +677,10 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
           image_file: it.image_url
         })),
         'merge',
-        { keepExistingStockQty: true }
+        {
+          keepExistingStockQty: true,
+          targetLiveId: targetLive
+        }
       );
       importedCount = impRes.imported + impRes.updated;
     }
@@ -685,7 +692,7 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
     tgAutoSyncState.lastError = null;
 
     if (importedCount > 0) {
-      console.log(`🔄 [Telegram Stock Auto-Sync]: Successfully synced ${importedCount} items (codes, photos, prices) into catalog!`);
+      console.log(`🔄 [Telegram Stock Auto-Sync]: Successfully synced ${importedCount} items into Live #${tgAutoSyncState.targetLiveId || activeLiveId}!`);
     }
 
     return {
@@ -702,10 +709,13 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
   }
 }
 
-export function startTelegramAutoSync(intervalSec = 10) {
+export function startTelegramAutoSync(intervalSec = 10, targetLiveId?: string) {
   if (intervalSec < 5) intervalSec = 5;
   tgAutoSyncState.intervalSec = intervalSec;
   tgAutoSyncState.enabled = true;
+  if (targetLiveId) {
+    tgAutoSyncState.targetLiveId = targetLiveId;
+  }
 
   if (tgAutoSyncTimer) {
     clearInterval(tgAutoSyncTimer);
@@ -721,7 +731,7 @@ export function startTelegramAutoSync(intervalSec = 10) {
     }
   }, tgAutoSyncState.intervalSec * 1000);
 
-  console.log(`🔄 [Telegram Stock Auto-Sync STARTED]: Polling Telegram every ${tgAutoSyncState.intervalSec}s`);
+  console.log(`🔄 [Telegram Stock Auto-Sync STARTED]: Polling Telegram every ${tgAutoSyncState.intervalSec}s (Target Live: ${tgAutoSyncState.targetLiveId || 'Active Live'})`);
   return getTelegramAutoSyncStatus();
 }
 

@@ -380,14 +380,14 @@ export function parseAndAllocateComment(
     picture_url: userPicUrl
   });
 
-  const { zone, label, detectedLocation } = detectDeliveryZone(rawText);
+  const { zone, label, detectedLocation, hasExplicitLocation } = detectDeliveryZone(rawText);
 
   let cust = customers.find(c => 
     (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && c.facebook_user_id === fbUserId) ||
     c.facebook_name.toLowerCase() === cleanFbName.toLowerCase()
   );
 
-  const initialCustAddress = detectedLocation || (zone !== 'UNKNOWN' ? label : undefined);
+  const initialCustAddress = hasExplicitLocation ? (detectedLocation || label) : undefined;
 
   if (!cust) {
     cust = {
@@ -405,11 +405,9 @@ export function parseAndAllocateComment(
   } else {
     if (userPicUrl) cust.picture_url = userPicUrl;
     if (phone) cust.phone_number = phone;
-    if (detectedLocation) {
-      if (!cust.address || cust.address.includes('មិនទាន់មាន') || cust.address === '🏙️ ភ្នំពេញ' || cust.address === 'ភ្នំពេញ' || cust.address === '🏞️ តាមខេត្ត') {
-        cust.address = detectedLocation;
-      }
-    } else if (zone !== 'UNKNOWN' && !cust.address) {
+    if (hasExplicitLocation && detectedLocation) {
+      cust.address = detectedLocation;
+    } else if (hasExplicitLocation && !cust.address) {
       cust.address = label;
     }
     cust.last_interaction_at = new Date().toISOString();
@@ -437,8 +435,8 @@ export function parseAndAllocateComment(
       if (!inv.unmatched_comments) inv.unmatched_comments = [];
       if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
 
-      // Auto-extract location from question or supplementary comments
-      if (zone !== 'UNKNOWN') {
+      // Auto-extract location from question or supplementary comments ONLY if explicit location found
+      if (hasExplicitLocation) {
         inv.location_zone = zone;
         inv.location_label = label;
         if (detectedLocation) {
@@ -463,9 +461,24 @@ export function parseAndAllocateComment(
 
   if (!inv) {
     const nextId = invoices.length > 0 ? Math.max(...invoices.map(i => i.invoice_id)) + 1 : 101;
-    const resolvedAddress = (cust?.address && !cust.address.includes('មិនទាន់មាន') && cust.address !== '🏙️ ភ្នំពេញ' && cust.address !== '🏞️ តាមខេត្ត')
-      ? cust.address
-      : (detectedLocation || cust?.address || (zone !== 'UNKNOWN' ? label : '⚠️ មិនទាន់មានអាសយដ្ឋាន'));
+
+    // Determine resolved address and zone
+    let resolvedAddress = '⚠️ មិនទាន់មានអាសយដ្ឋាន';
+    let resolvedZone: DeliveryZone = 'UNKNOWN';
+    let resolvedLabel = '❓ មិនទាន់ដឹង';
+
+    const custHasSavedAddr = cust?.address && !cust.address.includes('មិនទាន់មាន') && cust.address !== '⚠️ មិនទាន់មានអាសយដ្ឋាន';
+
+    if (hasExplicitLocation) {
+      resolvedAddress = detectedLocation || label;
+      resolvedZone = zone;
+      resolvedLabel = label;
+    } else if (custHasSavedAddr) {
+      resolvedAddress = cust!.address!;
+      const custZoneRes = detectDeliveryZone(resolvedAddress);
+      resolvedZone = custZoneRes.zone;
+      resolvedLabel = custZoneRes.label;
+    }
 
     inv = {
       invoice_id: nextId,
@@ -477,8 +490,8 @@ export function parseAndAllocateComment(
       picture_url: userPicUrl || cust?.picture_url,
       phone_number: phone || cust.phone_number || 'គ្មានលេខ',
       address: resolvedAddress,
-      location_zone: zone !== 'UNKNOWN' ? zone : 'UNKNOWN',
-      location_label: zone !== 'UNKNOWN' ? label : '❓ មិនទាន់ដឹង',
+      location_zone: resolvedZone,
+      location_label: resolvedLabel,
       total_amount: 0,
       status: 'Pending',
       packing_stage: 'UNPICKED',
@@ -491,7 +504,8 @@ export function parseAndAllocateComment(
   } else {
     if (userPicUrl && !inv.picture_url) inv.picture_url = userPicUrl;
     if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) inv.phone_number = phone;
-    if (zone !== 'UNKNOWN') {
+    
+    if (hasExplicitLocation) {
       inv.location_zone = zone;
       inv.location_label = label;
       if (detectedLocation) {
@@ -501,6 +515,12 @@ export function parseAndAllocateComment(
       } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
         inv.address = label;
       }
+    } else if ((!inv.address || inv.address.includes('មិនទាន់មាន')) && cust?.address && !cust.address.includes('មិនទាន់មាន')) {
+      // Inherit saved address from customer profile
+      inv.address = cust.address;
+      const custZoneRes = detectDeliveryZone(cust.address);
+      inv.location_zone = custZoneRes.zone;
+      inv.location_label = custZoneRes.label;
     }
     if (!inv.comments) inv.comments = [];
     if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
