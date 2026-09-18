@@ -130,21 +130,19 @@ export function extractCodeQtyPairs(text: string): ExtractedItemPair[] {
 
   let s = normalizeKhmerText(text);
 
-  // ១. ទាញយក និងលុបលេខទូរស័ព្ទចេញមុនគេបង្អស់ ដើម្បីកុំឱ្យលេខទូរស័ព្ទច្របូកច្របល់ជាមួយកូដទំនិញ
   const { cleanText: textWithoutPhone } = extractPhoneNumber(s);
   s = textWithoutPhone;
 
-  // ២. សម្អាតទម្ងន់/គីឡូ តម្លៃលុយ និងអាសយដ្ឋាន
   s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // ៣. បំប្លែងទម្រង់សម្រាយ slash (ឧ. 40/1, 45/1) និង dot (ឧ. 28.4) ឱ្យទៅជា CODE=QTY
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})[\/](\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
 
-  const segments = s.split(/[\n;+]+|\s+និង\s+|\s{2,}/i);
+  // បន្ថែមសញ្ញាក្បៀស , ទីនេះ ដើម្បីកុំឱ្យខមិនច្រើនកូដជាប់គ្នាត្រូវបានរំលង
+  const segments = s.split(/[\n;+,]+|\s+និង\s+|\s{2,}/i);
   const pairs: ExtractedItemPair[] = [];
   const seenCodes = new Set<string>();
 
