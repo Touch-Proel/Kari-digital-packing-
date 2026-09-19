@@ -139,6 +139,9 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
+  // 🎯 ដោះស្រាយករណីជាប់គ្នាដោយគ្មាន space (ឧ. 33យក/2, 33យក2 -> 33=2)
+  s = s.replace(/([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម|ដាក់|កក់)\s*[\/]?\s*(\d{1,2})(?!\d)/gi, '$1=$2');
+
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})[\/](\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
@@ -150,7 +153,7 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   const targetLive = liveId || activeLiveId;
   const sortedCatalog = products
     .filter(p => (p.live_id || activeLiveId) === targetLive && p.code && p.code.trim().length > 0)
-    .sort((a, b) => b.code.length - a.code.length); // ➔ រៀបចំពីកូដវែងទៅកូដខ្លី (ឧ. 18 ឆែកមុន 1)
+    .sort((a, b) => b.code.length - a.code.length);
 
   const validSuffixes = SIZE_COLOR_SUFFIXES.join('|');
 
@@ -184,7 +187,6 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
         }
       }
 
-      // សម្រាប់កូដ ១ ខ្ទង់ ត้องការកុំឱ្យវាទៅស៊ីក្នុងពាក្យថែម ឬយក (ឧ. ថែម18, 18យក2)
       const codePattern = isSingleDigit
         ? `(?<!\\d)(?:កូដ|កូដលេខ|CODE)?\\s*(${esc})(?!\\d)`
         : `(?<!\\d)(${esc})(?!\\d)`;
