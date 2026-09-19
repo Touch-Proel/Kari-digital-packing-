@@ -86,6 +86,7 @@ export function StockSyncModal({
   // Paste Text States
   const [pasteText, setPasteText] = useState<string>('');
   const [importingPaste, setImportingPaste] = useState<boolean>(false);
+  const [previewZoomImage, setPreviewZoomImage] = useState<{ url: string; code: string; name?: string; price?: number } | null>(null);
 
   // Parse Text helper for Paste Tab
   const parsedPasteItems = React.useMemo(() => {
@@ -812,46 +813,59 @@ export function StockSyncModal({
                           }`}
                         >
                           {item.image_url ? (
-                            <div className="w-12 h-12 rounded-lg relative overflow-hidden flex-shrink-0 bg-slate-800 border border-cyan-500/40">
+                            <div 
+                              onClick={() => setPreviewZoomImage({ url: item.image_url!, code: item.code, name: item.name, price: item.price })}
+                              className="w-13 h-13 min-w-[52px] h-[52px] rounded-lg relative overflow-hidden flex-shrink-0 bg-slate-950 border-2 border-cyan-500/50 hover:border-cyan-400 cursor-pointer shadow-sm group"
+                              title="ចុចដើម្បីពង្រីកមើលរូបភាពធំ"
+                            >
                               <img
                                 src={item.image_url}
                                 alt={item.code}
-                                loading="lazy"
-                                decoding="async"
-                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                                 onError={(e) => {
-                                  (e.target as HTMLElement).style.display = 'none';
-                                  const parent = (e.target as HTMLElement).parentElement;
+                                  const target = e.target as HTMLImageElement;
+                                  if (existingProd?.image_file && target.src !== existingProd.image_file) {
+                                    target.src = existingProd.image_file;
+                                    return;
+                                  }
+                                  target.style.display = 'none';
+                                  const parent = target.parentElement;
                                   const fb = parent?.querySelector('.img-fallback') as HTMLElement;
                                   if (fb) fb.style.display = 'flex';
                                 }}
                               />
-                              <div className="img-fallback hidden absolute inset-0 items-center justify-center text-xs opacity-60 bg-slate-800">
+                              <div className="img-fallback hidden absolute inset-0 items-center justify-center text-xs opacity-60 bg-slate-900 text-slate-400">
                                 📷
                               </div>
                             </div>
                           ) : existingProd?.image_file ? (
-                            <div className="w-12 h-12 rounded-lg relative overflow-hidden flex-shrink-0 bg-slate-800 border border-slate-700 opacity-75" title="រូបភាពចាស់ក្នុងស្តុក (រក្សាទុកដដែល)">
+                            <div 
+                              onClick={() => setPreviewZoomImage({ url: existingProd.image_file!, code: item.code, name: item.name, price: item.price })}
+                              className="w-13 h-13 min-w-[52px] h-[52px] rounded-lg relative overflow-hidden flex-shrink-0 bg-slate-950 border border-slate-700 hover:border-amber-400 opacity-90 cursor-pointer shadow-sm group"
+                              title="រូបភាពចាស់ក្នុងស្តុក (ចុចដើម្បីពង្រីក)"
+                            >
                               <img
                                 src={existingProd.image_file}
                                 alt={item.code}
-                                loading="lazy"
-                                decoding="async"
-                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                                 onError={(e) => {
-                                  (e.target as HTMLElement).style.display = 'none';
-                                  const parent = (e.target as HTMLElement).parentElement;
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                  const parent = target.parentElement;
                                   const fb = parent?.querySelector('.img-fallback') as HTMLElement;
                                   if (fb) fb.style.display = 'flex';
                                 }}
                               />
-                              <div className="img-fallback hidden absolute inset-0 items-center justify-center text-xs opacity-60 bg-slate-800">
+                              <div className="img-fallback hidden absolute inset-0 items-center justify-center text-xs opacity-60 bg-slate-900 text-slate-400">
                                 📷
                               </div>
                             </div>
                           ) : (
-                            <div className="w-12 h-12 rounded-lg bg-slate-800 flex items-center justify-center text-xs opacity-60 flex-shrink-0">
-                              📷
+                            <div className="w-13 h-13 min-w-[52px] h-[52px] rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center text-xs opacity-50 flex-shrink-0">
+                              <span>📷</span>
+                              <span className="text-[8px] text-slate-400">គ្មានរូប</span>
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
@@ -1059,6 +1073,51 @@ export function StockSyncModal({
 
         </div>
       </div>
+
+      {/* 🔍 High-Res Image Zoom Lightbox Popup */}
+      {previewZoomImage && (
+        <div 
+          onClick={() => setPreviewZoomImage(null)}
+          className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-in fade-in duration-150 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="relative max-w-sm w-full bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col items-center p-3"
+          >
+            <div className="w-full flex justify-between items-center pb-2 border-b border-slate-800 mb-2">
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-black text-cyan-400 text-base">[{previewZoomImage.code}]</span>
+                {previewZoomImage.price !== undefined && (
+                  <span className="font-mono font-bold text-amber-400 text-sm">${previewZoomImage.price.toFixed(2)}</span>
+                )}
+                {previewZoomImage.name && (
+                  <span className="text-xs text-slate-300 truncate max-w-[130px]">{previewZoomImage.name}</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewZoomImage(null)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-sm font-black cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="w-full aspect-square bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border border-slate-800 relative">
+              <img
+                src={previewZoomImage.url}
+                alt={previewZoomImage.code}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-contain"
+              />
+            </div>
+
+            <div className="w-full mt-2.5 text-center text-xs text-slate-400">
+              ចុចទីណាណាមួយ ឬចុច ✕ ដើម្បីបិទ
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

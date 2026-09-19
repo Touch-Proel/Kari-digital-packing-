@@ -29,6 +29,8 @@ export interface TelegramBotInfo {
 
 // 1. Verify Telegram Bot Token
 const downloadedPhotoCache = new Map<string, string>();
+const botInfoCache = new Map<string, TelegramBotInfo>();
+let lastScannedUpdateId: number | undefined = undefined;
 
 export async function testTelegramBotToken(token: string): Promise<{ success: boolean; bot?: TelegramBotInfo; error?: string }> {
   const cleanToken = token.trim();
@@ -36,25 +38,69 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
     return { success: false, error: 'សូមបញ្ចូល Telegram Bot Token ជាមុនសិន' };
   }
 
+  if (botInfoCache.has(cleanToken)) {
+    return { success: true, bot: botInfoCache.get(cleanToken) };
+  }
+
   try {
-    const res = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`);
+    const res = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`, {
+      signal: AbortSignal.timeout(5000)
+    });
     const data = await res.json();
     if (data.ok && data.result) {
-      return {
-        success: true,
-        bot: {
-          id: data.result.id,
-          username: data.result.username,
-          first_name: data.result.first_name,
-          can_join_groups: data.result.can_join_groups,
-          can_read_all_group_messages: data.result.can_read_all_group_messages
-        }
+      const botInfo: TelegramBotInfo = {
+        id: data.result.id,
+        username: data.result.username,
+        first_name: data.result.first_name,
+        can_join_groups: data.result.can_join_groups,
+        can_read_all_group_messages: data.result.can_read_all_group_messages
       };
+      botInfoCache.set(cleanToken, botInfo);
+      return { success: true, bot: botInfo };
     }
     return { success: false, error: data.description || 'Bot Token មិនត្រឹមត្រូវ' };
   } catch (err: any) {
     return { success: false, error: err.message || 'មិនអាចភ្ជាប់ទៅកាន់ Telegram API បានទេ' };
   }
+}
+
+// Helper: Fast check if any image for this code exists on disk
+function findExistingImageForCode(safeCode: string, uploadDir: string, distUploadDir: string): string | null {
+  try {
+    if (!safeCode) return null;
+    const lower = safeCode.toLowerCase();
+    
+    // Check in-memory products first (instant 0ms)
+    const existingProd = products.find(p => p.code.toLowerCase() === lower);
+    if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
+      const relPath = existingProd.image_file.replace(/^\//, '');
+      if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
+        return existingProd.image_file;
+      }
+    }
+
+    if (fs.existsSync(uploadDir)) {
+      const files = fs.readdirSync(uploadDir);
+      const match = files.find(f => {
+        const fLower = f.toLowerCase();
+        return fLower.startsWith(`${lower}_`) || fLower === `${lower}.jpg` || fLower === `${lower}.png` || fLower === `${lower}.webp`;
+      });
+      if (match) {
+        return `/uploads/${match}`;
+      }
+    }
+    if (fs.existsSync(distUploadDir)) {
+      const files = fs.readdirSync(distUploadDir);
+      const match = files.find(f => {
+        const fLower = f.toLowerCase();
+        return fLower.startsWith(`${lower}_`) || fLower === `${lower}.jpg` || fLower === `${lower}.png` || fLower === `${lower}.webp`;
+      });
+      if (match) {
+        return `/uploads/${match}`;
+      }
+    }
+  } catch {}
+  return null;
 }
 
 // 2. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
@@ -85,7 +131,7 @@ async function downloadTelegramPhoto(
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
-  // 1. In-memory cache check
+  // 1. In-memory cache check (0ms)
   if (downloadedPhotoCache.has(fileId)) {
     const cached = downloadedPhotoCache.get(fileId);
     if (cached) {
@@ -120,8 +166,17 @@ async function downloadTelegramPhoto(
     } catch {}
   }
 
+  // 3. Check any existing image on disk for this code
+  const existingAny = findExistingImageForCode(safeCode, uploadDir, distUploadDir);
+  if (existingAny) {
+    downloadedPhotoCache.set(fileId, existingAny);
+    return existingAny;
+  }
+
   try {
-    const fileInfoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+    const fileInfoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`, {
+      signal: AbortSignal.timeout(6000)
+    });
     const fileInfo = await fileInfoRes.json();
     if (!fileInfo.ok || !fileInfo.result?.file_path) {
       return undefined;
@@ -129,7 +184,9 @@ async function downloadTelegramPhoto(
 
     const filePath = fileInfo.result.file_path;
     const downloadUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
-    const imgRes = await fetch(downloadUrl);
+    const imgRes = await fetch(downloadUrl, {
+      signal: AbortSignal.timeout(8000)
+    });
     if (!imgRes.ok) return undefined;
 
     const arrayBuf = await imgRes.arrayBuffer();
@@ -149,7 +206,7 @@ async function downloadTelegramPhoto(
         fit: 'cover',
         position: 'center'
       })
-      .jpeg({ quality: 84, progressive: true })
+      .jpeg({ quality: 80, progressive: true })
       .toBuffer();
 
     fs.writeFileSync(localSavePath, processedBuffer);
@@ -165,7 +222,9 @@ async function downloadTelegramPhoto(
     downloadedPhotoCache.set(fileId, resultUrl);
     return resultUrl;
   } catch (err) {
-    console.error('[Telegram Photo Download Error]:', err);
+    console.error(`[Telegram Photo Download Error for ${safeCode}]:`, err);
+    // If download failed but we have any older image on disk, use it as fallback
+    if (existingAny) return existingAny;
     return undefined;
   }
 }
@@ -302,6 +361,7 @@ export async function fetchTelegramStockUpdates(options: {
 
   if (options.clearCache) {
     cachedTelegramItems = [];
+    lastScannedUpdateId = undefined;
   }
 
   // 1. Verify Bot Token
@@ -317,26 +377,29 @@ export async function fetchTelegramStockUpdates(options: {
   }
 
   const defaultQty = options.defaultQty || 200;
+  const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+  const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
   try {
     // 2. Fetch updates from Telegram using Loop Pagination
-    // Telegram Bot API getUpdates has a HARD CEILING of 100 updates per request!
-    // To scan hundreds or thousands of products (not just 99/100), we loop with offset.
-    const maxPages = 30; // Scans up to 3,000 Telegram updates
+    // If not clearing cache and we already know lastScannedUpdateId, start incrementally (sub-second scan)
+    const maxPages = 15; // Scans up to 1,500 Telegram updates
     const allUpdates: any[] = [];
-    let currentOffset: number | undefined = undefined;
-    let highestUpdateId = 0;
+    let currentOffset: number | undefined = (!options.clearCache && lastScannedUpdateId) ? lastScannedUpdateId + 1 : undefined;
+    let highestUpdateId = lastScannedUpdateId || 0;
 
     for (let page = 0; page < maxPages; page++) {
       const url = currentOffset !== undefined
         ? `https://api.telegram.org/bot${token}/getUpdates?offset=${currentOffset}&limit=100&allowed_updates=["message","channel_post","edited_message"]`
         : `https://api.telegram.org/bot${token}/getUpdates?limit=100&allowed_updates=["message","channel_post","edited_message"]`;
 
-      const updatesRes = await fetch(url);
+      const updatesRes = await fetch(url, {
+        signal: AbortSignal.timeout(8000)
+      });
       const updatesData = await updatesRes.json();
 
       if (!updatesData.ok || !Array.isArray(updatesData.result)) {
-        if (page === 0) {
+        if (page === 0 && !currentOffset) {
           let desc = updatesData.description || 'បរាជ័យក្នុងការទាញ getUpdates ពី Telegram';
           if (desc.includes('Conflict: terminated by other getUpdates request')) {
             desc = '⚠️ ជាន់គ្នាជាមួយកម្មវិធីផ្សេង (Conflict) ៖ Bot នេះកំពុងមានកម្មវិធីផ្សេង (ដូចជាប្រព័ន្ធ Attendance ឬ Server ផ្សេង) បើកដំណើរការទទួលសារស្របពេលគ្នា។ Telegram អនុញ្ញាតឱ្យតែ ១ កម្មវិធីគត់ទទួលសារពី Bot ក្នុងពេលតែមួយ។ សូមបង្កើត Bot ថ្មីមួយផ្សេងទៀតក្នុង @BotFather សម្រាប់តែស្តុក!';
@@ -373,6 +436,10 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
+    if (highestUpdateId > 0) {
+      lastScannedUpdateId = highestUpdateId;
+    }
+
     // 3. Parse all retrieved messages
     const newlyParsedMap = new Map<string, TelegramItemParsed>();
     const photoToDownloadMap = new Map<string, { fileId: string; code: string; messageDate?: string }>();
@@ -401,12 +468,10 @@ export async function fetchTelegramStockUpdates(options: {
         if (isPhoto) {
           // ⚡ Choose optimal photo resolution (600px - 1000px):
           // In Telegram, photo array has sizes: [small (90px), medium (320px), large (800px), extra-large (1280px), full-raw (4000px)]
-          // Downloading the 4K raw photo (5-15MB) across VPS causes slow downloads and memory stalls.
-          // Choosing ~800px gives 100% crisp 500x500 crop quality, while downloading in milliseconds (~50KB)!
           let chosenPhoto = msg.photo[msg.photo.length - 1]; // fallback
           for (let pIdx = msg.photo.length - 1; pIdx >= 0; pIdx--) {
             const p = msg.photo[pIdx];
-            if ((p.width >= 500 || p.height >= 500) && (p.width <= 1280 || p.height <= 1280)) {
+            if ((p.width >= 400 || p.height >= 400) && (p.width <= 1280 || p.height <= 1280)) {
               chosenPhoto = p;
               break;
             }
@@ -419,6 +484,22 @@ export async function fetchTelegramStockUpdates(options: {
 
       for (let i = 0; i < parsedLines.length; i++) {
         const item = parsedLines[i];
+        
+        // Instant check if we already have this photo in cache or on disk (0ms)
+        let matchedImageUrl: string | undefined = undefined;
+        if (photoFileId) {
+          const inMem = downloadedPhotoCache.get(photoFileId);
+          if (inMem) {
+            matchedImageUrl = inMem;
+          } else {
+            const onDisk = findExistingImageForCode(item.code, uploadDir, distUploadDir);
+            if (onDisk) {
+              matchedImageUrl = onDisk;
+              downloadedPhotoCache.set(photoFileId, onDisk);
+            }
+          }
+        }
+
         newlyParsedMap.set(item.code, {
           code: item.code,
           name: item.name || `កូដ ${item.code}`,
@@ -429,18 +510,20 @@ export async function fetchTelegramStockUpdates(options: {
           sender_name: senderName,
           message_date: messageDate,
           original_text: rawText,
-          message_id: msg.message_id
+          message_id: msg.message_id,
+          image_url: matchedImageUrl
         });
 
-        if (photoFileId) {
+        // Only queue for network download if NOT already found on disk/cache
+        if (photoFileId && !matchedImageUrl) {
           photoToDownloadMap.set(item.code, { fileId: photoFileId, code: item.code, messageDate });
         }
       }
     }
 
-    // 4. Download photos in parallel batches of 6 (prevents timeout when downloading 100+ images)
+    // 4. Download photos in parallel batches of 16 (4x faster than 4 or 6)
     const downloadEntries = Array.from(photoToDownloadMap.entries());
-    const concurrency = 6;
+    const concurrency = 16;
     for (let i = 0; i < downloadEntries.length; i += concurrency) {
       const chunk = downloadEntries.slice(i, i + concurrency);
       await Promise.all(
