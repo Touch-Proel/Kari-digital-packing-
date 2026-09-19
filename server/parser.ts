@@ -5,9 +5,7 @@ import {
   rawComments,
   recalculateInvoice,
   bumpDataRevision,
-  saveDatabaseToDisk,
-  activeLiveId,
-  settings
+  activeLiveId
 } from './db';
 import { DeliveryZone, Invoice, OrderItem } from './types';
 import { detectDeliveryZone } from './locationHelper';
@@ -127,25 +125,6 @@ export interface ExtractedItemPair {
   qty: number;
 }
 
-const INVALID_DYNAMIC_CODES = new Set([
-  'KG', 'CM', 'MM', 'M', 'G', 'L', 'ML',
-  'PM', 'AM', 'MIN', 'SEC', 'HR',
-  'OK', 'NO', 'HI', 'HELLO', 'BYE', 'FB', 'LIVE', 'VIP', 'VOD',
-  'SIZE', 'COLOR', 'PAGE', 'POST', 'POSTS',
-  'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'XS', 'XXL'
-]);
-
-function isValidDynamicOrderCode(code: string): boolean {
-  if (!code || code.length === 0 || code.length > 5) return false;
-  if (INVALID_DYNAMIC_CODES.has(code)) return false;
-  if (COMMON_GREETINGS.has(code)) return false;
-  if (/^\d+$/.test(code)) {
-    const num = parseInt(code, 10);
-    if (num <= 0 || num > 999) return false;
-  }
-  return true;
-}
-
 export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedItemPair[] {
   if (!text) return [];
 
@@ -158,11 +137,11 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
+  // បំប្លែងសញ្ញាសម្រាយ slash (/) និង dot (.) ឱ្យទៅជាសញ្ញាស្មើ (=)
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})[\/](\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
 
-  // បន្ថែមសញ្ញាក្បៀស , ទីនេះ ដើម្បីកុំឱ្យខមិនច្រើនកូដជាប់គ្នាត្រូវបានរំលង
   const segments = s.split(/[\n;+,]+|\s+និង\s+|\s{2,}/i);
   const pairs: ExtractedItemPair[] = [];
   const seenCodes = new Set<string>();
@@ -177,6 +156,19 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   for (let seg of segments) {
     seg = seg.trim();
     if (!seg) continue;
+
+    // 🎯 ត្រួតពិនិត្យទម្រង់ CODE=QTY មុនគេដាច់ខាត (ឧ. 6=4, 7=3, 5=2)
+    const explicitEqMatch = seg.match(/^([A-Za-z0-9]{1,5})\s*[:=]\s*(\d{1,2})(?!\d)/i);
+    if (explicitEqMatch) {
+      const rawCode = explicitEqMatch[1].toUpperCase().trim();
+      const qty = parseInt(explicitEqMatch[2], 10) || 1;
+      const matchingProd = sortedCatalog.find(p => p.code.toUpperCase() === rawCode);
+      if (matchingProd && !seenCodes.has(rawCode)) {
+        pairs.push({ code: matchingProd.code, qty });
+        seenCodes.add(matchingProd.code);
+        continue; // រំលង segment นี้ មិនឱ្យទៅចាប់លេខខាងស្តាំច្រឡំជាកូដទៀតទេ
+      }
+    }
 
     for (const prod of sortedCatalog) {
       const pCode = prod.code.toUpperCase().trim();
@@ -235,51 +227,10 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
         break;
       }
 
-      if (settings.parser_allow_standalone !== false) {
-        pairs.push({ code: pCode, qty: 1 });
-        seenCodes.add(pCode);
-        seg = '';
-        break;
-      }
-    }
-  }
-
-  // 🎯 Dynamic extraction: capture live order codes even before seller creates them in catalog
-  // Only active when parser_strict_catalog is false
-  if (!settings.parser_strict_catalog) {
-    // Pattern 1: CODE = QTY (e.g. 10=1, 12=5, 10=2, A12=2)
-    const reEq = /(?<!\d)([A-Za-z0-9]{1,4})\s*[:=xX*]\s*(\d{1,2})(?!\d)/g;
-    let mEq: RegExpExecArray | null;
-    while ((mEq = reEq.exec(s)) !== null) {
-      const rawCode = mEq[1].toUpperCase().trim();
-      const qty = parseInt(mEq[2], 10) || 1;
-      if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
-        pairs.push({ code: rawCode, qty });
-        seenCodes.add(rawCode);
-      }
-    }
-
-    // Pattern 2: កូដ/កូត CODE (e.g. កូត10, កូដ 10, កូដ 12=5)
-    const reKod = /(?:កូដ|កូត|CODE)\s*([A-Za-z0-9]{1,4})(?:\s*[:=xX*]?\s*(\d{1,2}))?/gi;
-    let mKod: RegExpExecArray | null;
-    while ((mKod = reKod.exec(s)) !== null) {
-      const rawCode = mKod[1].toUpperCase().trim();
-      const qty = mKod[2] ? (parseInt(mKod[2], 10) || 1) : 1;
-      if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
-        pairs.push({ code: rawCode, qty });
-        seenCodes.add(rawCode);
-      }
-    }
-
-    // Pattern 3: CODE = Khmer color/text (e.g. 10=សុកូឡា ស្វាយ)
-    const reEqDesc = /(?<!\d)([A-Za-z0-9]{1,4})\s*=\s*(?=[^\d\s])/g;
-    let mDesc: RegExpExecArray | null;
-    while ((mDesc = reEqDesc.exec(s)) !== null) {
-      const rawCode = mDesc[1].toUpperCase().trim();
-      if (isValidDynamicOrderCode(rawCode) && !seenCodes.has(rawCode)) {
-        pairs.push({ code: rawCode, qty: 1 });
-        seenCodes.add(rawCode);
-      }
+      pairs.push({ code: pCode, qty: 1 });
+      seenCodes.add(pCode);
+      seg = '';
+      break;
     }
   }
 
@@ -435,7 +386,6 @@ export function parseAndAllocateComment(
       if (!inv.unmatched_comments) inv.unmatched_comments = [];
       if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
 
-      // Auto-extract location from question or supplementary comments ONLY if explicit location found
       if (hasExplicitLocation) {
         inv.location_zone = zone;
         inv.location_label = label;
@@ -462,7 +412,6 @@ export function parseAndAllocateComment(
   if (!inv) {
     const nextId = invoices.length > 0 ? Math.max(...invoices.map(i => i.invoice_id)) + 1 : 101;
 
-    // Determine resolved address and zone
     let resolvedAddress = '⚠️ មិនទាន់មានអាសយដ្ឋាន';
     let resolvedZone: DeliveryZone = 'UNKNOWN';
     let resolvedLabel = '❓ មិនទាន់ដឹង';
@@ -516,7 +465,6 @@ export function parseAndAllocateComment(
         inv.address = label;
       }
     } else if ((!inv.address || inv.address.includes('មិនទាន់មាន')) && cust?.address && !cust.address.includes('មិនទាន់មាន')) {
-      // Inherit saved address from customer profile
       inv.address = cust.address;
       const custZoneRes = detectDeliveryZone(cust.address);
       inv.location_zone = custZoneRes.zone;
@@ -536,10 +484,8 @@ export function parseAndAllocateComment(
 
     if (!prod) {
       if (settings.parser_strict_catalog) {
-        // In strict mode, do not auto-create products that do not exist in live inventory
         continue;
       }
-      // Find template in existing products from other lives or create fresh
       const templateProd = products.find(p => p.code.toUpperCase() === pair.code.toUpperCase());
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       prod = {
@@ -555,7 +501,6 @@ export function parseAndAllocateComment(
       products.push(prod);
       saveDatabaseToDisk();
       bumpDataRevision();
-      console.log(`[Auto Stock Register] Auto-created product ${prod.code} (${prod.name}) for Live #${liveId}`);
     }
 
     if (prod.stock_qty <= 0) {
