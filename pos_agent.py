@@ -372,22 +372,51 @@ def print_raw_escpos(binary_data):
             print(f"✂️ [SUCCESS] ព្រីនចេញ និងកាត់ក្រដាសស្វ័យប្រវត្តិរួចរាល់ (USB)!\n")
         return res
 
-    # TCP Socket network mode
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(5.0)
-    try:
-        sock.connect((PRINTER_IP, PRINTER_PORT))
-        print(f"🖨️ [SOCKET CONNECTED] Sending {len(binary_data)} bytes to {PRINTER_IP}:{PRINTER_PORT}...")
-        sock.sendall(binary_data)
-        time.sleep(0.15)
-        print(f"✂️ [SUCCESS] ព្រីនចេញ និងកាត់ក្រដាសស្វ័យប្រវត្តិរួចរាល់ (Network LAN)!\n")
-        return True
-    except Exception as e:
-        print(f"❌ [PRINTER ERROR]: មិនអាចភ្ជាប់ទៅកាន់ {PRINTER_IP}:{PRINTER_PORT} បានទេ ៖ {e}")
-        print(f"   💡 បើប្រើខ្សែ USB សូមដំណើរការ ៖ python pos_agent.py usb")
-        return False
-    finally:
-        sock.close()
+    # TCP Socket network mode with Smart Auto-Retry & Flow-Controlled Chunking
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.settimeout(6.0)
+        try:
+            sock.connect((PRINTER_IP, PRINTER_PORT))
+            print(f"🖨️ [SOCKET CONNECTED] Sending {len(binary_data)} bytes to {PRINTER_IP}:{PRINTER_PORT}...")
+            # Send in 4096-byte chunks with micro-delays to prevent printer RAM buffer overflow
+            chunk_size = 4096
+            for offset in range(0, len(binary_data), chunk_size):
+                chunk = binary_data[offset:offset + chunk_size]
+                sock.sendall(chunk)
+                if len(binary_data) > 16384:
+                    time.sleep(0.015)
+            
+            try:
+                sock.shutdown(socket.SHUT_WR)
+            except Exception:
+                pass
+            time.sleep(0.2)
+            print(f"✂️ [SUCCESS] ព្រីនចេញ និងកាត់ក្រដាសស្វ័យប្រវត្តិរួចរាល់ (Network LAN)!\n")
+            return True
+        except socket.error as e:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            if attempt < max_retries:
+                print(f"⏳ [BUSY/RETRY {attempt}/{max_retries}] ម៉ាស៊ីនព្រីនកំពុងជាប់រវល់... រង់ចាំ {attempt * 1.5:.1f}s រួចសាកល្បងម្ដងទៀត...")
+                time.sleep(attempt * 1.5)
+            else:
+                print(f"❌ [PRINTER ERROR]: មិនអាចភ្ជាប់ទៅកាន់ {PRINTER_IP}:{PRINTER_PORT} បានទេ ៖ {e}")
+                print(f"   💡 មូលហេតុអាចបណ្ដាលមកពី ៖")
+                print(f"      1. ម៉ាស៊ីនព្រីនគាំង Buffer ក្រោយព្រីនចប់សន្លឹកមុន (សូមបិទកុងតាក់ម៉ាស៊ីនព្រីន ៥វិនាទី រួចបើកវិញ)")
+                print(f"      2. អស់ក្រដាស ឬគម្របម៉ាស៊ីនព្រីនរបើកចំហ (Cover Open / Paper Out)")
+                print(f"      3. ម៉ាស៊ីនព្រីនផ្លាស់ប្ដូរ IP Address (សូមចុចប៊ូតុង Feed + បើកកុងតាក់ដើម្បី Self-Test មើល IP)")
+                print(f"      4. បើមានដោតខ្សែ USB ទៅកុំព្យូទ័រ សូមដំណើរការ ៖ python pos_agent.py usb")
+                return False
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 def send_heartbeat_once():
