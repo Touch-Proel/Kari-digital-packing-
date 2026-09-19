@@ -398,11 +398,19 @@ export default function App() {
     fetchInvoices(id, 0);
     fetchStock(id);
     fetchBacklogCount(id);
+    setLiveSessions(prev =>
+      prev.map(s => ({
+        ...s,
+        is_active: s.live_id === id
+      }))
+    );
     fetch('/api/set_active_live_id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ live_id: id })
-    }).catch(() => {});
+    })
+      .then(() => fetchLiveSessions())
+      .catch(() => {});
   };
 
   const handleCreateLiveSessionWithMode = async (options: {

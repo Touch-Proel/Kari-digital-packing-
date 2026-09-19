@@ -1250,14 +1250,48 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
     activeLiveId
   ])).filter(Boolean);
 
+  const getSessionTimestamp = (item: { created_at?: string; live_id: string }): number => {
+    if (item.created_at) {
+      const t = new Date(item.created_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+
+      const m = item.created_at.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (m) {
+        const timeMatch = item.created_at.match(/(\d{1,2}):(\d{1,2})/);
+        const hours = timeMatch ? parseInt(timeMatch[1], 10) : 0;
+        const minutes = timeMatch ? parseInt(timeMatch[2], 10) : 0;
+        const parsed = new Date(parseInt(m[3], 10), parseInt(m[2], 10) - 1, parseInt(m[1], 10), hours, minutes).getTime();
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+
+    const dateMatch = item.live_id.match(/(\d{4})(\d{2})(\d{2})/);
+    if (dateMatch) {
+      const parsed = new Date(parseInt(dateMatch[1], 10), parseInt(dateMatch[2], 10) - 1, parseInt(dateMatch[3], 10)).getTime();
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+
+    if (/^\d+$/.test(item.live_id)) {
+      const num = parseInt(item.live_id.slice(0, 13), 10);
+      if (!isNaN(num) && num > 100000000000) return num;
+    }
+    return 0;
+  };
+
   const uniqueLiveIds = allLiveIds.map(liveId => {
-    const sample = invoices.find(i => i.live_id === liveId);
-    const count = invoices.filter(i => i.live_id === liveId && i.status !== 'Cancelled').length;
+    const sessionInvoices = invoices.filter(i => i.live_id === liveId);
+    let sessionDate = '';
+    if (sessionInvoices.length > 0) {
+      const dates = sessionInvoices.map(i => i.created_at).filter(Boolean).sort().reverse();
+      if (dates.length > 0) sessionDate = dates[0];
+    }
+    const sample = sessionInvoices[0];
+    const count = sessionInvoices.filter(i => i.status !== 'Cancelled').length;
     const sessionProducts = products.filter(p => (p.live_id || activeLiveId) === liveId);
     const unsoldProducts = sessionProducts.filter(p => p.stock_qty > 0);
     return {
       live_id: liveId,
-      created_at: sample?.created_at || new Date().toISOString(),
+      created_at: sessionDate || sample?.created_at || new Date().toISOString(),
       basket_count: count,
       product_count: sessionProducts.length,
       unsold_product_count: unsoldProducts.length,
@@ -1265,8 +1299,22 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
     };
   });
 
-  // Sort so sessions with baskets or products come first
-  uniqueLiveIds.sort((a, b) => (b.basket_count + b.product_count) - (a.basket_count + a.product_count));
+  // Sort:
+  // 1. ACTIVE session ALWAYS goes to the very top (when active រត់ទៅ top)
+  // 2. Newer dates first (ថ្ងៃថ្មីនៅ top / Descending order)
+  // 3. Fallback: alphanumeric live_id descending
+  uniqueLiveIds.sort((a, b) => {
+    if (a.is_active && !b.is_active) return -1;
+    if (!a.is_active && b.is_active) return 1;
+
+    const tA = getSessionTimestamp(a);
+    const tB = getSessionTimestamp(b);
+    if (tA !== tB) {
+      return tB - tA; // Newer date on top
+    }
+
+    return b.live_id.localeCompare(a.live_id, undefined, { numeric: true });
+  });
   res.json({
     sessions: uniqueLiveIds,
     active_live_id: activeLiveId

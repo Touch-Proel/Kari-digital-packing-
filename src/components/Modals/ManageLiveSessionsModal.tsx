@@ -37,12 +37,61 @@ export function ManageLiveSessionsModal({
 
   if (!isOpen) return null;
 
-  // Filter sessions
-  const filteredSessions = liveSessions.filter(s => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return s.live_id.toLowerCase().includes(q) || (s.created_at && s.created_at.includes(q));
-  });
+  // Helper to extract numeric timestamp for accurate sorting
+  const getSessionTimestamp = (created_at?: string, live_id?: string): number => {
+    if (created_at) {
+      const t = new Date(created_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+
+      const m = created_at.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (m) {
+        const timeMatch = created_at.match(/(\d{1,2}):(\d{1,2})/);
+        const hours = timeMatch ? parseInt(timeMatch[1], 10) : 0;
+        const minutes = timeMatch ? parseInt(timeMatch[2], 10) : 0;
+        const parsed = new Date(parseInt(m[3], 10), parseInt(m[2], 10) - 1, parseInt(m[1], 10), hours, minutes).getTime();
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+
+    if (live_id) {
+      const dateMatch = live_id.match(/(\d{4})(\d{2})(\d{2})/);
+      if (dateMatch) {
+        const parsed = new Date(parseInt(dateMatch[1], 10), parseInt(dateMatch[2], 10) - 1, parseInt(dateMatch[3], 10)).getTime();
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+
+      if (/^\d+$/.test(live_id)) {
+        const num = parseInt(live_id.slice(0, 13), 10);
+        if (!isNaN(num) && num > 100000000000) return num;
+      }
+    }
+    return 0;
+  };
+
+  // Filter & sort sessions:
+  // 1. ACTIVE session ALWAYS at the very top (when active រត់ទៅ top)
+  // 2. Newer dates first (ថ្ងៃថ្មីនៅ top / Descending order)
+  // 3. Fallback: alphanumeric live_id descending
+  const filteredSessions = [...liveSessions]
+    .filter(s => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return s.live_id.toLowerCase().includes(q) || (s.created_at && s.created_at.includes(q));
+    })
+    .sort((a, b) => {
+      const aIsActive = a.live_id === activeLiveId || a.is_active;
+      const bIsActive = b.live_id === activeLiveId || b.is_active;
+      if (aIsActive && !bIsActive) return -1;
+      if (!aIsActive && bIsActive) return 1;
+
+      const tA = getSessionTimestamp(a.created_at, a.live_id);
+      const tB = getSessionTimestamp(b.created_at, b.live_id);
+      if (tA !== tB) {
+        return tB - tA; // Newer date on top
+      }
+
+      return b.live_id.localeCompare(a.live_id, undefined, { numeric: true });
+    });
 
   const handleDeleteSession = async (liveId: string) => {
     setDeletingId(liveId);
