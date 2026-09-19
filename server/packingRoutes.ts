@@ -862,8 +862,24 @@ router.post('/edit_basket_item_code', (req: Request, res: Response) => {
       item.price = new_price;
     }
   } else {
-    // Same code, update price if provided
-    if (typeof new_price === 'number' && new_price > 0) {
+    // Same code: look up product in stock and sync latest image, price, and name
+    const liveId = inv.live_id || activeLiveId;
+    const sameProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanNewCode)
+      || products.find(p => p.code.toUpperCase() === cleanNewCode);
+    if (sameProd) {
+      if (sameProd.image_file && sameProd.image_file.trim() !== '') {
+        item.image_file = sameProd.image_file.trim();
+      }
+      if (typeof sameProd.price === 'number' && sameProd.price > 0) {
+        item.price = sameProd.price;
+      } else if (typeof new_price === 'number' && new_price > 0) {
+        item.price = new_price;
+      }
+      if (sameProd.name && sameProd.name.trim() !== '') {
+        item.product_name = sameProd.name.trim();
+      }
+      item.product_id = sameProd.id;
+    } else if (typeof new_price === 'number' && new_price > 0) {
       item.price = new_price;
     }
   }

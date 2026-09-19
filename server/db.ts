@@ -389,8 +389,8 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string): number {
             item.price = prod.price;
             invChanged = true;
           }
-          // Auto-sync photo if stock has photo and item is missing it
-          if (prod.image_file && prod.image_file.trim() !== '' && (!item.image_file || item.image_file.trim() === '')) {
+          // Auto-sync photo if stock has photo and item does not match latest stock photo
+          if (prod.image_file && prod.image_file.trim() !== '' && item.image_file !== prod.image_file.trim()) {
             item.image_file = prod.image_file.trim();
             invChanged = true;
           }

@@ -1330,9 +1330,9 @@ function BasketCardComponent({
               const isCurrentLiveOrder = !activeLiveId || invoice.live_id === activeLiveId;
 
               // Session-Isolated Image with real-time quick edit preview
-              const displayImage = (item.image_file && item.image_file.trim() !== '' && !isEditingThisCode)
-                ? item.image_file
-                : (isCurrentLiveOrder && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' ? (activeProd?.image_file || item.image_file) : item.image_file);
+              const displayImage = (isCurrentLiveOrder && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' && activeProd?.image_file && activeProd.image_file.trim() !== '')
+                ? activeProd.image_file
+                : (item.image_file && item.image_file.trim() !== '' ? item.image_file : (activeProd?.image_file || ''));
 
               const displayPrice = isEditingThisCode && typeof activeProd?.price === 'number'
                 ? activeProd.price
