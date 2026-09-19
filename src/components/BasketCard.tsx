@@ -50,11 +50,13 @@ interface BasketCardProps {
   onDataChanged: () => void;
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
   onOptimisticZoneUpdate?: (invoiceId: number, newZone: 'PP' | 'PROVINCE', serverTotal?: number, serverShipping?: number) => void;
+  onOptimisticAddItem?: (invoiceId: number, code: string, qty: number, commentText?: string, price?: number) => void;
+  onUpdateInvoice?: (inv: Invoice) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onUndispatch?: (inv: Invoice) => void;
 }
 
-export function BasketCard({
+function BasketCardComponent({
   invoice,
   currentMasterStage,
   myPackerName,
@@ -70,6 +72,8 @@ export function BasketCard({
   onDataChanged,
   onOptimisticItemUpdate,
   onOptimisticZoneUpdate,
+  onOptimisticAddItem,
+  onUpdateInvoice,
   onShowToast,
   onUndispatch
 }: BasketCardProps) {
@@ -252,7 +256,11 @@ export function BasketCard({
       if (res.ok) {
         const data = await res.json();
         if (data && data.success) {
-          onOptimisticZoneUpdate?.(invoice.invoice_id, newZone, data.total_amount, data.shipping_fee);
+          if (data.invoice && onUpdateInvoice) {
+            onUpdateInvoice(data.invoice);
+          } else {
+            onOptimisticZoneUpdate?.(invoice.invoice_id, newZone, data.total_amount, data.shipping_fee);
+          }
         }
       } else {
         // Rollback on server error
@@ -501,7 +509,9 @@ export function BasketCard({
       const data = await res.json();
       if (data.success) {
         onShowToast(`✅ [${it.product_code}] ចំនួន៖ ${targetQty}`);
-        onDataChanged();
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        }
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចកែប្រែបានទេ'}`, 'error');
@@ -540,7 +550,9 @@ export function BasketCard({
       const data = await res.json();
       if (data.success) {
         onShowToast(newQty === 0 ? `🗑️ បានលុបកូដ [${code}]` : `✅ [${code}] ចំនួន៖ ${newQty}`);
-        onDataChanged();
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        }
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចកែបានទេ'}`, 'error');
@@ -599,7 +611,9 @@ export function BasketCard({
       const data = await res.json();
       if (data.success) {
         onShowToast(`🗑️ បានដកកូដ [${it.product_code}] ចេញពីកន្ត្រក #${invoice.basket_no}!`);
-        onDataChanged();
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        }
       } else {
         onShowToast(`⚠️ ${data.message || 'មិនអាចលុបបានទេ'}`, 'error');
         onDataChanged();
@@ -656,7 +670,11 @@ export function BasketCard({
         playSuccessFanfare();
         onShowToast(data.message || `✅ បានកែប្រែកូដ [${targetCode}] (តម្លៃ $${finalPrice.toFixed(2)}) រួចរាល់!`, 'success');
         setEditingCodeItem(null);
-        onDataChanged();
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        } else {
+          onDataChanged();
+        }
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចកែប្រែកូដបានទេ'}`, 'error');
@@ -698,7 +716,11 @@ export function BasketCard({
       if (data.success) {
         playSuccessFanfare();
         onShowToast(data.message || `✅ បានប្តូរទៅកូដ [${targetCode}] រួចរាល់!`, 'success');
-        onDataChanged();
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        } else {
+          onDataChanged();
+        }
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចប្តូរកូដបានទេ'}`, 'error');
@@ -724,6 +746,11 @@ export function BasketCard({
       return;
     }
 
+    // Instant 0ms Optimistic UI Add & Fanfare sound!
+    playSuccessFanfare();
+    const stockProd = productMap ? productMap[finalCode.toUpperCase()] : undefined;
+    onOptimisticAddItem?.(invoice.invoice_id, finalCode, finalQty, commentText, stockProd?.price);
+
     try {
       const res = await fetch('/api/add_item_to_invoice', {
         method: 'POST',
@@ -740,14 +767,17 @@ export function BasketCard({
       if (!data.success) {
         playWarningBuzzer();
         onShowToast(`❌ មិនអាចកាត់បានទេ៖ ${data.message}`, 'error');
+        onDataChanged(); // Revert from server
       } else {
-        playSuccessFanfare();
         onShowToast(`⚡ កាត់ [${finalCode} x${finalQty}] ចូលកន្ត្រក #${invoice.basket_no} រួចរាល់!`);
-        onDataChanged();
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        }
       }
     } catch (e) {
       playWarningBuzzer();
       onShowToast('⚠️ ដាច់សេវា WiFi!', 'error');
+      onDataChanged();
     }
   };
 
@@ -760,6 +790,16 @@ export function BasketCard({
       return;
     }
 
+    // Instant 0ms Optimistic UI Add & Fanfare sound!
+    playSuccessFanfare();
+    const stockProd = productMap ? productMap[cleanCode] : undefined;
+    const addQty = manualQtyInput || 1;
+    onOptimisticAddItem?.(invoice.invoice_id, cleanCode, addQty, manualCommentSource || undefined, stockProd?.price);
+    setIsAddingManualCode(false);
+    setManualCodeInput('');
+    setManualQtyInput(1);
+    setManualCommentSource('');
+
     try {
       const res = await fetch('/api/add_item_to_invoice', {
         method: 'POST',
@@ -767,7 +807,7 @@ export function BasketCard({
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
           code: cleanCode,
-          quantity: manualQtyInput || 1,
+          quantity: addQty,
           comment_text: manualCommentSource || undefined,
           packer_name: myPackerName
         })
@@ -776,17 +816,16 @@ export function BasketCard({
       if (!data.success) {
         playWarningBuzzer();
         onShowToast(`❌ មិនអាចកាត់បានទេ៖ ${data.message}`, 'error');
+        onDataChanged(); // Revert from server
       } else {
-        playSuccessFanfare();
-        onShowToast(`✅ បានថែម [${cleanCode} x${manualQtyInput}] ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id}!`);
-        setIsAddingManualCode(false);
-        setManualCodeInput('');
-        setManualQtyInput(1);
-        setManualCommentSource('');
-        onDataChanged();
+        onShowToast(`✅ បានថែម [${cleanCode} x${addQty}] ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id}!`);
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        }
       }
     } catch (e) {
       onShowToast('Error adding item', 'error');
+      onDataChanged();
     }
   };
 
@@ -804,7 +843,11 @@ export function BasketCard({
       const data = await res.json();
       if (data.success) {
         onShowToast('✅ បានសម្អាតចេញពីបញ្ជី N/A (រក្សាទុកក្នុងប្រវត្តិ)');
-        onDataChanged();
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice);
+        } else {
+          onDataChanged();
+        }
       }
     } catch {
       onShowToast('Error dismissing comment', 'error');
@@ -2151,3 +2194,24 @@ export function BasketCard({
     </div>
   );
 }
+
+export const BasketCard = React.memo(BasketCardComponent, (prevProps, nextProps) => {
+  if (prevProps.invoice !== nextProps.invoice) return false;
+  if (prevProps.currentMasterStage !== nextProps.currentMasterStage) return false;
+  if (prevProps.myPackerName !== nextProps.myPackerName) return false;
+  if (prevProps.activeLiveId !== nextProps.activeLiveId) return false;
+  if (prevProps.productMap !== nextProps.productMap) return false;
+
+  // Check if any checked state for this invoice's items changed
+  const inv = nextProps.invoice;
+  for (const it of inv.items || []) {
+    const key = `${inv.invoice_id}_${it.product_code}`;
+    if (!!prevProps.checkedState[key] !== !!nextProps.checkedState[key]) {
+      return false;
+    }
+  }
+
+  return true;
+});
+
+export default BasketCard;

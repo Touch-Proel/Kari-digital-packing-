@@ -359,6 +359,7 @@ export function recalculateInvoice(inv: Invoice) {
   inv.shipping_fee = finalShipping;
   // Total is strictly (Subtotal + Shipping)
   inv.total_amount = Number((itemsSum + finalShipping).toFixed(2));
+  inv.updated_at = new Date().toISOString();
 }
 
 export async function loadDatabaseFromDisk() {

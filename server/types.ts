@@ -57,6 +57,7 @@ export interface Invoice {
   locked_by?: string | null;
   lock_timestamp?: number;
   lock_start_time?: number;
+  updated_at?: string;
   items: OrderItem[];
   unmatched_comments?: string[];
   comments?: string[];

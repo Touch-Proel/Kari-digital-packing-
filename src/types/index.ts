@@ -53,6 +53,7 @@ export interface Invoice {
   msg_error?: string;
   is_locked?: boolean;
   locked_by?: string | null;
+  updated_at?: string;
   items: OrderItem[];
   unmatched_comments?: string[];
   comments?: string[];

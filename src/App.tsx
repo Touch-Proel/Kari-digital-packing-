@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, CSSProperties } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, CSSProperties } from 'react';
 import {
   Invoice,
   Product,
@@ -47,6 +47,7 @@ export default function App() {
   });
   const [activePage, setActivePage] = useState<FacebookPage | null>(null);
   const [currentRevision, setCurrentRevision] = useState<number>(0);
+  const currentRevisionRef = useRef<number>(0);
   const [networkOnline, setNetworkOnline] = useState<boolean>(true);
 
   // Workflow & UI Filters
@@ -83,14 +84,14 @@ export default function App() {
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
   const toastTimeoutRef = useRef<any>(null);
 
-  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+  const showToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
     setToastMessage(msg);
     setToastType(type);
     clearTimeout(toastTimeoutRef.current);
     toastTimeoutRef.current = setTimeout(() => {
       setToastMessage(null);
     }, 2200);
-  };
+  }, []);
 
   // Modals visibility
   const [isQCModalOpen, setIsQCModalOpen] = useState(false);
@@ -153,7 +154,7 @@ export default function App() {
     }
   };
 
-  const handleUndispatch = async (inv: Invoice) => {
+  const handleUndispatch = useCallback(async (inv: Invoice) => {
     try {
       const res = await fetch('/api/undispatch_pack', {
         method: 'POST',
@@ -173,34 +174,53 @@ export default function App() {
     } catch (e) {
       showToast('⚠️ បរាជ័យក្នុងការតភ្ជាប់បណ្តាញ!', 'error');
     }
-  };
+  }, [showToast]);
+
+  const handleOpenQCModal = useCallback((i: Invoice) => {
+    setQcInvoice(i);
+    setIsQCModalOpen(true);
+  }, []);
+
+  const handleOpenZoomModal = useCallback((c: string, n: string, img?: string, pr?: number, sq?: number) => {
+    setZoomCode(c);
+    setZoomName(n);
+    setZoomImageUrl(img);
+    setZoomPrice(pr);
+    setZoomStockQty(sq);
+    setIsZoomModalOpen(true);
+  }, []);
+
+  const handleDataChanged = useCallback(() => {
+    fetchInvoices();
+    fetchStock();
+  }, []);
 
   // Receipt Modal State
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [receiptInvoice, setReceiptInvoice] = useState<Invoice | null>(null);
 
-  const handleOpenReceiptModal = (inv: Invoice) => {
+  const handleOpenReceiptModal = useCallback((inv: Invoice) => {
     setReceiptInvoice(inv);
     setIsReceiptModalOpen(true);
-  };
+  }, []);
 
   // VIP Invoice Modal State
   const [isVipModalOpen, setIsVipModalOpen] = useState(false);
   const [vipInvoice, setVipInvoice] = useState<Invoice | null>(null);
 
-  const handleOpenVipModal = (inv: Invoice) => {
+  const handleOpenVipModal = useCallback((inv: Invoice) => {
     setVipInvoice(inv);
     setIsVipModalOpen(true);
-  };
+  }, []);
 
   // Bakong Dynamic KHQR Modal State
   const [isKHQRModalOpen, setIsKHQRModalOpen] = useState(false);
   const [khqrInvoice, setKhqrInvoice] = useState<Invoice | null>(null);
 
-  const handleOpenKHQRModal = (inv?: Invoice) => {
+  const handleOpenKHQRModal = useCallback((inv?: Invoice) => {
     setKhqrInvoice(inv || null);
     setIsKHQRModalOpen(true);
-  };
+  }, []);
 
   // Fast Product Lookup Map for Instant Basket Thumbnail & Image Matching
   const productMap = useMemo(() => {
@@ -248,7 +268,7 @@ export default function App() {
     showToast(`👤 ប្តូរឈ្មោះអ្នកច្រក៖ ${newName}`);
   };
 
-  const handleToggleItemCheck = (invId: number, code: string) => {
+  const handleToggleItemCheck = useCallback((invId: number, code: string) => {
     const key = `${invId}_${code}`;
     setCheckedState(prev => {
       const next = { ...prev, [key]: !prev[key] };
@@ -256,10 +276,10 @@ export default function App() {
       localStorage.setItem('checkedItemsState', JSON.stringify(next));
       return next;
     });
-  };
+  }, []);
 
   // Immediate Optimistic Update for 0ms Smoothness (No Lag)
-  const handleOptimisticItemUpdate = (invoiceId: number, code: string, targetQty: number) => {
+  const handleOptimisticItemUpdate = useCallback((invoiceId: number, code: string, targetQty: number) => {
     setInvoices(prev =>
       prev.map(inv => {
         if (inv.invoice_id !== invoiceId) return inv;
@@ -279,14 +299,15 @@ export default function App() {
         return {
           ...inv,
           items: updatedItems,
-          total_amount: total
+          total_amount: total,
+          updated_at: new Date().toISOString()
         };
       })
     );
-  };
+  }, []);
 
   // Immediate Optimistic Zone Update for Silky-Smooth 0ms Switching
-  const handleOptimisticZoneUpdate = (
+  const handleOptimisticZoneUpdate = useCallback((
     invoiceId: number,
     newZone: 'PP' | 'PROVINCE',
     serverTotal?: number,
@@ -295,7 +316,7 @@ export default function App() {
     setInvoices(prev =>
       prev.map(inv => {
         if (inv.invoice_id !== invoiceId) return inv;
-        const shipping = serverShipping !== undefined ? serverShipping : (inv.shipping_fee || 2.0);
+        const shipping = serverShipping !== undefined ? serverShipping : (inv.shipping_fee || (newZone === 'PP' ? 1.25 : 2.0));
         const subtotal = (inv.items || []).reduce((s, it) => s + (it.price * it.quantity), 0);
         const total = serverTotal !== undefined ? serverTotal : (subtotal + shipping);
         return {
@@ -303,17 +324,81 @@ export default function App() {
           location_zone: newZone,
           location_label: newZone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត',
           shipping_fee: shipping,
-          total_amount: total
+          total_amount: total,
+          updated_at: new Date().toISOString()
         };
       })
     );
-  };
+  }, []);
+
+  // Optimistic Add Item from comment or manual (0ms instant response)
+  const handleOptimisticAddItem = useCallback((
+    invoiceId: number,
+    code: string,
+    qty: number,
+    commentText?: string,
+    price?: number
+  ) => {
+    setInvoices(prev =>
+      prev.map(inv => {
+        if (inv.invoice_id !== invoiceId) return inv;
+        const cleanCode = code.toUpperCase();
+        let updatedItems = [...(inv.items || [])];
+        const existingIdx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanCode);
+        const itemPrice = price !== undefined ? price : 5.0;
+
+        if (existingIdx !== -1) {
+          updatedItems[existingIdx] = {
+            ...updatedItems[existingIdx],
+            quantity: updatedItems[existingIdx].quantity + qty
+          };
+        } else {
+          updatedItems.push({
+            id: Date.now(),
+            invoice_id: invoiceId,
+            product_code: cleanCode,
+            product_name: cleanCode,
+            quantity: qty,
+            price: itemPrice,
+            is_packed: false,
+            item_comment: commentText
+          });
+        }
+
+        let updatedUnmatched = inv.unmatched_comments;
+        if (commentText && updatedUnmatched) {
+          updatedUnmatched = updatedUnmatched.filter(c => c.trim() !== commentText.trim());
+        }
+
+        const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+        const ship = inv.is_free_ship ? 0 : (inv.shipping_fee || (inv.location_zone === 'PROVINCE' ? 2.0 : 1.25));
+        return {
+          ...inv,
+          items: updatedItems,
+          unmatched_comments: updatedUnmatched,
+          total_amount: subtotal + ship,
+          updated_at: new Date().toISOString()
+        };
+      })
+    );
+  }, []);
+
+  // Sync single updated invoice directly without full refetch
+  const handleUpdateInvoice = useCallback((updatedInv: Invoice) => {
+    setInvoices(prev => {
+      const idx = prev.findIndex(inv => inv.invoice_id === updatedInv.invoice_id);
+      if (idx === -1) return [updatedInv, ...prev];
+      const copy = [...prev];
+      copy[idx] = updatedInv;
+      return copy;
+    });
+  }, []);
 
   // Data Fetching: Invoices with 0ms revision check
   const fetchInvoices = async (overrideLiveId?: string, overrideRev?: number) => {
     try {
       const targetLive = overrideLiveId !== undefined ? overrideLiveId : selectedLiveId;
-      const targetRev = overrideRev !== undefined ? overrideRev : currentRevision;
+      const targetRev = overrideRev !== undefined ? overrideRev : currentRevisionRef.current;
       const res = await fetch(`/api/invoices?live_id=${encodeURIComponent(targetLive)}&rev=${targetRev}&t=${Date.now()}`);
       if (!res.ok) {
         setNetworkOnline(false);
@@ -326,7 +411,10 @@ export default function App() {
       }
       if (json.data) {
         setInvoices(json.data);
-        if (json.revision) setCurrentRevision(json.revision);
+        if (json.revision) {
+          currentRevisionRef.current = json.revision;
+          setCurrentRevision(json.revision);
+        }
       }
     } catch (e) {
       setNetworkOnline(false);
@@ -492,7 +580,7 @@ export default function App() {
       clearInterval(packerTimer);
       clearInterval(backlogTimer);
     };
-  }, [selectedLiveId, currentRevision, packerName]);
+  }, [selectedLiveId, packerName]);
 
   // Barcode Scanner Listener
   useEffect(() => {
@@ -591,13 +679,23 @@ export default function App() {
     return true;
   });
 
-  // Sub-filter
+  // Sub-filter & Sorting (Newest date / most active baskets at the top)
   if (activeSubFilter === 'PP') {
     filtered = filtered.filter(i => i.location_zone === 'PP');
   } else if (activeSubFilter === 'PROVINCE') {
     filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
-  } else if (activeSubFilter === 'AMOUNT_DESC') {
+  }
+
+  if (activeSubFilter === 'AMOUNT_DESC') {
     filtered = [...filtered].sort((a, b) => b.total_amount - a.total_amount);
+  } else {
+    // Newest date / most recently active baskets run to the top!
+    filtered = [...filtered].sort((a, b) => {
+      const timeA = new Date((a as any).updated_at || a.created_at || 0).getTime();
+      const timeB = new Date((b as any).updated_at || b.created_at || 0).getTime();
+      if (timeB !== timeA) return timeB - timeA;
+      return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+    });
   }
 
   // Search filter
@@ -734,27 +832,16 @@ export default function App() {
                 productMap={productMap}
                 activeLiveId={selectedLiveId}
                 onToggleItemCheck={handleToggleItemCheck}
-                onOpenQCModal={i => {
-                  setQcInvoice(i);
-                  setIsQCModalOpen(true);
-                }}
+                onOpenQCModal={handleOpenQCModal}
                 onOpenReceiptModal={handleOpenReceiptModal}
                 onOpenVipModal={handleOpenVipModal}
                 onOpenKHQRModal={handleOpenKHQRModal}
-                onOpenZoomModal={(c, n, img, pr, sq) => {
-                  setZoomCode(c);
-                  setZoomName(n);
-                  setZoomImageUrl(img);
-                  setZoomPrice(pr);
-                  setZoomStockQty(sq);
-                  setIsZoomModalOpen(true);
-                }}
-                onDataChanged={() => {
-                  fetchInvoices();
-                  fetchStock();
-                }}
+                onOpenZoomModal={handleOpenZoomModal}
+                onDataChanged={handleDataChanged}
                 onOptimisticItemUpdate={handleOptimisticItemUpdate}
                 onOptimisticZoneUpdate={handleOptimisticZoneUpdate}
+                onOptimisticAddItem={handleOptimisticAddItem}
+                onUpdateInvoice={handleUpdateInvoice}
                 onShowToast={showToast}
                 onUndispatch={handleUndispatch}
               />

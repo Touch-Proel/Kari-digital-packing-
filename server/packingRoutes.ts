@@ -400,7 +400,13 @@ router.post('/update_invoice_zone', (req: Request, res: Response) => {
   recalculateInvoice(inv);
   bumpDataRevision();
 
-  res.json({ success: true, zone: inv.location_zone, shipping_fee: inv.shipping_fee, total_amount: inv.total_amount });
+  res.json({
+    success: true,
+    zone: inv.location_zone,
+    shipping_fee: inv.shipping_fee,
+    total_amount: inv.total_amount,
+    invoice: inv
+  });
 });
 
 // POST /api/invoices/:invoice_id/shipping or /api/update_invoice_shipping
@@ -912,7 +918,8 @@ router.post('/edit_basket_item_code', (req: Request, res: Response) => {
   res.json({
     success: true,
     message: `បានកែប្រែកូដ [${cleanOldCode}] ទៅជា [${item.product_code}] រួចរាល់!`,
-    item
+    item,
+    invoice: inv
   });
 });
 
@@ -965,7 +972,8 @@ router.post('/set_item_qty_direct', (req: Request, res: Response) => {
   res.json({
     success: true,
     message: 'កែប្រែចំនួនជោគជ័យ',
-    item: { code: cleanCode, quantity: targetQty }
+    item: { code: cleanCode, quantity: targetQty },
+    invoice: inv
   });
 });
 
@@ -1050,7 +1058,8 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
       quantity: finalQty,
       price: prod.price,
       total_amount: inv.total_amount
-    }
+    },
+    invoice: inv
   });
 });
 
@@ -1070,7 +1079,8 @@ router.post('/dismiss_unmatched_comment', (req: Request, res: Response) => {
 
   res.json({
     success: true,
-    message: 'បានបិទខមិននេះរួចរាល់ (រក្សាទុកក្នុងប្រវត្តិ)'
+    message: 'បានបិទខមិននេះរួចរាល់ (រក្សាទុកក្នុងប្រវត្តិ)',
+    invoice: inv
   });
 });
 
