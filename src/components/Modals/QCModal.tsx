@@ -99,7 +99,7 @@ export function QCModal({
 
         {/* Body Items List */}
         <div className="p-3 overflow-y-auto flex flex-col gap-2.5 max-h-[60vh]">
-          {(invoice.items || []).map(it => {
+          {(invoice.items || []).map((it, idx) => {
             const isVerified = verifiedMap[it.product_code] ?? true;
             const codeUpper = (it.product_code || '').trim().toUpperCase();
             const prod = productMap ? productMap[codeUpper] : undefined;
@@ -107,7 +107,7 @@ export function QCModal({
 
             return (
               <div
-                key={it.id}
+                key={it.id || `${it.product_code}-${idx}`}
                 onClick={() => toggleItem(it.product_code)}
                 className={`p-2.5 rounded-2xl flex gap-3 items-center cursor-pointer transition-all border ${
                   isVerified

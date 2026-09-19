@@ -136,6 +136,7 @@ export default function App() {
   // Cross-Live Backlog Alert & Modal State
   const [isBacklogModalOpen, setIsBacklogModalOpen] = useState(false);
   const [backlogCount, setBacklogCount] = useState(0);
+  const [backlogRefreshTrigger, setBacklogRefreshTrigger] = useState(0);
 
   const fetchBacklogCount = async (targetLiveId?: string) => {
     try {
@@ -700,10 +701,12 @@ export default function App() {
           onShowToast={showToast}
         />
 
-        {/* 3. Gamified HUD Strip */}
+        {/* 3. Gamified HUD Strip with Integrated Dynamic Backlog Alert */}
         <GamifiedHud
           topPackerName={topPackerName}
           mySessionPacks={mySessionPacks}
+          backlogCount={backlogCount}
+          onOpenBacklog={() => setIsBacklogModalOpen(true)}
           onOpenLeaderboard={() => {
             setPackerModalMode('leaderboard');
             setIsPackerModalOpen(true);
@@ -834,6 +837,8 @@ export default function App() {
         onDispatchSuccess={() => {
           fetchInvoices();
           fetchPackerStats();
+          fetchBacklogCount(selectedLiveId);
+          setBacklogRefreshTrigger(prev => prev + 1);
         }}
         onShowToast={showToast}
       />
@@ -1074,6 +1079,7 @@ export default function App() {
           fetchBacklogCount(selectedLiveId);
         }}
         currentLiveId={selectedLiveId}
+        refreshKey={backlogRefreshTrigger}
         onOpenQCModal={inv => {
           setQcInvoice(inv);
           setIsQCModalOpen(true);

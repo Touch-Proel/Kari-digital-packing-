@@ -6,6 +6,7 @@ interface BacklogModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentLiveId: string;
+  refreshKey?: number;
   onOpenQCModal: (inv: Invoice) => void;
   onOpenReceiptModal: (inv: Invoice) => void;
   onShowToast: (msg: string, type?: 'success' | 'error' | 'warning') => void;
@@ -16,6 +17,7 @@ export function BacklogModal({
   isOpen,
   onClose,
   currentLiveId,
+  refreshKey,
   onOpenQCModal,
   onOpenReceiptModal,
   onShowToast,
@@ -50,7 +52,7 @@ export function BacklogModal({
     if (isOpen) {
       fetchBacklog();
     }
-  }, [isOpen, currentLiveId]);
+  }, [isOpen, currentLiveId, refreshKey]);
 
   if (!isOpen) return null;
 
@@ -106,7 +108,7 @@ export function BacklogModal({
   const liveIds = Object.keys(summaryByLive);
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[999999] flex items-center justify-center p-2.5 sm:p-4 animate-fadeIn">
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[80000] flex items-center justify-center p-2.5 sm:p-4 animate-fadeIn">
       <div className="bg-[#0B1325] border-2 border-rose-500/80 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-[0_0_40px_rgba(244,63,94,0.3)]">
         {/* Header */}
         <div className="p-3.5 bg-gradient-to-r from-rose-950 via-red-950 to-[#0B1325] border-b-[1.5px] border-rose-500/60 flex justify-between items-center">

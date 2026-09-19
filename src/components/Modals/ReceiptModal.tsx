@@ -726,7 +726,7 @@ export function ReceiptModal({
     : null);
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[99999] flex items-center justify-center p-3 animate-fadeIn">
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[999999] flex items-center justify-center p-3 animate-fadeIn">
       <div className="bg-[#0B1426] border border-cyan-500/60 rounded-3xl w-full max-w-lg flex flex-col max-h-[94vh] shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-[#070D1B]">

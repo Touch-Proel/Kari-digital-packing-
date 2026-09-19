@@ -93,7 +93,7 @@ export function ImageZoomModal({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 bg-black/90 backdrop-blur-md z-[999999] flex items-center justify-center p-3 animate-fadeIn"
+      className="fixed inset-0 bg-black/90 backdrop-blur-md z-[1000000] flex items-center justify-center p-3 animate-fadeIn"
     >
       <div
         onClick={e => e.stopPropagation()}

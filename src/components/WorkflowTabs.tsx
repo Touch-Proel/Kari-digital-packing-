@@ -31,37 +31,6 @@ export function WorkflowTabs({
 }: WorkflowTabsProps) {
   return (
     <div className="flex flex-col gap-2.5">
-      {/* 🚨 CROSS-LIVE UNFINISHED BACKLOG ALERT BANNER */}
-      {backlogCount > 0 && (
-        <div
-          onClick={onOpenBacklog}
-          className="bg-gradient-to-r from-rose-950/90 via-red-950/85 to-amber-950/90 border-2 border-rose-500/80 rounded-2xl p-2.5 flex items-center justify-between shadow-[0_0_22px_rgba(244,63,94,0.35)] cursor-pointer hover:border-rose-400 active:scale-[0.99] transition-all group"
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-8 h-8 rounded-xl bg-rose-500/25 border border-rose-400/50 flex items-center justify-center text-base flex-shrink-0 animate-bounce">
-              🚨
-            </span>
-            <div className="flex flex-col text-left min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-black text-rose-200 text-xs sm:text-sm">
-                  ឥវ៉ាន់សល់ពី Live ចាស់ៗ ៖
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white font-mono font-black text-xs shadow-md">
-                  {backlogCount} នាក់
-                </span>
-              </div>
-              <span className="text-[10px] sm:text-[11px] text-rose-300/80 font-medium truncate">
-                ភ្ញៀវបង់លុយរួចហើយ តែមិនទាន់ចេញដឹក! ចុចដើម្បីពិនិត្យ & ចេញដឹក
-              </span>
-            </div>
-          </div>
-          <div className="px-3 py-1.5 rounded-xl bg-rose-600 group-hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1 shadow-md whitespace-nowrap flex-shrink-0 ml-2">
-            <span>ពិនិត្យ</span>
-            <span>➔</span>
-          </div>
-        </div>
-      )}
-
       {/* 🚀 TIER 1: 4-STAGE WORKFLOW TABS */}
       <div className="grid grid-cols-4 gap-1.5 bg-[#0B1325]/95 p-1.5 rounded-2xl border-[1.5px] border-sky-400/25 shadow-xl">
         {/* Tab 1: Unpicked */}
