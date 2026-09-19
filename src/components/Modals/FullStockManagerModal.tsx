@@ -48,26 +48,10 @@ export function FullStockManagerModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'ALL' | 'IN_STOCK' | 'LOW' | 'OUT'>('ALL');
   const [sortOption, setSortOption] = useState<ProductSortOption>('CODE_ASC');
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [updatingCode, setUpdatingCode] = useState<string | null>(null);
   const [deletingCode, setDeletingCode] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [removeFromBasketsToo, setRemoveFromBasketsToo] = useState(true);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const checkSyncStatus = () => {
-      fetch('/api/telegram/auto_sync')
-        .then(res => res.json())
-        .then(data => {
-          if (data && typeof data.enabled === 'boolean') {
-            setAutoSyncEnabled(data.enabled);
-          }
-        })
-        .catch(() => {});
-    };
-    checkSyncStatus();
-  }, [isOpen]);
 
   const outCount = useMemo(() => products.filter(p => p.stock_qty <= 0).length, [products]);
   const lowCount = useMemo(() => products.filter(p => p.stock_qty > 0 && p.stock_qty <= 5).length, [products]);
@@ -269,15 +253,10 @@ export function FullStockManagerModal({
             <button
               type="button"
               onClick={() => onOpenStockSync('telegram')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm border flex-shrink-0 ${
-                autoSyncEnabled
-                  ? 'bg-sky-950 hover:bg-sky-900 text-cyan-300 border-sky-500/80'
-                  : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border-slate-700'
-              }`}
+              className="bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-sky-500/60 px-3 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm flex-shrink-0"
+              title="ទាញស្តុកពី Telegram"
             >
               <span>✈️ Telegram</span>
-              <span className={`w-2 h-2 rounded-full ${autoSyncEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-              <span className="font-mono text-[10px]">{autoSyncEnabled ? 'AUTO' : 'OFF'}</span>
             </button>
 
             {/* Export */}

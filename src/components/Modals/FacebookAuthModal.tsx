@@ -171,15 +171,10 @@ export function FacebookAuthModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ live_id: liveId })
       });
-      await fetch('/api/fb/live_auto_sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: true, trigger_now: true, live_id: liveId })
-      });
     } catch (e) {
       console.warn('Set active live warning:', e);
     }
-    onShowToast(`🎥 បានជ្រើសរើស Live #${liveId} & បើក Real-Time Auto-Sync!`);
+    onShowToast(`🎥 បានជ្រើសរើស Live #${liveId} រួចរាល់!`);
     if (onSyncSuccess) {
       onSyncSuccess(liveId, 0, 0);
     }
@@ -413,34 +408,6 @@ export function FacebookAuthModal({
                 })}
               </div>
             )}
-
-            {/* Real-time Live Comments Auto-Sync Banner */}
-            <div className="bg-gradient-to-r from-emerald-950/50 via-slate-900 to-sky-950/50 border border-emerald-500/40 rounded-xl p-2.5 flex items-center justify-between shadow-md">
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-3 w-3 flex-shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                </span>
-                <div>
-                  <div className="text-xs font-black text-emerald-400 flex items-center gap-1.5">
-                    <span>🔴 Real-Time Live Comments Auto-Sync</span>
-                    <span className="bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[9px] px-1.5 py-0.2 rounded font-mono">3 SEC</span>
-                  </div>
-                  <div className="text-[10px] text-slate-300">
-                    ប្រព័ន្ធទាញខំមិន Real-time ដោយស្វ័យប្រវត្តិ & កាត់ចូលកន្ត្រកភ្លាមៗ
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={handleSyncComments}
-                disabled={syncingComments}
-                className="bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[11px] px-3 py-1.5 rounded-lg active:scale-95 transition-all shadow cursor-pointer whitespace-nowrap flex items-center gap-1"
-                title="ទាញយកខំមិនភ្លាមៗ"
-              >
-                <span>{syncingComments ? '⏳' : '⚡'}</span>
-                <span>ទាញឥឡូវ</span>
-              </button>
-            </div>
 
             {/* Direct Custom Post/Live ID Input */}
             <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1.5">

@@ -486,53 +486,11 @@ export default function App() {
     const packerTimer = setInterval(fetchPackerStats, 6000);
     const backlogTimer = setInterval(() => fetchBacklogCount(selectedLiveId), 6000);
 
-    // 🔴 1. Live Comments Real-time Auto-Sync Poller (Every 3s during live stream)
-    const liveCommentsTimer = setInterval(async () => {
-      try {
-        const res = await fetch('/api/fb/live_auto_sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ trigger_now: true, live_id: selectedLiveId })
-        });
-        const data = await res.json();
-        if (data.success && data.new_orders > 0) {
-          playSuccessFanfare();
-          showToast(`⚡ កាត់ចូលកន្ត្រក ${data.new_orders} ជួរថ្មីស្វ័យប្រវត្តិនៃ Live #${selectedLiveId.length > 10 ? selectedLiveId.slice(-8) : selectedLiveId}!`);
-          fetchInvoices();
-          fetchStock();
-          fetchLiveSessions();
-        }
-      } catch (err) {
-        // Silent catch for background poller
-      }
-    }, 3000);
-
-    // 🔄 2. Telegram Stock Real-time Auto-Sync Poller (Every 8s for new codes, photos, prices)
-    const telegramStockTimer = setInterval(async () => {
-      try {
-        const res = await fetch('/api/telegram/auto_sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ trigger_now: true })
-        });
-        const data = await res.json();
-        if (data.success && data.imported > 0) {
-          playSuccessFanfare();
-          showToast(`🎉 បានអាប់ដេតកូដ/រូបភាព/តម្លៃស្តុក ${data.imported} មុខថ្មីស្វ័យប្រវត្តិពី Telegram!`);
-          fetchStock();
-        }
-      } catch (err) {
-        // Silent catch for background poller
-      }
-    }, 8000);
-
     return () => {
       clearInterval(invTimer);
       clearInterval(stockTimer);
       clearInterval(packerTimer);
       clearInterval(backlogTimer);
-      clearInterval(liveCommentsTimer);
-      clearInterval(telegramStockTimer);
     };
   }, [selectedLiveId, currentRevision, packerName]);
 

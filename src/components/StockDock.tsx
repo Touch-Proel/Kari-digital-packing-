@@ -12,23 +12,6 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
   const [filterSearch, setFilterSearch] = useState<string>('');
   const [filterMode, setFilterMode] = useState<'ALL' | 'LOW' | 'OUT'>('ALL');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(false);
-
-  useEffect(() => {
-    const checkSyncStatus = () => {
-      fetch('/api/telegram/auto_sync')
-        .then(res => res.json())
-        .then(data => {
-          if (data && typeof data.enabled === 'boolean') {
-            setAutoSyncEnabled(data.enabled);
-          }
-        })
-        .catch(() => {});
-    };
-    checkSyncStatus();
-    const timer = setInterval(checkSyncStatus, 5000);
-    return () => clearInterval(timer);
-  }, []);
 
   const filteredProducts = useMemo(() => {
     const list = products.filter(p => {
@@ -98,16 +81,10 @@ export function StockDock({ products, onSelectProduct, onOpenAddStockPrompt, onO
               <button
                 type="button"
                 onClick={() => onOpenStockSync('telegram')}
-                className={`px-2 py-1 rounded-lg text-[11px] font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm h-7 border ${
-                  autoSyncEnabled
-                    ? 'bg-sky-950 hover:bg-sky-900 text-cyan-300 border-sky-500/80 shadow-sky-950/40'
-                    : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border-slate-700'
-                }`}
-                title={autoSyncEnabled ? 'Telegram Auto-Sync ៖ កំពុងបើក (ON)' : 'Telegram Auto-Sync ៖ ត្រូវបានបិទ (OFF)'}
+                className="bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-sky-500/60 px-2 py-1 rounded-lg text-[11px] font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1 shadow-sm h-7"
+                title="ទាញស្តុកពី Telegram"
               >
                 <span>✈️ Telegram</span>
-                <span className={`w-2 h-2 rounded-full ${autoSyncEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-                <span className="text-[9.5px] font-mono font-black">{autoSyncEnabled ? 'AUTO' : 'OFF'}</span>
               </button>
 
               <button

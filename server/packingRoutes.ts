@@ -1327,7 +1327,6 @@ router.post('/set_active_live_id', (req: Request, res: Response) => {
   if (live_id) {
     const clean = String(live_id).trim();
     setActiveLiveId(clean);
-    startLiveCommentsAutoSync(3, clean);
     bumpDataRevision();
     return res.json({ success: true, active_live_id: clean });
   }
