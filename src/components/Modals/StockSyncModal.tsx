@@ -125,6 +125,9 @@ export function StockSyncModal({
   const [importingFile, setImportingFile] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Sync Baskets Price State
+  const [syncingBaskets, setSyncingBaskets] = useState<boolean>(false);
+
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
@@ -476,8 +479,6 @@ export function StockSyncModal({
     playPureTone(880, 0.08);
     onShowToast('📋 បានចម្លងបញ្ជីកូដ និងតម្លៃទៅ Clipboard!');
   };
-
-  const [syncingBaskets, setSyncingBaskets] = useState<boolean>(false);
 
   const handleSyncBasketsPrice = async () => {
     setSyncingBaskets(true);

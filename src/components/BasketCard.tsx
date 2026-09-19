@@ -122,6 +122,8 @@ function BasketCardComponent({
   const [editingAddress, setEditingAddress] = useState(false);
   const [addressInput, setAddressInput] = useState('');
   const [showAllComments, setShowAllComments] = useState(false);
+  const [isSendingVip, setIsSendingVip] = useState(false);
+  const [isMarkingPaid, setIsMarkingPaid] = useState(false);
 
   const totalCount = invoice.items.length;
   const packedCount = invoice.items.filter(
@@ -326,8 +328,6 @@ function BasketCardComponent({
       onShowToast('Error updating address', 'error');
     }
   };
-
-  const [isSendingVip, setIsSendingVip] = useState(false);
 
   // Toggle Manual Sent Status
   const handleToggleMsgSent = async (e: React.MouseEvent) => {
@@ -894,8 +894,6 @@ function BasketCardComponent({
   };
 
   // Mark Basket as Paid -> Moves to Stage 3 (បង់រួច-QC)
-  const [isMarkingPaid, setIsMarkingPaid] = useState(false);
-
   const handleMarkAsPaid = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!checkLockGuard()) return;
