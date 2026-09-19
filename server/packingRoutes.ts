@@ -481,6 +481,7 @@ router.post(['/mark_invoice_paid', '/api/mark_invoice_paid'], (req: Request, res
   }
 
   inv.status = 'Paid';
+  (inv as any).payment_status = 'Paid';
   inv.paid_by = String(packer_name || 'បុគ្គលិក');
   inv.paid_at = new Date().toISOString();
   if (payment_method) {
@@ -515,6 +516,9 @@ router.post(['/mark_invoice_unpaid', '/api/mark_invoice_unpaid'], (req: Request,
   }
 
   inv.status = 'Pending';
+  (inv as any).payment_status = 'Unpaid';
+  delete inv.paid_at;
+  delete inv.paid_by;
   bumpDataRevision();
   saveDatabaseToDisk();
 
@@ -562,6 +566,15 @@ router.post('/dispatch_pack', (req: Request, res: Response) => {
   const duration = lock ? Math.max(5, Math.round((Date.now() - lock.start_time) / 1000)) : 25;
 
   inv.packing_stage = 'DISPATCHED';
+  // Preserve payment state when moving to Dispatched
+  if (inv.status === 'Paid' || inv.paid_at || (inv as any).payment_status === 'Paid') {
+    (inv as any).payment_status = 'Paid';
+    if (!inv.paid_at) {
+      inv.paid_at = new Date().toISOString();
+    }
+  } else {
+    (inv as any).payment_status = 'COD';
+  }
   inv.status = 'Dispatched';
   inv.items.forEach(it => { it.is_packed = true; });
 
@@ -2064,7 +2077,7 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
                 <span style="font-size: 14px; font-weight: 800; margin-left: 3px;">(${rielTotal} R)</span>
               </div>
               <span style="font-size: 14px; font-weight: 900; border: 2px solid #000; padding: 2px 8px; border-radius: 4px;">
-                ${invoice.status === 'Paid' ? '✅ PAID' : '⏳ UNPAID'}
+                ${(invoice.status === 'Paid' || invoice.paid_at || (invoice as any).payment_status === 'Paid') ? '✅ PAID' : (invoice.status === 'Dispatched' ? '💵 COD' : '⏳ UNPAID')}
               </span>
             </div>
           </div>

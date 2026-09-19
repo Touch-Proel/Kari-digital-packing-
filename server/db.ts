@@ -473,6 +473,16 @@ export async function loadDatabaseFromDisk() {
           }
         });
       }
+
+      // Populate / preserve payment_status
+      if (inv.status === 'Paid' || inv.paid_at || inv.paid_by) {
+        inv.payment_status = 'Paid';
+      } else if (inv.status === 'Dispatched' || inv.packing_stage === 'DISPATCHED') {
+        inv.payment_status = (inv.paid_at || inv.paid_by) ? 'Paid' : 'COD';
+      } else {
+        inv.payment_status = inv.payment_status || 'Unpaid';
+      }
+
       recalculateInvoice(inv);
     });
 

@@ -116,8 +116,9 @@ export function BasketCard({
   ).length;
   const packPercent = totalCount > 0 ? Math.round((packedCount / totalCount) * 100) : 0;
 
-  const isPaid = invoice.status === 'Paid';
-  const isStaged = invoice.packing_stage === 'STAGED';
+  const isDispatched = invoice.packing_stage === 'DISPATCHED' || invoice.status === 'Dispatched' || invoice.status === 'Packed';
+  const isPaid = invoice.status === 'Paid' || Boolean(invoice.paid_at) || invoice.payment_status === 'Paid';
+  const isStaged = invoice.packing_stage === 'STAGED' && !isDispatched;
 
   // Format live session date
   const formatLiveDate = (dateStr?: string) => {
@@ -136,7 +137,11 @@ export function BasketCard({
   };
 
   // Border and glow accent based on status
-  const cardBorderClass = isPaid
+  const cardBorderClass = isDispatched
+    ? (isPaid
+        ? 'border-l-[4px] border-l-indigo-400 border-t border-r border-b border-indigo-950/60 shadow-[0_0_18px_rgba(99,102,241,0.15)]'
+        : 'border-l-[4px] border-l-amber-500 border-t border-r border-b border-amber-950/60 shadow-[0_0_18px_rgba(245,158,11,0.15)]')
+    : isPaid
     ? 'border-l-[4px] border-l-emerald-400 border-t border-r border-b border-emerald-950/60 shadow-[0_0_18px_rgba(16,185,129,0.15)]'
     : isStaged
     ? 'border-l-[4px] border-l-amber-400 border-t border-r border-b border-amber-950/60 shadow-[0_0_18px_rgba(245,158,11,0.15)]'
@@ -829,6 +834,8 @@ export function BasketCard({
       if (data.success) {
         playSuccessFanfare();
         invoice.status = 'Paid';
+        invoice.payment_status = 'Paid';
+        invoice.paid_at = new Date().toISOString();
         onShowToast(`✅ កន្ត្រក #${invoice.basket_no || invoice.invoice_id} បានបង់ប្រាក់រួចរាល់ ➔ ចូលផ្ទាំង បង់រួច-QC!`, 'success');
         onDataChanged();
       } else {
@@ -856,6 +863,9 @@ export function BasketCard({
       const data = await res.json();
       if (data.success) {
         invoice.status = 'Pending';
+        invoice.payment_status = 'Unpaid';
+        delete invoice.paid_at;
+        delete invoice.paid_by;
         playPureTone(600, 0.06);
         onShowToast(`↩️ បានប្តូរកន្ត្រក #${invoice.basket_no || invoice.invoice_id} មក «រង់ចាំបង់» វិញ!`);
         onDataChanged();
@@ -920,7 +930,19 @@ export function BasketCard({
 
           {/* Right: Status Pill & Collapse Indicator */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {isPaid ? (
+            {isDispatched ? (
+              isPaid ? (
+                <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1">
+                  <span>✅</span>
+                  <span>PAID</span>
+                </span>
+              ) : (
+                <span className="bg-amber-950/90 border border-amber-400 text-amber-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(245,158,11,0.3)] flex items-center gap-1">
+                  <span>💵</span>
+                  <span>COD</span>
+                </span>
+              )
+            ) : isPaid ? (
               <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)]">
                 PAID
               </span>
@@ -986,7 +1008,7 @@ export function BasketCard({
 
           {/* Right: KHQR Button + Total Price Badge */}
           <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-            {onOpenKHQRModal && (
+            {onOpenKHQRModal && !isPaid && (
               <button
                 type="button"
                 onClick={() => onOpenKHQRModal(invoice)}
@@ -998,6 +1020,15 @@ export function BasketCard({
                 </span>
                 <span>ស្កែន</span>
               </button>
+            )}
+            {isPaid && (
+              <div
+                className="bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 px-2 py-0.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-sm"
+                title={invoice.paid_at ? `បានបង់ប្រាក់នៅ ${new Date(invoice.paid_at).toLocaleTimeString()}` : 'បានបង់ប្រាក់រួច'}
+              >
+                <span className="text-xs">✓</span>
+                <span>បង់រួច</span>
+              </div>
             )}
             <div className="bg-[#031526] border-2 border-cyan-400 text-cyan-300 px-3 py-1 rounded-xl font-mono font-black text-sm sm:text-base shadow-[0_0_14px_rgba(6,182,212,0.35)] flex items-center gap-1">
               <span>${invoice.total_amount.toFixed(2)}</span>

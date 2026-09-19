@@ -43,6 +43,7 @@ export interface Invoice {
   is_free_ship?: boolean;
   status: InvoiceStatus;
   packing_stage: PackingStage;
+  payment_status?: 'Paid' | 'Unpaid' | 'COD';
   staged_by?: string;
   staged_at?: string;
   verified_by?: string;

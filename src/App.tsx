@@ -579,25 +579,30 @@ export default function App() {
          i.status !== 'Paid' &&
          i.status !== 'Packed' &&
          i.status !== 'Dispatched' &&
+         i.packing_stage !== 'DISPATCHED' &&
          i.status !== 'Cancelled'
   ).length;
 
   const waitingCount = invoices.filter(
     i => i.packing_stage === 'STAGED' &&
          i.status !== 'Paid' &&
+         i.payment_status !== 'Paid' &&
+         !i.paid_at &&
          i.status !== 'Packed' &&
          i.status !== 'Dispatched' &&
+         i.packing_stage !== 'DISPATCHED' &&
          i.status !== 'Cancelled'
   ).length;
 
   const paidQcCount = invoices.filter(
-    i => i.status === 'Paid' &&
+    i => (i.status === 'Paid' || i.payment_status === 'Paid' || Boolean(i.paid_at)) &&
          i.status !== 'Packed' &&
          i.status !== 'Dispatched' &&
+         i.packing_stage !== 'DISPATCHED' &&
          i.status !== 'Cancelled'
   ).length;
 
-  const totalDispatched = invoices.filter(i => i.status === 'Dispatched' || i.status === 'Packed').length;
+  const totalDispatched = invoices.filter(i => i.status === 'Dispatched' || i.status === 'Packed' || i.packing_stage === 'DISPATCHED').length;
   useEffect(() => {
     setDispatchedCount(totalDispatched);
   }, [totalDispatched]);
@@ -606,16 +611,16 @@ export default function App() {
   let filtered = invoices.filter(inv => {
     if (inv.status === 'Cancelled') return false;
     if (currentMasterStage === 1) {
-      return (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) && inv.status !== 'Paid' && inv.status !== 'Packed' && inv.status !== 'Dispatched';
+      return (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) && inv.status !== 'Paid' && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
     }
     if (currentMasterStage === 2) {
-      return inv.packing_stage === 'STAGED' && inv.status !== 'Paid' && inv.status !== 'Packed' && inv.status !== 'Dispatched';
+      return inv.packing_stage === 'STAGED' && inv.status !== 'Paid' && inv.payment_status !== 'Paid' && !inv.paid_at && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
     }
     if (currentMasterStage === 3) {
-      return inv.status === 'Paid' && inv.status !== 'Packed' && inv.status !== 'Dispatched';
+      return (inv.status === 'Paid' || inv.payment_status === 'Paid' || Boolean(inv.paid_at)) && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
     }
     if (currentMasterStage === 4) {
-      return (inv.status === 'Dispatched' || inv.status === 'Packed');
+      return (inv.status === 'Dispatched' || inv.status === 'Packed' || inv.packing_stage === 'DISPATCHED');
     }
     return true;
   });
