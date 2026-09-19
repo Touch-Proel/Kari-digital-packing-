@@ -477,6 +477,31 @@ export function StockSyncModal({
     onShowToast('📋 បានចម្លងបញ្ជីកូដ និងតម្លៃទៅ Clipboard!');
   };
 
+  const [syncingBaskets, setSyncingBaskets] = useState<boolean>(false);
+
+  const handleSyncBasketsPrice = async () => {
+    setSyncingBaskets(true);
+    try {
+      const res = await fetch('/api/stock/sync_baskets_price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ live_id: activeLiveId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast(`🔄 បានធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញក្នុងកន្ត្រក ${data.updated_invoices} ដោយជោគជ័យ!`);
+        onStockUpdated();
+      } else {
+        onShowToast(data.error || 'បរាជ័យក្នុងការ sync តម្លៃ', 'error');
+      }
+    } catch {
+      onShowToast('⚠️ បរាជ័យក្នុងការ sync តម្លៃកន្ត្រក', 'error');
+    } finally {
+      setSyncingBaskets(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[999999] flex items-center justify-center p-3 animate-fadeIn">
       <div className="bg-[#0B1426] border-[1.5px] border-sky-500/60 rounded-2xl w-full max-w-[560px] flex flex-col overflow-hidden shadow-2xl max-h-[92vh]">
@@ -489,6 +514,15 @@ export function StockSyncModal({
                 🎥 #{activeLiveId.length > 10 ? activeLiveId.slice(-8) : activeLiveId}
               </span>
             )}
+            <button
+              type="button"
+              onClick={handleSyncBasketsPrice}
+              disabled={syncingBaskets}
+              className="text-[11px] bg-emerald-700 hover:bg-emerald-600 text-white font-black px-2.5 py-1 rounded-lg border border-emerald-500/60 shadow flex items-center gap-1 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+              title="ធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញគ្រប់កន្ត្រកក្នុង Live នេះឱ្យត្រូវតាមតម្លៃស្តុកបច្ចុប្បន្នភ្លាមៗ"
+            >
+              <span>{syncingBaskets ? '⏳ កំពុង Sync...' : '🔄 Sync តម្លៃកន្ត្រក'}</span>
+            </button>
           </div>
           <button
             onClick={onClose}

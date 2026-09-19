@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
-import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision } from './db';
+import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db';
 import { Product } from './types';
 
 export interface TelegramItemParsed {
@@ -629,66 +629,14 @@ export function bulkImportStockItems(
     if (existing) {
       existing.live_id = targetLive;
       if (it.price !== undefined && it.price !== null) {
-        const newPrice = Number(it.price);
-        existing.price = newPrice;
-
-        // Fill price into unpicked pending baskets of active live ONLY IF price is missing/zero or name was generic
-        for (const inv of invoices) {
-          if (
-            inv.live_id === targetLive &&
-            inv.status === 'Pending' &&
-            inv.packing_stage === 'UNPICKED'
-          ) {
-            let invChanged = false;
-            for (const orderItem of inv.items) {
-              if (orderItem.product_code.toUpperCase() === cleanCode) {
-                const isGenericName = !orderItem.product_name ||
-                  orderItem.product_name.startsWith('កូដ ') ||
-                  orderItem.product_name.startsWith('ទំនិញកូដ ');
-                const isZeroPrice = !orderItem.price || orderItem.price === 0;
-
-                // Only update price & name if the item was created as a generic/placeholder item
-                if (isZeroPrice || isGenericName) {
-                  if (isZeroPrice && newPrice > 0) {
-                    orderItem.price = newPrice;
-                  }
-                  if (isGenericName && it.name && it.name !== `កូដ ${cleanCode}`) {
-                    orderItem.product_name = it.name.trim();
-                  }
-                  invChanged = true;
-                }
-              }
-            }
-            if (invChanged) {
-              recalculateInvoice(inv);
-            }
-          }
-        }
+        existing.price = Number(it.price);
       }
       if (!keepStock && it.stock_qty !== undefined && it.stock_qty !== null) {
         existing.stock_qty = Number(it.stock_qty);
       }
       if (it.name && it.name !== `កូដ ${cleanCode}`) existing.name = it.name.trim();
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
-      if (it.image_file) {
-        existing.image_file = it.image_file;
-        // Cascade image ONLY IF order item currently has no image
-        for (const inv of invoices) {
-          if (
-            inv.live_id === targetLive &&
-            inv.status === 'Pending' &&
-            inv.packing_stage === 'UNPICKED'
-          ) {
-            for (const orderItem of inv.items) {
-              if (orderItem.product_code.toUpperCase() === cleanCode) {
-                if (!orderItem.image_file) {
-                  orderItem.image_file = it.image_file;
-                }
-              }
-            }
-          }
-        }
-      }
+      if (it.image_file) existing.image_file = it.image_file;
       updatedCount++;
     } else {
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
@@ -697,15 +645,18 @@ export function bulkImportStockItems(
         live_id: targetLive,
         code: cleanCode,
         name: it.name?.trim() || `កូដ ${cleanCode}`,
-        price: Number(it.price || 5.0),
+        price: Number(it.price || 0),
         stock_qty: Number(it.stock_qty !== undefined ? it.stock_qty : 200),
-        cost_price: Number(it.cost_price || 2.5),
+        cost_price: Number(it.cost_price || 0),
         image_file: it.image_file || ''
       };
       products.push(newProd);
       importedCount++;
     }
   }
+
+  // Auto-sync all imported/updated stock prices, names, and photos to ALL active (non-dispatched) baskets
+  syncAllActiveInvoicesWithStock(targetLive);
 
   bumpDataRevision();
   saveDatabaseToDisk();

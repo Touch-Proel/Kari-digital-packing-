@@ -19,7 +19,8 @@ import {
   getDataRevision,
   recalculateInvoice,
   saveDatabaseToDisk,
-  activeFacebookPage
+  activeFacebookPage,
+  syncAllActiveInvoicesWithStock
 } from './db';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
 import { parseAndAllocateComment } from './parser';
@@ -153,22 +154,7 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
     if (name) prod.name = name.trim();
     if (cost_price !== undefined) prod.cost_price = Number(cost_price);
     if (image_file !== undefined) {
-      const imgVal = image_file || '';
-      prod.image_file = imgVal;
-      // Cascade image ONLY to the target live session and ONLY unpicked pending invoices
-      for (const inv of invoices) {
-        if (
-          inv.live_id === targetLive &&
-          inv.status === 'Pending' &&
-          inv.packing_stage === 'UNPICKED'
-        ) {
-          for (const it of inv.items) {
-            if (it.product_code.toUpperCase() === cleanCode) {
-              it.image_file = imgVal;
-            }
-          }
-        }
-      }
+      prod.image_file = image_file || '';
     }
 
     // If user changed the code itself
@@ -190,25 +176,12 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
     }
 
     if (price !== undefined && price !== null) {
-      const newPrice = Number(price);
-      prod.price = newPrice;
-      // Cascade price ONLY to the target live session and ONLY unpicked pending invoices
-      for (const inv of invoices) {
-        if (
-          inv.live_id === targetLive &&
-          inv.status === 'Pending' &&
-          inv.packing_stage === 'UNPICKED'
-        ) {
-          for (const it of inv.items) {
-            if (it.product_code.toUpperCase() === cleanCode) {
-              it.price = newPrice;
-            }
-          }
-          recalculateInvoice(inv);
-        }
-      }
+      prod.price = Number(price);
     }
   }
+
+  // Automatically cascade updated price/image/name to ALL active baskets in this live session
+  syncAllActiveInvoicesWithStock(targetLive);
 
   bumpDataRevision();
   saveDatabaseToDisk();
@@ -354,20 +327,8 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
       if (targetProd) {
         targetProd.image_file = publicUrl;
       }
-      // Cascade to unpicked pending baskets in this target live session only
-      for (const inv of invoices) {
-        if (
-          inv.live_id === targetLive &&
-          inv.status === 'Pending' &&
-          inv.packing_stage === 'UNPICKED'
-        ) {
-          for (const orderItem of inv.items) {
-            if (orderItem.product_code.toUpperCase() === cleanCode) {
-              orderItem.image_file = publicUrl;
-            }
-          }
-        }
-      }
+      // Cascade to all active baskets in this target live session
+      syncAllActiveInvoicesWithStock(targetLive);
       bumpDataRevision();
       saveDatabaseToDisk();
     }
@@ -1705,6 +1666,17 @@ router.post('/stock/bulk_import', (req: Request, res: Response) => {
     targetLiveId: (live_id as string) || activeLiveId
   });
   res.json(result);
+});
+
+// POST /api/stock/sync_baskets_price - Manually or automatically trigger sync of all active baskets with current stock prices
+router.post('/stock/sync_baskets_price', (req: Request, res: Response) => {
+  const targetLive = (req.body.live_id as string) || activeLiveId;
+  const count = syncAllActiveInvoicesWithStock(targetLive);
+  res.json({
+    success: true,
+    message: `បានធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញក្នុងកន្ត្រកចំនួន ${count} ដោយជោគជ័យ!`,
+    updated_invoices: count
+  });
 });
 
 // GET /api/stock/export_csv

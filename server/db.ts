@@ -361,6 +361,63 @@ export function recalculateInvoice(inv: Invoice) {
   inv.total_amount = Number((itemsSum + finalShipping).toFixed(2));
 }
 
+// -------------------------------------------------------------
+// Auto-Sync Active (Non-Dispatched) Basket Items with Stock Catalog
+// Ensures that whenever stock prices/photos change, all active baskets reflect real prices immediately!
+// -------------------------------------------------------------
+export function syncAllActiveInvoicesWithStock(targetLiveId?: string): number {
+  let updatedInvoicesCount = 0;
+
+  for (const inv of invoices) {
+    const invLive = inv.live_id || activeLiveId;
+    if (targetLiveId && invLive !== targetLiveId) continue;
+
+    // Only cascade to active, non-dispatched invoices (never alter historic dispatched packages)
+    if (inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED') {
+      let invChanged = false;
+      for (const item of inv.items) {
+        // Look up product in this live session first, then fallback to global product catalog
+        const cleanCode = (item.product_code || '').trim().toUpperCase();
+        if (!cleanCode) continue;
+
+        const prod = products.find(p => (p.live_id || activeLiveId) === invLive && (p.code || '').trim().toUpperCase() === cleanCode)
+          || products.find(p => (p.code || '').trim().toUpperCase() === cleanCode && typeof p.price === 'number' && p.price > 0);
+
+        if (prod) {
+          // Auto-sync price if stock price is positive and differs
+          if (typeof prod.price === 'number' && prod.price > 0 && Math.abs((item.price || 0) - prod.price) > 0.001) {
+            item.price = prod.price;
+            invChanged = true;
+          }
+          // Auto-sync photo if stock has photo and item is missing it
+          if (prod.image_file && prod.image_file.trim() !== '' && (!item.image_file || item.image_file.trim() === '')) {
+            item.image_file = prod.image_file.trim();
+            invChanged = true;
+          }
+          // Auto-sync generic placeholder name
+          if (prod.name && prod.name.trim() !== '' && (!item.product_name || item.product_name.startsWith('កូដ ') || item.product_name.startsWith('ទំនិញកូដ ') || item.product_name === `កូដ [${cleanCode}]` || item.product_name === `កូដ ${cleanCode}`)) {
+            item.product_name = prod.name.trim();
+            invChanged = true;
+          }
+        }
+      }
+
+      if (invChanged) {
+        recalculateInvoice(inv);
+        updatedInvoicesCount++;
+      }
+    }
+  }
+
+  if (updatedInvoicesCount > 0) {
+    bumpDataRevision();
+    saveDatabaseToDisk();
+    console.log(`[Stock Sync] Successfully synced ${updatedInvoicesCount} active basket(s) with latest stock prices & photos.`);
+  }
+
+  return updatedInvoicesCount;
+}
+
 export async function loadDatabaseFromDisk() {
   try {
     // 1. Try loading from SQLite pos.db first
@@ -531,6 +588,9 @@ export async function loadDatabaseFromDisk() {
 
     // Natural sort products by code (1, 2, 3... 10... 100... A1, B1...)
     products.sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
+
+    // Automatically sync all active (non-dispatched) basket prices & photos with stock catalog
+    syncAllActiveInvoicesWithStock();
 
     // Persist normalized data to disk and SQLite
     saveDatabaseToDisk();

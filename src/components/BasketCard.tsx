@@ -1334,11 +1334,13 @@ function BasketCardComponent({
               // Session-Isolated Image with real-time quick edit preview
               const displayImage = (item.image_file && item.image_file.trim() !== '' && !isEditingThisCode)
                 ? item.image_file
-                : (isCurrentLiveOrder && invoice.packing_stage === 'UNPICKED' ? activeProd?.image_file : undefined);
+                : (isCurrentLiveOrder && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' ? (activeProd?.image_file || item.image_file) : item.image_file);
 
               const displayPrice = isEditingThisCode && typeof activeProd?.price === 'number'
                 ? activeProd.price
-                : item.price;
+                : (typeof activeProd?.price === 'number' && activeProd.price > 0 && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED'
+                  ? activeProd.price
+                  : (item.price || 0));
 
               const matchingComment = invoice.comments?.find(c => {
                 const converted = convertKhmerNumeralsToGlobal(c || '');
