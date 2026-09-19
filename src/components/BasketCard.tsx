@@ -422,10 +422,17 @@ function BasketCardComponent({
     }
   };
 
-  // Lock Invoice for Packing
+  // Lock Invoice for Packing (Optimistic 0ms update without screen re-fetch)
   const handleLockInvoice = async () => {
     if (invoice.is_locked && invoice.locked_by === myPackerName) return;
     try {
+      if (onUpdateInvoice) {
+        onUpdateInvoice({
+          ...invoice,
+          is_locked: true,
+          locked_by: myPackerName
+        });
+      }
       await fetch('/api/lock_invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -434,7 +441,8 @@ function BasketCardComponent({
           packer_name: myPackerName
         })
       });
-      onDataChanged();
+      // Do NOT call onDataChanged() here; calling onDataChanged() triggers fetchInvoices()
+      // which causes baskets to jitter and re-fetch from the network mid-click.
     } catch (err) {
       console.error(err);
     }
@@ -1359,6 +1367,11 @@ function BasketCardComponent({
                         <img
                           src={displayImage}
                           alt={item.product_code}
+                          loading="lazy"
+                          decoding="async"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                       ) : (

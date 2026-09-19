@@ -689,10 +689,12 @@ export default function App() {
   if (activeSubFilter === 'AMOUNT_DESC') {
     filtered = [...filtered].sort((a, b) => b.total_amount - a.total_amount);
   } else {
-    // Newest date / most recently active baskets run to the top!
+    // ⚡ Rock-Solid Stable Sorting:
+    // Newest orders at the top based on created_at and basket_no.
+    // Checking items, picking, or locking NEVER causes baskets to jump, displace, or vanish!
     filtered = [...filtered].sort((a, b) => {
-      const timeA = new Date((a as any).updated_at || a.created_at || 0).getTime();
-      const timeB = new Date((b as any).updated_at || b.created_at || 0).getTime();
+      const timeA = new Date(a.created_at || 0).getTime();
+      const timeB = new Date(b.created_at || 0).getTime();
       if (timeB !== timeA) return timeB - timeA;
       return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
     });

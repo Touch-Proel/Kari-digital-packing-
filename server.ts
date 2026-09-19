@@ -30,7 +30,45 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
-app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
+
+// ⚡ High-speed image serving for /uploads with multi-folder resolution and browser caching
+app.get('/uploads/:filename', (req: Request, res: Response) => {
+  const rawFilename = req.params.filename;
+  const filename = path.basename(rawFilename);
+  if (!filename) {
+    return res.status(400).send('Invalid filename');
+  }
+
+  const cwd = process.cwd();
+  const possibleDirs = [
+    path.join(cwd, 'public', 'uploads'),
+    path.join(cwd, 'dist', 'uploads'),
+    path.join(cwd, 'uploads')
+  ];
+
+  for (const dir of possibleDirs) {
+    const fullPath = path.join(dir, filename);
+    if (fs.existsSync(fullPath)) {
+      // Long-term immutable caching (images have timestamp/date in filename)
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      const ext = path.extname(filename).toLowerCase();
+      if (ext === '.png') res.setHeader('Content-Type', 'image/png');
+      else if (ext === '.webp') res.setHeader('Content-Type', 'image/webp');
+      else if (ext === '.svg') res.setHeader('Content-Type', 'image/svg+xml');
+      else res.setHeader('Content-Type', 'image/jpeg');
+
+      return res.sendFile(fullPath);
+    }
+  }
+
+  // If missing, return 404 image status so browser doesn't receive SPA HTML bundle (index.html)
+  return res.status(404).json({ error: 'Image not found' });
+});
+
+app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads'), {
+  maxAge: '30d',
+  immutable: true
+}));
 
 // -------------------------------------------------------------
 // 🔑 Facebook OAuth & Graph API Endpoints

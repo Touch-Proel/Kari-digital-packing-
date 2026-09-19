@@ -812,18 +812,43 @@ export function StockSyncModal({
                           }`}
                         >
                           {item.image_url ? (
-                            <img
-                              src={item.image_url}
-                              alt={item.code}
-                              className="w-12 h-12 rounded-lg object-cover border border-cyan-500/40 flex-shrink-0"
-                            />
+                            <div className="w-12 h-12 rounded-lg relative overflow-hidden flex-shrink-0 bg-slate-800 border border-cyan-500/40">
+                              <img
+                                src={item.image_url}
+                                alt={item.code}
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
+                                  const parent = (e.target as HTMLElement).parentElement;
+                                  const fb = parent?.querySelector('.img-fallback') as HTMLElement;
+                                  if (fb) fb.style.display = 'flex';
+                                }}
+                              />
+                              <div className="img-fallback hidden absolute inset-0 items-center justify-center text-xs opacity-60 bg-slate-800">
+                                📷
+                              </div>
+                            </div>
                           ) : existingProd?.image_file ? (
-                            <img
-                              src={existingProd.image_file}
-                              alt={item.code}
-                              className="w-12 h-12 rounded-lg object-cover border border-slate-700 opacity-75 flex-shrink-0"
-                              title="រូបភាពចាស់ក្នុងស្តុក (រក្សាទុកដដែល)"
-                            />
+                            <div className="w-12 h-12 rounded-lg relative overflow-hidden flex-shrink-0 bg-slate-800 border border-slate-700 opacity-75" title="រូបភាពចាស់ក្នុងស្តុក (រក្សាទុកដដែល)">
+                              <img
+                                src={existingProd.image_file}
+                                alt={item.code}
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
+                                  const parent = (e.target as HTMLElement).parentElement;
+                                  const fb = parent?.querySelector('.img-fallback') as HTMLElement;
+                                  if (fb) fb.style.display = 'flex';
+                                }}
+                              />
+                              <div className="img-fallback hidden absolute inset-0 items-center justify-center text-xs opacity-60 bg-slate-800">
+                                📷
+                              </div>
+                            </div>
                           ) : (
                             <div className="w-12 h-12 rounded-lg bg-slate-800 flex items-center justify-center text-xs opacity-60 flex-shrink-0">
                               📷
