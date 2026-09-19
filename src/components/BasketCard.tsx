@@ -1345,23 +1345,23 @@ export function BasketCard({
                           <button
                             type="button"
                             onClick={e => handleStartEditCode(item, e)}
-                            className={`border px-2.5 py-1 rounded-xl text-xs sm:text-sm font-bold tracking-wider shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group/code cursor-pointer flex-shrink-0 ${
+                            className={`px-1 py-0.5 rounded-lg text-xs sm:text-sm font-bold tracking-wider flex items-center gap-1.5 transition-all active:scale-95 group/code cursor-pointer flex-shrink-0 hover:bg-slate-800/60 ${
                               isChecked
-                                ? 'bg-emerald-950/90 border-emerald-500/70 text-emerald-300 hover:border-emerald-300'
+                                ? 'text-emerald-400'
                                 : hasMismatchCode
-                                ? 'bg-rose-950/90 border-rose-500/90 text-rose-200 hover:border-rose-300 shadow-[0_0_10px_rgba(244,63,94,0.3)] animate-pulse'
-                                : 'bg-[#0B1E3D] border-blue-400/80 text-blue-200 hover:border-cyan-400 hover:bg-[#0e274f]'
+                                ? 'text-rose-300 bg-rose-950/40 px-1.5 border border-rose-500/50'
+                                : 'text-cyan-300'
                             }`}
                             title="ចុចត្រង់នេះដើម្បីកែប្រែកូដទំនិញរហ័ស"
                           >
-                            <span className="text-[11px] font-bold opacity-80">កូដ</span>
-                            <span className={`font-mono font-black text-sm ${hasMismatchCode ? 'text-rose-300' : 'text-cyan-300'}`}>
+                            <span className="text-[11px] font-bold opacity-75 text-slate-400">កូដ</span>
+                            <span className={`font-mono font-black text-sm sm:text-base ${hasMismatchCode ? 'text-rose-300' : isChecked ? 'text-emerald-300' : 'text-cyan-300'}`}>
                               [{item.product_code}]
                             </span>
                             {hasMismatchCode ? (
                               <span className="text-amber-300 text-xs" title="កូដមិនត្រូវនឹងខមិន">⚠️</span>
                             ) : (
-                              <span className="text-[10px] text-amber-400 opacity-70 group-hover/code:opacity-100 group-hover/code:scale-110 transition-all">✏️</span>
+                              <span className="text-[10px] text-amber-400/80 group-hover/code:opacity-100 group-hover/code:scale-110 transition-all">✏️</span>
                             )}
                           </button>
                         )}
@@ -1381,14 +1381,17 @@ export function BasketCard({
                         })()}
                       </div>
 
-                      {/* Row 2: Customer Comment Text with Smart Mismatch Alert & 1-Click Fix */}
+                      {/* Row 2: Customer Comment Text as Clean Subtitle (No bulky border or background frame) */}
                       {noteText && (
-                        <div className={`text-xs font-medium mt-1.5 break-words whitespace-normal px-2.5 py-1.5 rounded-lg border leading-relaxed shadow-sm flex flex-col gap-1.5 ${
+                        <div className={`text-xs mt-1 break-words whitespace-normal leading-snug flex flex-col gap-1 ${
                           hasMismatchCode
-                            ? 'bg-rose-950/60 border-rose-500/70 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.2)]'
-                            : 'bg-amber-950/40 border-amber-500/35 text-amber-100'
+                            ? 'bg-rose-950/60 border border-rose-500/70 text-rose-100 px-2 py-1 rounded-lg shadow-[0_0_12px_rgba(244,63,94,0.2)]'
+                            : 'text-amber-200/85 font-medium pl-0.5'
                         }`}>
-                          <div>{renderCommentWithHighlightedCode(noteText, activeTypedCode || item.product_code)}</div>
+                          <div className="flex items-start gap-1">
+                            <span className="text-[11px] opacity-70 flex-shrink-0 select-none">💬</span>
+                            <span>{renderCommentWithHighlightedCode(noteText, activeTypedCode || item.product_code)}</span>
+                          </div>
 
                           {/* Instant 1-Click Code Correction when Mismatch Detected */}
                           {hasMismatchCode && detectedInNote && (

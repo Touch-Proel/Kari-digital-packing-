@@ -822,6 +822,15 @@ export default function App() {
         onClose={() => setIsQCModalOpen(false)}
         invoice={qcInvoice}
         packerName={packerName}
+        productMap={productMap}
+        onOpenZoomModal={(c, n, img, pr, sq) => {
+          setZoomCode(c);
+          setZoomName(n);
+          setZoomImageUrl(img);
+          setZoomPrice(pr);
+          setZoomStockQty(sq);
+          setIsZoomModalOpen(true);
+        }}
         onDispatchSuccess={() => {
           fetchInvoices();
           fetchPackerStats();

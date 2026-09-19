@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Invoice } from '../../types';
+import { Invoice, Product } from '../../types';
 import { playSuccessFanfare, playPureTone } from '../../utils/audio';
 
 interface QCModalProps {
@@ -8,6 +8,8 @@ interface QCModalProps {
   onClose: () => void;
   invoice: Invoice | null;
   packerName: string;
+  productMap?: Record<string, Product>;
+  onOpenZoomModal?: (code: string, name: string, imageUrl?: string, price?: number, stockQty?: number) => void;
   onDispatchSuccess: (invoiceId: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
@@ -17,6 +19,8 @@ export function QCModal({
   onClose,
   invoice,
   packerName,
+  productMap,
+  onOpenZoomModal,
   onDispatchSuccess,
   onShowToast
 }: QCModalProps) {
@@ -97,6 +101,10 @@ export function QCModal({
         <div className="p-3 overflow-y-auto flex flex-col gap-2.5 max-h-[60vh]">
           {(invoice.items || []).map(it => {
             const isVerified = verifiedMap[it.product_code] ?? true;
+            const codeUpper = (it.product_code || '').trim().toUpperCase();
+            const prod = productMap ? productMap[codeUpper] : undefined;
+            const displayImage = it.image_file && it.image_file.trim() !== '' ? it.image_file : prod?.image_file;
+
             return (
               <div
                 key={it.id}
@@ -107,12 +115,33 @@ export function QCModal({
                     : 'bg-slate-900/60 border-slate-700'
                 }`}
               >
-                <div className="w-16 h-16 rounded-xl bg-slate-800 border border-cyan-400 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                  <span className="font-mono text-cyan-300 font-black text-base">[{it.product_code}]</span>
+                {/* Product Thumbnail with Image */}
+                <div
+                  className="w-16 h-16 min-w-16 min-h-16 rounded-xl bg-slate-950 border-2 border-slate-700 hover:border-cyan-400 flex-shrink-0 flex items-center justify-center overflow-hidden relative cursor-pointer group shadow-sm transition-all"
+                  onClick={e => {
+                    if (displayImage && onOpenZoomModal) {
+                      e.stopPropagation();
+                      onOpenZoomModal(it.product_code, it.product_name, displayImage, it.price, prod?.stock_qty);
+                    }
+                  }}
+                  title={displayImage ? 'ចុចដើម្បីពង្រីកមើលរូបធំ' : undefined}
+                >
+                  {displayImage ? (
+                    <img
+                      src={displayImage}
+                      alt={it.product_code}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-[#06101E] text-slate-400 p-1 text-center">
+                      <span className="font-mono text-cyan-400 font-bold text-xs">[{it.product_code}]</span>
+                      <span className="text-[9px] text-slate-500 mt-0.5">គ្មានរូប</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex-1 overflow-hidden">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="bg-blue-900/80 text-sky-400 px-1.5 py-0.5 rounded text-xs font-mono font-bold border border-blue-600">
                       [{it.product_code}]
                     </span>
