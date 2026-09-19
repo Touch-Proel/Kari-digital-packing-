@@ -524,6 +524,38 @@ export function KHQRModal({
             </div>
           )}
 
+          {/* Action: Mark as Paid directly inside KHQR Modal */}
+          {!isEditingSettings && invoice && invoice.status !== 'Paid' && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/mark_invoice_paid', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      invoice_id: invoice.invoice_id,
+                      payment_method: 'Bakong KHQR'
+                    })
+                  });
+                  const data = await res.json();
+                  if (data.success) {
+                    playSuccessFanfare();
+                    invoice.status = 'Paid';
+                    onShowToast(`✅ កន្ត្រក #${invoice.basket_no || invoice.invoice_id} បានបង់ប្រាក់រួចរាល់ ➔ ចូលផ្ទាំង បង់រួច-QC!`, 'success');
+                    onClose();
+                  }
+                } catch {
+                  onShowToast('⚠️ ដាច់សេវាបណ្តាញ WiFi!', 'error');
+                }
+              }}
+              className="w-full mt-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-[0_4px_18px_rgba(16,185,129,0.45)] border border-emerald-300 active:scale-95 transition-all cursor-pointer"
+            >
+              <span>✅</span>
+              <span>ភ្ញៀវបង់រួច ➔ ចូលផ្ទាំង បង់រួច-QC</span>
+            </button>
+          )}
+
           {/* Action Buttons Row */}
           {!isEditingSettings && (
             <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">

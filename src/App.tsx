@@ -27,6 +27,7 @@ import { DatabaseModal } from './components/Modals/DatabaseModal';
 import { ManageLiveSessionsModal } from './components/Modals/ManageLiveSessionsModal';
 import { RequirePackerNameModal } from './components/Modals/RequirePackerNameModal';
 import { CreateLiveSessionModal } from './components/Modals/CreateLiveSessionModal';
+import { BacklogModal } from './components/Modals/BacklogModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -131,6 +132,47 @@ export default function App() {
   const [zoomImageUrl, setZoomImageUrl] = useState<string | undefined>(undefined);
   const [zoomPrice, setZoomPrice] = useState<number | undefined>(undefined);
   const [zoomStockQty, setZoomStockQty] = useState<number | undefined>(undefined);
+
+  // Cross-Live Backlog Alert & Modal State
+  const [isBacklogModalOpen, setIsBacklogModalOpen] = useState(false);
+  const [backlogCount, setBacklogCount] = useState(0);
+
+  const fetchBacklogCount = async (targetLiveId?: string) => {
+    try {
+      const lid = targetLiveId !== undefined ? targetLiveId : selectedLiveId;
+      const res = await fetch(`/api/backlog_invoices?current_live_id=${encodeURIComponent(lid)}&t=${Date.now()}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          setBacklogCount(json.total_backlog || 0);
+        }
+      }
+    } catch (e) {
+      // silently ignore
+    }
+  };
+
+  const handleUndispatch = async (inv: Invoice) => {
+    try {
+      const res = await fetch('/api/undispatch_pack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: inv.invoice_id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        showToast(`✅ បានត្រឡប់កន្ត្រក #${inv.basket_no || inv.invoice_id} មកផ្ទាំង QC វិញ!`);
+        fetchInvoices();
+        fetchBacklogCount();
+      } else {
+        playWarningBuzzer();
+        showToast(`❌ មិនអាចត្រឡប់បានទេ ៖ ${data.error || data.message}`, 'error');
+      }
+    } catch (e) {
+      showToast('⚠️ បរាជ័យក្នុងការតភ្ជាប់បណ្តាញ!', 'error');
+    }
+  };
 
   // Receipt Modal State
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
@@ -354,6 +396,7 @@ export default function App() {
     setCurrentRevision(0);
     fetchInvoices(id, 0);
     fetchStock(id);
+    fetchBacklogCount(id);
     fetch('/api/set_active_live_id', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -419,6 +462,7 @@ export default function App() {
     fetchStock();
     fetchLiveSessions();
     fetchPackerStats();
+    fetchBacklogCount(selectedLiveId);
 
     // Initial Facebook status
     fetch('/api/fb/status')
@@ -431,6 +475,7 @@ export default function App() {
     const invTimer = setInterval(fetchInvoices, 2000);
     const stockTimer = setInterval(fetchStock, 6000);
     const packerTimer = setInterval(fetchPackerStats, 6000);
+    const backlogTimer = setInterval(() => fetchBacklogCount(selectedLiveId), 6000);
 
     // 🔴 1. Live Comments Real-time Auto-Sync Poller (Every 3s during live stream)
     const liveCommentsTimer = setInterval(async () => {
@@ -476,6 +521,7 @@ export default function App() {
       clearInterval(invTimer);
       clearInterval(stockTimer);
       clearInterval(packerTimer);
+      clearInterval(backlogTimer);
       clearInterval(liveCommentsTimer);
       clearInterval(telegramStockTimer);
     };
@@ -566,6 +612,9 @@ export default function App() {
     }
     if (currentMasterStage === 3) {
       return inv.status === 'Paid' && inv.status !== 'Packed' && inv.status !== 'Dispatched';
+    }
+    if (currentMasterStage === 4) {
+      return (inv.status === 'Dispatched' || inv.status === 'Packed');
     }
     return true;
   });
@@ -676,6 +725,9 @@ export default function App() {
           unpickedCount={unpickedCount}
           waitingCount={waitingCount}
           paidQcCount={paidQcCount}
+          dispatchedCount={totalDispatched}
+          backlogCount={backlogCount}
+          onOpenBacklog={() => setIsBacklogModalOpen(true)}
           activeSubFilter={activeSubFilter}
           onSetSubFilter={flt => {
             setActiveSubFilter(flt);
@@ -730,6 +782,7 @@ export default function App() {
                 onOptimisticItemUpdate={handleOptimisticItemUpdate}
                 onOptimisticZoneUpdate={handleOptimisticZoneUpdate}
                 onShowToast={showToast}
+                onUndispatch={handleUndispatch}
               />
             ))
           )}
@@ -1001,6 +1054,27 @@ export default function App() {
         unsoldStockCount={unsoldStockCount}
         totalStockCount={products.length}
         onCreateSession={handleCreateLiveSessionWithMode}
+      />
+
+      {/* Cross-Live Unsent Backlog Modal */}
+      <BacklogModal
+        isOpen={isBacklogModalOpen}
+        onClose={() => {
+          setIsBacklogModalOpen(false);
+          fetchInvoices();
+          fetchBacklogCount(selectedLiveId);
+        }}
+        currentLiveId={selectedLiveId}
+        onOpenQCModal={inv => {
+          setQcInvoice(inv);
+          setIsQCModalOpen(true);
+        }}
+        onOpenReceiptModal={handleOpenReceiptModal}
+        onShowToast={showToast}
+        onRefreshAll={() => {
+          fetchInvoices();
+          fetchBacklogCount(selectedLiveId);
+        }}
       />
     </div>
   );

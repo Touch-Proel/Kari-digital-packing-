@@ -1,9 +1,12 @@
 interface WorkflowTabsProps {
-  currentStage: number; // 1: Unpicked, 2: Waiting, 3: Paid/QC
+  currentStage: number; // 1: មិនទាន់រើស, 2: រង់ចាំបង់, 3: QC, 4: ចេញដឹកហើយ
   onSwitchStage: (stage: number) => void;
   unpickedCount: number;
   waitingCount: number;
   paidQcCount: number;
+  dispatchedCount: number;
+  backlogCount?: number;
+  onOpenBacklog?: () => void;
   activeSubFilter: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE';
   onSetSubFilter: (flt: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE') => void;
   searchQuery: string;
@@ -17,6 +20,9 @@ export function WorkflowTabs({
   unpickedCount,
   waitingCount,
   paidQcCount,
+  dispatchedCount,
+  backlogCount = 0,
+  onOpenBacklog,
   activeSubFilter,
   onSetSubFilter,
   searchQuery,
@@ -25,20 +31,51 @@ export function WorkflowTabs({
 }: WorkflowTabsProps) {
   return (
     <div className="flex flex-col gap-2.5">
-      {/* 🚀 TIER 1: 3-STAGE WORKFLOW TABS */}
-      <div className="grid grid-cols-3 gap-2 bg-[#0B1325]/95 p-2 rounded-2xl border-[1.5px] border-sky-400/25 shadow-xl">
+      {/* 🚨 CROSS-LIVE UNFINISHED BACKLOG ALERT BANNER */}
+      {backlogCount > 0 && (
+        <div
+          onClick={onOpenBacklog}
+          className="bg-gradient-to-r from-rose-950/90 via-red-950/85 to-amber-950/90 border-2 border-rose-500/80 rounded-2xl p-2.5 flex items-center justify-between shadow-[0_0_22px_rgba(244,63,94,0.35)] cursor-pointer hover:border-rose-400 active:scale-[0.99] transition-all group"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-8 h-8 rounded-xl bg-rose-500/25 border border-rose-400/50 flex items-center justify-center text-base flex-shrink-0 animate-bounce">
+              🚨
+            </span>
+            <div className="flex flex-col text-left min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-rose-200 text-xs sm:text-sm">
+                  ឥវ៉ាន់សល់ពី Live ចាស់ៗ ៖
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white font-mono font-black text-xs shadow-md">
+                  {backlogCount} នាក់
+                </span>
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-rose-300/80 font-medium truncate">
+                ភ្ញៀវបង់លុយរួចហើយ តែមិនទាន់ចេញដឹក! ចុចដើម្បីពិនិត្យ & ចេញដឹក
+              </span>
+            </div>
+          </div>
+          <div className="px-3 py-1.5 rounded-xl bg-rose-600 group-hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1 shadow-md whitespace-nowrap flex-shrink-0 ml-2">
+            <span>ពិនិត្យ</span>
+            <span>➔</span>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 TIER 1: 4-STAGE WORKFLOW TABS */}
+      <div className="grid grid-cols-4 gap-1.5 bg-[#0B1325]/95 p-1.5 rounded-2xl border-[1.5px] border-sky-400/25 shadow-xl">
         {/* Tab 1: Unpicked */}
         <button
           onClick={() => onSwitchStage(1)}
-          className={`p-3 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
             currentStage === 1
-              ? 'bg-gradient-to-b from-sky-500/30 to-slate-900 border-[#00F0FF] shadow-[0_0_20px_rgba(0,240,255,0.35)] text-white'
+              ? 'bg-gradient-to-b from-sky-500/30 to-slate-900 border-[#00F0FF] shadow-[0_0_18px_rgba(0,240,255,0.35)] text-white'
               : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
           }`}
         >
-          <span className="text-[12px] font-extrabold whitespace-nowrap">🛒 មិនទាន់រើស</span>
+          <span className="text-[10.5px] sm:text-[12px] font-extrabold whitespace-nowrap">🛒 មិនទាន់រើស</span>
           <span
-            className={`font-mono text-2xl font-black leading-tight mt-0.5 ${
+            className={`font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 ${
               currentStage === 1 ? 'text-[#00F0FF] drop-shadow-[0_0_8px_rgba(0,240,255,0.8)]' : 'text-slate-300'
             }`}
           >
@@ -46,18 +83,18 @@ export function WorkflowTabs({
           </span>
         </button>
 
-        {/* Tab 2: Waiting / Staged */}
+        {/* Tab 2: Pending Payment */}
         <button
           onClick={() => onSwitchStage(2)}
-          className={`p-3 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
             currentStage === 2
-              ? 'bg-gradient-to-b from-amber-500/30 to-slate-900 border-[#F59E0B] shadow-[0_0_20px_rgba(245,158,11,0.35)] text-white'
+              ? 'bg-gradient-to-b from-amber-500/30 to-slate-900 border-[#F59E0B] shadow-[0_0_18px_rgba(245,158,11,0.35)] text-white'
               : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
           }`}
         >
-          <span className="text-[12px] font-extrabold whitespace-nowrap">⏳ រង់ចាំលុយ</span>
+          <span className="text-[10.5px] sm:text-[12px] font-extrabold whitespace-nowrap">⏳ រង់ចាំបង់</span>
           <span
-            className={`font-mono text-2xl font-black leading-tight mt-0.5 ${
+            className={`font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 ${
               currentStage === 2 ? 'text-[#F59E0B] drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]' : 'text-slate-300'
             }`}
           >
@@ -65,18 +102,33 @@ export function WorkflowTabs({
           </span>
         </button>
 
-        {/* Tab 3: Paid & QC Ready */}
+        {/* Tab 3: Paid-QC */}
         <button
           onClick={() => onSwitchStage(3)}
-          className={`p-3 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
             currentStage === 3
-              ? 'bg-gradient-to-b from-emerald-500/35 to-slate-900 border-[#10B981] shadow-[0_0_22px_rgba(16,185,129,0.45)] text-white'
+              ? 'bg-gradient-to-b from-emerald-500/35 to-slate-900 border-[#10B981] shadow-[0_0_20px_rgba(16,185,129,0.45)] text-white'
               : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
           }`}
         >
-          <span className="text-[12px] font-extrabold whitespace-nowrap">🔔 បង់រួច-ត្រូវផ្ទៀង</span>
-          <span className="font-mono text-2xl font-black leading-tight mt-0.5 text-[#10B981] drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]">
+          <span className="text-[10px] sm:text-[12px] font-extrabold whitespace-nowrap">🔍 បង់រួច-QC</span>
+          <span className="font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 text-[#10B981] drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]">
             {paidQcCount}
+          </span>
+        </button>
+
+        {/* Tab 4: Dispatched */}
+        <button
+          onClick={() => onSwitchStage(4)}
+          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+            currentStage === 4
+              ? 'bg-gradient-to-b from-indigo-500/35 to-slate-900 border-indigo-400 shadow-[0_0_20px_rgba(129,140,248,0.45)] text-white'
+              : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
+          }`}
+        >
+          <span className="text-[10.5px] sm:text-[12px] font-extrabold whitespace-nowrap">🚚 ចេញដឹកហើយ</span>
+          <span className="font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]">
+            {dispatchedCount}
           </span>
         </button>
       </div>

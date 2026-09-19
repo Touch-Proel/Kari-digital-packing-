@@ -49,6 +49,7 @@ export interface Invoice {
   verified_at?: string;
   paid_by?: string;
   paid_at?: string;
+  payment_method?: string;
   msg_status: 'SENT' | 'UNSENT' | 'FAILED';
   msg_error?: string;
   is_locked?: boolean;

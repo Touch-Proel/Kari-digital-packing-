@@ -36,7 +36,7 @@ function renderCommentWithHighlightedCode(comment: string, code: string) {
 interface BasketCardProps {
   key?: any;
   invoice: Invoice;
-  currentMasterStage: number; // 1: Unpicked, 2: Staged, 3: Paid/QC
+  currentMasterStage: number; // 1: Unpicked, 2: Staged, 3: Paid/QC, 4: Dispatched
   myPackerName: string;
   checkedState: Record<string, boolean>;
   productMap?: Record<string, Product>;
@@ -51,6 +51,7 @@ interface BasketCardProps {
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
   onOptimisticZoneUpdate?: (invoiceId: number, newZone: 'PP' | 'PROVINCE', serverTotal?: number, serverShipping?: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
+  onUndispatch?: (inv: Invoice) => void;
 }
 
 export function BasketCard({
@@ -69,7 +70,8 @@ export function BasketCard({
   onDataChanged,
   onOptimisticItemUpdate,
   onOptimisticZoneUpdate,
-  onShowToast
+  onShowToast,
+  onUndispatch
 }: BasketCardProps) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -801,6 +803,65 @@ export function BasketCard({
       }
     } catch {
       onShowToast('Error dismissing comment', 'error');
+    }
+  };
+
+  // Mark Basket as Paid -> Moves to Stage 3 (បង់រួច-QC)
+  const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+
+  const handleMarkAsPaid = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!checkLockGuard()) return;
+    setIsMarkingPaid(true);
+    playPureTone(950, 0.08);
+
+    try {
+      const res = await fetch('/api/mark_invoice_paid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: invoice.invoice_id,
+          packer_name: myPackerName,
+          payment_method: 'ABA/Bakong'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        invoice.status = 'Paid';
+        onShowToast(`✅ កន្ត្រក #${invoice.basket_no || invoice.invoice_id} បានបង់ប្រាក់រួចរាល់ ➔ ចូលផ្ទាំង បង់រួច-QC!`, 'success');
+        onDataChanged();
+      } else {
+        playWarningBuzzer();
+        onShowToast(`❌ មិនអាចកត់ត្រាបានទេ ៖ ${data.error || data.message}`, 'error');
+      }
+    } catch (err) {
+      playWarningBuzzer();
+      onShowToast('⚠️ ដាច់សេវាបណ្តាញ WiFi!', 'error');
+    } finally {
+      setIsMarkingPaid(false);
+    }
+  };
+
+  // Revert Paid to Unpaid (If clicked by mistake)
+  const handleRevertToUnpaid = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!checkLockGuard()) return;
+    try {
+      const res = await fetch('/api/mark_invoice_unpaid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: invoice.invoice_id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        invoice.status = 'Pending';
+        playPureTone(600, 0.06);
+        onShowToast(`↩️ បានប្តូរកន្ត្រក #${invoice.basket_no || invoice.invoice_id} មក «រង់ចាំបង់» វិញ!`);
+        onDataChanged();
+      }
+    } catch (err) {
+      onShowToast('⚠️ ដាច់សេវាបណ្តាញ WiFi!', 'error');
     }
   };
 
@@ -1867,6 +1928,23 @@ export function BasketCard({
             )
           ) : currentMasterStage === 2 ? (
             <div className="flex flex-col gap-2.5 mt-1" onClick={e => e.stopPropagation()}>
+              {/* 🟢 HERO ACTION BUTTON: MARK AS PAID -> ENTER QC */}
+              <button
+                type="button"
+                onClick={handleMarkAsPaid}
+                disabled={isMarkingPaid}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:from-emerald-400 hover:via-teal-300 hover:to-emerald-500 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-[0_4px_22px_rgba(16,185,129,0.45)] border-2 border-emerald-300 active:scale-[0.98] transition-all cursor-pointer group"
+                title="ចុចដើម្បីកត់ត្រាថាភ្ញៀវបានវេលុយរួច និងបញ្ជូនទៅផ្ទាំង បង់រួច-QC"
+              >
+                <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-slate-950/20 border border-slate-950/30 flex items-center justify-center text-sm sm:text-base font-black group-hover:scale-110 transition-transform">
+                  {isMarkingPaid ? '⏳' : '✅'}
+                </span>
+                <span className="font-black tracking-wide text-slate-950">
+                  {isMarkingPaid ? 'កំពុងកត់ត្រា...' : 'ភ្ញៀវបង់រួច ➔ ចូលផ្ទាំង បង់រួច-QC'}
+                </span>
+                <span className="text-slate-950 text-sm sm:text-base font-black group-hover:translate-x-1 transition-transform">➔</span>
+              </button>
+
               <div className="grid grid-cols-2 gap-2.5">
                 {invoice.msg_status === 'SENT' ? (
                   <button
@@ -1953,7 +2031,50 @@ export function BasketCard({
               </div>
               <div className="bg-[#1A1204] border border-amber-600/50 p-2.5 rounded-xl text-xs text-amber-200 text-center font-bold flex items-center justify-center gap-1.5 shadow-sm">
                 <span>📦</span>
-                <span>ថង់នៅលើធ្នើស្រាប់ ‧ រង់ចាំភ្ញៀវវេរលុយ ABA</span>
+                <span>ថង់នៅលើធ្នើស្រាប់ · ចុចប៊ូតុង «ភ្ញៀវបង់រួច» ពេលអតិថិជនវេរលុយរួច</span>
+              </div>
+            </div>
+          ) : currentMasterStage === 4 ? (
+            <div className="flex flex-col gap-2 mt-1" onClick={e => e.stopPropagation()}>
+              <div className="p-3 rounded-2xl bg-indigo-950/40 border border-indigo-500/40 flex items-center justify-between shadow-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-base flex-shrink-0">
+                    🚚
+                  </span>
+                  <div className="flex flex-col text-left min-w-0">
+                    <span className="font-black text-indigo-200 text-xs sm:text-sm truncate">
+                      បានវេចខ្ចប់ & ចេញដឹកជោគជ័យ
+                    </span>
+                    <span className="text-[10px] text-indigo-300/80 font-medium truncate">
+                      {invoice.location_label || (invoice.location_zone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត')} · {invoice.phone_number || 'មិនទាន់មានលេខ'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!checkLockGuard()) return;
+                      onOpenReceiptModal(invoice);
+                    }}
+                    className="py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-cyan-500/50 font-bold text-xs flex items-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
+                    title="ព្រីន / មើលវិក្កយបត្រ"
+                  >
+                    <span>🖨️</span>
+                    <span className="text-[11px]">វិក្កយបត្រ</span>
+                  </button>
+                  {onUndispatch && (
+                    <button
+                      type="button"
+                      onClick={() => onUndispatch(invoice)}
+                      className="py-2 px-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-500/40 font-bold text-xs flex items-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer"
+                      title="ត្រឡប់មកផ្ទាំង QC វិញ"
+                    >
+                      <span>↩️</span>
+                      <span className="text-[11px]">ត្រឡប់</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
@@ -1979,6 +2100,15 @@ export function BasketCard({
                 title="ព្រីនវិក្កយបត្រ"
               >
                 <span className="text-base">🖨️</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleRevertToUnpaid}
+                className="py-3 px-2.5 rounded-2xl bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-400 hover:text-amber-400 font-bold text-xs flex items-center justify-center gap-1 shadow-md active:scale-[0.98] transition-all cursor-pointer"
+                title="ត្រឡប់ទៅ «រង់ចាំបង់» វិញ (ប្រសិនបើចុចច្រឡំ)"
+              >
+                <span>↩️</span>
+                <span className="text-[11px] hidden sm:inline">មិនទាន់បង់</span>
               </button>
             </div>
           )}

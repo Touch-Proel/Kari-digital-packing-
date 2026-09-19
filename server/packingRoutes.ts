@@ -470,6 +470,61 @@ router.post(['/unlock_invoice', '/api/unlock_invoice'], (req: Request, res: Resp
   res.json({ success: true });
 });
 
+// POST /api/mark_invoice_paid
+router.post(['/mark_invoice_paid', '/api/mark_invoice_paid'], (req: Request, res: Response) => {
+  const { invoice_id, packer_name, payment_method } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+  const inv = invoices.find(i => i.invoice_id === cleanId);
+
+  if (!inv) {
+    return res.status(404).json({ success: false, error: 'Invoice not found' });
+  }
+
+  inv.status = 'Paid';
+  inv.paid_by = String(packer_name || 'បុគ្គលិក');
+  inv.paid_at = new Date().toISOString();
+  if (payment_method) {
+    inv.payment_method = payment_method;
+  }
+  // Ensure it has entered STAGED stage so it belongs in QC workflow
+  if (inv.packing_stage === 'UNPICKED') {
+    inv.packing_stage = 'STAGED';
+    inv.staged_by = String(packer_name || 'បុគ្គលិក');
+    inv.staged_at = new Date().toISOString();
+  }
+
+  activeInvoiceLocks.delete(cleanId);
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  res.json({
+    success: true,
+    message: `✅ កន្ត្រក #${cleanId} បានបង់ប្រាក់រួចរាល់ ➔ បញ្ជូនទៅផ្ទាំង បង់រួច-QC ជោគជ័យ!`,
+    invoice: inv
+  });
+});
+
+// POST /api/mark_invoice_unpaid
+router.post(['/mark_invoice_unpaid', '/api/mark_invoice_unpaid'], (req: Request, res: Response) => {
+  const { invoice_id } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+  const inv = invoices.find(i => i.invoice_id === cleanId);
+
+  if (!inv) {
+    return res.status(404).json({ success: false, error: 'Invoice not found' });
+  }
+
+  inv.status = 'Pending';
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  res.json({
+    success: true,
+    message: `បានប្តូរកន្ត្រក #${cleanId} មកស្ថានភាព «រង់ចាំបង់» វិញ!`,
+    invoice: inv
+  });
+});
+
 // POST /api/stage_pack
 router.post('/stage_pack', (req: Request, res: Response) => {
   const { invoice_id, packer_name } = req.body;
@@ -526,10 +581,57 @@ router.post('/dispatch_pack', (req: Request, res: Response) => {
 
   activeInvoiceLocks.delete(cleanId);
   bumpDataRevision();
+  saveDatabaseToDisk();
 
   res.json({
     success: true,
     message: `កញ្ចប់ #${cleanId} ត្រូវបានផ្ទៀងផ្ទាត់ និងបញ្ចេញដឹកជោគជ័យ!`
+  });
+});
+
+// POST /api/undispatch_pack
+router.post('/undispatch_pack', (req: Request, res: Response) => {
+  const { invoice_id } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+  const inv = invoices.find(i => i.invoice_id === cleanId);
+  if (!inv) {
+    return res.status(404).json({ success: false, error: 'Invoice not found' });
+  }
+  inv.packing_stage = 'STAGED';
+  inv.status = 'Paid';
+  inv.items.forEach(it => { it.is_packed = false; });
+  bumpDataRevision();
+  saveDatabaseToDisk();
+  res.json({ success: true, message: `បានត្រឡប់កន្ត្រក #${cleanId} មកផ្ទាំង QC វិញជោគជ័យ!` });
+});
+
+// GET /api/backlog_invoices
+router.get('/backlog_invoices', (req: Request, res: Response) => {
+  const currentLive = (req.query.current_live_id as string) || activeLiveId;
+  // All invoices across all lives that are Paid but not yet Dispatched/Packed/Cancelled
+  // Exclude the current live session so this specifically highlights OLD UNFINISHED lives
+  const previousLiveBacklog = invoices.filter(inv =>
+    inv.status === 'Paid' &&
+    inv.packing_stage !== 'DISPATCHED' &&
+    inv.live_id !== currentLive
+  );
+
+  // Group summary by live_id
+  const summaryByLive: Record<string, { count: number; total_amount: number }> = {};
+  for (const inv of previousLiveBacklog) {
+    const lid = inv.live_id || 'UNKNOWN';
+    if (!summaryByLive[lid]) {
+      summaryByLive[lid] = { count: 0, total_amount: 0 };
+    }
+    summaryByLive[lid].count += 1;
+    summaryByLive[lid].total_amount += inv.total_amount;
+  }
+
+  res.json({
+    success: true,
+    total_backlog: previousLiveBacklog.length,
+    summary_by_live: summaryByLive,
+    invoices: previousLiveBacklog
   });
 });
 
