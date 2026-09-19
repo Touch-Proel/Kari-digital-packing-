@@ -50,8 +50,16 @@ interface BasketCardProps {
   onDataChanged: () => void;
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
   onOptimisticZoneUpdate?: (invoiceId: number, newZone: 'PP' | 'PROVINCE', serverTotal?: number, serverShipping?: number) => void;
-  onOptimisticAddItem?: (invoiceId: number, code: string, qty: number, commentText?: string, price?: number) => void;
-  onUpdateInvoice?: (inv: Invoice) => void;
+  onOptimisticAddItem?: (
+    invoiceId: number,
+    code: string,
+    qty: number,
+    commentText?: string,
+    price?: number,
+    imageFile?: string,
+    productName?: string
+  ) => void;
+  onUpdateInvoice?: (inv: Invoice, revision?: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onUndispatch?: (inv: Invoice) => void;
 }
@@ -103,6 +111,7 @@ function BasketCardComponent({
 
   // Manual Add Item States
   const [isAddingManualCode, setIsAddingManualCode] = useState(false);
+  const [isSubmittingManualAdd, setIsSubmittingManualAdd] = useState(false);
   const [manualCodeInput, setManualCodeInput] = useState('');
   const [manualQtyInput, setManualQtyInput] = useState(1);
   const [manualCommentSource, setManualCommentSource] = useState('');
@@ -518,7 +527,7 @@ function BasketCardComponent({
       if (data.success) {
         onShowToast(`✅ [${it.product_code}] ចំនួន៖ ${targetQty}`);
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         }
       } else {
         playWarningBuzzer();
@@ -559,7 +568,7 @@ function BasketCardComponent({
       if (data.success) {
         onShowToast(newQty === 0 ? `🗑️ បានលុបកូដ [${code}]` : `✅ [${code}] ចំនួន៖ ${newQty}`);
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         }
       } else {
         playWarningBuzzer();
@@ -620,7 +629,7 @@ function BasketCardComponent({
       if (data.success) {
         onShowToast(`🗑️ បានដកកូដ [${it.product_code}] ចេញពីកន្ត្រក #${invoice.basket_no}!`);
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         }
       } else {
         onShowToast(`⚠️ ${data.message || 'មិនអាចលុបបានទេ'}`, 'error');
@@ -679,7 +688,7 @@ function BasketCardComponent({
         onShowToast(data.message || `✅ បានកែប្រែកូដ [${targetCode}] (តម្លៃ $${finalPrice.toFixed(2)}) រួចរាល់!`, 'success');
         setEditingCodeItem(null);
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         } else {
           onDataChanged();
         }
@@ -725,7 +734,7 @@ function BasketCardComponent({
         playSuccessFanfare();
         onShowToast(data.message || `✅ បានប្តូរទៅកូដ [${targetCode}] រួចរាល់!`, 'success');
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         } else {
           onDataChanged();
         }
@@ -757,7 +766,15 @@ function BasketCardComponent({
     // Instant 0ms Optimistic UI Add & Fanfare sound!
     playSuccessFanfare();
     const stockProd = productMap ? productMap[finalCode.toUpperCase()] : undefined;
-    onOptimisticAddItem?.(invoice.invoice_id, finalCode, finalQty, commentText, stockProd?.price);
+    onOptimisticAddItem?.(
+      invoice.invoice_id,
+      finalCode,
+      finalQty,
+      commentText,
+      stockProd?.price,
+      stockProd?.image_file,
+      stockProd?.name
+    );
 
     try {
       const res = await fetch('/api/add_item_to_invoice', {
@@ -777,9 +794,9 @@ function BasketCardComponent({
         onShowToast(`❌ មិនអាចកាត់បានទេ៖ ${data.message}`, 'error');
         onDataChanged(); // Revert from server
       } else {
-        onShowToast(`⚡ កាត់ [${finalCode} x${finalQty}] ចូលកន្ត្រក #${invoice.basket_no} រួចរាល់!`);
+        onShowToast(`⚡ កាត់ [${finalCode} x${finalQty}] ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id} រួចរាល់!`);
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         }
       }
     } catch (e) {
@@ -792,20 +809,32 @@ function BasketCardComponent({
   // Execute Manual Add Item
   const executeManualAddCode = async () => {
     if (!checkLockGuard()) return;
+    if (isSubmittingManualAdd) return;
+
     const cleanCode = manualCodeInput.trim().toUpperCase();
     if (!cleanCode) {
       onShowToast('សូមបញ្ចូលកូដទំនិញ', 'error');
       return;
     }
 
+    setIsSubmittingManualAdd(true);
     // Instant 0ms Optimistic UI Add & Fanfare sound!
     playSuccessFanfare();
     const stockProd = productMap ? productMap[cleanCode] : undefined;
     const addQty = manualQtyInput || 1;
-    onOptimisticAddItem?.(invoice.invoice_id, cleanCode, addQty, manualCommentSource || undefined, stockProd?.price);
+    onOptimisticAddItem?.(
+      invoice.invoice_id,
+      cleanCode,
+      addQty,
+      manualCommentSource || undefined,
+      stockProd?.price,
+      stockProd?.image_file,
+      stockProd?.name
+    );
     setIsAddingManualCode(false);
     setManualCodeInput('');
     setManualQtyInput(1);
+    const commentSource = manualCommentSource;
     setManualCommentSource('');
 
     try {
@@ -816,7 +845,7 @@ function BasketCardComponent({
           invoice_id: invoice.invoice_id,
           code: cleanCode,
           quantity: addQty,
-          comment_text: manualCommentSource || undefined,
+          comment_text: commentSource || undefined,
           packer_name: myPackerName
         })
       });
@@ -828,12 +857,14 @@ function BasketCardComponent({
       } else {
         onShowToast(`✅ បានថែម [${cleanCode} x${addQty}] ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id}!`);
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         }
       }
     } catch (e) {
       onShowToast('Error adding item', 'error');
       onDataChanged();
+    } finally {
+      setIsSubmittingManualAdd(false);
     }
   };
 
@@ -852,7 +883,7 @@ function BasketCardComponent({
       if (data.success) {
         onShowToast('✅ បានសម្អាតចេញពីបញ្ជី N/A (រក្សាទុកក្នុងប្រវត្តិ)');
         if (data.invoice && onUpdateInvoice) {
-          onUpdateInvoice(data.invoice);
+          onUpdateInvoice(data.invoice, data.revision);
         } else {
           onDataChanged();
         }
@@ -1753,10 +1784,11 @@ function BasketCardComponent({
                   </div>
                   <button
                     type="button"
+                    disabled={isSubmittingManualAdd}
                     onClick={executeManualAddCode}
-                    className="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black text-xs px-3.5 py-2 rounded-xl active:scale-95 shadow transition-all whitespace-nowrap"
+                    className="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-50 text-white font-black text-xs px-3.5 py-2 rounded-xl active:scale-95 shadow transition-all whitespace-nowrap"
                   >
-                    ➕ កាត់ចូល
+                    {isSubmittingManualAdd ? '⏳ កំពុងកាត់...' : '➕ កាត់ចូល'}
                   </button>
                 </div>
               </div>

@@ -912,14 +912,15 @@ router.post('/edit_basket_item_code', (req: Request, res: Response) => {
   }
 
   recalculateInvoice(inv);
-  bumpDataRevision();
+  const newRev = bumpDataRevision();
   saveDatabaseToDisk();
 
   res.json({
     success: true,
     message: `បានកែប្រែកូដ [${cleanOldCode}] ទៅជា [${item.product_code}] រួចរាល់!`,
     item,
-    invoice: inv
+    invoice: inv,
+    revision: newRev
   });
 });
 
@@ -938,7 +939,7 @@ router.post('/set_item_qty_direct', (req: Request, res: Response) => {
     });
   }
 
-  const inv = invoices.find(i => i.invoice_id === cleanId);
+  const inv = invoices.find(i => i.invoice_id === cleanId || i.basket_no === cleanId);
   if (!inv) {
     return res.status(404).json({ success: false, message: 'រកមិនឃើញវិក្កយបត្រ' });
   }
@@ -967,13 +968,15 @@ router.post('/set_item_qty_direct', (req: Request, res: Response) => {
   }
 
   recalculateInvoice(inv);
-  bumpDataRevision();
+  const newRev = bumpDataRevision();
+  saveDatabaseToDisk();
 
   res.json({
     success: true,
     message: 'កែប្រែចំនួនជោគជ័យ',
     item: { code: cleanCode, quantity: targetQty },
-    invoice: inv
+    invoice: inv,
+    revision: newRev
   });
 });
 
@@ -992,7 +995,7 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
     });
   }
 
-  const inv = invoices.find(i => i.invoice_id === cleanId);
+  const inv = invoices.find(i => i.invoice_id === cleanId || i.basket_no === cleanId);
   if (!inv) {
     return res.status(404).json({ success: false, message: 'រកមិនឃើញវិក្កយបត្រ' });
   }
@@ -1029,7 +1032,7 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
     const nextItemId = inv.items.length > 0 ? Math.max(...inv.items.map(it => it.id)) + 1 : 1;
     inv.items.push({
       id: nextItemId,
-      invoice_id: cleanId,
+      invoice_id: inv.invoice_id,
       product_id: prod.id,
       product_code: prod.code,
       product_name: prod.name,
@@ -1043,23 +1046,27 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
 
   // Remove comment from unmatched if provided
   if (comment_text && inv.unmatched_comments) {
-    inv.unmatched_comments = inv.unmatched_comments.filter(c => c !== comment_text);
+    const cleanComment = String(comment_text).trim();
+    inv.unmatched_comments = inv.unmatched_comments.filter(c => c.trim() !== cleanComment);
   }
 
   recalculateInvoice(inv);
-  bumpDataRevision();
+  const newRev = bumpDataRevision();
+  saveDatabaseToDisk();
 
   res.json({
     success: true,
-    message: `បានបន្ថែម [${cleanCode} x${addQty}] ចូលកន្ត្រក #${cleanId} រួចរាល់!`,
+    message: `បានបន្ថែម [${cleanCode} x${addQty}] ចូលកន្ត្រក #${inv.basket_no || inv.invoice_id} រួចរាល់!`,
     item: {
       code: cleanCode,
       product_name: prod.name,
       quantity: finalQty,
       price: prod.price,
+      image_file: prod.image_file || '',
       total_amount: inv.total_amount
     },
-    invoice: inv
+    invoice: inv,
+    revision: newRev
   });
 });
 
@@ -1075,12 +1082,14 @@ router.post('/dismiss_unmatched_comment', (req: Request, res: Response) => {
   if (comment_text && inv.unmatched_comments) {
     inv.unmatched_comments = inv.unmatched_comments.filter(c => c.trim() !== String(comment_text).trim());
   }
-  bumpDataRevision();
+  const newRev = bumpDataRevision();
+  saveDatabaseToDisk();
 
   res.json({
     success: true,
     message: 'បានបិទខមិននេះរួចរាល់ (រក្សាទុកក្នុងប្រវត្តិ)',
-    invoice: inv
+    invoice: inv,
+    revision: newRev
   });
 });
 

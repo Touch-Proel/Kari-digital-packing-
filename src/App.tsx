@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, CSSProperties } from 'react';
 import {
   Invoice,
+  OrderItem,
   Product,
   FacebookPage
 } from './types';
@@ -48,6 +49,16 @@ export default function App() {
   const [activePage, setActivePage] = useState<FacebookPage | null>(null);
   const [currentRevision, setCurrentRevision] = useState<number>(0);
   const currentRevisionRef = useRef<number>(0);
+  const pendingMutationsRef = useRef<Map<number, {
+    timestamp: number;
+    items?: OrderItem[];
+    unmatched_comments?: string[];
+    total_amount?: number;
+    location_zone?: 'PP' | 'PROVINCE';
+    shipping_fee?: number;
+  }>>(new Map());
+  const isFetchingInvoicesRef = useRef<boolean>(false);
+  const fetchRequestIdRef = useRef<number>(0);
   const [networkOnline, setNetworkOnline] = useState<boolean>(true);
 
   // Workflow & UI Filters
@@ -280,30 +291,36 @@ export default function App() {
 
   // Immediate Optimistic Update for 0ms Smoothness (No Lag)
   const handleOptimisticItemUpdate = useCallback((invoiceId: number, code: string, targetQty: number) => {
-    setInvoices(prev =>
-      prev.map(inv => {
-        if (inv.invoice_id !== invoiceId) return inv;
-        const cleanCode = code.toUpperCase();
-        let updatedItems = [...(inv.items || [])];
-        const idx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanCode);
-        if (idx !== -1) {
-          if (targetQty <= 0) {
-            updatedItems.splice(idx, 1);
-          } else {
-            updatedItems[idx] = { ...updatedItems[idx], quantity: targetQty };
-          }
+    setInvoices(prev => {
+      const inv = prev.find(i => i.invoice_id === invoiceId);
+      if (!inv) return prev;
+      const cleanCode = code.toUpperCase();
+      let updatedItems = [...(inv.items || [])];
+      const idx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanCode);
+      if (idx !== -1) {
+        if (targetQty <= 0) {
+          updatedItems.splice(idx, 1);
+        } else {
+          updatedItems[idx] = { ...updatedItems[idx], quantity: targetQty };
         }
-        const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
-        const ship = inv.is_free_ship ? 0 : (inv.shipping_fee || (inv.location_zone === 'PROVINCE' ? 2.0 : 1.25));
-        const total = subtotal + ship;
-        return {
-          ...inv,
-          items: updatedItems,
-          total_amount: total,
-          updated_at: new Date().toISOString()
-        };
-      })
-    );
+      }
+      const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+      const ship = inv.is_free_ship ? 0 : (inv.shipping_fee || (inv.location_zone === 'PROVINCE' ? 2.0 : 1.25));
+      const total = subtotal + ship;
+
+      pendingMutationsRef.current.set(invoiceId, {
+        timestamp: Date.now(),
+        items: updatedItems,
+        total_amount: total
+      });
+
+      return prev.map(item => item.invoice_id === invoiceId ? {
+        ...item,
+        items: updatedItems,
+        total_amount: total,
+        updated_at: new Date().toISOString()
+      } : item);
+    });
   }, []);
 
   // Immediate Optimistic Zone Update for Silky-Smooth 0ms Switching
@@ -313,78 +330,107 @@ export default function App() {
     serverTotal?: number,
     serverShipping?: number
   ) => {
-    setInvoices(prev =>
-      prev.map(inv => {
-        if (inv.invoice_id !== invoiceId) return inv;
-        const shipping = serverShipping !== undefined ? serverShipping : (inv.shipping_fee || (newZone === 'PP' ? 1.25 : 2.0));
-        const subtotal = (inv.items || []).reduce((s, it) => s + (it.price * it.quantity), 0);
-        const total = serverTotal !== undefined ? serverTotal : (subtotal + shipping);
-        return {
-          ...inv,
-          location_zone: newZone,
-          location_label: newZone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត',
-          shipping_fee: shipping,
-          total_amount: total,
-          updated_at: new Date().toISOString()
-        };
-      })
-    );
+    setInvoices(prev => {
+      const inv = prev.find(i => i.invoice_id === invoiceId);
+      if (!inv) return prev;
+      const shipping = serverShipping !== undefined ? serverShipping : (inv.shipping_fee || (newZone === 'PP' ? 1.25 : 2.0));
+      const subtotal = (inv.items || []).reduce((s, it) => s + (it.price * it.quantity), 0);
+      const total = serverTotal !== undefined ? serverTotal : (subtotal + shipping);
+
+      pendingMutationsRef.current.set(invoiceId, {
+        timestamp: Date.now(),
+        location_zone: newZone,
+        shipping_fee: shipping,
+        total_amount: total
+      });
+
+      return prev.map(item => item.invoice_id === invoiceId ? {
+        ...item,
+        location_zone: newZone,
+        location_label: newZone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត',
+        shipping_fee: shipping,
+        total_amount: total,
+        updated_at: new Date().toISOString()
+      } : item);
+    });
   }, []);
 
-  // Optimistic Add Item from comment or manual (0ms instant response)
+  // Optimistic Add Item from comment or manual (0ms instant response, rock-solid lock)
   const handleOptimisticAddItem = useCallback((
     invoiceId: number,
     code: string,
     qty: number,
     commentText?: string,
-    price?: number
+    price?: number,
+    imageFile?: string,
+    productName?: string
   ) => {
-    setInvoices(prev =>
-      prev.map(inv => {
-        if (inv.invoice_id !== invoiceId) return inv;
-        const cleanCode = code.toUpperCase();
-        let updatedItems = [...(inv.items || [])];
-        const existingIdx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanCode);
-        const itemPrice = price !== undefined ? price : 5.0;
+    setInvoices(prev => {
+      const inv = prev.find(i => i.invoice_id === invoiceId);
+      if (!inv) return prev;
+      const cleanCode = code.toUpperCase();
+      let updatedItems = [...(inv.items || [])];
+      const existingIdx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanCode);
+      const itemPrice = price !== undefined ? price : 5.0;
 
-        if (existingIdx !== -1) {
-          updatedItems[existingIdx] = {
-            ...updatedItems[existingIdx],
-            quantity: updatedItems[existingIdx].quantity + qty
-          };
-        } else {
-          updatedItems.push({
-            id: Date.now(),
-            invoice_id: invoiceId,
-            product_code: cleanCode,
-            product_name: cleanCode,
-            quantity: qty,
-            price: itemPrice,
-            is_packed: false,
-            item_comment: commentText
-          });
-        }
-
-        let updatedUnmatched = inv.unmatched_comments;
-        if (commentText && updatedUnmatched) {
-          updatedUnmatched = updatedUnmatched.filter(c => c.trim() !== commentText.trim());
-        }
-
-        const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
-        const ship = inv.is_free_ship ? 0 : (inv.shipping_fee || (inv.location_zone === 'PROVINCE' ? 2.0 : 1.25));
-        return {
-          ...inv,
-          items: updatedItems,
-          unmatched_comments: updatedUnmatched,
-          total_amount: subtotal + ship,
-          updated_at: new Date().toISOString()
+      if (existingIdx !== -1) {
+        updatedItems[existingIdx] = {
+          ...updatedItems[existingIdx],
+          quantity: updatedItems[existingIdx].quantity + qty,
+          image_file: imageFile || updatedItems[existingIdx].image_file
         };
-      })
-    );
+      } else {
+        updatedItems.push({
+          id: Date.now(),
+          invoice_id: invoiceId,
+          product_code: cleanCode,
+          product_name: productName || cleanCode,
+          quantity: qty,
+          price: itemPrice,
+          is_packed: false,
+          item_comment: commentText,
+          image_file: imageFile || ''
+        });
+      }
+
+      let updatedUnmatched = inv.unmatched_comments;
+      if (commentText && updatedUnmatched) {
+        const cleanComment = commentText.trim();
+        updatedUnmatched = updatedUnmatched.filter(c => c.trim() !== cleanComment);
+      }
+
+      const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+      const ship = inv.is_free_ship ? 0 : (inv.shipping_fee || (inv.location_zone === 'PROVINCE' ? 2.0 : 1.25));
+      const totalAmount = subtotal + ship;
+
+      // Lock optimistic state for this invoice so background polls cannot overwrite it!
+      pendingMutationsRef.current.set(invoiceId, {
+        timestamp: Date.now(),
+        items: updatedItems,
+        unmatched_comments: updatedUnmatched,
+        total_amount: totalAmount
+      });
+
+      return prev.map(item => item.invoice_id === invoiceId ? {
+        ...item,
+        items: updatedItems,
+        unmatched_comments: updatedUnmatched,
+        total_amount: totalAmount,
+        updated_at: new Date().toISOString()
+      } : item);
+    });
   }, []);
 
-  // Sync single updated invoice directly without full refetch
-  const handleUpdateInvoice = useCallback((updatedInv: Invoice) => {
+  // Sync single updated invoice directly without full refetch & update server revision
+  const handleUpdateInvoice = useCallback((updatedInv: Invoice, serverRev?: number) => {
+    // Clear pending mutation lock for this invoice
+    pendingMutationsRef.current.delete(updatedInv.invoice_id);
+
+    if (typeof serverRev === 'number' && serverRev > currentRevisionRef.current) {
+      currentRevisionRef.current = serverRev;
+      setCurrentRevision(serverRev);
+    }
+
     setInvoices(prev => {
       const idx = prev.findIndex(inv => inv.invoice_id === updatedInv.invoice_id);
       if (idx === -1) return [updatedInv, ...prev];
@@ -394,8 +440,15 @@ export default function App() {
     });
   }, []);
 
-  // Data Fetching: Invoices with 0ms revision check
+  // Data Fetching: Invoices with 0ms revision check, concurrency lock, and optimistic preservation
   const fetchInvoices = async (overrideLiveId?: string, overrideRev?: number) => {
+    // Avoid piling parallel polls on slow networks
+    if (isFetchingInvoicesRef.current && overrideLiveId === undefined && overrideRev === undefined) {
+      return;
+    }
+    const reqId = ++fetchRequestIdRef.current;
+    isFetchingInvoicesRef.current = true;
+
     try {
       const targetLive = overrideLiveId !== undefined ? overrideLiveId : selectedLiveId;
       const targetRev = overrideRev !== undefined ? overrideRev : currentRevisionRef.current;
@@ -406,18 +459,51 @@ export default function App() {
       }
       setNetworkOnline(true);
       const json = await res.json();
+
+      // If a newer request was dispatched while this was in flight, discard stale response
+      if (reqId !== fetchRequestIdRef.current) {
+        return;
+      }
+
       if (json && json.changed === false) {
         return; // No change
       }
       if (json.data) {
-        setInvoices(json.data);
+        const now = Date.now();
+        setInvoices(prev => {
+          return json.data.map((serverInv: Invoice) => {
+            const pending = pendingMutationsRef.current.get(serverInv.invoice_id);
+            if (pending) {
+              if (now - pending.timestamp < 5000) {
+                // An optimistic mutation is in-flight: preserve user changes to prevent jumping/flicker
+                const local = prev.find(p => p.invoice_id === serverInv.invoice_id);
+                if (local) {
+                  return {
+                    ...serverInv,
+                    items: pending.items || local.items,
+                    unmatched_comments: pending.unmatched_comments !== undefined ? pending.unmatched_comments : local.unmatched_comments,
+                    total_amount: pending.total_amount !== undefined ? pending.total_amount : local.total_amount,
+                    location_zone: pending.location_zone || local.location_zone,
+                    shipping_fee: pending.shipping_fee !== undefined ? pending.shipping_fee : local.shipping_fee
+                  };
+                }
+              } else {
+                pendingMutationsRef.current.delete(serverInv.invoice_id);
+              }
+            }
+            return serverInv;
+          });
+        });
+
         if (json.revision) {
-          currentRevisionRef.current = json.revision;
-          setCurrentRevision(json.revision);
+          currentRevisionRef.current = Math.max(currentRevisionRef.current, json.revision);
+          setCurrentRevision(currentRevisionRef.current);
         }
       }
     } catch (e) {
       setNetworkOnline(false);
+    } finally {
+      isFetchingInvoicesRef.current = false;
     }
   };
 
