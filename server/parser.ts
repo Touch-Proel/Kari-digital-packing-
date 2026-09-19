@@ -5,7 +5,9 @@ import {
   rawComments,
   recalculateInvoice,
   bumpDataRevision,
-  activeLiveId
+  saveDatabaseToDisk,
+  activeLiveId,
+  settings
 } from './db';
 import { DeliveryZone, Invoice, OrderItem } from './types';
 import { detectDeliveryZone } from './locationHelper';
@@ -137,7 +139,6 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   s = s.replace(RE_PRICE_CLEANUP, ' ');
   s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
 
-  // បំប្លែងសញ្ញាសម្រាយ slash (/) និង dot (.) ឱ្យទៅជាសញ្ញាស្មើ (=)
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})[\/](\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(?<!\d)(?!1\.[4-9]\d)(\d{1,3})\.(\d{1,2})(?!\d)/g, '$1=$2');
   s = s.replace(/(\d{1,3})\s*=\s*(?:[-_]|\s*(?=[^\d]|$))/g, '$1=1 ');
@@ -149,7 +150,7 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   const targetLive = liveId || activeLiveId;
   const sortedCatalog = products
     .filter(p => (p.live_id || activeLiveId) === targetLive && p.code && p.code.trim().length > 0)
-    .sort((a, b) => b.code.length - a.code.length);
+    .sort((a, b) => b.code.length - a.code.length); // ➔ រៀបចំពីកូដវែងទៅកូដខ្លី (ឧ. 18 ឆែកមុន 1)
 
   const validSuffixes = SIZE_COLOR_SUFFIXES.join('|');
 
@@ -157,7 +158,6 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
     seg = seg.trim();
     if (!seg) continue;
 
-    // 🎯 ត្រួតពិនិត្យទម្រង់ CODE=QTY មុនគេដាច់ខាត (ឧ. 6=4, 7=3, 5=2)
     const explicitEqMatch = seg.match(/^([A-Za-z0-9]{1,5})\s*[:=]\s*(\d{1,2})(?!\d)/i);
     if (explicitEqMatch) {
       const rawCode = explicitEqMatch[1].toUpperCase().trim();
@@ -166,7 +166,7 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
       if (matchingProd && !seenCodes.has(rawCode)) {
         pairs.push({ code: matchingProd.code, qty });
         seenCodes.add(matchingProd.code);
-        continue; // រំលង segment นี้ មិនឱ្យទៅចាប់លេខខាងស្តាំច្រឡំជាកូដទៀតទេ
+        continue;
       }
     }
 
@@ -184,8 +184,9 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
         }
       }
 
+      // សម្រាប់កូដ ១ ខ្ទង់ ត้องការកុំឱ្យវាទៅស៊ីក្នុងពាក្យថែម ឬយក (ឧ. ថែម18, 18យក2)
       const codePattern = isSingleDigit
-        ? `(?:(?:កូដ|កូដលេខ|CODE|យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*${esc}|(?<!\\d)${esc}(?!\\d))`
+        ? `(?<!\\d)(?:កូដ|កូដលេខ|CODE)?\\s*(${esc})(?!\\d)`
         : `(?<!\\d)(${esc})(?!\\d)`;
 
       const codeMatch = seg.match(new RegExp(codePattern, 'i'));
