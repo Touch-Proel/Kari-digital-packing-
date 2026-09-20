@@ -103,6 +103,7 @@ export const settings: AppSettings = {
   exchange_rate: 4100,
   telegram_token: process.env.TELEGRAM_BOT_TOKEN || '',
   telegram_chat_id: process.env.TELEGRAM_CHAT_ID || '',
+  gemini_api_key: process.env.GEMINI_API_KEY || '',
   parser_strict_catalog: false,
   parser_allow_standalone: true
 };

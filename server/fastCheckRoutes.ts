@@ -2,17 +2,19 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision } from './db';
+import { invoices, saveDatabaseToDisk, bumpDataRevision, settings } from './db';
 import { Invoice } from './types';
 
 const router = Router();
 
-// Lazy-init Gemini client
+// Lazy-init Gemini client with dynamic API key support (env or UI settings)
 let geminiClient: GoogleGenAI | null = null;
+let currentActiveKey: string = '';
+
 function getGemini(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY;
+  const key = (process.env.GEMINI_API_KEY || settings.gemini_api_key || '').trim();
   if (!key) return null;
-  if (!geminiClient) {
+  if (!geminiClient || currentActiveKey !== key) {
     geminiClient = new GoogleGenAI({
       apiKey: key,
       httpOptions: {
@@ -21,9 +23,64 @@ function getGemini(): GoogleGenAI | null {
         },
       },
     });
+    currentActiveKey = key;
   }
   return geminiClient;
 }
+
+// GET /api/fast_check/gemini_status
+router.get('/gemini_status', (req: Request, res: Response) => {
+  const envKey = (process.env.GEMINI_API_KEY || '').trim();
+  const dbKey = (settings.gemini_api_key || '').trim();
+  const activeKey = envKey || dbKey;
+  
+  let maskedKey = '';
+  if (activeKey) {
+    maskedKey = activeKey.length > 8 
+      ? `${activeKey.slice(0, 4)}••••••••${activeKey.slice(-4)}`
+      : '••••••••';
+  }
+
+  res.json({
+    success: true,
+    hasKey: Boolean(activeKey),
+    isFromEnv: Boolean(envKey),
+    maskedKey,
+    hasCustomKey: Boolean(dbKey)
+  });
+});
+
+// POST /api/fast_check/save_gemini_key
+router.post('/save_gemini_key', (req: Request, res: Response) => {
+  const { gemini_api_key } = req.body;
+  if (typeof gemini_api_key !== 'string') {
+    return res.status(400).json({ success: false, error: 'Invalid API key format' });
+  }
+
+  const cleanKey = gemini_api_key.trim();
+  settings.gemini_api_key = cleanKey;
+  
+  // Invalidate cached client to force re-initialization with new key
+  geminiClient = null;
+  currentActiveKey = '';
+  
+  saveDatabaseToDisk();
+  bumpDataRevision();
+
+  let maskedKey = '';
+  if (cleanKey) {
+    maskedKey = cleanKey.length > 8 
+      ? `${cleanKey.slice(0, 4)}••••••••${cleanKey.slice(-4)}`
+      : '••••••••';
+  }
+
+  res.json({
+    success: true,
+    message: cleanKey ? 'បានរក្សាទុក Gemini API Key រួចរាល់!' : 'បានលុប Gemini API Key រួចរាល់!',
+    hasKey: Boolean(cleanKey || process.env.GEMINI_API_KEY),
+    maskedKey
+  });
+});
 
 // Utility: Normalize text for matching
 function normalizeName(name: string): string {

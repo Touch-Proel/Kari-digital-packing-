@@ -45,6 +45,17 @@ export function SystemSettingsModal({
   const [strictCatalogMode, setStrictCatalogMode] = useState(false);
   const [loadingStrict, setLoadingStrict] = useState(false);
 
+  // Gemini API Key State
+  const [geminiStatus, setGeminiStatus] = useState<{
+    hasKey: boolean;
+    maskedKey: string;
+    isFromEnv: boolean;
+    hasCustomKey: boolean;
+  }>({ hasKey: false, maskedKey: '', isFromEnv: false, hasCustomKey: false });
+  const [geminiKeyInput, setGeminiKeyInput] = useState('');
+  const [isSavingGemini, setIsSavingGemini] = useState(false);
+  const [geminiFeedback, setGeminiFeedback] = useState<string | null>(null);
+
   useEffect(() => {
     if (!isOpen) return;
     fetch('/api/parser/settings')
@@ -55,7 +66,53 @@ export function SystemSettingsModal({
         }
       })
       .catch(() => {});
+
+    fetch('/api/fast_check/gemini_status')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success) {
+          setGeminiStatus({
+            hasKey: Boolean(data.hasKey),
+            maskedKey: data.maskedKey || '',
+            isFromEnv: Boolean(data.isFromEnv),
+            hasCustomKey: Boolean(data.hasCustomKey)
+          });
+        }
+      })
+      .catch(() => {});
   }, [isOpen]);
+
+  const handleSaveGeminiKey = async () => {
+    if (!geminiKeyInput.trim() && !geminiStatus.hasKey) return;
+    setIsSavingGemini(true);
+    setGeminiFeedback(null);
+    try {
+      const res = await fetch('/api/fast_check/save_gemini_key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gemini_api_key: geminiKeyInput.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGeminiStatus({
+          hasKey: Boolean(data.hasKey),
+          maskedKey: data.maskedKey || '',
+          isFromEnv: false,
+          hasCustomKey: Boolean(geminiKeyInput.trim())
+        });
+        setGeminiKeyInput('');
+        setGeminiFeedback('✅ បានរក្សាទុក Key ជោគជ័យ!');
+        playPureTone(880, 0.1);
+      } else {
+        setGeminiFeedback('❌ បរាជ័យក្នុងការរក្សាទុក');
+      }
+    } catch {
+      setGeminiFeedback('❌ មានបញ្ហាតភ្ជាប់');
+    } finally {
+      setIsSavingGemini(false);
+      setTimeout(() => setGeminiFeedback(null), 3000);
+    }
+  };
 
   const handleToggleStrict = async () => {
     const nextVal = !strictCatalogMode;
@@ -284,7 +341,92 @@ export function SystemSettingsModal({
             </div>
           </div>
 
-          {/* Section 4: Font & UI Zoom Settings */}
+          {/* Section 4: Google Gemini AI Key (For VPS / AI Fast-Check) */}
+          <div className="bg-[#0A1526] border border-indigo-500/40 rounded-2xl p-3.5 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">✨</span>
+                <div>
+                  <span className="font-bold text-indigo-300 text-sm">Google Gemini AI Key (ស្កេន Slips)</span>
+                  <p className="text-[11px] text-slate-400">សម្រាប់ដំណើរការស្កេនវិក្កយបត្ររូបភាព AI លើ VPS</p>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                geminiStatus.hasKey
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+              }`}>
+                {geminiStatus.hasKey ? '✅ សកម្ម (Active)' : '⚠️ មិនទាន់កំណត់'}
+              </span>
+            </div>
+
+            {geminiStatus.hasKey && (
+              <div className="flex items-center justify-between bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-xl text-[11px]">
+                <span className="text-slate-400">Key បច្ចុប្បន្ន ៖</span>
+                <span className="font-mono text-emerald-400 font-bold">{geminiStatus.maskedKey}</span>
+                <span className="text-[9.5px] bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded">
+                  {geminiStatus.isFromEnv ? 'ENV' : 'Custom'}
+                </span>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={geminiKeyInput}
+                onChange={e => setGeminiKeyInput(e.target.value)}
+                placeholder={geminiStatus.hasKey ? 'បញ្ចូល Key ថ្មីដើម្បីប្តូរ...' : 'បញ្ចូល Gemini API Key (AIzaSy...)'}
+                className="flex-1 bg-slate-950 border border-indigo-500/50 focus:border-indigo-400 rounded-xl px-3 py-2 text-xs text-indigo-100 placeholder-slate-500 outline-none font-mono"
+              />
+              <button
+                type="button"
+                disabled={isSavingGemini || !geminiKeyInput.trim()}
+                onClick={handleSaveGeminiKey}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-sm"
+              >
+                {isSavingGemini ? '...' : '💾 រក្សាទុក'}
+              </button>
+            </div>
+
+            {geminiFeedback && (
+              <div className="text-[11px] font-bold text-cyan-300 animate-fade-in">
+                {geminiFeedback}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between text-[10.5px]">
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-400 hover:text-indigo-300 hover:underline"
+              >
+                ✨ យក API Key ឥតគិតថ្លៃ (Free 100%) ↗
+              </a>
+              {geminiStatus.hasCustomKey && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await fetch('/api/fast_check/save_gemini_key', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ gemini_api_key: '' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                      setGeminiStatus({ hasKey: false, maskedKey: '', isFromEnv: false, hasCustomKey: false });
+                      setGeminiFeedback('🗑️ បានលុប Key ផ្ទាល់ខ្លួនរួច');
+                    }
+                  }}
+                  className="text-rose-400 hover:text-rose-300 hover:underline"
+                >
+                  🗑️ លុប Key ផ្ទាល់ខ្លួន
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Section 5: Font & UI Zoom Settings */}
           <div className="bg-[#0A1526] border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3">
             <span className="font-bold text-slate-200 text-sm flex items-center gap-1.5">
               <span>🎨</span> ការកំណត់ពុម្ពអក្សរ & ទំហំមើល (Typography & Zoom)

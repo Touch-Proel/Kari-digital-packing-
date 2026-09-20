@@ -24,7 +24,77 @@ export function FastCheckSlipsModal({
   const [isConfirming, setIsConfirming] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  // Gemini API Key State for VPS / Direct UI Config
+  const [geminiStatus, setGeminiStatus] = useState<{
+    hasKey: boolean;
+    maskedKey: string;
+    isFromEnv: boolean;
+    hasCustomKey: boolean;
+  }>({ hasKey: false, maskedKey: '', isFromEnv: false, hasCustomKey: false });
+  const [showKeyConfig, setShowKeyConfig] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [isSavingKey, setIsSavingKey] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Check Gemini Key Status on mount/open
+  const fetchGeminiStatus = async () => {
+    try {
+      const res = await fetch('/api/fast_check/gemini_status');
+      if (res.ok) {
+        const data = await res.json();
+        setGeminiStatus({
+          hasKey: Boolean(data.hasKey),
+          maskedKey: data.maskedKey || '',
+          isFromEnv: Boolean(data.isFromEnv),
+          hasCustomKey: Boolean(data.hasCustomKey)
+        });
+      }
+    } catch {
+      // fallback
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchGeminiStatus();
+    }
+  }, [isOpen]);
+
+  const handleSaveGeminiKey = async () => {
+    if (!apiKeyInput.trim() && !geminiStatus.hasKey) {
+      onShowToast('សូមបញ្ចូល Gemini API Key ជាមុនសិន!', 'warning');
+      return;
+    }
+
+    setIsSavingKey(true);
+    try {
+      const res = await fetch('/api/fast_check/save_gemini_key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gemini_api_key: apiKeyInput.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGeminiStatus(prev => ({
+          ...prev,
+          hasKey: data.hasKey,
+          maskedKey: data.maskedKey || '',
+          hasCustomKey: Boolean(apiKeyInput.trim())
+        }));
+        setApiKeyInput('');
+        setShowKeyConfig(false);
+        playSuccessFanfare();
+        onShowToast(data.message || 'បានរក្សាទុក Gemini API Key រួចរាល់!', 'success');
+      } else {
+        onShowToast(data.error || 'បរាជ័យក្នុងការរក្សាទុក Key', 'error');
+      }
+    } catch {
+      onShowToast('មានបញ្ហាក្នុងការតភ្ជាប់ Server', 'error');
+    } finally {
+      setIsSavingKey(false);
+    }
+  };
 
   // Handle clipboard paste (Ctrl+V / Cmd+V)
   useEffect(() => {
@@ -251,13 +321,23 @@ export function FastCheckSlipsModal({
               ⚡
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">
                   Fast-Check Slips & ផ្ទៀងផ្ទាត់បង់រួច
                 </h2>
-                <span className="bg-emerald-500/20 text-emerald-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40">
-                  ✨ Gemini Free 100%
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowKeyConfig(!showKeyConfig)}
+                  className={`text-[10.5px] font-black px-2.5 py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1 shadow-sm active:scale-95 ${
+                    geminiStatus.hasKey
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30'
+                      : 'bg-amber-500/25 text-amber-300 border-amber-500/60 hover:bg-amber-500/35 animate-pulse'
+                  }`}
+                  title="ចុចដើម្បីកំណត់ ឬប្តូរ Gemini API Key សម្រាប់ VPS"
+                >
+                  <span>{geminiStatus.hasKey ? '✅ Gemini AI Active' : '⚠️ មិនទាន់កំណត់ API Key'}</span>
+                  <span className="text-[10px] opacity-80">⚙️ កំណត់ Key</span>
+                </button>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 ស្កេនរូបវិក្កយបត្រ (ABA/ACLEDA/KHQR) ឬ Paste ឈ្មោះ ដើម្បី Tick [បង់រួច] គ្រប់ Live ស្វ័យប្រវត្តិ
@@ -271,6 +351,92 @@ export function FastCheckSlipsModal({
             ✕
           </button>
         </div>
+
+        {/* Gemini API Key Configuration Panel (For VPS / Front-end input) */}
+        {(showKeyConfig || (!geminiStatus.hasKey && activeTab === 'SLIPS')) && (
+          <div className="mx-4 mt-3 p-3.5 bg-gradient-to-r from-slate-950 via-[#0B1528] to-slate-950 border border-indigo-500/40 rounded-2xl shadow-md text-xs space-y-2.5 animate-in slide-in-from-top duration-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🔑</span>
+                <div>
+                  <span className="font-bold text-indigo-200 text-sm">កំណត់ Gemini API Key (សម្រាប់ដំណើរការលើ VPS)</span>
+                  <p className="text-[11px] text-slate-400">
+                    បញ្ចូល Google Gemini API Key ដើម្បីឱ្យប្រព័ន្ធស្កេន Slip រូបភាព AI ដំណើរការលើ VPS
+                  </p>
+                </div>
+              </div>
+              {geminiStatus.hasKey && (
+                <button
+                  type="button"
+                  onClick={() => setShowKeyConfig(false)}
+                  className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1"
+                >
+                  ✕ បិទ
+                </button>
+              )}
+            </div>
+
+            {geminiStatus.hasKey && (
+              <div className="flex items-center justify-between bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl text-[11.5px]">
+                <span className="text-slate-400">Key បច្ចុប្បន្ន ៖</span>
+                <span className="font-mono text-emerald-400 font-bold">{geminiStatus.maskedKey}</span>
+                <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">
+                  {geminiStatus.isFromEnv ? 'ENV (.env)' : 'UI Settings'}
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={e => setApiKeyInput(e.target.value)}
+                placeholder="បិទភ្ជាប់ Gemini API Key ទីនេះ (ឧ. AIzaSy...)"
+                className="flex-1 bg-slate-900 border border-indigo-500/50 focus:border-indigo-400 rounded-xl px-3 py-2 text-xs text-indigo-100 placeholder-slate-500 outline-none font-mono"
+              />
+              <button
+                type="button"
+                disabled={isSavingKey || !apiKeyInput.trim()}
+                onClick={handleSaveGeminiKey}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all active:scale-95 shadow-md flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <span>{isSavingKey ? 'កំពុងរក្សាទុក...' : '💾 រក្សាទុក Key'}</span>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between pt-0.5 text-[11px]">
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1"
+              >
+                <span>✨ យក Gemini API Key ឥតគិតថ្លៃ (Free 100%) ពី Google AI Studio ↗</span>
+              </a>
+              {geminiStatus.hasCustomKey && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setApiKeyInput('');
+                    const res = await fetch('/api/fast_check/save_gemini_key', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ gemini_api_key: '' })
+                    });
+                    const d = await res.json();
+                    if (d.success) {
+                      setGeminiStatus({ hasKey: false, maskedKey: '', isFromEnv: false, hasCustomKey: false });
+                      onShowToast('បានលុប Key ចេញរួចរាល់', 'warning');
+                    }
+                  }}
+                  className="text-rose-400 hover:text-rose-300 hover:underline"
+                >
+                  🗑️ លុប Key ផ្ទាល់ខ្លួន
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Tab Switcher */}
         <div className="px-4 pt-3 pb-2 bg-slate-900/90 border-b border-slate-800 flex gap-2 flex-shrink-0">
