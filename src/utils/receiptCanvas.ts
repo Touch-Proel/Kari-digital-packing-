@@ -40,6 +40,53 @@ export interface RenderCanvasOptions {
 }
 
 /**
+ * Helper to wrap text cleanly for Canvas 2D without clipping
+ */
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string[] {
+  if (!text) return [];
+  const lines: string[] = [];
+  
+  // Try splitting by spaces or Khmer word boundaries if spaces exist
+  const words = text.includes(' ') ? text.split(' ') : [text];
+  let currentLine = '';
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const metrics = ctx.measureText(testLine);
+
+    if (metrics.width <= maxWidth) {
+      currentLine = testLine;
+    } else {
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        // Single word exceeds maxWidth, break by characters
+        let chunk = '';
+        for (const char of word) {
+          if (ctx.measureText(chunk + char).width <= maxWidth) {
+            chunk += char;
+          } else {
+            if (chunk) lines.push(chunk);
+            chunk = char;
+          }
+        }
+        currentLine = chunk;
+      }
+    }
+  }
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  return lines;
+}
+
+/**
  * Renders an invoice directly to an HTML5 Canvas element in < 5ms with Large High-Contrast Fonts
  */
 export function renderInvoiceTo576Canvas(
@@ -52,15 +99,49 @@ export function renderInvoiceTo576Canvas(
   // By default, NEVER print KHQR on POS paper slips to save thermal paper & vertical space
   const showKHQR = options.showKHQR !== undefined ? options.showKHQR : false;
   const khqrCurrency = options.khqrCurrency || khqrConfig.currency || 'USD';
-  
-  // 1. Calculate height dynamically with extra breathing room for larger text
-  const headerHeight = 500;
-  const itemHeight = items.reduce((acc, it) => acc + (it.item_comment ? 95 : 65), 0);
-  const khqrHeight = showKHQR ? 370 : 0;
-  const footerHeight = 420 + khqrHeight;
-  const totalHeight = headerHeight + itemHeight + footerHeight;
+
+  const fontKhmer = "'Battambang', 'Kantumruy Pro', 'Khmer OS Siemreap', system-ui, sans-serif";
+  const fontMono = "'Courier New', Courier, monospace";
 
   const width = 576;
+  const paddingX = 22; // Safe 22px margin so right side numbers never get cut off
+  const maxContentWidth = width - (paddingX * 2);
+
+  // Temporary canvas to measure wrapped text height accurately
+  const measureCanvas = document.createElement('canvas');
+  const measureCtx = measureCanvas.getContext('2d');
+  
+  const address = (invoice.address || invoice.shipping_address || '').trim();
+  let addressLines: string[] = [];
+  if (measureCtx && address) {
+    measureCtx.font = `800 24px ${fontKhmer}`;
+    addressLines = wrapText(measureCtx, `ទីតាំង ៖ ${address}`, maxContentWidth);
+  }
+
+  // Measure notes per item
+  const itemNoteLinesMap = new Map<number, string[]>();
+  if (measureCtx) {
+    measureCtx.font = `800 23px ${fontKhmer}`;
+    const maxNoteWidth = maxContentWidth - 44;
+    items.forEach((it, idx) => {
+      if (it.item_comment) {
+        const lines = wrapText(measureCtx, `↳ Note: "${it.item_comment}"`, maxNoteWidth);
+        itemNoteLinesMap.set(idx, lines);
+      }
+    });
+  }
+
+  // 1. Calculate height dynamically with extra breathing room for larger text & wrapped notes
+  const headerHeight = 440 + (addressLines.length > 1 ? (addressLines.length - 1) * 32 : 0);
+  const itemsHeight = items.reduce((acc, _, idx) => {
+    const noteLines = itemNoteLinesMap.get(idx) || [];
+    const noteExtra = noteLines.length > 0 ? noteLines.length * 32 + 8 : 0;
+    return acc + 65 + noteExtra;
+  }, 0);
+  const khqrHeight = showKHQR ? 370 : 0;
+  const footerHeight = 430 + khqrHeight;
+  const totalHeight = headerHeight + itemsHeight + footerHeight;
+
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = totalHeight;
@@ -76,11 +157,7 @@ export function renderInvoiceTo576Canvas(
   ctx.fillStyle = '#000000';
   ctx.textBaseline = 'top';
 
-  const fontKhmer = "'Battambang', 'Kantumruy Pro', 'Khmer OS Siemreap', system-ui, sans-serif";
-  const fontMono = "'Courier New', Courier, monospace";
-
   let y = 18;
-  const paddingX = 16;
 
   // Helper: Draw horizontal line
   const drawLine = (posY: number, thickness = 3) => {
@@ -114,11 +191,11 @@ export function renderInvoiceTo576Canvas(
   ctx.font = `900 48px ${fontMono}`;
   ctx.fillText(basketText, paddingX + 135, y);
 
-  // Location Badge (Right aligned)
+  // Location Badge (Right aligned with safe margin)
   const locationZone = (invoice.location_zone || invoice.province || 'ភ្នំពេញ').trim();
   ctx.font = `800 24px ${fontKhmer}`;
   const badgeWidth = ctx.measureText(locationZone).width + 24;
-  const badgeX = width - paddingX - badgeWidth;
+  const badgeX = width - paddingX - badgeWidth - 4;
   
   ctx.strokeStyle = '#000000';
   ctx.lineWidth = 3;
@@ -144,7 +221,6 @@ export function renderInvoiceTo576Canvas(
   // 3. CUSTOMER DETAILS
   const custName = invoice.facebook_name || 'អតិថិជន';
   const phone = invoice.phone || invoice.phone_number || '[គ្មានលេខ]';
-  const address = invoice.address || invoice.shipping_address || '';
 
   ctx.font = `800 26px ${fontKhmer}`;
   ctx.fillText('អតិថិជន ៖ ', paddingX, y);
@@ -159,9 +235,17 @@ export function renderInvoiceTo576Canvas(
   y += 42;
 
   if (address) {
-    ctx.font = `800 25px ${fontKhmer}`;
-    ctx.fillText(`ទីតាំង    ៖ ${address.slice(0, 30)}`, paddingX, y);
-    y += 38;
+    ctx.font = `800 24px ${fontKhmer}`;
+    if (addressLines.length > 0) {
+      addressLines.forEach((line) => {
+        ctx.fillText(line, paddingX, y);
+        y += 32;
+      });
+      y += 6;
+    } else {
+      ctx.fillText(`ទីតាំង ៖ ${address}`, paddingX, y);
+      y += 38;
+    }
   }
 
   drawLine(y, 3);
@@ -176,7 +260,7 @@ export function renderInvoiceTo576Canvas(
   let totalQty = 0;
   let subtotal = 0;
 
-  items.forEach((it) => {
+  items.forEach((it, idx) => {
     const qty = Number(it.quantity || 1);
     const price = Number(it.price || 0);
     const itemTotal = qty * price;
@@ -207,17 +291,27 @@ export function renderInvoiceTo576Canvas(
       ctx.fillText(custom.slice(0, 8), paddingX + 310, y + 8);
     }
 
-    // Quantity + Price (Right Aligned - 34px)
+    // Quantity + Price (Right Aligned with safe margin)
     ctx.textAlign = 'right';
     ctx.font = `900 34px ${fontMono}`;
     ctx.fillText(`x${qty}`, width - paddingX - 130, y + 2);
-    ctx.fillText(`$${itemTotal.toFixed(2)}`, width - paddingX, y + 2);
+    ctx.fillText(`$${itemTotal.toFixed(2)}`, width - paddingX - 4, y + 2);
     ctx.textAlign = 'left';
 
     y += 50;
 
-    if (it.item_comment) {
-      ctx.font = `800 24px ${fontKhmer}`;
+    // Multiline Note rendering to prevent line clipping
+    const noteLines = itemNoteLinesMap.get(idx);
+    if (noteLines && noteLines.length > 0) {
+      ctx.font = `800 23px ${fontKhmer}`;
+      noteLines.forEach((nLine, nIdx) => {
+        const indentX = nIdx === 0 ? paddingX + 42 : paddingX + 68;
+        ctx.fillText(nLine, indentX, y);
+        y += 32;
+      });
+      y += 6;
+    } else if (it.item_comment) {
+      ctx.font = `800 23px ${fontKhmer}`;
       ctx.fillText(`↳ Note: "${it.item_comment}"`, paddingX + 42, y);
       y += 34;
     }
@@ -239,7 +333,7 @@ export function renderInvoiceTo576Canvas(
   ctx.fillText('ចំនួនសរុប ៖', paddingX, y);
   ctx.textAlign = 'right';
   ctx.font = `900 28px ${fontKhmer}`;
-  ctx.fillText(`${totalQty} ឈុត`, width - paddingX, y);
+  ctx.fillText(`${totalQty} ឈុត`, width - paddingX - 4, y);
   ctx.textAlign = 'left';
   y += 36;
 
@@ -247,7 +341,7 @@ export function renderInvoiceTo576Canvas(
   ctx.fillText('តម្លៃទំនិញ ៖', paddingX, y);
   ctx.textAlign = 'right';
   ctx.font = `900 28px ${fontMono}`;
-  ctx.fillText(`$${subtotal.toFixed(2)}`, width - paddingX, y);
+  ctx.fillText(`$${subtotal.toFixed(2)}`, width - paddingX - 4, y);
   ctx.textAlign = 'left';
   y += 36;
 
@@ -255,7 +349,7 @@ export function renderInvoiceTo576Canvas(
   ctx.fillText('សេវាដឹក ៖', paddingX, y);
   ctx.textAlign = 'right';
   ctx.font = `900 28px ${fontMono}`;
-  ctx.fillText(shippingFee === 0 ? 'FREE' : `+$${shippingFee.toFixed(2)}`, width - paddingX, y);
+  ctx.fillText(shippingFee === 0 ? 'FREE' : `+$${shippingFee.toFixed(2)}`, width - paddingX - 4, y);
   ctx.textAlign = 'left';
   y += 38;
 

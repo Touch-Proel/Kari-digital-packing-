@@ -1810,7 +1810,7 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
           <span style="width: 18%; text-align: right; color: #000; font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 16px;">$${it.price.toFixed(2)}</span>
           <span style="font-weight: 900; width: 18%; text-align: right; color: #000; font-family: 'JetBrains Mono', monospace; font-size: 19px;">$${(it.price * it.quantity).toFixed(2)}</span>
         </div>
-        ${it.item_comment ? `<div style="font-size: 14px; color: #000; font-weight: 800; margin-left: 24px; margin-top: 2px;">↳ Note: "${it.item_comment}"</div>` : ''}
+        ${it.item_comment ? `<div style="font-size: 14px; color: #000; font-weight: 800; margin-left: 24px; margin-top: 2px; word-break: break-word; overflow-wrap: break-word; line-height: 1.35;">↳ Note: "${it.item_comment}"</div>` : ''}
       </div>
     `;
   }).join('');
