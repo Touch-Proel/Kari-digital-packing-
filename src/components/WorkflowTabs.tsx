@@ -3,6 +3,7 @@ interface WorkflowTabsProps {
   onSwitchStage: (stage: number) => void;
   unpickedCount: number;
   emptyBasketsCount?: number;
+  onCleanEmptyBaskets?: () => void;
   waitingCount: number;
   paidQcCount: number;
   dispatchedCount: number;
@@ -35,6 +36,7 @@ export function WorkflowTabs({
   onSwitchStage,
   unpickedCount,
   emptyBasketsCount = 0,
+  onCleanEmptyBaskets,
   waitingCount,
   paidQcCount,
   dispatchedCount,
@@ -369,6 +371,32 @@ export function WorkflowTabs({
               </span>
             )}
           </button>
+        </div>
+      )}
+
+      {/* 🧹 EMPTY BASKETS BULK CLEANUP BANNER */}
+      {currentStage === 1 && activeSubFilter === 'EMPTY' && (
+        <div className="flex items-center justify-between p-2.5 bg-[#1a080c]/90 border border-rose-500/40 rounded-2xl shadow-lg animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🗑️</span>
+            <div className="flex flex-col">
+              <span className="text-xs font-black text-rose-200">
+                កន្ត្រកទទេគ្មានទំនិញ ({totalFilteredBaskets} កន្ត្រក)
+              </span>
+              <span className="text-[10px] text-slate-400">
+                កន្ត្រកដែលដកកូដអស់ ($0.00) ឬមិនទាន់បានដាក់ទំនិញ
+              </span>
+            </div>
+          </div>
+          {onCleanEmptyBaskets && totalFilteredBaskets > 0 && (
+            <button
+              type="button"
+              onClick={onCleanEmptyBaskets}
+              className="px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 active:scale-95 transition-all border border-rose-400/50 cursor-pointer"
+            >
+              <span>🧹 សម្អាតទាំងអស់ ({totalFilteredBaskets})</span>
+            </button>
+          )}
         </div>
       )}
 

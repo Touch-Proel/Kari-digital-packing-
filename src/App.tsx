@@ -777,6 +777,60 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [invoices]);
 
+  // Check if a basket is completely empty ($0.00 / 0 items)
+  const isBasketEmpty = (inv: Invoice) => {
+    if (!inv.items || inv.items.length === 0) return true;
+    const totalQty = inv.items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+    return totalQty === 0;
+  };
+
+  // Bulk Clean All Empty Baskets
+  const handleBulkCleanEmptyBaskets = async () => {
+    const countToDelete = emptyBasketsCount;
+    if (countToDelete === 0) {
+      showToast('គ្មានកន្ត្រកទទេត្រូវសម្អាតឡើយ');
+      return;
+    }
+    if (!window.confirm(`តើអ្នកពិតជាចង់លុបកន្ត្រកទទេទាំងអស់ (${countToDelete} កន្ត្រក) ចេញពីប្រព័ន្ធមែនទេ?`)) return;
+    try {
+      const res = await fetch('/api/clean_empty_baskets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ live_id: selectedLiveId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || 'បានសម្អាតកន្ត្រកទទេជោគជ័យ');
+        fetchInvoices(undefined, 0);
+      } else {
+        showToast(data.message || 'មិនអាចលុបបានទេ', 'error');
+      }
+    } catch {
+      showToast('កំហុសក្នុងការសម្អាតកន្ត្រកទទេ', 'error');
+    }
+  };
+
+  // Delete a single basket
+  const handleDeleteBasket = async (invoiceId: number) => {
+    if (!window.confirm(`តើអ្នកពិតជាចង់លុបកន្ត្រក #${invoiceId} នេះចេញពីប្រព័ន្ធមែនទេ?`)) return;
+    try {
+      const res = await fetch('/api/delete_basket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: invoiceId, packer_name: packerName })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || `បានលុបកន្ត្រក #${invoiceId} រួចរាល់`);
+        fetchInvoices(undefined, 0);
+      } else {
+        showToast(data.message || 'មិនអាចលុបបានទេ', 'error');
+      }
+    } catch {
+      showToast('កំហុសក្នុងការលុបកន្ត្រក', 'error');
+    }
+  };
+
   // Counts for 3 Stage tabs
   const unpickedCount = invoices.filter(
     i => (i.packing_stage === 'UNPICKED' || !i.packing_stage) &&
@@ -785,17 +839,16 @@ export default function App() {
          i.status !== 'Dispatched' &&
          i.packing_stage !== 'DISPATCHED' &&
          i.status !== 'Cancelled' &&
-         Boolean(i.items && i.items.length > 0)
+         !isBasketEmpty(i)
   ).length;
 
   const emptyBasketsCount = invoices.filter(
-    i => (i.packing_stage === 'UNPICKED' || !i.packing_stage) &&
-         i.status !== 'Paid' &&
+    i => i.status !== 'Dispatched' &&
          i.status !== 'Packed' &&
-         i.status !== 'Dispatched' &&
          i.packing_stage !== 'DISPATCHED' &&
+         i.status !== 'Paid' &&
          i.status !== 'Cancelled' &&
-         (!i.items || i.items.length === 0)
+         isBasketEmpty(i)
   ).length;
 
   const waitingCount = invoices.filter(
@@ -806,7 +859,8 @@ export default function App() {
          i.status !== 'Packed' &&
          i.status !== 'Dispatched' &&
          i.packing_stage !== 'DISPATCHED' &&
-         i.status !== 'Cancelled'
+         i.status !== 'Cancelled' &&
+         !isBasketEmpty(i)
   ).length;
 
   const paidQcCount = invoices.filter(
@@ -833,6 +887,14 @@ export default function App() {
   let filtered = sourceInvoices.filter(inv => {
     if (inv.status === 'Cancelled') return false;
     if (currentMasterStage === 1) {
+      if (activeSubFilter === 'EMPTY') {
+        return inv.status !== 'Dispatched' &&
+               inv.status !== 'Packed' &&
+               inv.packing_stage !== 'DISPATCHED' &&
+               inv.status !== 'Paid' &&
+               isBasketEmpty(inv);
+      }
+
       const isStage1 = (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) &&
                        inv.status !== 'Paid' &&
                        inv.status !== 'Packed' &&
@@ -840,11 +902,7 @@ export default function App() {
                        inv.packing_stage !== 'DISPATCHED';
       if (!isStage1) return false;
 
-      const hasItems = Boolean(inv.items && inv.items.length > 0);
-      if (activeSubFilter === 'EMPTY') {
-        return !hasItems;
-      }
-      return hasItems;
+      return !isBasketEmpty(inv);
     }
     if (currentMasterStage === 2) {
       return inv.packing_stage === 'STAGED' && inv.status !== 'Paid' && inv.payment_status !== 'Paid' && !inv.paid_at && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
@@ -1029,6 +1087,7 @@ export default function App() {
           }}
           unpickedCount={unpickedCount}
           emptyBasketsCount={emptyBasketsCount}
+          onCleanEmptyBaskets={handleBulkCleanEmptyBaskets}
           waitingCount={waitingCount}
           paidQcCount={paidQcCount}
           dispatchedCount={totalDispatched}
@@ -1092,6 +1151,7 @@ export default function App() {
                 onUpdateInvoice={handleUpdateInvoice}
                 onShowToast={showToast}
                 onUndispatch={handleUndispatch}
+                onDeleteBasket={handleDeleteBasket}
               />
             ))
           )}
