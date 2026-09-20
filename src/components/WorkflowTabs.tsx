@@ -20,8 +20,8 @@ interface WorkflowTabsProps {
     today_pp: number;
     today_province: number;
   };
-  dispatchedTimeFilter?: 'ALL' | 'TODAY';
-  onSetDispatchedTimeFilter?: (flt: 'ALL' | 'TODAY') => void;
+  dispatchedTimeFilter?: 'ALL' | 'TODAY' | 'PP' | 'PROVINCE';
+  onSetDispatchedTimeFilter?: (flt: 'ALL' | 'TODAY' | 'PP' | 'PROVINCE') => void;
   activeSubFilter: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE';
   onSetSubFilter: (flt: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE') => void;
   searchQuery: string;
@@ -232,13 +232,14 @@ export function WorkflowTabs({
           {/* 📊 Daily Output Summary Strip (ដឹងថ្ងៃនឹងគ្រប់ឡាយចេញបានប៉ុន្មាន) */}
           {isAllLiveDispatched && allLiveDispatchedStats && (
             <div className="grid grid-cols-4 gap-1.5 pt-1.5 border-t border-indigo-500/30 text-center">
+              {/* 1. Today Filter */}
               <button
                 type="button"
                 onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'TODAY' ? 'ALL' : 'TODAY')}
-                className={`rounded-xl py-1 px-1 border transition-all text-center flex flex-col items-center justify-center ${
+                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
                   dispatchedTimeFilter === 'TODAY'
-                    ? 'bg-amber-500/30 border-amber-400 text-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.4)] ring-1 ring-amber-300'
-                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50'
+                    ? 'bg-amber-500/35 border-amber-400 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.5)] ring-1 ring-amber-300'
+                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
                 }`}
               >
                 <span className="text-[9.5px] font-black text-amber-300">📅 ចេញថ្ងៃនេះ</span>
@@ -247,27 +248,46 @@ export function WorkflowTabs({
                 </span>
               </button>
 
-              <div className="bg-indigo-900/40 border border-indigo-400/20 rounded-xl py-1 px-1 flex flex-col items-center justify-center">
+              {/* 2. PP Filter */}
+              <button
+                type="button"
+                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'PP' ? 'ALL' : 'PP')}
+                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
+                  dispatchedTimeFilter === 'PP'
+                    ? 'bg-emerald-600/40 border-emerald-400 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.5)] ring-1 ring-emerald-300'
+                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
+                }`}
+              >
                 <span className="text-[9.5px] font-bold text-emerald-300">🏙️ ភ្នំពេញ</span>
                 <span className="text-sm font-black text-emerald-400 font-mono">
-                  {dispatchedTimeFilter === 'TODAY' ? allLiveDispatchedStats.today_pp : allLiveDispatchedStats.pp} <span className="text-[9px] font-normal text-slate-300">កញ្ចប់</span>
+                  {allLiveDispatchedStats.pp} <span className="text-[9px] font-normal text-slate-300">កញ្ចប់</span>
                 </span>
-              </div>
+              </button>
 
-              <div className="bg-indigo-900/40 border border-indigo-400/20 rounded-xl py-1 px-1 flex flex-col items-center justify-center">
+              {/* 3. Province Filter */}
+              <button
+                type="button"
+                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'PROVINCE' ? 'ALL' : 'PROVINCE')}
+                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
+                  dispatchedTimeFilter === 'PROVINCE'
+                    ? 'bg-purple-600/40 border-purple-400 text-purple-100 shadow-[0_0_12px_rgba(168,85,247,0.5)] ring-1 ring-purple-300'
+                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
+                }`}
+              >
                 <span className="text-[9.5px] font-bold text-purple-300">🏞️ ខេត្ត</span>
                 <span className="text-sm font-black text-purple-300 font-mono">
-                  {dispatchedTimeFilter === 'TODAY' ? allLiveDispatchedStats.today_province : allLiveDispatchedStats.province} <span className="text-[9px] font-normal text-slate-300">កញ្ចប់</span>
+                  {allLiveDispatchedStats.province} <span className="text-[9px] font-normal text-slate-300">កញ្ចប់</span>
                 </span>
-              </div>
+              </button>
 
+              {/* 4. All Filter */}
               <button
                 type="button"
                 onClick={() => onSetDispatchedTimeFilter?.('ALL')}
-                className={`rounded-xl py-1 px-1 border transition-all text-center flex flex-col items-center justify-center ${
+                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
                   dispatchedTimeFilter === 'ALL'
-                    ? 'bg-indigo-600/40 border-indigo-400 text-white shadow-[0_0_10px_rgba(99,102,241,0.4)] ring-1 ring-indigo-300'
-                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50'
+                    ? 'bg-indigo-600/40 border-indigo-400 text-white shadow-[0_0_12px_rgba(99,102,241,0.5)] ring-1 ring-indigo-300'
+                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
                 }`}
               >
                 <span className="text-[9.5px] font-bold text-sky-300">📦 សរុបទាំងអស់</span>

@@ -168,7 +168,7 @@ export default function App() {
     today_pp: 0,
     today_province: 0
   });
-  const [dispatchedTimeFilter, setDispatchedTimeFilter] = useState<'ALL' | 'TODAY'>('ALL');
+  const [dispatchedTimeFilter, setDispatchedTimeFilter] = useState<'ALL' | 'TODAY' | 'PP' | 'PROVINCE'>('ALL');
 
   const fetchAllLivePaidInvoices = async () => {
     try {
@@ -833,10 +833,18 @@ export default function App() {
     if (currentMasterStage === 4) {
       const isDispatched = (inv.status === 'Dispatched' || inv.status === 'Packed' || inv.packing_stage === 'DISPATCHED');
       if (!isDispatched) return false;
-      if (isAllLiveDispatched && dispatchedTimeFilter === 'TODAY') {
-        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
-        const dispDate = (inv as any).dispatched_at || inv.created_at || '';
-        return typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+      if (isAllLiveDispatched) {
+        if (dispatchedTimeFilter === 'TODAY') {
+          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+          const dispDate = (inv as any).dispatched_at || inv.created_at || '';
+          return typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+        }
+        if (dispatchedTimeFilter === 'PP') {
+          return inv.location_zone === 'PP';
+        }
+        if (dispatchedTimeFilter === 'PROVINCE') {
+          return inv.location_zone === 'PROVINCE';
+        }
       }
       return true;
     }
