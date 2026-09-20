@@ -289,11 +289,13 @@ export function ReceiptModal({
   // Display the order's actual live date if available, otherwise current print time
   const orderDate = invoice.created_at ? new Date(invoice.created_at) : new Date();
   const dateStr = orderDate.toLocaleDateString('km-KH', {
+    timeZone: 'Asia/Phnom_Penh',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric'
   });
   const timeStr = orderDate.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Phnom_Penh',
     hour: '2-digit',
     minute: '2-digit',
     hour12: true

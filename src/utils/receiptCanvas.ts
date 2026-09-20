@@ -130,8 +130,8 @@ export function renderInvoiceTo576Canvas(
 
   // Date/Time
   const dateObj = invoice.created_at ? new Date(invoice.created_at) : new Date();
-  const dateStr = dateObj.toLocaleDateString('en-GB');
-  const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const dateStr = dateObj.toLocaleDateString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
+  const timeStr = dateObj.toLocaleTimeString('en-US', { timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: true });
 
   ctx.textAlign = 'left';
   ctx.font = `800 24px ${fontKhmer}`;

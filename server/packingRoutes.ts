@@ -1170,8 +1170,8 @@ router.post('/send_telegram_dispatch_report', async (req: Request, res: Response
     .map(([k, v]) => `  • ${k} ៖ ${v} កញ្ចប់`)
     .join('\n') || '  • បុគ្គលិកទូទៅ';
 
-  const dateStr = new Date().toLocaleDateString('km-KH');
-  const timeStr = new Date().toLocaleTimeString('km-KH');
+  const dateStr = new Date().toLocaleDateString('km-KH', { timeZone: 'Asia/Phnom_Penh' });
+  const timeStr = new Date().toLocaleTimeString('km-KH', { timeZone: 'Asia/Phnom_Penh' });
 
   const text =
     `📦 របាយការណ៍បញ្ចេញទំនិញប្រចាំថ្ងៃ (Daily Dispatch)\n` +
@@ -1756,8 +1756,8 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
   const totalQty = invoice.items.reduce((s, it) => s + it.quantity, 0);
   const rielTotal = Math.round(invoice.total_amount * 4100).toLocaleString('en-US');
   const now = new Date();
-  const dateStr = now.toLocaleDateString('km-KH', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const dateStr = now.toLocaleDateString('km-KH', { timeZone: 'Asia/Phnom_Penh', day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-US', { timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: true });
 
   const phoneText = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : '';
   const addressText = invoice.address && !invoice.address.includes('មិនទាន់មាន') ? invoice.address : '';

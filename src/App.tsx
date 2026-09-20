@@ -837,7 +837,13 @@ export default function App() {
         if (dispatchedTimeFilter === 'TODAY') {
           const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
           const dispDate = (inv as any).dispatched_at || inv.created_at || '';
-          return typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+          if (!dispDate) return false;
+          try {
+            const dispDateStr = new Date(dispDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+            return dispDateStr === todayStr;
+          } catch {
+            return typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+          }
         }
         if (dispatchedTimeFilter === 'PP') {
           return inv.location_zone === 'PP';

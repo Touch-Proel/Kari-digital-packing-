@@ -566,7 +566,15 @@ router.get('/dispatched_all_lives', (_req: Request, res: Response) => {
       summaryByLive[lid].total_amount += inv.total_amount || 0;
 
       const dispDate = (inv as any).dispatched_at || inv.created_at || '';
-      const isToday = typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+      let isToday = false;
+      if (dispDate) {
+        try {
+          const dispDateStr = new Date(dispDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+          isToday = dispDateStr === todayStr;
+        } catch {
+          isToday = typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+        }
+      }
 
       if (isToday) {
         todayCount++;

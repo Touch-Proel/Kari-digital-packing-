@@ -135,17 +135,26 @@ function BasketCardComponent({
   const isPaid = invoice.status === 'Paid' || Boolean(invoice.paid_at) || invoice.payment_status === 'Paid';
   const isStaged = invoice.packing_stage === 'STAGED' && !isDispatched;
 
-  // Format live session date
+  // Format live session date in Cambodia Time (Asia/Phnom_Penh)
   const formatLiveDate = (dateStr?: string) => {
     if (!dateStr) return 'ថ្ងៃ 13/09 (09:58)';
     try {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return 'ថ្ងៃ 13/09 (09:58)';
-      const day = String(d.getDate()).padStart(2, '0');
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const hours = String(d.getHours()).padStart(2, '0');
-      const mins = String(d.getMinutes()).padStart(2, '0');
-      return `ថ្ងៃ ${day}/${month} (${hours}:${mins})`;
+      const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Phnom_Penh',
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      const parts = formatter.formatToParts(d);
+      const day = parts.find(p => p.type === 'day')?.value || '01';
+      const month = parts.find(p => p.type === 'month')?.value || '01';
+      const hour = parts.find(p => p.type === 'hour')?.value || '00';
+      const minute = parts.find(p => p.type === 'minute')?.value || '00';
+      return `ថ្ងៃ ${day}/${month} (${hour}:${minute})`;
     } catch {
       return 'ថ្ងៃ 13/09 (09:58)';
     }
@@ -997,18 +1006,18 @@ function BasketCardComponent({
             </div>
 
             {/* Customer Name & Live Timestamp */}
-            <div className="flex flex-col min-w-0 flex-1">
+            <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
               <span className="text-white font-black text-sm sm:text-base leading-tight truncate drop-shadow-sm">
                 {invoice.facebook_name || 'អតិថិជន'}
               </span>
-              <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                <span className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 whitespace-nowrap">
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5 min-w-0">
+                <span className="text-[10.5px] text-amber-400 font-semibold flex items-center gap-0.5 whitespace-nowrap">
                   <span>📹</span>
-                  <span>Live ៖ {formatLiveDate(invoice.created_at)}</span>
+                  <span>{formatLiveDate(invoice.created_at)}</span>
                 </span>
                 {activeLiveId && invoice.live_id && invoice.live_id !== activeLiveId && (
                   <span
-                    className="bg-purple-950/90 border border-purple-400/60 text-purple-300 text-[9.5px] font-mono px-1.5 py-0.2 rounded-md truncate max-w-[120px] sm:max-w-none flex-shrink-0"
+                    className="bg-purple-950/90 border border-purple-400/60 text-purple-300 text-[9px] font-mono px-1 py-0.2 rounded-md truncate max-w-[80px] sm:max-w-[130px]"
                     title={`Live ID: ${invoice.live_id}`}
                   >
                     #{invoice.live_id.replace('LIVE_', '')}
@@ -1019,7 +1028,7 @@ function BasketCardComponent({
           </div>
 
           {/* Right: Status Pill & Collapse Indicator */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 relative z-10">
             {invoice.payment_slip_url && (
               <button
                 type="button"
@@ -1128,7 +1137,7 @@ function BasketCardComponent({
             {isPaid && (
               <div
                 className="bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 px-2 py-0.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-sm"
-                title={invoice.paid_at ? `បានបង់ប្រាក់នៅ ${new Date(invoice.paid_at).toLocaleTimeString()}` : 'បានបង់ប្រាក់រួច'}
+                title={invoice.paid_at ? `បានបង់ប្រាក់នៅ ${new Date(invoice.paid_at).toLocaleTimeString('en-US', { timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: true })}` : 'បានបង់ប្រាក់រួច'}
               >
                 <span className="text-xs">✓</span>
                 <span>បង់រួច</span>

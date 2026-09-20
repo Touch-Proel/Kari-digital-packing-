@@ -1,3 +1,6 @@
+// Set timezone to Cambodia (Asia/Phnom_Penh - UTC+7) for the entire server
+process.env.TZ = 'Asia/Phnom_Penh';
+
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
