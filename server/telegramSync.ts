@@ -149,7 +149,7 @@ export async function downloadTelegramPhoto(
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
-  // 1. In-memory cache check (0ms)
+  // 1. In-memory cache check by exact fileId (0ms)
   if (downloadedPhotoCache.has(fileId)) {
     const cached = downloadedPhotoCache.get(fileId);
     if (cached) {
@@ -182,13 +182,6 @@ export async function downloadTelegramPhoto(
         return cachedUrl;
       }
     } catch {}
-  }
-
-  // 3. Check if there is already a downloaded image on disk matching safeCode
-  const existingDiskImg = findImageOnDiskForCode(safeCode);
-  if (existingDiskImg) {
-    downloadedPhotoCache.set(fileId, existingDiskImg);
-    return existingDiskImg;
   }
 
   try {
@@ -512,19 +505,12 @@ export async function fetchTelegramStockUpdates(options: {
       for (let i = 0; i < parsedLines.length; i++) {
         const item = parsedLines[i];
         
-        // Instant check if we already have this specific Telegram photo in cache (0ms)
+        // Instant check if we already downloaded this specific Telegram photoFileId in cache (0ms)
         let matchedImageUrl: string | undefined = undefined;
         if (photoFileId) {
           const inMem = downloadedPhotoCache.get(photoFileId);
           if (inMem) {
             matchedImageUrl = inMem;
-          }
-        }
-        if (!matchedImageUrl) {
-          const diskImg = findImageOnDiskForCode(item.code);
-          if (diskImg) {
-            matchedImageUrl = diskImg;
-            if (photoFileId) downloadedPhotoCache.set(photoFileId, diskImg);
           }
         }
 
