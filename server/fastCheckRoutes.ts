@@ -11,7 +11,7 @@ const router = Router();
 let geminiClient: GoogleGenAI | null = null;
 let currentActiveKey: string = '';
 
-function getGemini(): GoogleGenAI | null {
+export function getGemini(): GoogleGenAI | null {
   const key = (process.env.GEMINI_API_KEY || settings.gemini_api_key || '').trim();
   if (!key) return null;
   if (!geminiClient || currentActiveKey !== key) {
@@ -143,7 +143,7 @@ export interface FastCheckResultItem {
 /**
  * Match extracted slip data against active database invoices
  */
-function matchInvoiceForSlip(data: ExtractedSlipData): {
+export function matchInvoiceForSlip(data: ExtractedSlipData): {
   status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND';
   confidence: number;
   matched?: Invoice;
@@ -245,7 +245,7 @@ function matchInvoiceForSlip(data: ExtractedSlipData): {
 /**
  * Robust OCR Helper with Multi-Model Fallback for 503 / 429 Demand Spikes
  */
-async function callGeminiSlipExtraction(
+export async function callGeminiSlipExtraction(
   ai: GoogleGenAI,
   imagePart: { inlineData: { mimeType: string; data: string } },
   textPart: { text: string }

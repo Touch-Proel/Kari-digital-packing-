@@ -26,6 +26,7 @@ import {
 } from './server/db';
 import { parseAndAllocateComment } from './server/parser';
 import { startLiveCommentsAutoSync } from './server/liveSync';
+import { initTelegramBotService } from './server/telegramBotService';
 
 dotenv.config();
 
@@ -399,6 +400,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT} (${isProduction ? 'Production Static Build' : 'Vite Dev Mode'})`);
+    initTelegramBotService();
   });
 }
 

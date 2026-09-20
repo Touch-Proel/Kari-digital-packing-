@@ -32,6 +32,21 @@ const downloadedPhotoCache = new Map<string, string>();
 const botInfoCache = new Map<string, TelegramBotInfo>();
 let lastScannedUpdateId: number | undefined = undefined;
 
+/**
+ * Delete any active Webhook on the Bot so that getUpdates polling works properly
+ */
+export async function deleteTelegramWebhook(token: string): Promise<{ success: boolean; description?: string }> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token.trim()}/deleteWebhook?drop_pending_updates=false`, {
+      signal: AbortSignal.timeout(6000)
+    });
+    const data = await res.json();
+    return { success: !!data.ok, description: data.description };
+  } catch (err: any) {
+    return { success: false, description: err?.message };
+  }
+}
+
 export async function testTelegramBotToken(token: string): Promise<{ success: boolean; bot?: TelegramBotInfo; error?: string }> {
   const cleanToken = token.trim();
   if (!cleanToken) {
@@ -43,6 +58,9 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
   }
 
   try {
+    // Proactively clear any stale webhook
+    deleteTelegramWebhook(cleanToken).catch(() => {});
+
     const res = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`, {
       signal: AbortSignal.timeout(5000)
     });
@@ -104,7 +122,7 @@ function findExistingImageForCode(safeCode: string, uploadDir: string, distUploa
 }
 
 // 2. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
-async function downloadTelegramPhoto(
+export async function downloadTelegramPhoto(
   token: string,
   fileId: string,
   codeHint: string,
@@ -393,16 +411,27 @@ export async function fetchTelegramStockUpdates(options: {
         ? `https://api.telegram.org/bot${token}/getUpdates?offset=${currentOffset}&limit=100&allowed_updates=["message","channel_post","edited_message"]`
         : `https://api.telegram.org/bot${token}/getUpdates?limit=100&allowed_updates=["message","channel_post","edited_message"]`;
 
-      const updatesRes = await fetch(url, {
+      let updatesRes = await fetch(url, {
         signal: AbortSignal.timeout(8000)
       });
-      const updatesData = await updatesRes.json();
+      let updatesData = await updatesRes.json();
+
+      // If webhook is active, delete webhook automatically and retry
+      if (!updatesData.ok && updatesData.description && (updatesData.description.includes('webhook is active') || updatesData.description.includes('deleteWebhook'))) {
+        console.log('⚡ Telegram Webhook conflict detected, auto-deleting webhook...');
+        await deleteTelegramWebhook(token);
+        // Retry fetching after webhook deletion
+        updatesRes = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        updatesData = await updatesRes.json();
+      }
 
       if (!updatesData.ok || !Array.isArray(updatesData.result)) {
         if (page === 0 && !currentOffset) {
           let desc = updatesData.description || 'បរាជ័យក្នុងការទាញ getUpdates ពី Telegram';
           if (desc.includes('Conflict: terminated by other getUpdates request')) {
             desc = '⚠️ ជាន់គ្នាជាមួយកម្មវិធីផ្សេង (Conflict) ៖ Bot នេះកំពុងមានកម្មវិធីផ្សេង (ដូចជាប្រព័ន្ធ Attendance ឬ Server ផ្សេង) បើកដំណើរការទទួលសារស្របពេលគ្នា។ Telegram អនុញ្ញាតឱ្យតែ ១ កម្មវិធីគត់ទទួលសារពី Bot ក្នុងពេលតែមួយ។ សូមបង្កើត Bot ថ្មីមួយផ្សេងទៀតក្នុង @BotFather សម្រាប់តែស្តុក!';
+          } else if (desc.includes('webhook is active') || desc.includes('deleteWebhook')) {
+            desc = '⚠️ Bot ធ្លាប់បានភ្ជាប់ Webhook ពីមុន។ ប្រព័ន្ធបានលុប Webhook ចាស់ដោយស្វ័យប្រវត្តិរួចរាល់ហើយ សូមចុចស្កេនម្តងទៀត!';
           }
           return {
             success: false,

@@ -35,7 +35,8 @@ import {
   startTelegramAutoSync,
   stopTelegramAutoSync,
   getTelegramAutoSyncStatus,
-  executeTelegramAutoSyncOnce
+  executeTelegramAutoSyncOnce,
+  deleteTelegramWebhook
 } from './telegramSync';
 import {
   startLiveCommentsAutoSync,
@@ -1547,6 +1548,19 @@ router.post('/telegram/save_token', (req: Request, res: Response) => {
   }
   saveDatabaseToDisk();
   res.json({ success: true, message: 'បានរក្សាទុក Bot Token រួចរាល់!', settings });
+});
+
+// POST /api/telegram/delete_webhook - Explicitly remove any active webhook on Telegram Bot
+router.post('/api/telegram/delete_webhook', async (req: Request, res: Response) => {
+  const token = (req.body.token || settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  if (!token) {
+    return res.status(400).json({ success: false, error: 'សូមបញ្ចូល Bot Token ជាមុនសិន' });
+  }
+  const result = await deleteTelegramWebhook(token);
+  res.json({
+    success: result.success,
+    message: result.success ? '✅ បានលុប Webhook ជោគជ័យ! Bot អាចទទួលទិន្នន័យបានធម្មតាវិញហើយ' : '❌ បរាជ័យក្នុងការលុប Webhook: ' + (result.description || '')
+  });
 });
 
 // POST /api/telegram/test_token - Verify Bot Token with Telegram getMe

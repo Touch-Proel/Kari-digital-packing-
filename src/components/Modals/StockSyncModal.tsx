@@ -195,6 +195,13 @@ export function StockSyncModal({
     const clean = botToken.trim();
     if (!clean) return;
     try {
+      // Proactively clear webhook
+      fetch('/api/telegram/delete_webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: clean })
+      }).catch(() => {});
+
       const res = await fetch('/api/telegram/save_token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -207,6 +214,31 @@ export function StockSyncModal({
         testToken(clean, false);
       }
     } catch (e) {}
+  };
+
+  // Explicit Reset Webhook
+  const handleResetWebhook = async () => {
+    const clean = botToken.trim();
+    if (!clean) {
+      onShowToast('⚠️ សូមបញ្ចូល Bot Token ជាមុនសិន', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/telegram/delete_webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: clean })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast('✅ បានដោះស្រាយ Conflict & លុប Webhook ចាស់រួចរាល់! អាចស្កេនបានហើយ');
+      } else {
+        onShowToast(data.message || 'បរាជ័យក្នុងការលុប Webhook', 'error');
+      }
+    } catch {
+      onShowToast('⚠️ មិនអាចតភ្ជាប់បានទេ', 'error');
+    }
   };
 
   // Clear preview items and server cache completely
@@ -636,6 +668,15 @@ export function StockSyncModal({
                     className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-bold active:scale-95 disabled:opacity-50 cursor-pointer flex-shrink-0"
                   >
                     {testingToken ? '⏳...' : 'តេស្ត Token'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetWebhook}
+                    disabled={!botToken.trim()}
+                    title="ដោះស្រាយបញ្ហា Conflict Webhook ជាមួយប្រព័ន្ធផ្សេង"
+                    className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-500/50 text-slate-300 hover:text-rose-300 text-xs font-bold active:scale-95 disabled:opacity-50 cursor-pointer flex-shrink-0"
+                  >
+                    🔄 Fix Webhook
                   </button>
                   <button
                     type="button"

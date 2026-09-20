@@ -80,7 +80,53 @@ export function SystemSettingsModal({
         }
       })
       .catch(() => {});
+
+    fetch('/api/telegram/config')
+      .then(res => res.json())
+      .then(data => {
+        if (data) {
+          setTgConfig({
+            has_token: !!data.has_token,
+            token: data.token || '',
+            chat_id: data.chat_id || ''
+          });
+          setTgTokenInput(data.token || '');
+        }
+      })
+      .catch(() => {});
   }, [isOpen]);
+
+  // Telegram Bot Token State
+  const [tgConfig, setTgConfig] = useState<{ has_token: boolean; token: string; chat_id: string }>({ has_token: false, token: '', chat_id: '' });
+  const [tgTokenInput, setTgTokenInput] = useState('');
+  const [isSavingTg, setIsSavingTg] = useState(false);
+  const [tgFeedback, setTgFeedback] = useState<string | null>(null);
+  const [showTgGuide, setShowTgGuide] = useState(false);
+
+  const handleSaveTgToken = async () => {
+    setIsSavingTg(true);
+    setTgFeedback(null);
+    try {
+      const res = await fetch('/api/telegram/save_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tgTokenInput.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTgConfig(prev => ({ ...prev, has_token: !!tgTokenInput.trim(), token: tgTokenInput.trim() }));
+        setTgFeedback('✅ បានរក្សាទុក Telegram Bot Token ជោគជ័យ!');
+        playPureTone(880, 0.1);
+      } else {
+        setTgFeedback('❌ បរាជ័យក្នុងការរក្សាទុក');
+      }
+    } catch {
+      setTgFeedback('❌ មានបញ្ហាតភ្ជាប់');
+    } finally {
+      setIsSavingTg(false);
+      setTimeout(() => setTgFeedback(null), 3500);
+    }
+  };
 
   const handleSaveGeminiKey = async () => {
     if (!geminiKeyInput.trim() && !geminiStatus.hasKey) return;
@@ -422,6 +468,83 @@ export function SystemSettingsModal({
                 >
                   🗑️ លុប Key ផ្ទាល់ខ្លួន
                 </button>
+              )}
+            </div>
+          </div>
+
+          {/* Section 4.5: Telegram Bot Assistant & Slip AI Scanner */}
+          <div className="bg-[#0A162B] border border-sky-500/40 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🤖</span>
+                <div>
+                  <span className="font-bold text-sky-300 text-sm">Telegram Bot Assistant &amp; Slip Auto-Tick</span>
+                  <p className="text-[11px] text-slate-400">ស្កេនរូប Slip តាម Telegram Auto-Tick &amp; បញ្ជាឆាត</p>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                tgConfig.has_token
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+              }`}>
+                {tgConfig.has_token ? '✅ Bot កំពុងដំណើរការ' : '⚠️ មិនទាន់កំណត់ Token'}
+              </span>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={tgTokenInput}
+                onChange={e => setTgTokenInput(e.target.value)}
+                placeholder="បញ្ចូល Telegram Bot Token (ឧ. 123456:ABC-DEF...)"
+                className="flex-1 bg-slate-950 border border-sky-500/50 focus:border-sky-400 rounded-xl px-3 py-2 text-xs text-sky-100 placeholder-slate-500 outline-none font-mono"
+              />
+              <button
+                type="button"
+                disabled={isSavingTg || !tgTokenInput.trim()}
+                onClick={handleSaveTgToken}
+                className="bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-bold px-3.5 py-2 rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-sm"
+              >
+                {isSavingTg ? '...' : '💾 រក្សាទុក'}
+              </button>
+            </div>
+
+            {tgFeedback && (
+              <div className="text-[11px] font-bold text-cyan-300 animate-fade-in">
+                {tgFeedback}
+              </div>
+            )}
+
+            {/* Quick Command Guide Accordion */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setShowTgGuide(!showTgGuide)}
+                className="text-[11px] text-sky-400 hover:text-sky-300 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+              >
+                <span>{showTgGuide ? '▼ បិទការណែនាំពាក្យបញ្ជា' : '▶ មើលរបៀបប្រើ & ពាក្យបញ្ជា Bot (/check, /paid, Slip...)'}</span>
+              </button>
+
+              {showTgGuide && (
+                <div className="mt-2 p-3 bg-slate-950/90 border border-slate-800 rounded-xl space-y-2 text-[11px] text-slate-300">
+                  <div className="font-bold text-sky-300 flex items-center gap-1">
+                    <span>📸 ១. របៀបស្កេនរូបភាព Slip (Option 1) ៖</span>
+                  </div>
+                  <p className="text-slate-400">
+                    គ្រាន់តែ <b>Forward រូបថតវិក្កយបត្រ (ABA/ACLEDA/KHQR)</b> ពីឆាតភ្ញៀវចូលក្នុង Bot ឬ Group ដែលមាន Bot នោះ AI នឹងអានទិន្នន័យ និង Tick [បង់រួច] លើ Web Dashboard ស្វ័យប្រវត្តិតែម្តង!
+                  </p>
+
+                  <div className="font-bold text-sky-300 flex items-center gap-1 pt-1 border-t border-slate-800/80">
+                    <span>💬 ២. ពាក្យបញ្ជា Chat ក្នុង Telegram (Option 3) ៖</span>
+                  </div>
+                  <ul className="space-y-1 font-mono text-[10.5px]">
+                    <li><b className="text-emerald-400">/check &lt;លេខកន្ត្រក ឬ ឈ្មោះ&gt;</b> <span className="text-slate-400">- មើលទំនិញ តម្លៃ និងស្ថានភាព</span></li>
+                    <li><b className="text-emerald-400">/paid &lt;លេខកន្ត្រក&gt;</b> <span className="text-slate-400">- Tick បង់រួចលើកន្ត្រក</span></li>
+                    <li><b className="text-emerald-400">/unpaid &lt;លេខកន្ត្រក&gt;</b> <span className="text-slate-400">- ប្តូរទៅមិនទាន់បង់វិញ</span></li>
+                    <li><b className="text-emerald-400">/today</b> <span className="text-slate-400">- របាយការណ៍សរុបប្រចាំថ្ងៃ &amp; ចំណូល</span></li>
+                    <li><b className="text-emerald-400">/stock &lt;កូដ&gt;</b> <span className="text-slate-400">- ស្វែងរកស្តុក និងតម្លៃ</span></li>
+                  </ul>
+                </div>
               )}
             </div>
           </div>
