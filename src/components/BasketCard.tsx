@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
+import { formatLiveShortBadge } from '../utils/liveUtils';
 
 function renderCommentWithHighlightedCode(comment: string, code: string) {
   if (!comment) return null;
@@ -1015,12 +1016,12 @@ function BasketCardComponent({
                   <span>📹</span>
                   <span>{formatLiveDate(invoice.created_at)}</span>
                 </span>
-                {activeLiveId && invoice.live_id && invoice.live_id !== activeLiveId && (
+                {invoice.live_id && (
                   <span
-                    className="bg-purple-950/90 border border-purple-400/60 text-purple-300 text-[9px] font-mono px-1 py-0.2 rounded-md truncate max-w-[80px] sm:max-w-[130px]"
-                    title={`Live ID: ${invoice.live_id}`}
+                    className="bg-purple-950/90 border border-purple-400/60 text-purple-200 text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-sm whitespace-nowrap"
+                    title={`វគ្គ Live: ${invoice.live_id}`}
                   >
-                    #{invoice.live_id.replace('LIVE_', '')}
+                    <span>{formatLiveShortBadge(invoice.live_id)}</span>
                   </span>
                 )}
               </div>

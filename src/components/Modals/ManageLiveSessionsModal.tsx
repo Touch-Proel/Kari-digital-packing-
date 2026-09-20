@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
+import { getLiveDisplayTitle } from '../../utils/liveUtils';
 
 interface LiveSessionItem {
   live_id: string;
@@ -150,24 +151,6 @@ export function ManageLiveSessionsModal({
       };
     }
     return { date: raw, time: '' };
-  };
-
-  // Helper for title
-  const getLiveDisplayTitle = (liveId: string) => {
-    if (liveId.startsWith('LIVE_')) {
-      const parts = liveId.replace('LIVE_', '').split('_');
-      if (parts.length >= 2) {
-        const d = parts[0];
-        const day = d.slice(6, 8);
-        const month = d.slice(4, 6);
-        return `Live ${parts[1]} (${day}/${month})`;
-      }
-      return `Live ${liveId.replace('LIVE_', '')}`;
-    }
-    if (/^\d+$/.test(liveId)) {
-      return `Live #${liveId.length > 8 ? liveId.slice(-8) : liveId}`;
-    }
-    return `Live #${liveId}`;
   };
 
   return (

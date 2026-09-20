@@ -1,5 +1,6 @@
 import React from 'react';
 import { FacebookPage } from '../types';
+import { getLiveDisplayTitle } from '../utils/liveUtils';
 
 interface HeaderProps {
   onOpenSystemSettings: () => void;
@@ -115,19 +116,21 @@ export function Header({
           {(() => {
             const currentLiveSession = liveSessions.find(s => s.live_id === selectedLiveId);
             let liveDisplayTitle = '🌐 គ្រប់ Live (ទាំងអស់)';
-            if (selectedLiveId && currentLiveSession) {
-              const raw = currentLiveSession.created_at || '';
-              const day = raw.slice(8, 10);
-              const month = raw.slice(5, 7);
-              const time = raw.slice(11, 16);
-              const dateDisp = day && month ? `${day}/${month}${time ? ` (${time})` : ''} ‧ ` : '';
-              const idLabel = selectedLiveId.length > 10 ? `Live #${selectedLiveId.slice(-8)}` : selectedLiveId;
-              const displayCount = totalBasketCount !== undefined ? totalBasketCount : (currentLiveSession.basket_count ?? 0);
+            if (selectedLiveId && selectedLiveId !== 'ALL') {
+              const displayTitle = getLiveDisplayTitle(selectedLiveId);
+              const displayCount = totalBasketCount !== undefined ? totalBasketCount : (currentLiveSession?.basket_count ?? 0);
               const countLabel = ` (${displayCount} កន្ត្រក)`;
-              liveDisplayTitle = `🎥 ${dateDisp}${idLabel}${countLabel}`;
-            } else if (selectedLiveId) {
-              const displayCount = totalBasketCount !== undefined ? totalBasketCount : 0;
-              liveDisplayTitle = `🎥 Live #${selectedLiveId.length > 10 ? selectedLiveId.slice(-8) : selectedLiveId} (${displayCount} កន្ត្រក)`;
+              
+              if (currentLiveSession?.created_at) {
+                const raw = currentLiveSession.created_at;
+                const day = raw.slice(8, 10);
+                const month = raw.slice(5, 7);
+                const time = raw.slice(11, 16);
+                const dateDisp = day && month ? `${day}/${month}${time ? ` (${time})` : ''} ‧ ` : '';
+                liveDisplayTitle = `🎥 ${dateDisp}${displayTitle}${countLabel}`;
+              } else {
+                liveDisplayTitle = `🎥 ${displayTitle}${countLabel}`;
+              }
             }
 
             return (
