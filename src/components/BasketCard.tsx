@@ -1348,6 +1348,17 @@ function BasketCardComponent({
 
           {/* ITEM ROWS LIST */}
           <div className="flex flex-col gap-2.5">
+            {(!invoice.items || invoice.items.length === 0) && (
+              <div className="p-3.5 bg-slate-900/80 border border-dashed border-rose-500/40 rounded-2xl flex flex-col items-center justify-center gap-1 text-center">
+                <div className="flex items-center gap-1.5 font-bold text-xs sm:text-sm text-rose-300">
+                  <span className="text-base">🗑️</span>
+                  <span>កន្ត្រកនេះគ្មានទំនិញឡើយ (ដកកូដអស់ / $0.00)</span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  លោកអ្នកអាចចុច <span className="text-cyan-300 font-bold">+ ថែមកូដទំនិញថ្មីដោយដៃ</span> ឬលុបកន្ត្រកនេះចេញ។
+                </p>
+              </div>
+            )}
             {(invoice.items || []).map((item, idx) => {
               const isChecked = !!checkedState[`${invoice.invoice_id}_${item.product_code}`];
               const prod = productMap ? productMap[item.product_code.toUpperCase()] : undefined;

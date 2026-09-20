@@ -64,7 +64,7 @@ export default function App() {
 
   // Workflow & UI Filters
   const [currentMasterStage, setCurrentMasterStage] = useState<number>(1); // 1: Unpicked, 2: Staged, 3: Paid/QC
-  const [activeSubFilter, setActiveSubFilter] = useState<'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE'>('ALL');
+  const [activeSubFilter, setActiveSubFilter] = useState<'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [displayedLimit, setDisplayedLimit] = useState<number>(25);
 
@@ -784,7 +784,18 @@ export default function App() {
          i.status !== 'Packed' &&
          i.status !== 'Dispatched' &&
          i.packing_stage !== 'DISPATCHED' &&
-         i.status !== 'Cancelled'
+         i.status !== 'Cancelled' &&
+         Boolean(i.items && i.items.length > 0)
+  ).length;
+
+  const emptyBasketsCount = invoices.filter(
+    i => (i.packing_stage === 'UNPICKED' || !i.packing_stage) &&
+         i.status !== 'Paid' &&
+         i.status !== 'Packed' &&
+         i.status !== 'Dispatched' &&
+         i.packing_stage !== 'DISPATCHED' &&
+         i.status !== 'Cancelled' &&
+         (!i.items || i.items.length === 0)
   ).length;
 
   const waitingCount = invoices.filter(
@@ -822,7 +833,18 @@ export default function App() {
   let filtered = sourceInvoices.filter(inv => {
     if (inv.status === 'Cancelled') return false;
     if (currentMasterStage === 1) {
-      return (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) && inv.status !== 'Paid' && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
+      const isStage1 = (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) &&
+                       inv.status !== 'Paid' &&
+                       inv.status !== 'Packed' &&
+                       inv.status !== 'Dispatched' &&
+                       inv.packing_stage !== 'DISPATCHED';
+      if (!isStage1) return false;
+
+      const hasItems = Boolean(inv.items && inv.items.length > 0);
+      if (activeSubFilter === 'EMPTY') {
+        return !hasItems;
+      }
+      return hasItems;
     }
     if (currentMasterStage === 2) {
       return inv.packing_stage === 'STAGED' && inv.status !== 'Paid' && inv.payment_status !== 'Paid' && !inv.paid_at && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
@@ -1006,6 +1028,7 @@ export default function App() {
             playPureTone(650, 0.04);
           }}
           unpickedCount={unpickedCount}
+          emptyBasketsCount={emptyBasketsCount}
           waitingCount={waitingCount}
           paidQcCount={paidQcCount}
           dispatchedCount={totalDispatched}
