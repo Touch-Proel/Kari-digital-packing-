@@ -777,10 +777,19 @@ router.post('/update_customer_contact', (req: Request, res: Response) => {
     }
   }
 
-  const cust = customers.find(c => c.facebook_name.toLowerCase() === String(facebook_name || '').trim().toLowerCase());
+  const cleanName = String(facebook_name || inv?.facebook_name || '').trim().toLowerCase();
+  const targetUserId = inv?.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' ? inv.facebook_user_id : undefined;
+
+  let cust = targetUserId
+    ? customers.find(c => c.facebook_user_id === targetUserId)
+    : customers.find(c => c.facebook_name.toLowerCase() === cleanName);
+
   if (cust) {
     if (phone) cust.phone_number = String(phone).trim();
     if (address !== undefined) cust.address = String(address).trim();
+    if (targetUserId && (!cust.facebook_user_id || cust.facebook_user_id === 'FB_USER_ID_STREAM')) {
+      cust.facebook_user_id = targetUserId;
+    }
   }
 
   bumpDataRevision();

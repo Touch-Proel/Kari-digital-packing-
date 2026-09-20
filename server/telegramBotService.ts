@@ -109,9 +109,6 @@ async function handleIncomingStockItemPhoto(
   if (chosenPhoto?.file_id) {
     photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, primaryItem.code, messageDate);
   }
-  if (!photoUrl) {
-    photoUrl = findImageOnDiskForCode(primaryItem.code) || undefined;
-  }
 
   // Bulk import items into products database (handles persistence, active live sync, and IDs)
   bulkImportStockItems(

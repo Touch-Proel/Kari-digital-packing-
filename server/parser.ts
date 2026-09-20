@@ -348,19 +348,42 @@ export function parseAndAllocateComment(
   }
 
   const { phone, cleanText } = extractPhoneNumber(rawText);
+  const hasValidFbUserId = Boolean(fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && fbUserId.trim() !== '');
 
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
 
-  const existingInv = invoices.find(
-    i => i.live_id === liveId &&
-         i.status !== 'Cancelled' &&
-         (
-           (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && i.facebook_user_id === fbUserId) ||
-           (i.facebook_name.toLowerCase() === cleanFbName.toLowerCase()) ||
-           (phone && i.phone_number && i.phone_number.replace(/\D/g, '') === phone.replace(/\D/g, ''))
-         )
-  );
+  // Safe invoice lookup helper: avoids merging two distinct users who happen to share the same name
+  const existingInv = invoices.find(i => {
+    if (i.live_id !== liveId) return false;
+    if (i.status === 'Cancelled') return false;
+
+    const invHasUserId = Boolean(i.facebook_user_id && i.facebook_user_id !== 'FB_USER_ID_STREAM' && i.facebook_user_id.trim() !== '');
+
+    // 1. If both have valid facebook_user_id, they must match
+    if (hasValidFbUserId && invHasUserId) {
+      return i.facebook_user_id === fbUserId;
+    }
+
+    // 2. If phone is explicitly present in comment, match by normalized phone
+    if (phone && i.phone_number && i.phone_number !== 'គ្មានលេខ' && !i.phone_number.includes('មិនទាន់មាន')) {
+      const cleanInvPhone = i.phone_number.replace(/\D/g, '');
+      const cleanCommentPhone = phone.replace(/\D/g, '');
+      if (cleanInvPhone && cleanCommentPhone && cleanInvPhone === cleanCommentPhone) {
+        return true;
+      }
+    }
+
+    // 3. If neither has conflicting user ID, match by name
+    if (i.facebook_name.toLowerCase() === cleanFbName.toLowerCase()) {
+      if (hasValidFbUserId && invHasUserId && i.facebook_user_id !== fbUserId) {
+        return false; // Two different Facebook accounts with the same display name! Keep separate!
+      }
+      return true;
+    }
+
+    return false;
+  });
 
   const isAlreadyInBasket = existingInv && (
     (existingInv.comments && existingInv.comments.includes(rawText)) ||
@@ -401,10 +424,24 @@ export function parseAndAllocateComment(
 
   const { zone, label, detectedLocation, hasExplicitLocation } = detectDeliveryZone(rawText);
 
-  let cust = customers.find(c => 
-    (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && c.facebook_user_id === fbUserId) ||
-    c.facebook_name.toLowerCase() === cleanFbName.toLowerCase()
-  );
+  // SAFE CUSTOMER DB LOOKUP:
+  // 1. First priority: match by unique facebook_user_id
+  let cust = hasValidFbUserId
+    ? customers.find(c => c.facebook_user_id === fbUserId)
+    : undefined;
+
+  let isVerifiedIdCustomer = Boolean(cust);
+
+  // 2. If not found by user_id, match by name ONLY if that customer doesn't have a different conflicting user_id
+  if (!cust) {
+    const nameMatch = customers.find(c => c.facebook_name.toLowerCase() === cleanFbName.toLowerCase());
+    if (nameMatch) {
+      const nameMatchHasOtherId = Boolean(nameMatch.facebook_user_id && nameMatch.facebook_user_id !== 'FB_USER_ID_STREAM' && nameMatch.facebook_user_id !== fbUserId);
+      if (!nameMatchHasOtherId) {
+        cust = nameMatch;
+      }
+    }
+  }
 
   const initialCustAddress = hasExplicitLocation ? (detectedLocation || label) : undefined;
 
@@ -421,6 +458,7 @@ export function parseAndAllocateComment(
       last_interaction_at: new Date().toISOString()
     };
     customers.push(cust);
+    isVerifiedIdCustomer = hasValidFbUserId;
   } else {
     if (userPicUrl) cust.picture_url = userPicUrl;
     if (phone) cust.phone_number = phone;
@@ -429,23 +467,47 @@ export function parseAndAllocateComment(
     } else if (hasExplicitLocation && !cust.address) {
       cust.address = label;
     }
+    if (hasValidFbUserId && (!cust.facebook_user_id || cust.facebook_user_id === 'FB_USER_ID_STREAM')) {
+      cust.facebook_user_id = fbUserId;
+      isVerifiedIdCustomer = true;
+    }
     cust.last_interaction_at = new Date().toISOString();
   }
 
   const isQuestion = isQuestionComment(rawText);
   const pairs = extractCodeQtyPairs(cleanText, liveId);
 
-  let inv = invoices.find(
-    i => i.live_id === liveId &&
-         i.status !== 'Packed' &&
-         i.status !== 'Dispatched' &&
-         i.status !== 'Cancelled' &&
-         (
-           (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && i.facebook_user_id === fbUserId) ||
-           (i.facebook_name.toLowerCase() === cleanFbName.toLowerCase()) ||
-           (phone && i.phone_number && i.phone_number.replace(/\D/g, '') === phone.replace(/\D/g, ''))
-         )
-  );
+  // Match open/unpacked invoice for this customer in this live session
+  let inv = invoices.find(i => {
+    if (i.live_id !== liveId) return false;
+    if (i.status === 'Packed' || i.status === 'Dispatched' || i.status === 'Cancelled') return false;
+
+    const invHasUserId = Boolean(i.facebook_user_id && i.facebook_user_id !== 'FB_USER_ID_STREAM' && i.facebook_user_id.trim() !== '');
+
+    // 1. If both have valid facebook_user_id
+    if (hasValidFbUserId && invHasUserId) {
+      return i.facebook_user_id === fbUserId;
+    }
+
+    // 2. If phone is explicitly present in comment, match by normalized phone
+    if (phone && i.phone_number && i.phone_number !== 'គ្មានលេខ' && !i.phone_number.includes('មិនទាន់មាន')) {
+      const cleanInvPhone = i.phone_number.replace(/\D/g, '');
+      const cleanCommentPhone = phone.replace(/\D/g, '');
+      if (cleanInvPhone && cleanCommentPhone && cleanInvPhone === cleanCommentPhone) {
+        return true;
+      }
+    }
+
+    // 3. Match by name only if no conflicting user IDs
+    if (i.facebook_name.toLowerCase() === cleanFbName.toLowerCase()) {
+      if (hasValidFbUserId && invHasUserId && i.facebook_user_id !== fbUserId) {
+        return false; // Two different Facebook accounts with the same display name! Separate baskets!
+      }
+      return true;
+    }
+
+    return false;
+  });
 
   if (isQuestion || pairs.length === 0) {
     if (inv) {
@@ -472,19 +534,27 @@ export function parseAndAllocateComment(
       status: isQuestion ? 'QUESTION_SAVED' : 'UNMATCHED_SAVED',
       message: `💬 កត់ត្រាខមិន${isQuestion ? 'សួរ' : ''} (មិនមានកូដទំនិញត្រូវ) ៖ «${cleanFbName}» ៖ "${rawText}"`,
       customer_name: cleanFbName,
-      phone_number: phone || cust.phone_number,
-      address: cust.address
+      phone_number: phone || (isVerifiedIdCustomer ? cust.phone_number : undefined),
+      address: isVerifiedIdCustomer ? cust.address : undefined
     };
   }
 
   if (!inv) {
     const nextId = invoices.length > 0 ? Math.max(...invoices.map(i => i.invoice_id)) + 1 : 101;
 
+    // SAFE AUTOFILL RULE:
+    // Only autofill phone & address from DB if:
+    // 1. The customer record has a VERIFIED Facebook User ID match (preventing wrong autofill when 2 people share the same name like "អា លីន")
+    // OR
+    // 2. The phone / location is explicitly stated in the CURRENT comment.
+    const canAutofillFromSavedCust = isVerifiedIdCustomer && Boolean(cust?.phone_number || cust?.address);
+
+    let resolvedPhone = phone || (canAutofillFromSavedCust ? cust?.phone_number : undefined) || 'គ្មានលេខ';
     let resolvedAddress = '⚠️ មិនទាន់មានអាសយដ្ឋាន';
     let resolvedZone: DeliveryZone = 'UNKNOWN';
     let resolvedLabel = '❓ មិនទាន់ដឹង';
 
-    const custHasSavedAddr = cust?.address && !cust.address.includes('មិនទាន់មាន') && cust.address !== '⚠️ មិនទាន់មានអាសយដ្ឋាន';
+    const custHasSavedAddr = canAutofillFromSavedCust && cust?.address && !cust.address.includes('មិនទាន់មាន') && cust.address !== '⚠️ មិនទាន់មានអាសយដ្ឋាន';
 
     if (hasExplicitLocation) {
       resolvedAddress = detectedLocation || label;
@@ -505,7 +575,7 @@ export function parseAndAllocateComment(
       facebook_user_id: fbUserId || 'FB_USER_ID_STREAM',
       facebook_name: cleanFbName,
       picture_url: userPicUrl || cust?.picture_url,
-      phone_number: phone || cust.phone_number || 'គ្មានលេខ',
+      phone_number: resolvedPhone,
       address: resolvedAddress,
       location_zone: resolvedZone,
       location_label: resolvedLabel,
@@ -532,7 +602,7 @@ export function parseAndAllocateComment(
       } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
         inv.address = label;
       }
-    } else if ((!inv.address || inv.address.includes('មិនទាន់មាន')) && cust?.address && !cust.address.includes('មិនទាន់មាន')) {
+    } else if (isVerifiedIdCustomer && (!inv.address || inv.address.includes('មិនទាន់មាន')) && cust?.address && !cust.address.includes('មិនទាន់មាន')) {
       inv.address = cust.address;
       const custZoneRes = detectDeliveryZone(cust.address);
       inv.location_zone = custZoneRes.zone;
