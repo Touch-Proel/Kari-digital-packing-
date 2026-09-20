@@ -1083,6 +1083,83 @@ router.post('/dismiss_unmatched_comment', (req: Request, res: Response) => {
   });
 });
 
+// POST /api/delete_basket - Delete a single basket completely
+router.post('/delete_basket', (req: Request, res: Response) => {
+  const { invoice_id, packer_name } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+
+  const idx = invoices.findIndex(i => i.invoice_id === cleanId || i.basket_no === cleanId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: 'រកមិនឃើញវិក្កយបត្រនេះឡើយ' });
+  }
+
+  const targetInv = invoices[idx];
+
+  // If there are any items with quantity, restore stock
+  if (targetInv.items && targetInv.items.length > 0) {
+    const liveId = targetInv.live_id || activeLiveId;
+    for (const it of targetInv.items) {
+      if (it.quantity > 0) {
+        const prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === it.product_code.toUpperCase());
+        if (prod) {
+          prod.stock_qty += it.quantity;
+        }
+      }
+    }
+  }
+
+  const removedInv = invoices.splice(idx, 1)[0];
+  const newRev = bumpDataRevision();
+  saveDatabaseToDisk();
+
+  console.log(`[Basket Deleted] Basket #${removedInv.basket_no || removedInv.invoice_id} deleted by ${packer_name || 'Staff'}.`);
+
+  res.json({
+    success: true,
+    message: `បានលុបកន្ត្រក #${removedInv.basket_no || removedInv.invoice_id} (${removedInv.facebook_name}) រួចរាល់!`,
+    deleted_invoice_id: removedInv.invoice_id,
+    revision: newRev
+  });
+});
+
+// POST /api/clean_empty_baskets - Bulk remove all empty ($0.00 / 0 items) baskets
+router.post('/clean_empty_baskets', (req: Request, res: Response) => {
+  const { live_id, all_lives } = req.body;
+  const targetLive = live_id || activeLiveId;
+
+  let deletedCount = 0;
+  for (let i = invoices.length - 1; i >= 0; i--) {
+    const inv = invoices[i];
+    if (!all_lives && targetLive && inv.live_id !== targetLive) {
+      continue;
+    }
+
+    // Never delete paid or dispatched baskets
+    if (inv.status === 'Paid' || inv.payment_status === 'Paid' || inv.status === 'Dispatched' || inv.status === 'Packed' || inv.packing_stage === 'DISPATCHED') {
+      continue;
+    }
+
+    // Check if basket is empty (no items or all items qty=0)
+    const hasNoItems = !inv.items || inv.items.length === 0 || inv.items.every(it => !it.quantity || it.quantity === 0);
+    if (hasNoItems) {
+      invoices.splice(i, 1);
+      deletedCount++;
+    }
+  }
+
+  const newRev = bumpDataRevision();
+  saveDatabaseToDisk();
+
+  console.log(`[Bulk Clean] Cleaned ${deletedCount} empty baskets from ${all_lives ? 'all lives' : `Live #${targetLive}`}.`);
+
+  res.json({
+    success: true,
+    deleted_count: deletedCount,
+    message: `បានសម្អាតកន្ត្រកទទេចំនួន ${deletedCount} កញ្ចប់ចេញពីប្រព័ន្ធដោយជោគជ័យ!`,
+    revision: newRev
+  });
+});
+
 // GET /api/picking_list
 router.get('/picking_list', (req: Request, res: Response) => {
   const liveId = (req.query.live_id as string) || activeLiveId;

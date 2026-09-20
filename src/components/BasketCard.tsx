@@ -63,6 +63,7 @@ interface BasketCardProps {
   onUpdateInvoice?: (inv: Invoice, revision?: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onUndispatch?: (inv: Invoice) => void;
+  onDeleteBasket?: (invId: number) => void;
 }
 
 function BasketCardComponent({
@@ -84,7 +85,8 @@ function BasketCardComponent({
   onOptimisticAddItem,
   onUpdateInvoice,
   onShowToast,
-  onUndispatch
+  onUndispatch,
+  onDeleteBasket
 }: BasketCardProps) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -1348,6 +1350,29 @@ function BasketCardComponent({
 
           {/* ITEM ROWS LIST */}
           <div className="flex flex-col gap-2.5">
+            {(!invoice.items || invoice.items.length === 0 || invoice.items.every(it => !it.quantity || it.quantity === 0)) && (
+              <div className="p-3.5 bg-slate-900/90 border border-dashed border-rose-500/50 rounded-2xl flex flex-col items-center justify-center gap-2 text-center shadow-lg">
+                <div className="flex items-center gap-1.5 font-black text-xs sm:text-sm text-rose-300">
+                  <span className="text-base">🗑️</span>
+                  <span>កន្ត្រកនេះគ្មានទំនិញឡើយ (ដកកូដអស់ / $0.00)</span>
+                </div>
+                <p className="text-[11px] text-slate-400 max-w-md">
+                  លោកអ្នកអាចចុច <span className="text-cyan-300 font-bold">+ ថែមកូដទំនិញថ្មីដោយដៃ</span> ឬចុចលុបកន្ត្រកនេះចេញពីប្រព័ន្ធខាងក្រោម។
+                </p>
+                {onDeleteBasket && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteBasket(invoice.invoice_id);
+                    }}
+                    className="mt-1 px-3 py-1.5 bg-rose-600/90 hover:bg-rose-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 active:scale-95 transition-all border border-rose-400/50 cursor-pointer"
+                  >
+                    <span>🗑️ លុបកន្ត្រកនេះចោល</span>
+                  </button>
+                )}
+              </div>
+            )}
             {(invoice.items || []).map((item, idx) => {
               const isChecked = !!checkedState[`${invoice.invoice_id}_${item.product_code}`];
               const prod = productMap ? productMap[item.product_code.toUpperCase()] : undefined;

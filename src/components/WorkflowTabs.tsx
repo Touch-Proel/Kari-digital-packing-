@@ -2,6 +2,8 @@ interface WorkflowTabsProps {
   currentStage: number; // 1: មិនទាន់រើស, 2: រង់ចាំបង់, 3: QC, 4: ចេញដឹកហើយ
   onSwitchStage: (stage: number) => void;
   unpickedCount: number;
+  emptyBasketsCount?: number;
+  onCleanEmptyBaskets?: () => void;
   waitingCount: number;
   paidQcCount: number;
   dispatchedCount: number;
@@ -22,8 +24,8 @@ interface WorkflowTabsProps {
   };
   dispatchedTimeFilter?: 'ALL' | 'TODAY' | 'PP' | 'PROVINCE';
   onSetDispatchedTimeFilter?: (flt: 'ALL' | 'TODAY' | 'PP' | 'PROVINCE') => void;
-  activeSubFilter: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE';
-  onSetSubFilter: (flt: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE') => void;
+  activeSubFilter: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY';
+  onSetSubFilter: (flt: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY') => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   totalFilteredBaskets: number;
@@ -33,6 +35,8 @@ export function WorkflowTabs({
   currentStage,
   onSwitchStage,
   unpickedCount,
+  emptyBasketsCount = 0,
+  onCleanEmptyBaskets,
   waitingCount,
   paidQcCount,
   dispatchedCount,
@@ -300,12 +304,12 @@ export function WorkflowTabs({
         </div>
       )}
 
-      {/* 🎯 TIER 2: SUB-FILTERS (Only for Tab 1: មិនទាន់រើស) */}
-      {currentStage === 1 && (
-        <div className="grid grid-cols-4 gap-1.5 bg-[#0B1325]/95 p-1.5 rounded-2xl border-[1.5px] border-sky-400/20 shadow-md">
+      {/* 🎯 TIER 2: SUB-FILTERS (For Tab 1: មិនទាន់រើស & Tab 2: រង់ចាំបង់) */}
+      {(currentStage === 1 || currentStage === 2) && (
+        <div className="grid grid-cols-5 gap-1.5 bg-[#0B1325]/95 p-1.5 rounded-2xl border-[1.5px] border-sky-400/20 shadow-md">
           <button
             onClick={() => onSetSubFilter('ALL')}
-            className={`py-2 px-1 rounded-xl text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'ALL'
                 ? 'bg-gradient-to-r from-sky-600/40 to-blue-900 border-sky-400 text-white shadow-[0_0_12px_rgba(56,189,248,0.4)]'
                 : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
@@ -316,7 +320,7 @@ export function WorkflowTabs({
 
           <button
             onClick={() => onSetSubFilter('AMOUNT_DESC')}
-            className={`py-2 px-1 rounded-xl text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'AMOUNT_DESC'
                 ? 'bg-gradient-to-r from-amber-600/40 to-amber-950 border-amber-500 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
                 : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
@@ -327,7 +331,7 @@ export function WorkflowTabs({
 
           <button
             onClick={() => onSetSubFilter('PP')}
-            className={`py-2 px-1 rounded-xl text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'PP'
                 ? 'bg-gradient-to-r from-emerald-600/40 to-emerald-950 border-emerald-500 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
                 : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
@@ -338,7 +342,7 @@ export function WorkflowTabs({
 
           <button
             onClick={() => onSetSubFilter('PROVINCE')}
-            className={`py-2 px-1 rounded-xl text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'PROVINCE'
                 ? 'bg-gradient-to-r from-purple-600/40 to-purple-950 border-purple-500 text-purple-200 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
                 : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
@@ -346,6 +350,53 @@ export function WorkflowTabs({
           >
             🏞️ ខេត្ត
           </button>
+
+          <button
+            onClick={() => onSetSubFilter('EMPTY')}
+            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+              activeSubFilter === 'EMPTY'
+                ? 'bg-gradient-to-r from-rose-600/40 to-rose-950 border-rose-500 text-rose-200 shadow-[0_0_12px_rgba(244,63,94,0.4)]'
+                : emptyBasketsCount > 0
+                  ? 'bg-rose-950/20 border-rose-800/40 text-rose-300/80 hover:text-rose-200 hover:border-rose-600'
+                  : 'bg-[#070D1B] border-white/5 text-slate-500 hover:text-slate-300'
+            }`}
+            title="កន្ត្រកដែលដកកូដចេញអស់ ($0.00 / 0 មុខ)"
+          >
+            <span>🗑️ ទទេ</span>
+            {emptyBasketsCount > 0 && (
+              <span className={`text-[9px] font-mono px-1 py-0.2 rounded-full font-black ${
+                activeSubFilter === 'EMPTY' ? 'bg-rose-500 text-white' : 'bg-rose-900/80 text-rose-200 border border-rose-700/60'
+              }`}>
+                {emptyBasketsCount}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* 🧹 EMPTY BASKETS BULK CLEANUP BANNER */}
+      {activeSubFilter === 'EMPTY' && (
+        <div className="flex items-center justify-between p-2.5 bg-[#1a080c]/90 border border-rose-500/40 rounded-2xl shadow-lg animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🗑️</span>
+            <div className="flex flex-col">
+              <span className="text-xs font-black text-rose-200">
+                កន្ត្រកទទេគ្មានទំនិញ ({totalFilteredBaskets} កន្ត្រក)
+              </span>
+              <span className="text-[10px] text-slate-400">
+                កន្ត្រកដែលដកកូដអស់ ($0.00) ឬមិនទាន់បានដាក់ទំនិញ
+              </span>
+            </div>
+          </div>
+          {onCleanEmptyBaskets && totalFilteredBaskets > 0 && (
+            <button
+              type="button"
+              onClick={onCleanEmptyBaskets}
+              className="px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 active:scale-95 transition-all border border-rose-400/50 cursor-pointer"
+            >
+              <span>🧹 សម្អាតទាំងអស់ ({totalFilteredBaskets})</span>
+            </button>
+          )}
         </div>
       )}
 
