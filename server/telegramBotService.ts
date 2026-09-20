@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision } from './db';
 import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, ExtractedSlipData } from './fastCheckRoutes';
-import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems } from './telegramSync';
+import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode } from './telegramSync';
 import { Invoice, Product } from './types';
 
 // State tracker for Telegram Bot Service
@@ -108,6 +108,9 @@ async function handleIncomingStockItemPhoto(
   let photoUrl: string | undefined = undefined;
   if (chosenPhoto?.file_id) {
     photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, primaryItem.code, messageDate);
+  }
+  if (!photoUrl) {
+    photoUrl = findImageOnDiskForCode(primaryItem.code) || undefined;
   }
 
   // Bulk import items into products database (handles persistence, active live sync, and IDs)

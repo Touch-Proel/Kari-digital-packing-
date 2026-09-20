@@ -84,6 +84,43 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
 
 
 // 2. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
+export function findImageOnDiskForCode(code: string): string | null {
+  try {
+    if (!code) return null;
+    const clean = code.trim().toLowerCase();
+    
+    // 1. Check in-memory products first (if any product has image_file for this code)
+    const existingProd = products.find(p => p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
+    if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
+      const relPath = existingProd.image_file.replace(/^\//, '');
+      if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
+        return existingProd.image_file;
+      }
+    }
+
+    // 2. Check disk uploads directory for matching {code}_*.jpg or {code}.*
+    const uploadDirs = [
+      path.join(process.cwd(), 'public', 'uploads'),
+      path.join(process.cwd(), 'dist', 'uploads'),
+      path.join(process.cwd(), 'uploads')
+    ];
+
+    for (const dir of uploadDirs) {
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        const match = files.find(f => {
+          const fLower = f.toLowerCase();
+          return fLower.startsWith(`${clean}_`) || fLower.startsWith(`${clean}.`);
+        });
+        if (match) {
+          return `/uploads/${match}`;
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
 export async function downloadTelegramPhoto(
   token: string,
   fileId: string,
@@ -145,6 +182,13 @@ export async function downloadTelegramPhoto(
         return cachedUrl;
       }
     } catch {}
+  }
+
+  // 3. Check if there is already a downloaded image on disk matching safeCode
+  const existingDiskImg = findImageOnDiskForCode(safeCode);
+  if (existingDiskImg) {
+    downloadedPhotoCache.set(fileId, existingDiskImg);
+    return existingDiskImg;
   }
 
   try {
@@ -476,6 +520,13 @@ export async function fetchTelegramStockUpdates(options: {
             matchedImageUrl = inMem;
           }
         }
+        if (!matchedImageUrl) {
+          const diskImg = findImageOnDiskForCode(item.code);
+          if (diskImg) {
+            matchedImageUrl = diskImg;
+            if (photoFileId) downloadedPhotoCache.set(photoFileId, diskImg);
+          }
+        }
 
         newlyParsedMap.set(item.code, {
           code: item.code,
@@ -521,6 +572,10 @@ export async function fetchTelegramStockUpdates(options: {
     // 5. Merge with cached items (keeps previously scanned items even if Telegram queue clears)
     const combinedMap = new Map<string, TelegramItemParsed>();
     for (const it of cachedTelegramItems) {
+      if (!it.image_url) {
+        const diskImg = findImageOnDiskForCode(it.code);
+        if (diskImg) it.image_url = diskImg;
+      }
       combinedMap.set(it.code, it);
     }
     for (const [code, it] of newlyParsedMap.entries()) {
@@ -529,9 +584,13 @@ export async function fetchTelegramStockUpdates(options: {
         combinedMap.set(code, {
           ...existing,
           ...it,
-          image_url: it.image_url || existing.image_url
+          image_url: it.image_url || existing.image_url || findImageOnDiskForCode(code) || undefined
         });
       } else {
+        if (!it.image_url) {
+          const diskImg = findImageOnDiskForCode(it.code);
+          if (diskImg) it.image_url = diskImg;
+        }
         combinedMap.set(code, it);
       }
     }
@@ -602,6 +661,10 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
+    const resolvedImage = (it.image_file && it.image_file.trim() !== '')
+      ? it.image_file.trim()
+      : findImageOnDiskForCode(cleanCode) || '';
+
     const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
     if (existing) {
       existing.live_id = targetLive;
@@ -613,7 +676,7 @@ export function bulkImportStockItems(
       }
       if (it.name && it.name !== `កូដ ${cleanCode}`) existing.name = it.name.trim();
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
-      if (it.image_file) existing.image_file = it.image_file;
+      if (resolvedImage) existing.image_file = resolvedImage;
       updatedCount++;
     } else {
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
@@ -625,7 +688,7 @@ export function bulkImportStockItems(
         price: Number(it.price || 0),
         stock_qty: Number(it.stock_qty !== undefined ? it.stock_qty : 200),
         cost_price: Number(it.cost_price || 0),
-        image_file: it.image_file || ''
+        image_file: resolvedImage || ''
       };
       products.push(newProd);
       importedCount++;
