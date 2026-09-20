@@ -543,6 +543,8 @@ router.post('/dispatch_pack', (req: Request, res: Response) => {
     (inv as any).payment_status = 'COD';
   }
   inv.status = 'Dispatched';
+  (inv as any).dispatched_at = new Date().toISOString();
+  (inv as any).dispatched_by = pName;
   inv.items.forEach(it => { it.is_packed = true; });
 
   const totalQty = inv.items.reduce((s, it) => s + it.quantity, 0);
@@ -579,6 +581,8 @@ router.post('/undispatch_pack', (req: Request, res: Response) => {
   }
   inv.packing_stage = 'STAGED';
   inv.status = 'Paid';
+  (inv as any).dispatched_at = undefined;
+  (inv as any).dispatched_by = undefined;
   inv.items.forEach(it => { it.is_packed = false; });
   bumpDataRevision();
   saveDatabaseToDisk();

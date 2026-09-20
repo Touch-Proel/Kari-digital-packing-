@@ -4,6 +4,7 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import packingRoutes from './server/packingRoutes';
+import fastCheckRoutes from './server/fastCheckRoutes';
 import {
   getFacebookOAuthUrl,
   handleOAuthCallback,
@@ -329,6 +330,8 @@ app.get('/api/download/:filename', (req: Request, res: Response) => {
 // 📦 Digital Packing API Routes
 // -------------------------------------------------------------
 app.use('/api', packingRoutes);
+app.use('/api/fast_check', fastCheckRoutes);
+app.use('/api', fastCheckRoutes);
 
 // Shortcut routes for printing slips and payment screen directly in any tab
 app.get(['/print/:invoice_id', '/print_slip/:invoice_id'], (req: Request, res: Response) => {

@@ -2,6 +2,10 @@ interface GamifiedHudProps {
   topPackerName: string;
   mySessionPacks: number;
   backlogCount?: number;
+  allLivePaidCount?: number;
+  isAllLiveQcActive?: boolean;
+  onToggleAllLiveQc?: () => void;
+  onOpenFastCheck?: () => void;
   onOpenBacklog?: () => void;
   onOpenLeaderboard: () => void;
   onOpenMyHistory: () => void;
@@ -11,100 +15,151 @@ export function GamifiedHud({
   topPackerName,
   mySessionPacks,
   backlogCount = 0,
+  allLivePaidCount = 0,
+  isAllLiveQcActive = false,
+  onToggleAllLiveQc,
+  onOpenFastCheck,
   onOpenBacklog,
   onOpenLeaderboard,
   onOpenMyHistory
 }: GamifiedHudProps) {
-  // 🚨 When there is Backlog from previous lives (> 0), transform this entire banner into high-priority Alert!
-  if (backlogCount > 0) {
-    return (
-      <div
-        onClick={onOpenBacklog}
-        className="bg-gradient-to-r from-rose-950 via-red-950/95 to-amber-950 border-2 border-rose-500 rounded-2xl p-2.5 flex items-center justify-between shadow-[0_0_25px_rgba(244,63,94,0.45)] cursor-pointer hover:border-rose-400 active:scale-[0.99] transition-all group animate-pulse"
-      >
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className="w-9 h-9 rounded-xl bg-rose-500/30 border border-rose-400/60 flex items-center justify-center text-lg flex-shrink-0 animate-bounce">
-            🚨
+  return (
+    <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-[1.5px] border-emerald-500/50 p-2 rounded-2xl shadow-xl backdrop-blur-md flex flex-col sm:flex-row sm:items-center gap-2">
+      {/* 1. Mobile Leaderboard Strip (Shows as a neat top bar on small screens) */}
+      <div className="flex sm:hidden items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/60 shadow-inner">
+        <div
+          onClick={onOpenLeaderboard}
+          className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer active:scale-98 transition-transform"
+          title="ចុចដើម្បីមើលតារាងជើងខ្លាំងច្រកប្រចាំថ្ងៃ"
+        >
+          <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-xs flex-shrink-0">
+            🏆
           </span>
-          <div className="flex flex-col text-left min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="bg-rose-600 text-white text-[11px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-                កន្ត្រកកកស្ទះ (Backlog)
-              </span>
-              <span className="font-black text-rose-200 text-xs sm:text-sm">
-                {backlogCount} នាក់ (ពី Live មុនៗមិនទាន់ចេញដឹក)
-              </span>
-            </div>
-            <span className="text-[11px] text-amber-200/90 font-medium truncate mt-0.5">
-              👉 ភ្ញៀវបង់លុយរួចហើយ តែមិនទាន់ចេញដឹក! ចុចដើម្បីពិនិត្យ & ចេញដឹកភ្លាម
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="font-black text-xs text-white truncate">
+              {topPackerName || 'អ្នកច្រក'}
+            </span>
+            <span className="text-[10px] text-amber-300 font-bold bg-amber-500/15 border border-amber-400/30 px-1.5 py-0.5 rounded-md truncate">
+              ជើងខ្លាំង ({mySessionPacks} ខ្ញុំ)
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            onOpenBacklog?.();
-          }}
-          className="px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg group-hover:scale-105 transition-transform whitespace-nowrap flex-shrink-0 ml-2"
-        >
-          <span>ពិនិត្យឥឡូវ</span>
-          <span>➔</span>
-        </button>
-      </div>
-    );
-  }
 
-  // 🟢 Normal state (Backlog = 0): Shows Backlog 0 status + Leaderboard & Packer stats
-  return (
-    <div className="bg-gradient-to-r from-emerald-950/90 via-teal-900/80 to-emerald-900/90 border-[1.5px] border-emerald-500 p-2 rounded-xl flex justify-between items-center shadow-md">
-      {/* Backlog Quick Status & Trigger (Always accessible) */}
-      <div
-        onClick={onOpenBacklog}
-        className="flex items-center gap-2 pr-2.5 hover:opacity-90 cursor-pointer active:scale-98 transition-all flex-shrink-0"
-        title="ពិនិត្យកន្ត្រកកកស្ទះពី Live មុនៗ (ចុចដើម្បីបើកមើល)"
-      >
-        <div className="w-7 h-7 rounded-lg bg-emerald-900/80 border border-emerald-400/50 flex items-center justify-center text-sm flex-shrink-0">
-          🚨
-        </div>
-        <div>
-          <div className="font-black text-xs text-white flex items-center gap-1.5">
-            <span>Backlog:</span>
-            <span className="bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded text-[11px] font-mono border border-emerald-400/40">0</span>
+        {backlogCount > 0 ? (
+          <div
+            onClick={onOpenBacklog}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-rose-950/90 border border-rose-500 text-rose-200 text-xs font-black animate-pulse cursor-pointer active:scale-95"
+            title={`មានកន្ត្រកកកស្ទះ ${backlogCount} នាក់ ពី Live មុនៗ`}
+          >
+            <span className="text-xs">🚨</span>
+            <span className="font-mono">{backlogCount}</span>
           </div>
-          <div className="text-[10px] text-emerald-300 font-bold hover:underline">គ្មានកកស្ទះ (ចុចមើល)</div>
-        </div>
+        ) : (
+          <div
+            onClick={onOpenLeaderboard}
+            className="text-[10px] text-slate-400 hover:text-amber-300 flex items-center gap-0.5 cursor-pointer flex-shrink-0 font-medium"
+          >
+            <span>តារាង</span>
+            <span className="text-[9px]">❯</span>
+          </div>
+        )}
       </div>
 
-      {/* Divider */}
-      <div className="h-7 w-[1px] bg-white/20 flex-shrink-0"></div>
-
-      {/* Top Packer */}
+      {/* 1b. Desktop Leaderboard Card (Hidden on mobile, visible on sm:) */}
       <div
         onClick={onOpenLeaderboard}
-        className="flex items-center gap-2 px-2 hover:opacity-90 cursor-pointer active:scale-98 transition-all min-w-0"
+        className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/60 hover:border-amber-400/80 cursor-pointer active:scale-98 transition-all flex-shrink-0 shadow-sm"
+        title="ចុចដើម្បីមើលតារាងជើងខ្លាំងច្រកប្រចាំថ្ងៃ"
       >
-        <span className="text-xl flex-shrink-0">🏆</span>
+        <span className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-sm flex-shrink-0">
+          🏆
+        </span>
         <div className="min-w-0">
-          <div className="font-black text-xs text-white truncate max-w-[120px] sm:max-w-[160px]">{topPackerName}</div>
-          <div className="text-[10.5px] text-emerald-300 font-bold truncate">ជើងខ្លាំងច្រក (ចុចមើលតារាង)</div>
+          <div className="font-black text-xs text-white truncate max-w-[110px]">
+            {topPackerName || 'អ្នកច្រក'}
+          </div>
+          <div className="text-[10px] text-amber-300 font-bold truncate flex items-center gap-1">
+            <span>ជើងខ្លាំង</span>
+            <span className="text-slate-400 font-normal">({mySessionPacks} ខ្ញុំ)</span>
+          </div>
         </div>
       </div>
 
-      {/* Current Session Packs */}
-      <div
-        onClick={e => {
-          e.stopPropagation();
-          onOpenMyHistory();
-        }}
-        className="flex items-center gap-2 border-l border-white/20 pl-2.5 hover:opacity-90 cursor-pointer active:scale-98 transition-all flex-shrink-0"
-      >
-        <span className="text-xl">🔥</span>
-        <div>
-          <div className="font-black text-xs text-white">{mySessionPacks} កន្ត្រក</div>
-          <div className="text-[10.5px] text-emerald-300 font-bold">អ្នកច្រកបាន (ចុចមើល)</div>
-        </div>
+      {/* Action Buttons Container (Grid on mobile: 50% / 50% perfectly symmetrical; Flex-1 on desktop) */}
+      <div className="grid grid-cols-2 sm:flex sm:flex-1 items-center gap-2">
+        {/* 2. Button: 🔍 បង់រួច - QC All Live */}
+        <button
+          type="button"
+          onClick={onToggleAllLiveQc}
+          className={`sm:flex-1 h-[48px] py-1 px-2.5 rounded-xl border flex items-center justify-between gap-1.5 shadow-md transition-all active:scale-98 cursor-pointer ${
+            isAllLiveQcActive
+              ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 border-emerald-300 text-white ring-2 ring-emerald-400/50 shadow-emerald-500/30'
+              : 'bg-gradient-to-r from-emerald-950/90 via-teal-950/80 to-emerald-950/90 border-emerald-500/60 hover:border-emerald-400 text-emerald-100'
+          }`}
+          title="ចុចដើម្បីពិនិត្យផ្ទៀងផ្ទាត់កន្ត្រកបង់រួចទាំងអស់ពីគ្រប់ Live ទាំងអស់"
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-emerald-500/30 border border-emerald-400/50 flex items-center justify-center text-xs sm:text-sm flex-shrink-0">
+              🔍
+            </span>
+            <div className="text-left min-w-0">
+              <div className="font-black text-[11px] sm:text-xs text-white flex items-center gap-1 truncate">
+                <span>QC All Live</span>
+                {isAllLiveQcActive && (
+                  <span className="bg-emerald-300 text-slate-950 text-[8px] font-black px-1 rounded-full uppercase">
+                    On
+                  </span>
+                )}
+              </div>
+              <div className="text-[9.5px] sm:text-[10px] text-emerald-300/90 font-medium truncate">
+                {isAllLiveQcActive ? 'កំពុងមើល' : 'បង់រួចគ្រប់ Live'}
+              </div>
+            </div>
+          </div>
+
+          <span className="bg-emerald-400 text-slate-950 font-black text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-md sm:rounded-lg shadow-sm font-mono flex-shrink-0">
+            {allLivePaidCount}
+          </span>
+        </button>
+
+        {/* 3. Button: ⚡ AI Fast-Check Slips (Polished, Equal Height & Visual Symmetry) */}
+        <button
+          type="button"
+          onClick={onOpenFastCheck}
+          className="sm:flex-1 h-[48px] py-1 px-2.5 rounded-xl bg-gradient-to-r from-indigo-950/90 via-purple-950/90 to-indigo-950/90 border border-indigo-400/70 hover:border-indigo-300 text-white shadow-md flex items-center justify-between gap-1.5 cursor-pointer active:scale-98 transition-all group"
+          title="ស្កេនរូបភាព Slips ឬ Paste ឈ្មោះដើម្បី Tick បង់រួចស្វ័យប្រវត្តិ"
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-indigo-500/30 border border-indigo-400/50 flex items-center justify-center text-xs sm:text-sm flex-shrink-0 shadow-inner group-hover:scale-110 transition-transform">
+              ⚡
+            </span>
+            <div className="text-left min-w-0">
+              <div className="font-black text-[11px] sm:text-xs text-indigo-100 truncate">
+                Fast-Check
+              </div>
+              <div className="text-[9.5px] sm:text-[10px] text-indigo-300 font-medium truncate">
+                ស្កេនរូប Slips
+              </div>
+            </div>
+          </div>
+
+          <span className="bg-gradient-to-r from-indigo-400 to-purple-400 text-slate-950 font-black text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-md sm:rounded-lg shadow-sm font-mono flex-shrink-0">
+            AI Free
+          </span>
+        </button>
       </div>
+
+      {/* 4. Desktop Backlog pill (visible on sm: if backlog exists) */}
+      {backlogCount > 0 && (
+        <div
+          onClick={onOpenBacklog}
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-950/90 border border-rose-500 hover:border-rose-400 cursor-pointer active:scale-98 transition-all flex-shrink-0 animate-pulse"
+          title={`មានកន្ត្រកកកស្ទះ ${backlogCount} នាក់ ពី Live មុនៗ`}
+        >
+          <span className="text-xs">🚨</span>
+          <span className="text-rose-200 text-xs font-black font-mono">{backlogCount}</span>
+        </div>
+      )}
     </div>
   );
 }

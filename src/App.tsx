@@ -29,6 +29,7 @@ import { ManageLiveSessionsModal } from './components/Modals/ManageLiveSessionsM
 import { RequirePackerNameModal } from './components/Modals/RequirePackerNameModal';
 import { CreateLiveSessionModal } from './components/Modals/CreateLiveSessionModal';
 import { BacklogModal } from './components/Modals/BacklogModal';
+import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -150,6 +151,62 @@ export default function App() {
   const [backlogCount, setBacklogCount] = useState(0);
   const [backlogRefreshTrigger, setBacklogRefreshTrigger] = useState(0);
 
+  // All Live QC & Fast Check States
+  const [isAllLiveQc, setIsAllLiveQc] = useState(false);
+  const [allLivePaidInvoices, setAllLivePaidInvoices] = useState<Invoice[]>([]);
+  const [allLivePaidCount, setAllLivePaidCount] = useState(0);
+  const [isFastCheckModalOpen, setIsFastCheckModalOpen] = useState(false);
+
+  // All Live Dispatched States & Daily Output Metrics
+  const [isAllLiveDispatched, setIsAllLiveDispatched] = useState(false);
+  const [allLiveDispatchedInvoices, setAllLiveDispatchedInvoices] = useState<Invoice[]>([]);
+  const [allLiveDispatchedStats, setAllLiveDispatchedStats] = useState({
+    total: 0,
+    today: 0,
+    pp: 0,
+    province: 0,
+    today_pp: 0,
+    today_province: 0
+  });
+  const [dispatchedTimeFilter, setDispatchedTimeFilter] = useState<'ALL' | 'TODAY'>('ALL');
+
+  const fetchAllLivePaidInvoices = async () => {
+    try {
+      const res = await fetch(`/api/qc_all_lives?t=${Date.now()}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          setAllLivePaidInvoices(json.invoices || []);
+          setAllLivePaidCount(json.total_count || 0);
+        }
+      }
+    } catch {
+      // silently ignore
+    }
+  };
+
+  const fetchAllLiveDispatchedInvoices = async () => {
+    try {
+      const res = await fetch(`/api/dispatched_all_lives?t=${Date.now()}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          setAllLiveDispatchedInvoices(json.invoices || []);
+          setAllLiveDispatchedStats({
+            total: json.total_count || 0,
+            today: json.today_count || 0,
+            pp: json.pp_count || 0,
+            province: json.province_count || 0,
+            today_pp: json.today_pp_count || 0,
+            today_province: json.today_province_count || 0
+          });
+        }
+      }
+    } catch {
+      // silently ignore
+    }
+  };
+
   const fetchBacklogCount = async (targetLiveId?: string) => {
     try {
       const lid = targetLiveId !== undefined ? targetLiveId : selectedLiveId;
@@ -178,6 +235,7 @@ export default function App() {
         showToast(`✅ បានត្រឡប់កន្ត្រក #${inv.basket_no || inv.invoice_id} មកផ្ទាំង QC វិញ!`);
         fetchInvoices();
         fetchBacklogCount();
+        fetchAllLiveDispatchedInvoices();
       } else {
         playWarningBuzzer();
         showToast(`❌ មិនអាចត្រឡប់បានទេ ៖ ${data.error || data.message}`, 'error');
@@ -646,6 +704,8 @@ export default function App() {
     fetchLiveSessions();
     fetchPackerStats();
     fetchBacklogCount(selectedLiveId);
+    fetchAllLivePaidInvoices();
+    fetchAllLiveDispatchedInvoices();
 
     // Initial Facebook status
     fetch('/api/fb/status')
@@ -659,12 +719,16 @@ export default function App() {
     const stockTimer = setInterval(fetchStock, 6000);
     const packerTimer = setInterval(fetchPackerStats, 6000);
     const backlogTimer = setInterval(() => fetchBacklogCount(selectedLiveId), 6000);
+    const allLiveQcTimer = setInterval(fetchAllLivePaidInvoices, 5000);
+    const allLiveDispatchedTimer = setInterval(fetchAllLiveDispatchedInvoices, 5000);
 
     return () => {
       clearInterval(invTimer);
       clearInterval(stockTimer);
       clearInterval(packerTimer);
       clearInterval(backlogTimer);
+      clearInterval(allLiveQcTimer);
+      clearInterval(allLiveDispatchedTimer);
     };
   }, [selectedLiveId, packerName]);
 
@@ -747,8 +811,15 @@ export default function App() {
     setDispatchedCount(totalDispatched);
   }, [totalDispatched]);
 
+  const sourceInvoices =
+    (currentMasterStage === 3 && isAllLiveQc)
+      ? allLivePaidInvoices
+      : (currentMasterStage === 4 && isAllLiveDispatched)
+        ? allLiveDispatchedInvoices
+        : invoices;
+
   // Filter invoices for display
-  let filtered = invoices.filter(inv => {
+  let filtered = sourceInvoices.filter(inv => {
     if (inv.status === 'Cancelled') return false;
     if (currentMasterStage === 1) {
       return (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) && inv.status !== 'Paid' && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
@@ -760,28 +831,54 @@ export default function App() {
       return (inv.status === 'Paid' || inv.payment_status === 'Paid' || Boolean(inv.paid_at)) && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
     }
     if (currentMasterStage === 4) {
-      return (inv.status === 'Dispatched' || inv.status === 'Packed' || inv.packing_stage === 'DISPATCHED');
+      const isDispatched = (inv.status === 'Dispatched' || inv.status === 'Packed' || inv.packing_stage === 'DISPATCHED');
+      if (!isDispatched) return false;
+      if (isAllLiveDispatched && dispatchedTimeFilter === 'TODAY') {
+        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+        const dispDate = (inv as any).dispatched_at || inv.created_at || '';
+        return typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+      }
+      return true;
     }
     return true;
   });
 
-  // Sub-filter & Sorting (Newest date / most active baskets at the top)
-  if (activeSubFilter === 'PP') {
-    filtered = filtered.filter(i => i.location_zone === 'PP');
-  } else if (activeSubFilter === 'PROVINCE') {
-    filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
-  }
+  // Sub-filter & Sorting (Sub-filters PP/PROVINCE/AMOUNT_DESC apply only to Stage 1: មិនទាន់រើស)
+  if (currentMasterStage === 1) {
+    if (activeSubFilter === 'PP') {
+      filtered = filtered.filter(i => i.location_zone === 'PP');
+    } else if (activeSubFilter === 'PROVINCE') {
+      filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
+    }
 
-  if (activeSubFilter === 'AMOUNT_DESC') {
-    filtered = [...filtered].sort((a, b) => b.total_amount - a.total_amount);
+    if (activeSubFilter === 'AMOUNT_DESC') {
+      filtered = [...filtered].sort((a, b) => b.total_amount - a.total_amount);
+    } else {
+      filtered = [...filtered].sort((a, b) => {
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        if (timeB !== timeA) return timeB - timeA;
+        return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+      });
+    }
   } else {
-    // ⚡ Rock-Solid Stable Sorting:
-    // Newest orders at the top based on created_at and basket_no.
-    // Checking items, picking, or locking NEVER causes baskets to jump, displace, or vanish!
+    // ⚡ Rock-Solid Stable Sorting for Stages 2, 3, 4:
+    // In All Live QC mode, oldest orders come first to prevent delay!
     filtered = [...filtered].sort((a, b) => {
+      if (currentMasterStage === 4) {
+        const dispA = new Date((a as any).dispatched_at || a.created_at || 0).getTime();
+        const dispB = new Date((b as any).dispatched_at || b.created_at || 0).getTime();
+        if (dispB !== dispA) return dispB - dispA;
+        return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+      }
+
       const timeA = new Date(a.created_at || 0).getTime();
       const timeB = new Date(b.created_at || 0).getTime();
-      if (timeB !== timeA) return timeB - timeA;
+      if (isAllLiveQc && currentMasterStage === 3) {
+        if (timeA !== timeB) return timeA - timeB;
+      } else {
+        if (timeB !== timeA) return timeB - timeA;
+      }
       return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
     });
   }
@@ -858,11 +955,23 @@ export default function App() {
           onShowToast={showToast}
         />
 
-        {/* 3. Gamified HUD Strip with Integrated Dynamic Backlog Alert */}
+        {/* 3. Gamified HUD Strip with Integrated Dynamic Backlog Alert & QC All Live & Fast-Check */}
         <GamifiedHud
           topPackerName={topPackerName}
           mySessionPacks={mySessionPacks}
           backlogCount={backlogCount}
+          allLivePaidCount={allLivePaidCount}
+          isAllLiveQcActive={currentMasterStage === 3 && isAllLiveQc}
+          onToggleAllLiveQc={() => {
+            if (currentMasterStage !== 3) {
+              setCurrentMasterStage(3);
+              setIsAllLiveQc(true);
+            } else {
+              setIsAllLiveQc(prev => !prev);
+            }
+            fetchAllLivePaidInvoices();
+          }}
+          onOpenFastCheck={() => setIsFastCheckModalOpen(true)}
           onOpenBacklog={() => setIsBacklogModalOpen(true)}
           onOpenLeaderboard={() => {
             setPackerModalMode('leaderboard');
@@ -888,6 +997,20 @@ export default function App() {
           dispatchedCount={totalDispatched}
           backlogCount={backlogCount}
           onOpenBacklog={() => setIsBacklogModalOpen(true)}
+          isAllLiveQc={isAllLiveQc}
+          onToggleAllLiveQc={() => {
+            setIsAllLiveQc(prev => !prev);
+            fetchAllLivePaidInvoices();
+          }}
+          allLivePaidCount={allLivePaidCount}
+          isAllLiveDispatched={isAllLiveDispatched}
+          onToggleAllLiveDispatched={() => {
+            setIsAllLiveDispatched(prev => !prev);
+            fetchAllLiveDispatchedInvoices();
+          }}
+          allLiveDispatchedStats={allLiveDispatchedStats}
+          dispatchedTimeFilter={dispatchedTimeFilter}
+          onSetDispatchedTimeFilter={setDispatchedTimeFilter}
           activeSubFilter={activeSubFilter}
           onSetSubFilter={flt => {
             setActiveSubFilter(flt);
@@ -1236,6 +1359,19 @@ export default function App() {
           fetchInvoices();
           fetchBacklogCount(selectedLiveId);
         }}
+      />
+
+      {/* ⚡ AI Fast-Check Slips & Batch Payments Modal */}
+      <FastCheckSlipsModal
+        isOpen={isFastCheckModalOpen}
+        onClose={() => setIsFastCheckModalOpen(false)}
+        onSuccess={(count) => {
+          fetchInvoices();
+          fetchAllLivePaidInvoices();
+          fetchBacklogCount(selectedLiveId);
+          showToast(`🎉 បានសម្គាល់បង់រួច ${count} កន្ត្រកដោយជោគជ័យ!`, 'success');
+        }}
+        onShowToast={showToast}
       />
     </div>
   );

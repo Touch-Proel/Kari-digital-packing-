@@ -51,6 +51,7 @@ export interface Invoice {
   paid_by?: string;
   paid_at?: string;
   payment_method?: string;
+  payment_slip_url?: string;
   msg_status: 'SENT' | 'UNSENT' | 'FAILED';
   msg_error?: string;
   is_locked?: boolean;

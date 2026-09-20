@@ -968,7 +968,7 @@ function BasketCardComponent({
       >
         {/* Top Header Row: #BasketNo, Avatar, Customer Name, Live Tag, UNPAID badge, Collapse triangle */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
             {/* Basket Number */}
             <span className="text-xl sm:text-2xl font-black font-mono text-cyan-400 tracking-tight flex-shrink-0 bg-cyan-950/50 border border-cyan-500/40 px-2 py-0.5 rounded-xl shadow-inner">
               #{invoice.basket_no || invoice.invoice_id}
@@ -997,19 +997,43 @@ function BasketCardComponent({
             </div>
 
             {/* Customer Name & Live Timestamp */}
-            <div className="flex flex-col min-w-0">
+            <div className="flex flex-col min-w-0 flex-1">
               <span className="text-white font-black text-sm sm:text-base leading-tight truncate drop-shadow-sm">
-                {invoice.facebook_name}
+                {invoice.facebook_name || 'អតិថិជន'}
               </span>
-              <span className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-0.5 whitespace-nowrap">
-                <span>📹</span>
-                <span>Live ៖ {formatLiveDate(invoice.created_at)}</span>
-              </span>
+              <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                <span className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 whitespace-nowrap">
+                  <span>📹</span>
+                  <span>Live ៖ {formatLiveDate(invoice.created_at)}</span>
+                </span>
+                {activeLiveId && invoice.live_id && invoice.live_id !== activeLiveId && (
+                  <span
+                    className="bg-purple-950/90 border border-purple-400/60 text-purple-300 text-[9.5px] font-mono px-1.5 py-0.2 rounded-md truncate max-w-[120px] sm:max-w-none flex-shrink-0"
+                    title={`Live ID: ${invoice.live_id}`}
+                  >
+                    #{invoice.live_id.replace('LIVE_', '')}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Right: Status Pill & Collapse Indicator */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            {invoice.payment_slip_url && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenZoomModal('SLIP', `វិក្កយបត្របង់ប្រាក់ #${invoice.basket_no || invoice.invoice_id}`, invoice.payment_slip_url);
+                }}
+                className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-400/80 text-indigo-300 hover:text-white px-2 py-0.5 rounded-lg text-[10.5px] font-bold flex items-center gap-1 shadow-sm transition-all"
+                title="ចុចមើលរូបវិក្កយបត្របង់ប្រាក់ (Slip)"
+              >
+                <span>📷 Slip</span>
+              </button>
+            )}
+
             {isDispatched ? (
               isPaid ? (
                 <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1">
