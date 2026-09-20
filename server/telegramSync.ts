@@ -82,44 +82,6 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
   }
 }
 
-// Helper: Fast check if any image for this code exists on disk
-function findExistingImageForCode(safeCode: string, uploadDir: string, distUploadDir: string): string | null {
-  try {
-    if (!safeCode) return null;
-    const lower = safeCode.toLowerCase();
-    
-    // Check in-memory products first (instant 0ms)
-    const existingProd = products.find(p => p.code.toLowerCase() === lower);
-    if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
-      const relPath = existingProd.image_file.replace(/^\//, '');
-      if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
-        return existingProd.image_file;
-      }
-    }
-
-    if (fs.existsSync(uploadDir)) {
-      const files = fs.readdirSync(uploadDir);
-      const match = files.find(f => {
-        const fLower = f.toLowerCase();
-        return fLower.startsWith(`${lower}_`) || fLower === `${lower}.jpg` || fLower === `${lower}.png` || fLower === `${lower}.webp`;
-      });
-      if (match) {
-        return `/uploads/${match}`;
-      }
-    }
-    if (fs.existsSync(distUploadDir)) {
-      const files = fs.readdirSync(distUploadDir);
-      const match = files.find(f => {
-        const fLower = f.toLowerCase();
-        return fLower.startsWith(`${lower}_`) || fLower === `${lower}.jpg` || fLower === `${lower}.png` || fLower === `${lower}.webp`;
-      });
-      if (match) {
-        return `/uploads/${match}`;
-      }
-    }
-  } catch {}
-  return null;
-}
 
 // 2. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
 export async function downloadTelegramPhoto(
@@ -145,7 +107,8 @@ export async function downloadTelegramPhoto(
   const dd = String(d.getDate()).padStart(2, '0');
   const dateStr = `${yyyy}${mm}${dd}`;
 
-  const standardFilename = `${safeCode}_${dateStr}.jpg`;
+  const fileHash = fileId.slice(-8).replace(/[^a-zA-Z0-9]/g, '');
+  const standardFilename = `${safeCode}_${fileHash || 'img'}.jpg`;
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
@@ -161,7 +124,7 @@ export async function downloadTelegramPhoto(
     }
   }
 
-  // 2. Fast disk check: if photo for this code & date is already downloaded and valid, reuse immediately (0ms)
+  // 2. Fast disk check: if photo for this specific fileId is already downloaded
   const existingPath = path.join(uploadDir, standardFilename);
   const existingDistPath = path.join(distUploadDir, standardFilename);
   if (fs.existsSync(existingPath)) {
@@ -182,13 +145,6 @@ export async function downloadTelegramPhoto(
         return cachedUrl;
       }
     } catch {}
-  }
-
-  // 3. Check any existing image on disk for this code
-  const existingAny = findExistingImageForCode(safeCode, uploadDir, distUploadDir);
-  if (existingAny) {
-    downloadedPhotoCache.set(fileId, existingAny);
-    return existingAny;
   }
 
   try {
@@ -241,8 +197,6 @@ export async function downloadTelegramPhoto(
     return resultUrl;
   } catch (err) {
     console.error(`[Telegram Photo Download Error for ${safeCode}]:`, err);
-    // If download failed but we have any older image on disk, use it as fallback
-    if (existingAny) return existingAny;
     return undefined;
   }
 }
@@ -514,18 +468,12 @@ export async function fetchTelegramStockUpdates(options: {
       for (let i = 0; i < parsedLines.length; i++) {
         const item = parsedLines[i];
         
-        // Instant check if we already have this photo in cache or on disk (0ms)
+        // Instant check if we already have this specific Telegram photo in cache (0ms)
         let matchedImageUrl: string | undefined = undefined;
         if (photoFileId) {
           const inMem = downloadedPhotoCache.get(photoFileId);
           if (inMem) {
             matchedImageUrl = inMem;
-          } else {
-            const onDisk = findExistingImageForCode(item.code, uploadDir, distUploadDir);
-            if (onDisk) {
-              matchedImageUrl = onDisk;
-              downloadedPhotoCache.set(photoFileId, onDisk);
-            }
           }
         }
 

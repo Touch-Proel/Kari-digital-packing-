@@ -554,16 +554,15 @@ export function parseAndAllocateComment(
       if (settings.parser_strict_catalog) {
         continue;
       }
-      const templateProd = products.find(p => p.code.toUpperCase() === pair.code.toUpperCase());
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       prod = {
         id: nextId,
         code: pair.code.toUpperCase(),
-        name: templateProd ? templateProd.name : `ទំនិញកូដ ${pair.code.toUpperCase()}`,
-        stock_qty: templateProd && templateProd.stock_qty > 0 ? templateProd.stock_qty : 99,
-        price: templateProd ? templateProd.price : 0,
-        cost_price: templateProd ? templateProd.cost_price : 0,
-        image_file: templateProd ? templateProd.image_file : '',
+        name: `កូដ ${pair.code.toUpperCase()}`,
+        stock_qty: 200,
+        price: 0,
+        cost_price: 0,
+        image_file: '',
         live_id: liveId
       };
       products.push(prod);

@@ -381,8 +381,7 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string): number {
         const cleanCode = (item.product_code || '').trim().toUpperCase();
         if (!cleanCode) continue;
 
-        const prod = products.find(p => (p.live_id || activeLiveId) === invLive && (p.code || '').trim().toUpperCase() === cleanCode)
-          || products.find(p => (p.code || '').trim().toUpperCase() === cleanCode && typeof p.price === 'number' && p.price > 0);
+        const prod = products.find(p => (p.live_id || activeLiveId) === invLive && (p.code || '').trim().toUpperCase() === cleanCode);
 
         if (prod) {
           // Auto-sync price if stock price is positive and differs

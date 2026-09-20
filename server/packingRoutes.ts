@@ -869,8 +869,7 @@ router.post('/edit_basket_item_code', (req: Request, res: Response) => {
   } else {
     // Same code: look up product in stock and sync latest image, price, and name
     const liveId = inv.live_id || activeLiveId;
-    const sameProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanNewCode)
-      || products.find(p => p.code.toUpperCase() === cleanNewCode);
+    const sameProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanNewCode);
     if (sameProd) {
       if (sameProd.image_file && sameProd.image_file.trim() !== '') {
         item.image_file = sameProd.image_file.trim();
