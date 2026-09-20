@@ -889,7 +889,7 @@ export function ReceiptModal({
                         </div>
                       </div>
                       {it.item_comment && (
-                        <div className="text-sm text-black font-bold pl-7 pt-0.5">
+                        <div className="text-sm text-black font-bold pl-7 pt-0.5 break-words whitespace-normal leading-snug">
                           ↳ Note: "{it.item_comment}"
                         </div>
                       )}
