@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Invoice } from '../../types';
 import { playPureTone, playSuccessFanfare } from '../../utils/audio';
 import { getKHQRConfig, generateBakongKHQRString, generateKHQRDataUrl } from '../../utils/khqr';
+import { openMetaInboxDirect } from '../../utils/metaInbox';
 
 interface VipInvoiceModalProps {
   isOpen: boolean;
@@ -132,11 +133,7 @@ export function VipInvoiceModal({
   };
 
   const openMessengerDirect = () => {
-    if (invoice.facebook_user_id && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE'].includes(invoice.facebook_user_id)) {
-      window.open(`https://www.facebook.com/messages/t/${invoice.facebook_user_id}`, '_blank');
-    } else {
-      window.open('https://www.facebook.com/messages', '_blank');
-    }
+    openMetaInboxDirect(invoice?.facebook_user_id);
   };
 
   return (

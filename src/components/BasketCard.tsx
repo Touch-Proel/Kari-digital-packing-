@@ -3,6 +3,7 @@ import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
 import { formatLiveShortBadge } from '../utils/liveUtils';
+import { openMetaInboxDirect } from '../utils/metaInbox';
 
 function renderCommentWithHighlightedCode(comment: string, code: string) {
   if (!comment) return null;
@@ -368,9 +369,9 @@ function BasketCardComponent({
     }
   };
 
-  // Open Facebook Messenger or Page Inbox directly and copy VIP invoice text
-  const openFacebookDirectChat = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  // Open Meta Business Suite Inbox directly and copy VIP invoice text
+  const openFacebookDirectChat = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
       const res = await fetch('/api/send_vip_invoice', {
         method: 'POST',
@@ -384,18 +385,11 @@ function BasketCardComponent({
       const data = await res.json();
       if (data.vip_message && navigator.clipboard) {
         await navigator.clipboard.writeText(data.vip_message);
-        onShowToast('📋 បាន Copy វិក្កយបត្ររួចរាល់! កំពុងបើក Messenger...', 'success');
+        onShowToast(`📋 បាន Copy វិក្កយបត្រ ${invoice.facebook_name} រួចរាល់! កំពុងបើក Meta Inbox (Chrome)...`, 'success');
       }
     } catch {}
 
-    const cleanUid = String(invoice.facebook_user_id || '').trim();
-    let chatUrl = '';
-    if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None', 'undefined', 'null'].includes(cleanUid) && cleanUid.length > 4) {
-      chatUrl = `https://m.me/${cleanUid}`;
-    } else {
-      chatUrl = `https://www.facebook.com/messages`;
-    }
-    window.open(chatUrl, '_blank', 'noopener,noreferrer');
+    openMetaInboxDirect(invoice.facebook_user_id);
   };
 
   // Notify VIP Messenger Invoice
@@ -986,8 +980,12 @@ function BasketCardComponent({
               #{invoice.basket_no || invoice.invoice_id}
             </span>
 
-            {/* Customer Avatar Circle */}
-            <div className="w-10 h-10 rounded-full border-2 border-cyan-400/80 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-lg relative ring-2 ring-cyan-500/20">
+            {/* Customer Avatar Circle (Clickable to open Meta Inbox) */}
+            <div 
+              onClick={openFacebookDirectChat}
+              title={`ចុចដើម្បីបើកឆាត Meta Inbox ជាមួយ ${invoice.facebook_name || 'អតិថិជន'}`}
+              className="w-10 h-10 rounded-full border-2 border-cyan-400/80 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-lg relative ring-2 ring-cyan-500/20 cursor-pointer hover:border-emerald-400 hover:scale-105 active:scale-95 transition-all"
+            >
               {invoice.picture_url || invoice.facebook_user_id ? (
                 <img
                   src={
@@ -1010,9 +1008,11 @@ function BasketCardComponent({
 
             {/* Customer Name & Live Timestamp */}
             <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
-              <span className="text-white font-black text-sm sm:text-base leading-tight truncate drop-shadow-sm">
-                {invoice.facebook_name || 'អតិថិជន'}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-white font-black text-sm sm:text-base leading-tight truncate drop-shadow-sm">
+                  {invoice.facebook_name || 'អតិថិជន'}
+                </span>
+              </div>
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5 min-w-0">
                 <span className="text-[10.5px] text-amber-400 font-semibold flex items-center gap-0.5 whitespace-nowrap">
                   <span>📹</span>
@@ -1258,62 +1258,7 @@ function BasketCardComponent({
               </button>
             )}
 
-            {/* VIP Messenger notification status */}
-            {invoice.msg_status === 'SENT' ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onOpenVipModal) {
-                    onOpenVipModal(invoice);
-                  } else {
-                    handleNotifyVIP(e);
-                  }
-                }}
-                title="សារ VIP បានផ្ញើចូល Messenger ជោគជ័យ (ចុចដើម្បីមើល ឬផ្ញើឡើងវិញ)"
-                className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-emerald-950/90 border-emerald-500/80 text-emerald-300 hover:bg-emerald-900/80"
-              >
-                <span className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] text-emerald-400">✓</span>
-                <span>ឆាតជោគជ័យ</span>
-              </button>
-            ) : invoice.msg_status === 'FAILED' ? (
-              <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                <button
-                  type="button"
-                  onClick={openFacebookDirectChat}
-                  title="ចុចចូលទៅកាន់ Facebook Messenger / Page Inbox ផ្ទាល់ (Copy សាររួចរាល់)"
-                  className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 border transition-all shadow-sm active:scale-95 cursor-pointer bg-rose-950/90 border-rose-500/80 text-rose-200 hover:bg-rose-900/80 animate-pulse"
-                >
-                  <span className="text-rose-400 text-xs">❌</span>
-                  <span>ផ្ញើបរាជ័យ (ឆាតផ្ទាល់)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleToggleMsgSent}
-                  title="សម្គាល់ថាបានឆាតផ្ញើរួចរាល់"
-                  className="text-xs font-bold px-2 py-1.5 rounded-xl flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 shadow-sm active:scale-95 cursor-pointer"
-                >
-                  <span>✓</span>
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onOpenVipModal) {
-                    onOpenVipModal(invoice);
-                  } else {
-                    handleNotifyVIP(e);
-                  }
-                }}
-                title="ចុចដើម្បីពិនិត្យ ឬផ្ញើសារ VIP"
-                className="text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 border transition-all shadow-sm active:scale-95 cursor-pointer bg-[#0A1832] hover:bg-[#0E234A] border-purple-500/40 hover:border-purple-400 text-purple-200"
-              >
-                <span>✉️</span>
-                <span>ឆាតប្រាប់ VIP</span>
-              </button>
-            )}
+            {/* Direct Meta Inbox / VIP Message buttons removed for cleaner UI */}
           </div>
 
           {/* Progress Row & Sleek Progress Bar */}

@@ -495,8 +495,7 @@ export async function sendFacebookReply(
             payload: { is_reusable: true }
           }
         }));
-        form.append('messaging_type', 'MESSAGE_TAG');
-        form.append('tag', 'POST_PURCHASE_UPDATE');
+        form.append('messaging_type', 'RESPONSE');
         const blob = new Blob([imageBuffer], { type: 'image/png' });
         form.append('filedata', blob, 'bakong_khqr.png');
 
@@ -524,8 +523,7 @@ export async function sendFacebookReply(
                 }
               }
             },
-            messaging_type: 'MESSAGE_TAG',
-            tag: 'POST_PURCHASE_UPDATE'
+            messaging_type: 'RESPONSE'
           })
         });
         console.log(`📸 [KHQR IMAGE SENT]: Successfully attached KHQR image to User ID (${recipientId})`);
@@ -551,8 +549,9 @@ export async function sendFacebookReply(
       });
       if (data.message_id || data.recipient_id) {
         console.log(`🎉 [PRIVATE REPLY SUCCESS]: Sent VIP message via Comment ID (${cid}) - 24h Window Bypassed!`);
-        if (data.recipient_id && imageUrl) {
-          await sendImageAttachment(data.recipient_id);
+        const targetRecipient = data.recipient_id || cleanUid;
+        if (targetRecipient && (imageUrl || imageBuffer)) {
+          await sendImageAttachment(targetRecipient);
         }
         console.log(`=======================================================\n`);
         return { success: true, method: 'PRIVATE_REPLY' };
@@ -567,37 +566,10 @@ export async function sendFacebookReply(
   }
 
   // ---------------------------------------------------------------------
-  // Layer 2: Send API via User ID with Message Tag (POST_PURCHASE_UPDATE)
-  // 💡 Using POST_PURCHASE_UPDATE tag allows sending order updates outside 24h
+  // Layer 2: Send API via User ID (Standard Response & Message Tag Fallback)
   // ---------------------------------------------------------------------
   if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None', '', 'null', 'undefined'].includes(cleanUid)) {
-    // Try with POST_PURCHASE_UPDATE tag first
-    try {
-      const dataTagged = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipient: { id: cleanUid },
-          message: { text: messageText },
-          messaging_type: 'MESSAGE_TAG',
-          tag: 'POST_PURCHASE_UPDATE'
-        })
-      });
-      if (dataTagged.message_id) {
-        console.log(`📩 [SEND API TAGGED SUCCESS]: Sent VIP invoice to User ID (${cleanUid}) via POST_PURCHASE_UPDATE`);
-        if (imageUrl) {
-          await sendImageAttachment(cleanUid);
-        }
-        console.log(`=======================================================\n`);
-        return { success: true, method: 'SEND_API' };
-      } else if (dataTagged.error) {
-        lastApiError = dataTagged.error.message || `Error code ${dataTagged.error.code}`;
-      }
-    } catch (tagErr: any) {
-      lastApiError = tagErr?.message || 'Tag API error';
-    }
-
-    // Try standard RESPONSE
+    // 1. Try standard RESPONSE first (compliant with Graph API v21+)
     try {
       const data = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
         method: 'POST',
@@ -610,7 +582,7 @@ export async function sendFacebookReply(
       });
       if (data.message_id) {
         console.log(`📩 [SEND API SUCCESS]: Sent VIP message to User ID (${cleanUid})`);
-        if (imageUrl) {
+        if (imageUrl || imageBuffer) {
           await sendImageAttachment(cleanUid);
         }
         console.log(`=======================================================\n`);
@@ -620,6 +592,32 @@ export async function sendFacebookReply(
       }
     } catch (e: any) {
       lastApiError = e?.message || 'Send API error';
+    }
+
+    // 2. Try with CONFIRMED_EVENT_UPDATE if supported
+    try {
+      const dataTagged = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: cleanUid },
+          message: { text: messageText },
+          messaging_type: 'MESSAGE_TAG',
+          tag: 'CONFIRMED_EVENT_UPDATE'
+        })
+      });
+      if (dataTagged.message_id) {
+        console.log(`📩 [SEND API TAGGED SUCCESS]: Sent VIP invoice to User ID (${cleanUid}) via CONFIRMED_EVENT_UPDATE`);
+        if (imageUrl || imageBuffer) {
+          await sendImageAttachment(cleanUid);
+        }
+        console.log(`=======================================================\n`);
+        return { success: true, method: 'SEND_API' };
+      } else if (dataTagged.error && dataTagged.error.error_subcode !== 1893061) {
+        lastApiError = dataTagged.error.message || `Error code ${dataTagged.error.code}`;
+      }
+    } catch (tagErr: any) {
+      // Ignore tag deprecation errors
     }
   }
 
