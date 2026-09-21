@@ -1746,8 +1746,8 @@ function BasketCardComponent({
               );
             })}
 
-            {/* Unmatched / Unallocated Comments List (Capture.PNG match) */}
-            {(unallocatedComments || []).map((unm, cIdx) => {
+            {/* Unmatched / Unallocated Comments List (Option 1: Shown only in Stage 1: មិនទាន់រើស) */}
+            {currentMasterStage === 1 && (unallocatedComments || []).map((unm, cIdx) => {
               const detected = parseQuickComment(unm);
               const displayUnm = convertKhmerNumeralsToGlobal(unm);
               return (
