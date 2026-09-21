@@ -733,19 +733,33 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     }
   }
 
-  // If candidateCommentIds is still empty, search active live stream comments via Facebook Graph API
+  // If candidateCommentIds is still empty, search active live stream comments via Facebook Graph API (up to 1000 comments)
   if (candidateCommentIds.length === 0 && activeFacebookPage?.access_token && activeLiveId && !activeLiveId.startsWith('LIVE_') && !activeLiveId.startsWith('sim_')) {
     try {
-      const liveCommentsRes = await fetchFacebookComments(activeLiveId, activeFacebookPage.access_token, 100);
+      const liveCommentsRes = await fetchFacebookComments(activeLiveId, activeFacebookPage.access_token, 1000);
       if (liveCommentsRes && liveCommentsRes.data && Array.isArray(liveCommentsRes.data)) {
         for (const item of liveCommentsRes.data) {
           const fromName = (item.from?.name || '').toLowerCase().trim();
           const fromId = String(item.from?.id || '').trim();
           const isNameMatch = fromName && cleanCustomerName && (fromName === cleanCustomerName || fromName.includes(cleanCustomerName) || cleanCustomerName.includes(fromName));
           const isIdMatch = fromId && inv.facebook_user_id && fromId === inv.facebook_user_id;
+
+          // Cache all fetched comments to rawComments for future instant lookups
+          if (item.id && !rawComments.some(r => r.comment_id === item.id)) {
+            rawComments.push({
+              comment_id: item.id,
+              live_id: activeLiveId,
+              facebook_user_id: fromId,
+              facebook_name: item.from?.name || '',
+              comment_text: item.message || '',
+              created_at: item.created_time || new Date().toISOString()
+            });
+          }
+
           if ((isNameMatch || isIdMatch) && item.id) {
-            candidateCommentIds.push(item.id);
-            break;
+            if (!candidateCommentIds.includes(item.id)) {
+              candidateCommentIds.push(item.id);
+            }
           }
         }
       }
@@ -832,6 +846,78 @@ router.post('/link_comment_to_invoice', (req: Request, res: Response) => {
   bumpDataRevision();
   saveDatabaseToDisk();
   res.json({ success: true, message: 'បានភ្ជាប់ Comment ID ជោគជ័យ', last_comment_id: cid });
+});
+
+// GET /api/invoices/:id/auto_resolve_comment - Look up and attach any missing comment ID from rawComments or Facebook Live
+router.get('/invoices/:id/auto_resolve_comment', async (req: Request, res: Response) => {
+  const cleanId = parseInt(String(req.params.id).replace('#', '').trim(), 10);
+  const inv = invoices.find(i => i.invoice_id === cleanId || i.basket_no === cleanId);
+  if (!inv) return res.status(404).json({ success: false, error: 'រកមិនឃើញកន្ត្រកទេ' });
+
+  if (inv.last_comment_id) {
+    return res.json({ success: true, comment_id: inv.last_comment_id, comment_ids: inv.comment_ids || [inv.last_comment_id] });
+  }
+
+  const cleanCustomerName = (inv.facebook_name || '').toLowerCase().trim();
+  const fbUserId = inv.facebook_user_id;
+
+  // 1. Search in local rawComments
+  const localMatch = rawComments.slice().reverse().find(c => {
+    if (!c.comment_id || c.comment_id.startsWith('sys_') || c.comment_id.startsWith('manual_')) return false;
+    if (c.invoice_id === cleanId) return true;
+    if (fbUserId && fbUserId !== 'FB_USER_ID_STREAM' && c.facebook_user_id === fbUserId) return true;
+    const cName = (c.facebook_name || '').toLowerCase().trim();
+    if (cName && (cName === cleanCustomerName || (cleanCustomerName.length >= 3 && (cName.includes(cleanCustomerName) || cleanCustomerName.includes(cName))))) return true;
+    return false;
+  });
+
+  if (localMatch && localMatch.comment_id) {
+    inv.last_comment_id = localMatch.comment_id;
+    if (!inv.comment_ids) inv.comment_ids = [];
+    if (!inv.comment_ids.includes(localMatch.comment_id)) inv.comment_ids.unshift(localMatch.comment_id);
+    bumpDataRevision();
+    saveDatabaseToDisk();
+    return res.json({ success: true, comment_id: localMatch.comment_id, comment_ids: inv.comment_ids });
+  }
+
+  // 2. Fetch from Facebook Live if active
+  if (activeFacebookPage?.access_token && activeLiveId && !activeLiveId.startsWith('LIVE_') && !activeLiveId.startsWith('sim_')) {
+    try {
+      const liveCommentsRes = await fetchFacebookComments(activeLiveId, activeFacebookPage.access_token, 1000);
+      if (liveCommentsRes && liveCommentsRes.data && Array.isArray(liveCommentsRes.data)) {
+        for (const item of liveCommentsRes.data) {
+          const fromName = (item.from?.name || '').toLowerCase().trim();
+          const fromId = String(item.from?.id || '').trim();
+          const isNameMatch = fromName && cleanCustomerName && (fromName === cleanCustomerName || fromName.includes(cleanCustomerName) || cleanCustomerName.includes(fromName));
+          const isIdMatch = fromId && fbUserId && fromId === fbUserId;
+
+          if (item.id && !rawComments.some(r => r.comment_id === item.id)) {
+            rawComments.push({
+              comment_id: item.id,
+              live_id: activeLiveId,
+              facebook_user_id: fromId,
+              facebook_name: item.from?.name || '',
+              comment_text: item.message || '',
+              created_at: item.created_time || new Date().toISOString()
+            });
+          }
+
+          if ((isNameMatch || isIdMatch) && item.id) {
+            inv.last_comment_id = item.id;
+            if (!inv.comment_ids) inv.comment_ids = [];
+            if (!inv.comment_ids.includes(item.id)) inv.comment_ids.unshift(item.id);
+            bumpDataRevision();
+            saveDatabaseToDisk();
+            return res.json({ success: true, comment_id: item.id, comment_ids: inv.comment_ids });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Auto-Resolve Comment] Error:', e);
+    }
+  }
+
+  res.json({ success: false, message: 'មិនមាន Comment ID សម្រាប់កន្ត្រកនេះទេ' });
 });
 
 // POST /api/toggle_msg_sent_status - Manually mark as SENT or UNSENT/FAILED

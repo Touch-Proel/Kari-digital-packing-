@@ -25,6 +25,54 @@ export function VipInvoiceModal({
   const [showLogs, setShowLogs] = useState(true);
   const [customCommentId, setCustomCommentId] = useState('');
   const [isLinkingCid, setIsLinkingCid] = useState(false);
+  const [isAutoResolving, setIsAutoResolving] = useState(false);
+
+  // Auto-resolve comment ID from backend if missing
+  const handleAutoResolveCommentId = async () => {
+    if (!invoice) return;
+    setIsAutoResolving(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoice.invoice_id}/auto_resolve_comment`);
+      const data = await res.json();
+      if (data.success && data.comment_id) {
+        setCustomCommentId(data.comment_id);
+        invoice.last_comment_id = data.comment_id;
+        if (!invoice.comment_ids) invoice.comment_ids = [];
+        if (!invoice.comment_ids.includes(data.comment_id)) {
+          invoice.comment_ids.unshift(data.comment_id);
+        }
+        onShowToast(`🎯 រកឃើញ និងភ្ជាប់ Comment ID #${data.comment_id.split('_').pop()} រួចរាល់!`, 'success');
+        onDataChanged();
+      } else {
+        onShowToast('ℹ️ មិនទាន់រកឃើញ Comment ក្នុង Live ទេ សូមបិទភ្ជាប់ Comment ID ដោយដៃ', 'error');
+      }
+    } catch {
+      onShowToast('⚠️ បរាជ័យក្នុងការស្វែងរក Comment ID', 'error');
+    } finally {
+      setIsAutoResolving(false);
+    }
+  };
+
+  // Background auto-resolve on open if missing comment ID
+  useEffect(() => {
+    if (isOpen && invoice) {
+      const cid = (invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]) || '').trim();
+      if (!cid) {
+        fetch(`/api/invoices/${invoice.invoice_id}/auto_resolve_comment`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.success && d.comment_id) {
+              setCustomCommentId(d.comment_id);
+              invoice.last_comment_id = d.comment_id;
+              if (!invoice.comment_ids) invoice.comment_ids = [];
+              if (!invoice.comment_ids.includes(d.comment_id)) invoice.comment_ids.unshift(d.comment_id);
+              onDataChanged();
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [isOpen, invoice]);
 
   // Generate initial message
   useEffect(() => {
@@ -160,8 +208,8 @@ export function VipInvoiceModal({
                     <span>✅</span>
                     <span>
                       {invoice.msg_delivery_method === 'PRIVATE_REPLY'
-                        ? 'វិធីទី ២ (Private Reply)'
-                        : 'វិធីទី ១ (Direct Inbox)'}
+                        ? 'វិធីទី ១ (Private Reply)'
+                        : 'វិធីទី ២ (Direct Inbox)'}
                     </span>
                   </span>
                 ) : invoice.msg_status === 'FAILED' ? (
@@ -209,25 +257,25 @@ export function VipInvoiceModal({
                     invoice.msg_delivery_method === 'PRIVATE_REPLY'
                       ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
                       : hasCommentId
-                      ? 'bg-cyan-950/40 border-cyan-800/80 text-cyan-200'
+                      ? 'bg-cyan-950/50 border-cyan-500 text-cyan-200 ring-1 ring-cyan-500/50'
                       : 'bg-slate-900/60 border-slate-800 text-slate-500'
                   }`}>
                     <div className="flex items-center gap-1">
-                      <span className="font-black text-[10px] text-cyan-400">វិធីទី ១ (អាទិភាព)</span>
+                      <span className="font-black text-[10px] text-cyan-400">វិធីទី ១ (អាទិភាពចម្បង)</span>
                       {hasCommentId && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
                     </div>
                     <span className="font-bold text-white text-[11px]">Private Reply</span>
                     <span className="text-[9px] text-amber-300 font-medium">តាមខមិន (រួចផុត ២៤ ម៉ោង)</span>
-                    <span className="text-[8px] text-slate-400 mt-0.5 font-mono truncate max-w-full">
-                      {hasCommentId ? `ខមិន #${displayCid}` : 'គ្មានខមិន (កន្ត្រកបង្កើតផ្ទាល់)'}
+                    <span className="text-[8px] text-slate-300 mt-0.5 font-mono truncate max-w-full">
+                      {hasCommentId ? `✅ ខមិន #${displayCid}` : '⚠️ គ្មានខមិន (កន្ត្រកបង្កើតផ្ទាល់)'}
                     </span>
                   </div>
                   <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center gap-0.5 transition-all ${
-                    invoice.msg_delivery_method === 'SEND_API'
+                    invoice.msg_delivery_method === 'SEND_API' && !hasCommentId
                       ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
                       : 'bg-slate-900/70 border-slate-800 text-slate-400'
                   }`}>
-                    <span className="font-black text-[10px] text-cyan-400">វិធីទី ២</span>
+                    <span className="font-black text-[10px] text-slate-400">វិធីទី ២ (បម្រុង Fallback)</span>
                     <span className="font-bold text-white text-[11px]">Direct Inbox</span>
                     <span className="text-[9px] text-slate-400">ផ្ញើចូល Messenger (ក្នុង ២៤ ម៉ោង)</span>
                     <span className="text-[8px] text-slate-400 mt-0.5 font-mono">
@@ -242,8 +290,16 @@ export function VipInvoiceModal({
                     <div className="flex items-center justify-between text-[11px] text-amber-300 font-medium">
                       <span className="flex items-center gap-1">
                         <span>🔗</span>
-                        <span>ភ្ជាប់ Comment ID / Link ដើម្បី Private Reply ៖</span>
+                        <span>ភ្ជាប់ Comment ID ដើម្បីបើក Private Reply ៖</span>
                       </span>
+                      <button
+                        type="button"
+                        onClick={handleAutoResolveCommentId}
+                        disabled={isAutoResolving}
+                        className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 rounded-lg text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1"
+                      >
+                        {isAutoResolving ? '⏳ កំពុងស្វែងរក...' : '🔍 ស្វែងរកខមិនពី Live'}
+                      </button>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <input
