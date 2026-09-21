@@ -498,6 +498,12 @@ export async function sendFacebookReply(
     }
   }
 
+  const isValidCid = (cid: string) => {
+    if (!cid || typeof cid !== 'string') return false;
+    const clean = cid.trim();
+    return /^[\d_]+$/.test(clean) && clean.replace(/_/g, '').length >= 6;
+  };
+
   const candidateCommentIds: string[] = [];
   for (const raw of rawIdPool) {
     if (!raw || raw.startsWith('sys_') || raw.startsWith('manual_')) continue;
@@ -505,12 +511,12 @@ export async function sendFacebookReply(
     if (raw.startsWith('c_') && !/^\d+$/.test(raw.replace(/^c_/, ''))) continue;
 
     const cleaned = raw.replace(/^c_/, '');
-    if (cleaned.length >= 5) {
+    if (isValidCid(cleaned)) {
       candidateCommentIds.push(cleaned);
       if (cleaned.includes('_')) {
         const parts = cleaned.split('_');
         const suffix = parts[parts.length - 1];
-        if (suffix && suffix.length >= 5 && /^\d+$/.test(suffix)) {
+        if (suffix && isValidCid(suffix)) {
           candidateCommentIds.push(suffix);
         }
       }
@@ -527,6 +533,8 @@ export async function sendFacebookReply(
   else if (imageUrl) console.log(`   ↳ Image URL: ${imageUrl}`);
 
   let lastApiError = '';
+  let privateReplyFailReason = '';
+  let directInboxFailReason = '';
   const safeDelay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   // Helper to send image attachment via Send API with Meta 24-Hour Policy compliance
@@ -616,15 +624,15 @@ export async function sendFacebookReply(
       const cleanCid = String(rawCid || '').trim();
       const targetCid = cleanCid.includes('_') ? cleanCid.split('_').pop() || cleanCid : cleanCid;
 
-      // Prepare IDs to test: numeric suffix first, then full ID if different
-      const cidsToTest = [targetCid];
-      if (cleanCid !== targetCid) {
-        cidsToTest.push(cleanCid);
+      // Prepare IDs to test: exact compound ID first, then numeric suffix
+      const cidsToTest = [cleanCid];
+      if (cleanCid !== targetCid && isValidCid(targetCid)) {
+        cidsToTest.push(targetCid);
       }
 
       for (const testCid of cidsToTest) {
         if (isDelivered) break;
-        if (!testCid || !/^\d+$/.test(testCid) || testCid.length < 8) continue;
+        if (!isValidCid(testCid)) continue;
 
         // Polite delay between requests to prevent triggering Meta API rate limits
         if (i > 0) {
@@ -649,7 +657,7 @@ export async function sendFacebookReply(
             if (targetRecipient && (imageUrl || imageBuffer)) {
               await sendImageAttachment(targetRecipient, false);
             }
-            attemptLogs.push(`✅ វិធីទី ១ (Private Reply) ជោគជ័យ៖ បានផ្ញើតាម Comment ID #${testCid} ចូល Messenger រួចផុតពីកំហិត ២៤ ម៉ោង`);
+            attemptLogs.push(`✅ វិធីទី ១ (Private Reply តាមខមិន) ជោគជ័យ ៖ បានផ្ញើតាម Comment ID #${testCid} ចូល Messenger រួចផុតពីកំហិត ២៤ ម៉ោង`);
             console.log(`=======================================================\n`);
             return {
               success: true,
@@ -660,8 +668,21 @@ export async function sendFacebookReply(
             };
           } else if (msgData.error) {
             const mErr = msgData.error.message || `Error code ${msgData.error.code}`;
-            console.log(`   ↳ Comment ID ${testCid} response: ${mErr}`);
+            const code = msgData.error.code;
+            const subCode = msgData.error.error_subcode;
+            console.log(`   ↳ Comment ID ${testCid} response: [${code}/${subCode || ''}] ${mErr}`);
             lastApiError = mErr;
+
+            let reasonKh = mErr;
+            if (code === 10900 || mErr.toLowerCase().includes('already has a private reply')) {
+              reasonKh = `ខមិន #${testCid} ត្រូវបានឆ្លើយតប Private Reply ម្តងរួចហើយ (Meta អនុញ្ញាតត្រឹម ១ ដងក្នុង ១ ខមិន)`;
+            } else if (mErr.toLowerCase().includes('7 days') || mErr.toLowerCase().includes('seven days')) {
+              reasonKh = `ខមិន #${testCid} ផុតកំណត់លើស ៧ ថ្ងៃ (Meta មិនអនុញ្ញាត Private Reply លើស ៧ ថ្ងៃឡើយ)`;
+            } else if (code === 100 || subCode === 33 || mErr.toLowerCase().includes('does not exist')) {
+              reasonKh = `រកមិនឃើញខមិន #${testCid} ឬខមិននេះត្រូវបានលុបចេញពី Facebook`;
+            }
+            privateReplyFailReason = reasonKh;
+            attemptLogs.push(`⚠️ វិធីទី ១ (Private Reply តាម Comment #${testCid}) ៖ ${reasonKh}`);
 
             // Meta Rate Limit circuit breaker: halt immediately to protect Page health
             if ([4, 17, 32, 613].includes(msgData.error.code)) {
@@ -676,12 +697,10 @@ export async function sendFacebookReply(
         }
       }
     }
-    if (!isDelivered) {
-      attemptLogs.push(`⚠️ វិធីទី ១ (Private Reply តាម Comment ID) មិនអាចផ្ញើបាន៖ ${lastApiError}`);
-    }
   } else {
     console.log(`ℹ️ [METHOD 1 SKIPPED]: No comment ID available for this customer.`);
-    attemptLogs.push(`ℹ️ វិធីទី ១ រំលង (មិនមាន Comment ID)`);
+    privateReplyFailReason = 'កន្ត្រកនេះមិនមាន Comment ID ឡើយ (កន្ត្រកបង្កើតផ្ទាល់ ឬគ្មានខមិន)';
+    attemptLogs.push(`ℹ️ វិធីទី ១ (Private Reply) រំលង ៖ កន្ត្រកនេះមិនមាន Comment ID ឡើយ (កន្ត្រកបង្កើតផ្ទាល់ ឬគ្មានខមិន)`);
   }
 
   // =====================================================================
@@ -728,12 +747,14 @@ export async function sendFacebookReply(
       } else if (data.error) {
         lastApiError = data.error.message || `Error code ${data.error.code}`;
         console.log(`⚠️ [METHOD 2 FAILED]: ${lastApiError}`);
-        attemptLogs.push(`⚠️ វិធីទី ២ (Direct Inbox) មិនអាចផ្ញើបាន៖ ${lastApiError}`);
 
         // Check if error is due to Meta 24-hour window policy (Error code 10, subcode 2018278)
-        const is24hWindowError = data.error.code === 10 || data.error.error_subcode === 2018278 || lastApiError.toLowerCase().includes('24 hour');
+        const is24hWindowError = data.error.code === 10 || data.error.error_subcode === 2018278 || lastApiError.toLowerCase().includes('24 hour') || lastApiError.toLowerCase().includes('allowed window');
 
         if (is24hWindowError) {
+          directInboxFailReason = 'ប្រអប់សារ Messenger ផុតកំណត់ ២៤ ម៉ោង (អតិថិជនមិនបានឆាតក្នុងរយៈពេល ២៤ ម៉ោងចុងក្រោយ)';
+          attemptLogs.push(`⚠️ វិធីទី ២ (Direct Inbox) ផុត ២៤ ម៉ោង ៖ អតិថិជនមិនបានឆាតក្នុង Messenger រយៈពេល ២៤ ម៉ោងចុងក្រោយ`);
+
           // Under Meta Messenger Policy: Use POST_PURCHASE_UPDATE for transactional receipts/invoices
           console.log(`   ↳ Customer outside 24h window. Attempting Meta compliant POST_PURCHASE_UPDATE message tag...`);
           try {
@@ -753,7 +774,7 @@ export async function sendFacebookReply(
               console.log(`🎉 [METHOD 2 POST_PURCHASE_UPDATE SUCCESS]: Delivered via Meta official POST_PURCHASE_UPDATE tag!`);
               isDelivered = true;
               if (imageUrl || imageBuffer) await sendImageAttachment(cleanUid, true);
-              attemptLogs.push(`✅ វិធីទី ២ (POST_PURCHASE_UPDATE Tag) ជោគជ័យ៖ ស្របតាមគោលការណ៍ Messenger សម្រាប់វិក្កយបត្រ`);
+              attemptLogs.push(`✅ វិធីទី ២ (POST_PURCHASE_UPDATE Tag) ជោគជ័យ ៖ ស្របតាមគោលការណ៍ Messenger សម្រាប់វិក្កយបត្រ`);
               console.log(`=======================================================\n`);
               return {
                 success: true,
@@ -765,20 +786,25 @@ export async function sendFacebookReply(
             } else if (taggedRes.error) {
               const tagErr = taggedRes.error.message || `Error code ${taggedRes.error.code}`;
               console.log(`   ↳ Tagged attempt response: ${tagErr}`);
-              attemptLogs.push(`⚠️ វិធីទី ២ Tagged មិនអាចផ្ញើបាន៖ ${tagErr}`);
+              attemptLogs.push(`⚠️ វិធីទី ២ Tagged (POST_PURCHASE_UPDATE) មិនអាចផ្ញើបាន ៖ ${tagErr}`);
             }
           } catch (tagErr: any) {
             console.warn(`   ↳ Tagged dispatch exception:`, tagErr?.message);
           }
+        } else {
+          directInboxFailReason = lastApiError;
+          attemptLogs.push(`⚠️ វិធីទី ២ (Direct Inbox) មិនអាចផ្ញើបាន ៖ ${lastApiError}`);
         }
       }
     } catch (m2Err: any) {
       lastApiError = m2Err?.message || 'Send API error';
+      directInboxFailReason = lastApiError;
       console.log(`⚠️ [METHOD 2 EXCEPTION]: ${lastApiError}`);
-      attemptLogs.push(`⚠️ វិធីទី ២ ជួបបញ្ហា៖ ${lastApiError}`);
+      attemptLogs.push(`⚠️ វិធីទី ២ ជួបបញ្ហា ៖ ${lastApiError}`);
     }
   } else if (!isDelivered) {
     console.log(`ℹ️ [METHOD 2 SKIPPED]: No valid Facebook User PSID available.`);
+    directInboxFailReason = 'មិនមាន Facebook User PSID របស់អតិថិជនឡើយ';
     attemptLogs.push(`ℹ️ វិធីទី ២ រំលង (មិនមាន User PSID)`);
   }
 
@@ -787,8 +813,20 @@ export async function sendFacebookReply(
   // Clipboard copied + One-tap button to open customer Messenger thread
   // Zero risk of Meta page penalty or automated flag
   // =====================================================================
-  const reasonDetail = lastApiError ? ` (${lastApiError})` : '';
-  console.log(`ℹ️ [DISPATCH RESULT]: Automated Facebook API unavailable for this recipient: ${lastApiError || 'Facebook 24h Window / restricted permissions'}`);
+  let failureSummary = '';
+  if (privateReplyFailReason && directInboxFailReason) {
+    failureSummary = `វិធីទី ១ (Private Reply)៖ ${privateReplyFailReason} | វិធីទី ២ (Direct Inbox)៖ ${directInboxFailReason}`;
+  } else if (privateReplyFailReason) {
+    failureSummary = `វិធីទី ១ (Private Reply)៖ ${privateReplyFailReason}`;
+  } else if (directInboxFailReason) {
+    failureSummary = `វិធីទី ២ (Direct Inbox)៖ ${directInboxFailReason}`;
+  } else if (lastApiError) {
+    failureSummary = lastApiError;
+  } else {
+    failureSummary = 'Facebook 24h Window ឬកំហិតសិទ្ធិរបស់ Meta';
+  }
+
+  console.log(`ℹ️ [DISPATCH RESULT]: Automated Facebook API unavailable for this recipient: ${failureSummary}`);
   console.log(`=======================================================\n`);
 
   attemptLogs.push(`📋 ជម្រើសផ្ញើផ្ទាល់ ៖ បានចម្លងអត្ថបទវិក្កយបត្រ VIP ចូលក្នុងក្តារចុច (Clipboard) រួចរាល់ អាចចុច Paste ក្នុង Messenger បានភ្លាមៗ`);
@@ -797,7 +835,7 @@ export async function sendFacebookReply(
     success: false,
     method: 'MANUAL_COPIED',
     methodTitle: 'ផ្ញើដោយផ្ទាល់ (ចម្លងរួចរាល់)',
-    error: `Facebook API មិនទាន់អាចផ្ញើស្វ័យប្រវត្តិចូល Inbox បានទេ${reasonDetail} ➔ អត្ថបទត្រូវបាន Copy រួចរាល់ សូមចុច "ឆាតផ្ទាល់" ដើម្បី Paste ផ្ញើជូនភ្ញៀវ!`,
+    error: `Facebook API មិនទាន់អាចផ្ញើស្វ័យប្រវត្តិចូល Inbox បានទេ (${failureSummary}) ➔ អត្ថបទត្រូវបាន Copy រួចរាល់ សូមចុច "ឆាតផ្ទាល់" ដើម្បី Paste ផ្ញើជូនភ្ញៀវ!`,
     attemptLogs
   };
 }

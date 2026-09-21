@@ -699,6 +699,22 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     }
   }
 
+  // Also harvest comment IDs from comments_json stored on invoice
+  const invAny = inv as any;
+  if (invAny.comments_json) {
+    try {
+      const parsedComments = typeof invAny.comments_json === 'string' ? JSON.parse(invAny.comments_json) : invAny.comments_json;
+      if (Array.isArray(parsedComments)) {
+        for (const c of parsedComments) {
+          const cid = c?.comment_id || c?.id;
+          if (cid && !candidateCommentIds.includes(String(cid).trim())) {
+            candidateCommentIds.push(String(cid).trim());
+          }
+        }
+      }
+    } catch {}
+  }
+
   // Also query rawComments for this invoice or customer
   const matchingRawComments = rawComments
     .slice()

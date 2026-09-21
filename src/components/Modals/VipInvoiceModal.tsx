@@ -23,10 +23,14 @@ export function VipInvoiceModal({
   const [customMsg, setCustomMsg] = useState('');
   const [isEditingCustom, setIsEditingCustom] = useState(false);
   const [khqrDataUrl, setKhqrDataUrl] = useState<string>('');
+  const [deliveryLogs, setDeliveryLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(true);
 
   // Generate initial message & KHQR preview
   useEffect(() => {
     if (invoice) {
+      setDeliveryLogs([]);
+      setShowLogs(true);
       const khqrCfg = getKHQRConfig();
       const customerName = invoice.facebook_name || 'អតិថិជន VIP';
       const phone = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : 'មិនទាន់មាន';
@@ -110,6 +114,14 @@ export function VipInvoiceModal({
         } catch {}
       }
 
+      if (Array.isArray(data.attempt_logs)) {
+        setDeliveryLogs(data.attempt_logs);
+        setShowLogs(true);
+      } else if (Array.isArray(data.attemptLogs)) {
+        setDeliveryLogs(data.attemptLogs);
+        setShowLogs(true);
+      }
+
       if (data.success) {
         invoice.msg_status = 'SENT';
         if (data.msg_delivery_method) {
@@ -119,7 +131,7 @@ export function VipInvoiceModal({
         const successTitle = data.method_title ? `[${data.method_title}] ` : '';
         onShowToast(`✅ ${successTitle}${data.message || 'បានផ្ញើវិក្កយបត្រ VIP ជោគជ័យ!'}`, 'success');
         onDataChanged();
-        setTimeout(() => onClose(), 650);
+        setTimeout(() => onClose(), 800);
       } else {
         invoice.msg_status = 'FAILED';
         invoice.msg_delivery_method = 'MANUAL_COPIED';
@@ -190,35 +202,93 @@ export function VipInvoiceModal({
         {/* Message Preview Body */}
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-slate-950/70">
           {/* Multi-Method Delivery Pipeline Indicator */}
-          <div className="bg-[#071120] border border-cyan-900/60 rounded-2xl p-3 shadow-sm">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-2">
-              <div className="flex items-center gap-1.5 text-cyan-300">
-                <span>🛡️</span>
-                <span>ប្រព័ន្ធធានាជោគជ័យ ២ ដំណាក់កាល (Inbox & Private Reply)</span>
+          {(() => {
+            const hasCommentId = Boolean(invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids.length > 0));
+            const candidateCid = invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]);
+            const displayCid = candidateCid ? String(candidateCid).split('_').pop() : '';
+
+            return (
+              <div className="bg-[#071120] border border-cyan-900/60 rounded-2xl p-3 shadow-sm">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-2">
+                  <div className="flex items-center gap-1.5 text-cyan-300">
+                    <span>🛡️</span>
+                    <span>ប្រព័ន្ធផ្ញើសារ ២ ដំណាក់កាល (Private Reply & Inbox)</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">Meta Graph API</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center gap-0.5 transition-all ${
+                    invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                      ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
+                      : hasCommentId
+                      ? 'bg-cyan-950/40 border-cyan-800/80 text-cyan-200'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-500'
+                  }`}>
+                    <div className="flex items-center gap-1">
+                      <span className="font-black text-[10px] text-cyan-400">វិធីទី ១ (អាទិភាព)</span>
+                      {hasCommentId && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+                    </div>
+                    <span className="font-bold text-white text-[11px]">Private Reply</span>
+                    <span className="text-[9px] text-amber-300 font-medium">តាមខមិន (រួចផុត ២៤ ម៉ោង)</span>
+                    <span className="text-[8px] text-slate-400 mt-0.5 font-mono truncate max-w-full">
+                      {hasCommentId ? `ខមិន #${displayCid}` : 'គ្មានខមិន (កន្ត្រកបង្កើតផ្ទាល់)'}
+                    </span>
+                  </div>
+                  <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center gap-0.5 transition-all ${
+                    invoice.msg_delivery_method === 'SEND_API'
+                      ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
+                      : 'bg-slate-900/70 border-slate-800 text-slate-400'
+                  }`}>
+                    <span className="font-black text-[10px] text-cyan-400">វិធីទី ២</span>
+                    <span className="font-bold text-white text-[11px]">Direct Inbox</span>
+                    <span className="text-[9px] text-slate-400">ផ្ញើចូល Messenger (ក្នុង ២៤ ម៉ោង)</span>
+                    <span className="text-[8px] text-slate-400 mt-0.5 font-mono">
+                      {invoice.facebook_user_id && !invoice.facebook_user_id.startsWith('FB_USER') ? `PSID: ...${invoice.facebook_user_id.slice(-6)}` : 'ប្រើ Tag ឬផ្ញើផ្ទាល់'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Delivery Status Logs if available */}
+                {deliveryLogs.length > 0 && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-800">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-300 mb-1.5">
+                      <span className="flex items-center gap-1 text-cyan-300">
+                        <span>📋</span>
+                        <span>កំណត់ហេតុដំណើរការ (Delivery Logs) ៖</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowLogs(!showLogs)}
+                        className="text-[10px] text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                      >
+                        {showLogs ? 'បង្រួម' : 'ពង្រីក'}
+                      </button>
+                    </div>
+                    {showLogs && (
+                      <div className="space-y-1 font-sans">
+                        {deliveryLogs.map((log, idx) => (
+                          <div
+                            key={idx}
+                            className={`px-2 py-1.5 rounded-lg text-[10.5px] leading-relaxed border ${
+                              log.startsWith('✅')
+                                ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-200'
+                                : log.startsWith('⚠️')
+                                ? 'bg-amber-950/40 border-amber-700/60 text-amber-200'
+                                : log.startsWith('ℹ️')
+                                ? 'bg-blue-950/40 border-blue-800/60 text-blue-200'
+                                : 'bg-slate-900/60 border-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {log}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <span className="text-[10px] text-slate-400 font-mono">Meta Graph API</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center gap-0.5 transition-all ${
-                invoice.msg_delivery_method === 'SEND_API'
-                  ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
-                  : 'bg-slate-900/70 border-slate-800 text-slate-400'
-              }`}>
-                <span className="font-black text-[10px] text-cyan-400">វិធីទី ១</span>
-                <span className="font-bold text-white text-[11px]">Direct Inbox</span>
-                <span className="text-[9px] text-slate-400">ផ្ញើចូល Messenger (ក្នុង ២៤ ម៉ោង)</span>
-              </div>
-              <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center gap-0.5 transition-all ${
-                invoice.msg_delivery_method === 'PRIVATE_REPLY'
-                  ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
-                  : 'bg-slate-900/70 border-slate-800 text-slate-400'
-              }`}>
-                <span className="font-black text-[10px] text-cyan-400">វិធីទី ២</span>
-                <span className="font-bold text-white text-[11px]">Private Reply</span>
-                <span className="text-[9px] text-amber-300 font-medium">តាមខមិន (រួចផុត ២៤ ម៉ោង)</span>
-              </div>
-            </div>
-          </div>
+            );
+          })()}
           {invoice.msg_status === 'FAILED' && (
             <div className="bg-rose-950/60 border border-rose-600/70 rounded-2xl p-3 text-xs text-rose-200 flex items-start gap-2.5 shadow-md">
               <span className="text-lg">⚠️</span>
