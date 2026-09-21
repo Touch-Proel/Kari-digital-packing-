@@ -383,12 +383,20 @@ async function handleIncomingTextCommand(token: string, chatId: number | string,
     }
 
     const cleanQuery = query.toLowerCase();
-    const matches = invoices.filter(inv => {
-      const bNo = String(inv.basket_no || inv.invoice_id);
-      const name = (inv.facebook_name || '').toLowerCase();
-      const phone = (inv.phone_number || '').replace(/\D/g, '');
-      return bNo === cleanQuery || name.includes(cleanQuery) || (phone && phone.includes(cleanQuery));
+    // Prioritize exact basket number match first, then partial match
+    let matches = invoices.filter(inv => {
+      const bNo = String(inv.basket_no || inv.invoice_id).toLowerCase();
+      return bNo === cleanQuery;
     });
+
+    if (matches.length === 0) {
+      matches = invoices.filter(inv => {
+        const bNo = String(inv.basket_no || inv.invoice_id).toLowerCase();
+        const name = (inv.facebook_name || '').toLowerCase();
+        const phone = (inv.phone_number || '').replace(/\D/g, '');
+        return bNo.includes(cleanQuery) || name.includes(cleanQuery) || (phone && phone.includes(cleanQuery));
+      });
+    }
 
     if (matches.length === 0) {
       await sendTelegramMessage(token, chatId, `❌ រកមិនឃើញកន្ត្រកដែលមានពាក្យ <b>"${query}"</b> ទេ!`, messageId);
@@ -405,14 +413,31 @@ async function handleIncomingTextCommand(token: string, chatId: number | string,
     };
 
     const stageDisp = stageMap[inv.packing_stage] || inv.packing_stage;
-    const itemsList = inv.items.map(it => `  • ${it.product_name || it.product_code} x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`).join('\n');
+
+    // Resolve accurate unit price from product catalog if item.price is 0 or outdated
+    const itemsList = inv.items.map(it => {
+      let unitPrice = Number(it.price || 0);
+      if (unitPrice <= 0) {
+        const catalogProd = products.find(p => (p.live_id || activeLiveId) === (inv.live_id || activeLiveId) && p.code.toUpperCase() === it.product_code.toUpperCase());
+        if (catalogProd && catalogProd.price > 0) {
+          unitPrice = catalogProd.price;
+          it.price = unitPrice; // sync back
+        }
+      }
+      const itemSubtotal = unitPrice * it.quantity;
+      return `  • កូដ [${it.product_code}] x${it.quantity} = $${itemSubtotal.toFixed(2)}`;
+    }).join('\n');
+
+    // Recalculate true subtotal if needed
+    const calculatedSubtotal = inv.items.reduce((sum, it) => sum + (Number(it.price || 0) * it.quantity), 0);
+    const displayedTotal = inv.total_amount > 0 ? inv.total_amount : calculatedSubtotal;
     const locationDisp = inv.address || (inv.location_zone === 'PROVINCE' ? 'ផ្ញើតាមខេត្ត' : 'ភ្នំពេញ');
 
     const checkMsg = `🛒 <b>ព័ត៌មានកន្ត្រក #${inv.basket_no || inv.invoice_id}</b>
 ━━━━━━━━━━━━━━━━━━
 👤 <b>អតិថិជន:</b> <b>${inv.facebook_name || 'អតិថិជន'}</b>
 📞 <b>លេខទូរស័ព្ទ:</b> ${inv.phone_number || 'មិនទាន់មាន'}
-💵 <b>តម្លៃសរុប:</b> <b>$${inv.total_amount.toFixed(2)}</b>
+💵 <b>តម្លៃសរុប:</b> <b>$${displayedTotal.toFixed(2)}</b>
 💳 <b>ស្ថានភាពទូទាត់:</b> ${isPaid ? '✅ <b>បង់រួច (PAID)</b>' : '⏳ <b>មិនទាន់បង់ (UNPAID)</b>'}
 📦 <b>ដំណាក់កាលវេចខ្ចប់:</b> ${stageDisp}
 📍 <b>ទីតាំង:</b> ${locationDisp}
