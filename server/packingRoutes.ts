@@ -25,7 +25,7 @@ import {
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
 import { parseAndAllocateComment } from './parser';
 import { detectDeliveryZone } from './locationHelper';
-import { sendFacebookReply } from './fbAuth';
+import { sendFacebookReply, fetchFacebookComments } from './fbAuth';
 import { generateServerKHQRPNG } from './khqrServer';
 import {
   testTelegramBotToken,
@@ -659,8 +659,6 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
   const rawHost = req.get('x-forwarded-host') || req.get('host') || 'localhost:3000';
   const host = rawHost.split(',')[0].trim();
   const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
-  const khqrImageUrl = `${proto}://${host}/api/khqr/image/${inv.invoice_id}`;
-  const payUrl = `${proto}://${host}/pay/${inv.invoice_id}`;
 
   const vipMsg = custom_message || (
     `🛍️ វិក្កយបត្រកន្ត្រក #${inv.basket_no || cleanId} (${customerName})\n` +
@@ -670,8 +668,7 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     `------------------------\n` +
     `📦 សរុប ${totalQty} ឈុត ៖ $${subtotal.toFixed(2)}${shippingFee === 0 ? ' (ហ្វ្រីដឹក)' : ` + ដឹក $${shippingFee.toFixed(2)}`} = $${exactTotal.toFixed(2)}\n` +
     `💰 ទឹកប្រាក់ត្រូវបង់ ៖ $${exactTotal.toFixed(2)} (${totalKhr}៛)\n\n` +
-    `💳 វេរមក ABA ៖ ${settings.account_number || '124072117063906'} (${settings.account_name || 'TOCH PROEL'})\n` +
-    `📲 ស្កែន QR ៖ ${payUrl}\n\n` +
+    `💳 វេរមក ABA ៖ ${settings.account_number || '124072117063906'} (${settings.account_name || 'TOCH PROEL'})\n\n` +
     `🙏 វេររួចសូមផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះចា៎ 🥰`
   );
 
@@ -716,15 +713,20 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
   }
 
   // Also query rawComments for this invoice or customer
+  const cleanCustomerName = customerName.toLowerCase().trim();
   const matchingRawComments = rawComments
     .slice()
     .reverse()
-    .filter(c => 
-      (c.invoice_id === cleanId || 
-       (inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' && c.facebook_user_id === inv.facebook_user_id) ||
-       (c.facebook_name && c.facebook_name.toLowerCase() === customerName.toLowerCase())) &&
-      c.comment_id && !c.comment_id.startsWith('sys_') && !c.comment_id.startsWith('manual_')
-    );
+    .filter(c => {
+      if (!c.comment_id || c.comment_id.startsWith('sys_') || c.comment_id.startsWith('manual_')) return false;
+      if (c.invoice_id === cleanId) return true;
+      if (inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' && c.facebook_user_id === inv.facebook_user_id) return true;
+      const cName = (c.facebook_name || '').toLowerCase().trim();
+      if (!cName) return false;
+      if (cName === cleanCustomerName) return true;
+      if (cleanCustomerName.length >= 3 && (cName.includes(cleanCustomerName) || cleanCustomerName.includes(cName))) return true;
+      return false;
+    });
 
   for (const rc of matchingRawComments) {
     if (rc.comment_id && !candidateCommentIds.includes(rc.comment_id)) {
@@ -732,22 +734,38 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     }
   }
 
+  // If candidateCommentIds is still empty, search active live stream comments via Facebook Graph API
+  if (candidateCommentIds.length === 0 && activeFacebookPage?.access_token && activeLiveId && !activeLiveId.startsWith('LIVE_') && !activeLiveId.startsWith('sim_')) {
+    try {
+      const liveCommentsRes = await fetchFacebookComments(activeLiveId, activeFacebookPage.access_token, 100);
+      if (liveCommentsRes && liveCommentsRes.data && Array.isArray(liveCommentsRes.data)) {
+        for (const item of liveCommentsRes.data) {
+          const fromName = (item.from?.name || '').toLowerCase().trim();
+          const fromId = String(item.from?.id || '').trim();
+          const isNameMatch = fromName && cleanCustomerName && (fromName === cleanCustomerName || fromName.includes(cleanCustomerName) || cleanCustomerName.includes(fromName));
+          const isIdMatch = fromId && inv.facebook_user_id && fromId === inv.facebook_user_id;
+          if ((isNameMatch || isIdMatch) && item.id) {
+            candidateCommentIds.push(item.id);
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[VIP Comment Lookup] Failed to fetch live comments for customer:', e);
+    }
+  }
+
+  // Store resolved comment IDs on invoice so they remain persistently cached
+  if (candidateCommentIds[0]) {
+    inv.last_comment_id = candidateCommentIds[0];
+    if (!inv.comment_ids) inv.comment_ids = [];
+    for (const cid of candidateCommentIds) {
+      if (!inv.comment_ids.includes(cid)) inv.comment_ids.push(cid);
+    }
+  }
+
   const primaryCommentId = candidateCommentIds[0] || null;
   const extraCommentIds = candidateCommentIds.slice(1);
-
-  // Generate KHQR PNG buffer for direct binary attachment
-  let khqrPngBuffer: Buffer | undefined;
-  try {
-    khqrPngBuffer = await generateServerKHQRPNG({
-      amount: exactTotal,
-      currency: 'USD',
-      billNumber: inv.basket_no || cleanId,
-      customerName,
-      storeLabel: settings.merchant_name || 'Kari Arnett'
-    });
-  } catch (qrErr) {
-    console.warn('[VIP] Could not generate server KHQR PNG buffer:', qrErr);
-  }
 
   let replyRes: any = { success: false };
   try {
@@ -756,8 +774,8 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
       inv.facebook_user_id,
       vipMsg,
       undefined,
-      khqrImageUrl,
-      khqrPngBuffer,
+      undefined, // QR Image URL removed to keep invoice clean & prevent Meta scam warning
+      undefined, // QR PNG Buffer removed to keep invoice clean & prevent Meta scam warning
       extraCommentIds
     );
   } catch (err: any) {
@@ -795,11 +813,26 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
       ? (replyRes.detail || 'បានផ្ញើវិក្កយបត្រ VIP ជោគជ័យ!') 
       : (replyRes.error || 'មិនអាចផ្ញើសារបានទេ ➔ សូមចុចឆាតផ្ទាល់'),
     vip_message: vipMsg,
-    khqr_image_url: khqrImageUrl,
     recipient_name: customerName,
     facebook_user_id: inv.facebook_user_id,
     fb_delivery: replyRes
   });
+});
+
+// POST /api/link_comment_to_invoice - Attach a Facebook comment ID to an invoice
+router.post('/link_comment_to_invoice', (req: Request, res: Response) => {
+  const { invoice_id, comment_id } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+  const inv = invoices.find(i => i.invoice_id === cleanId);
+  if (!inv) return res.status(404).json({ success: false, error: 'រកមិនឃើញកន្ត្រកទេ' });
+  const cid = String(comment_id || '').trim();
+  if (!cid) return res.status(400).json({ success: false, error: 'សូមបញ្ចូល Comment ID' });
+  inv.last_comment_id = cid;
+  if (!inv.comment_ids) inv.comment_ids = [];
+  if (!inv.comment_ids.includes(cid)) inv.comment_ids.unshift(cid);
+  bumpDataRevision();
+  saveDatabaseToDisk();
+  res.json({ success: true, message: 'បានភ្ជាប់ Comment ID ជោគជ័យ', last_comment_id: cid });
 });
 
 // POST /api/toggle_msg_sent_status - Manually mark as SENT or UNSENT/FAILED

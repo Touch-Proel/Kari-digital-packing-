@@ -90,12 +90,15 @@ function initTables(db: Database) {
         msg_status TEXT DEFAULT 'UNSENT',
         comments_json TEXT,
         unmatched_comments_json TEXT,
-        items_json TEXT
+        items_json TEXT,
+        last_comment_id TEXT,
+        comment_ids_json TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_invoices_live_id ON invoices(live_id);
       CREATE INDEX IF NOT EXISTS idx_invoices_created_date ON invoices(created_date);
       CREATE INDEX IF NOT EXISTS idx_invoices_basket_no ON invoices(basket_no);
+      CREATE INDEX IF NOT EXISTS idx_invoices_last_comment_id ON invoices(last_comment_id);
 
       CREATE TABLE IF NOT EXISTS invoice_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,6 +139,20 @@ function initTables(db: Database) {
         key TEXT PRIMARY KEY,
         value TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS raw_comments (
+        comment_id TEXT PRIMARY KEY,
+        live_id TEXT,
+        invoice_id INTEGER,
+        facebook_user_id TEXT,
+        facebook_name TEXT,
+        comment_text TEXT,
+        created_at TEXT,
+        picture_url TEXT,
+        is_matched INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_raw_comments_live_id ON raw_comments(live_id);
+      CREATE INDEX IF NOT EXISTS idx_raw_comments_customer ON raw_comments(facebook_user_id, facebook_name);
     `);
   } catch (err) {
     console.warn('[SQLite] Table creation warning:', err);
@@ -183,6 +200,8 @@ function initTables(db: Database) {
     ['comments_json', 'TEXT'],
     ['unmatched_comments_json', 'TEXT'],
     ['items_json', 'TEXT'],
+    ['last_comment_id', 'TEXT'],
+    ['comment_ids_json', 'TEXT'],
     ['msg_status', "TEXT DEFAULT 'UNSENT'"],
     ['staged_by', 'TEXT'],
     ['staged_at', 'TEXT'],
@@ -254,6 +273,7 @@ export async function persistToSqlite(data: {
   customers: Customer[];
   packerLogs: PackerLog[];
   activeFacebookPage: FacebookPage | null;
+  rawComments?: any[];
 }) {
   if (isPersisting) {
     pendingPersistData = data;
@@ -322,8 +342,9 @@ export async function persistToSqlite(data: {
           location_zone, location_label, total_amount, shipping_fee,
           is_free_ship, status, packing_stage, staged_by, staged_at,
           verified_by, verified_at, paid_by, paid_at, msg_status,
-          comments_json, unmatched_comments_json, items_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+          comments_json, unmatched_comments_json, items_json,
+          last_comment_id, comment_ids_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
       `);
 
       const stmtItem = db.prepare(`
@@ -372,7 +393,9 @@ export async function persistToSqlite(data: {
           inv.msg_status || 'UNSENT',
           JSON.stringify(inv.comments || []),
           JSON.stringify(inv.unmatched_comments || []),
-          JSON.stringify(inv.items || [])
+          JSON.stringify(inv.items || []),
+          inv.last_comment_id || '',
+          JSON.stringify(inv.comment_ids || (inv.last_comment_id ? [inv.last_comment_id] : []))
         ]);
 
         if (inv.items && Array.isArray(inv.items)) {
@@ -394,7 +417,29 @@ export async function persistToSqlite(data: {
       stmtInv.free();
       stmtItem.free();
 
-      // 6. Live sessions
+      // 6. Raw Comments
+      if (data.rawComments && Array.isArray(data.rawComments) && data.rawComments.length > 0) {
+        db.run('DELETE FROM raw_comments;');
+        const stmtRaw = db.prepare('INSERT OR REPLACE INTO raw_comments (comment_id, live_id, invoice_id, facebook_user_id, facebook_name, comment_text, created_at, picture_url, is_matched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);');
+        for (const rc of data.rawComments) {
+          if (rc && rc.comment_id) {
+            stmtRaw.run([
+              String(rc.comment_id),
+              String(rc.live_id || ''),
+              rc.invoice_id ? Number(rc.invoice_id) : null,
+              String(rc.facebook_user_id || ''),
+              String(rc.facebook_name || ''),
+              String(rc.comment_text || ''),
+              String(rc.created_at || ''),
+              String(rc.picture_url || ''),
+              rc.is_matched ? 1 : 0
+            ]);
+          }
+        }
+        stmtRaw.free();
+      }
+
+      // 7. Live sessions
       db.run('DELETE FROM live_sessions;');
       const stmtLive = db.prepare('INSERT INTO live_sessions (live_id, title, live_date, created_at, total_baskets, total_revenue) VALUES (?, ?, ?, ?, ?, ?);');
       for (const [liveId, stat] of liveStats.entries()) {
@@ -518,10 +563,17 @@ export async function loadFromSqlite(): Promise<{
         let items = [];
         let comments = [];
         let unmatched = [];
+        let commentIds: string[] = [];
 
         try { items = JSON.parse(rowObj.items_json || '[]'); } catch {}
         try { comments = JSON.parse(rowObj.comments_json || '[]'); } catch {}
         try { unmatched = JSON.parse(rowObj.unmatched_comments_json || '[]'); } catch {}
+        try { commentIds = JSON.parse(rowObj.comment_ids_json || '[]'); } catch {}
+
+        const lastCommentId = rowObj.last_comment_id ? String(rowObj.last_comment_id).trim() : undefined;
+        if (lastCommentId && !commentIds.includes(lastCommentId)) {
+          commentIds.unshift(lastCommentId);
+        }
 
         return {
           invoice_id: Number(rowObj.invoice_id),
@@ -546,6 +598,8 @@ export async function loadFromSqlite(): Promise<{
           paid_by: rowObj.paid_by || undefined,
           paid_at: rowObj.paid_at || undefined,
           msg_status: rowObj.msg_status || 'UNSENT',
+          last_comment_id: lastCommentId || undefined,
+          comment_ids: commentIds.length > 0 ? commentIds : (lastCommentId ? [lastCommentId] : undefined),
           comments,
           unmatched_comments: unmatched,
           items
@@ -567,6 +621,24 @@ export async function loadFromSqlite(): Promise<{
         total_amount: Number(r[7])
       }));
     }
+
+    // 6. Raw Comments
+    try {
+      const rawRows = db.exec('SELECT comment_id, live_id, invoice_id, facebook_user_id, facebook_name, comment_text, created_at, picture_url, is_matched FROM raw_comments ORDER BY created_at ASC;');
+      if (rawRows.length > 0 && rawRows[0].values) {
+        result.rawComments = rawRows[0].values.map((r: any) => ({
+          comment_id: String(r[0]),
+          live_id: String(r[1] || ''),
+          invoice_id: r[2] !== null && r[2] !== undefined ? Number(r[2]) : undefined,
+          facebook_user_id: String(r[3] || ''),
+          facebook_name: String(r[4] || ''),
+          comment_text: String(r[5] || ''),
+          created_at: String(r[6] || ''),
+          picture_url: String(r[7] || ''),
+          is_matched: Boolean(r[8])
+        }));
+      }
+    } catch {}
 
     return result;
   } catch (err) {

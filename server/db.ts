@@ -39,6 +39,7 @@ export function saveDatabaseToDisk() {
       settings,
       products,
       invoices,
+      rawComments,
       customers,
       packerLogs,
       activeFacebookPage

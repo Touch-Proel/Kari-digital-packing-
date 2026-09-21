@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Invoice } from '../../types';
 import { playPureTone, playSuccessFanfare } from '../../utils/audio';
-import { getKHQRConfig, generateBakongKHQRString, generateKHQRDataUrl } from '../../utils/khqr';
+import { getKHQRConfig } from '../../utils/khqr';
 import { openMetaInboxDirect } from '../../utils/metaInbox';
 
 interface VipInvoiceModalProps {
@@ -22,15 +22,18 @@ export function VipInvoiceModal({
   const [isSending, setIsSending] = useState(false);
   const [customMsg, setCustomMsg] = useState('');
   const [isEditingCustom, setIsEditingCustom] = useState(false);
-  const [khqrDataUrl, setKhqrDataUrl] = useState<string>('');
   const [deliveryLogs, setDeliveryLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(true);
+  const [customCommentId, setCustomCommentId] = useState('');
+  const [isLinkingCid, setIsLinkingCid] = useState(false);
 
-  // Generate initial message & KHQR preview
+  // Generate initial message
   useEffect(() => {
     if (invoice) {
       setDeliveryLogs([]);
       setShowLogs(true);
+      const initialCid = invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]) || '';
+      setCustomCommentId(initialCid);
       const khqrCfg = getKHQRConfig();
       const customerName = invoice.facebook_name || 'អតិថិជន VIP';
       const phone = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : 'មិនទាន់មាន';
@@ -64,24 +67,11 @@ export function VipInvoiceModal({
         `------------------------\n` +
         `📦 សរុប ${totalQty} ឈុត ៖ $${subtotal.toFixed(2)}${shippingFee === 0 ? ' (ហ្វ្រីដឹក)' : ` + ដឹក $${shippingFee.toFixed(2)}`} = $${exactTotal.toFixed(2)}\n` +
         `💰 ទឹកប្រាក់ត្រូវបង់ ៖ $${exactTotal.toFixed(2)} (${totalKhr}៛)\n\n` +
-        `💳 វេរមក ABA ៖ ${khqrCfg.accountNumber || '124072117063906'} (${khqrCfg.accountName || 'TOCH PROEL'})\n` +
-        `📲 ស្កែន QR ៖ ${window.location.origin}/pay/${invoice.invoice_id}\n\n` +
+        `💳 វេរមក ABA ៖ ${khqrCfg.accountNumber || '124072117063906'} (${khqrCfg.accountName || 'TOCH PROEL'})\n\n` +
         `🙏 វេររួចសូមផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះចា៎ 🥰`;
 
       setCustomMsg(defaultText);
       setIsEditingCustom(false);
-
-      // Generate QR preview
-      const qrStr = generateBakongKHQRString({
-        amount: exactTotal,
-        currency: 'USD',
-        billNumber: invoice.basket_no || invoice.invoice_id,
-        storeLabel: khqrCfg.merchantName || 'Kari Arnett',
-        config: khqrCfg
-      });
-      generateKHQRDataUrl(qrStr, { width: 220, margin: 1 })
-        .then(url => setKhqrDataUrl(url))
-        .catch(() => {});
     }
   }, [invoice]);
 
@@ -93,6 +83,7 @@ export function VipInvoiceModal({
     onShowToast(`✉️ កំពុងផ្ញើវិក្កយបត្រ VIP ទៅកាន់ ${invoice.facebook_name}...`);
 
     try {
+      const targetCid = (customCommentId.trim() || invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]) || '').trim();
       const res = await fetch('/api/send_vip_invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -101,8 +92,8 @@ export function VipInvoiceModal({
           facebook_name: invoice.facebook_name,
           custom_message: customMsg,
           total_amount: invoice.total_amount,
-          comment_id: invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]),
-          comment_ids: invoice.comment_ids || []
+          comment_id: targetCid,
+          comment_ids: targetCid ? [targetCid, ...(invoice.comment_ids || [])] : (invoice.comment_ids || [])
         })
       });
 
@@ -203,9 +194,9 @@ export function VipInvoiceModal({
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-slate-950/70">
           {/* Multi-Method Delivery Pipeline Indicator */}
           {(() => {
-            const hasCommentId = Boolean(invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids.length > 0));
-            const candidateCid = invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]);
-            const displayCid = candidateCid ? String(candidateCid).split('_').pop() : '';
+            const effectiveCid = (customCommentId.trim() || invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]) || '').trim();
+            const hasCommentId = Boolean(effectiveCid);
+            const displayCid = effectiveCid ? String(effectiveCid).split('_').pop() : '';
 
             return (
               <div className="bg-[#071120] border border-cyan-900/60 rounded-2xl p-3 shadow-sm">
@@ -247,6 +238,79 @@ export function VipInvoiceModal({
                     </span>
                   </div>
                 </div>
+
+                {/* Inline Comment ID connector if missing */}
+                {!hasCommentId ? (
+                  <div className="mt-2.5 p-2 bg-slate-900/90 border border-amber-600/30 rounded-xl text-xs space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-amber-300 font-medium">
+                      <span className="flex items-center gap-1">
+                        <span>🔗</span>
+                        <span>ភ្ជាប់ Comment ID / Link ដើម្បី Private Reply ៖</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Paste Link ខមិន ឬ Comment ID..."
+                        value={customCommentId}
+                        onChange={(e) => {
+                          let val = e.target.value.trim();
+                          const commentMatch = val.match(/comment_id=([0-9_]+)/i) || val.match(/reply_comment_id=([0-9_]+)/i) || val.match(/comments\/([0-9_]+)/i);
+                          if (commentMatch && commentMatch[1]) {
+                            val = commentMatch[1];
+                          }
+                          setCustomCommentId(val);
+                        }}
+                        className="flex-1 bg-slate-950 border border-slate-700 focus:border-cyan-500 rounded-lg px-2.5 py-1 text-xs text-white font-mono placeholder:text-slate-500 focus:outline-none"
+                      />
+                      {customCommentId.trim() && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setIsLinkingCid(true);
+                            try {
+                              const res = await fetch('/api/link_comment_to_invoice', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  invoice_id: invoice.invoice_id,
+                                  comment_id: customCommentId.trim()
+                                })
+                              });
+                              const data = await res.json();
+                              if (data.success) {
+                                invoice.last_comment_id = customCommentId.trim();
+                                if (!invoice.comment_ids) invoice.comment_ids = [];
+                                if (!invoice.comment_ids.includes(customCommentId.trim())) invoice.comment_ids.unshift(customCommentId.trim());
+                                onShowToast('✅ បានភ្ជាប់ Comment ID ជោគជ័យ!');
+                                onDataChanged();
+                              }
+                            } catch {}
+                            setIsLinkingCid(false);
+                          }}
+                          disabled={isLinkingCid}
+                          className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors"
+                        >
+                          {isLinkingCid ? '...' : 'ភ្ជាប់'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 px-1">
+                    <span className="flex items-center gap-1 font-mono text-emerald-300">
+                      <span>🔗 Comment ID:</span>
+                      <span>{displayCid}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomCommentId('')}
+                      className="text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                    >
+                      កែប្រែ / ផ្លាស់ប្តូរ
+                    </button>
+                  </div>
+                )}
 
                 {/* Delivery Status Logs if available */}
                 {deliveryLogs.length > 0 && (
@@ -327,81 +391,11 @@ export function VipInvoiceModal({
             </div>
           )}
 
-          {/* KHQR Card in Vip Modal */}
-          {khqrDataUrl && (
-            <div className="bg-[#0D182E] border border-red-500/50 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-md">
-              <div className="flex items-center gap-2.5">
-                <img
-                  src={khqrDataUrl}
-                  alt="KHQR"
-                  className="w-14 h-14 object-contain bg-white rounded-lg p-0.5 border border-red-400 shadow-sm"
-                />
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="bg-[#E11925] text-white text-[9px] font-black px-1 rounded">KHQR</span>
-                    <span className="text-white text-xs font-bold">ABA: 000474559</span>
-                  </div>
-                  <div className="text-[11px] text-slate-300">
-                    Proel Toch ‧ Kari Arnett
-                  </div>
-                  <div className="text-[11px] text-emerald-400 font-mono font-bold">
-                    ${Number((invoice.items.reduce((s, it) => s + it.price * it.quantity, 0) + (invoice.shipping_fee !== undefined ? invoice.shipping_fee : 2)).toFixed(2))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const res = await fetch(`/api/khqr/image/${invoice.invoice_id}`);
-                      const blob = await res.blob();
-                      if (navigator.clipboard && (window as any).ClipboardItem) {
-                        await navigator.clipboard.write([
-                          new (window as any).ClipboardItem({
-                            'image/png': blob
-                          })
-                        ]);
-                        playSuccessFanfare();
-                        onShowToast('🖼️ បានចម្លង (Copy) រូបភាព KHQR រួចរាល់! អាចចុច Paste ក្នុង Chat បាន!', 'success');
-                      } else {
-                        onShowToast('សូមប្រើប៊ូតុងទាញយក QR');
-                      }
-                    } catch {
-                      onShowToast('បរាជ័យក្នុងការ Copy រូបភាព', 'error');
-                    }
-                  }}
-                  className="px-2.5 py-1.5 rounded-xl bg-red-900/90 hover:bg-red-800 text-white border border-red-400 text-xs font-bold flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm"
-                  title="Copy រូបភាព KHQR ចូល Clipboard ដើម្បី Paste ក្នុង Messenger"
-                >
-                  <span>🖼️</span>
-                  <span>Copy រូប QR</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const a = document.createElement('a');
-                    a.href = `/api/khqr/image/${invoice.invoice_id}`;
-                    a.download = `KHQR_Basket_${invoice.basket_no || invoice.invoice_id}.png`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    onShowToast('📥 បានទាញយក QR code សម្រាប់ផ្ញើ!');
-                  }}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold flex items-center gap-1 active:scale-95 transition-all cursor-pointer"
-                >
-                  <span>📥</span>
-                  <span>ទាញយក</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Tips */}
-          <div className="bg-purple-950/40 border border-purple-800/40 rounded-xl p-2.5 text-[11px] text-purple-200 flex items-start gap-2">
-            <span>💡</span>
+          {/* Safe Mode Tip - Clean text without external links/images */}
+          <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-xl p-2.5 text-[11px] text-emerald-200 flex items-start gap-2">
+            <span>🛡️</span>
             <div>
-              ប្រព័ន្ធនឹងភ្ជាប់ <strong>រូបភាព Bakong KHQR (Card PNG)</strong> ទៅជាមួយសារវិក្កយបត្រស្វ័យប្រវត្តិចូល Facebook Messenger។ លោកអ្នកក៏អាចចុច <strong>«🖼️ Copy រូប QR»</strong> ដើម្បី Paste រូបក្នុង Chat ដោយដៃបានគ្រប់ពេល!
+              <strong>វិក្កយបត្រទម្រង់អត្ថបទសុទ្ធ (Text Only) ៖</strong> គ្មាន Link ឬរូបភាព QR ឡើយ ដើម្បីធានាសុវត្ថិភាពខ្ពស់ 100% និងចៀសវាងការលោត Alert "Be aware of scams" ពី Facebook Messenger។
             </div>
           </div>
         </div>
@@ -415,7 +409,7 @@ export function VipInvoiceModal({
             className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-[0_4px_22px_rgba(147,51,234,0.45)] active:scale-98 cursor-pointer disabled:opacity-50 transition-all border border-purple-400/40"
           >
             <span className="text-lg">🚀</span>
-            <span>{isSending ? 'កំពុងបញ្ជូនសារ & រូបភាព KHQR...' : 'ផ្ញើ VIP & រូប KHQR ស្វ័យប្រវត្តិ (1-Tap)'}</span>
+            <span>{isSending ? 'កំពុងបញ្ជូនសារវិក្កយបត្រ...' : 'ផ្ញើវិក្កយបត្រ VIP ស្វ័យប្រវត្តិ (1-Tap)'}</span>
           </button>
 
           {/* Secondary Buttons: Copy only & Open Messenger */}
