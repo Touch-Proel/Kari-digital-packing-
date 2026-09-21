@@ -543,8 +543,8 @@ export async function loadDatabaseFromDisk() {
       recalculateInvoice(inv);
     });
 
-    // Note: Do NOT automatically delete empty baskets on startup.
-    // Empty baskets should only be cleaned when user explicitly clicks the cleanup button in the UI.
+    // Remove any leftover 0-item empty baskets from previous question comments
+    cleanupEmptyZeroItemInvoices();
 
     // Normalize all existing product image filenames to [CODE]_[YYYYMMDD].jpg
     const uploadDir = path.join(process.cwd(), 'public', 'uploads');
