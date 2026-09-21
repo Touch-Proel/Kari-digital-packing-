@@ -68,6 +68,15 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [displayedLimit, setDisplayedLimit] = useState<number>(25);
 
+  // 🔒 Stable Sort Snapshot for "💰 ច្រើនមុន" (Prevents baskets from jumping up/down during editing/picking)
+  const frozenAmountMapRef = useRef<Map<string | number, number>>(new Map());
+  const [sortSnapshotToken, setSortSnapshotToken] = useState<number>(0);
+
+  // Refresh frozen sort snapshot whenever stage, live stream, or explicit refresh occurs
+  useEffect(() => {
+    frozenAmountMapRef.current.clear();
+  }, [selectedLiveId, currentMasterStage, sortSnapshotToken]);
+
   // User / Packer Settings
   const [packerName, setPackerName] = useState<string>(() => localStorage.getItem('packerName') || '');
   const [isRequirePackerModalOpen, setIsRequirePackerModalOpen] = useState<boolean>(() => !localStorage.getItem('packerName'));
@@ -972,7 +981,24 @@ export default function App() {
     }
 
     if (activeSubFilter === 'AMOUNT_DESC') {
-      filtered = [...filtered].sort((a, b) => b.total_amount - a.total_amount);
+      filtered = [...filtered].sort((a, b) => {
+        const idA = a.invoice_id;
+        const idB = b.invoice_id;
+
+        // Freeze initial/current captured amount so editing items doesn't jump the row
+        if (!frozenAmountMapRef.current.has(idA)) {
+          frozenAmountMapRef.current.set(idA, a.total_amount);
+        }
+        if (!frozenAmountMapRef.current.has(idB)) {
+          frozenAmountMapRef.current.set(idB, b.total_amount);
+        }
+
+        const amtA = frozenAmountMapRef.current.get(idA) ?? a.total_amount;
+        const amtB = frozenAmountMapRef.current.get(idB) ?? b.total_amount;
+
+        if (amtB !== amtA) return amtB - amtA;
+        return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+      });
     } else {
       filtered = [...filtered].sort((a, b) => {
         const timeA = new Date(a.created_at || 0).getTime();
@@ -1135,6 +1161,15 @@ export default function App() {
           onSetDispatchedTimeFilter={setDispatchedTimeFilter}
           activeSubFilter={activeSubFilter}
           onSetSubFilter={flt => {
+            if (flt === 'AMOUNT_DESC') {
+              if (activeSubFilter === 'AMOUNT_DESC') {
+                // Re-clicking on "💰 ច្រើនមុន" forces a fresh re-sort snapshot
+                setSortSnapshotToken(prev => prev + 1);
+                showToast('🔄 បានតម្រៀបឡើងវិញតាមតម្លៃថ្មី');
+              }
+            } else {
+              frozenAmountMapRef.current.clear();
+            }
             setActiveSubFilter(flt);
             setDisplayedLimit(25);
             playPureTone(700, 0.04);
