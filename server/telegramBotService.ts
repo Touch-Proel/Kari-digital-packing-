@@ -119,10 +119,7 @@ async function handleIncomingStockItemPhoto(
       stock_qty: 200,
       image_file: photoUrl
     })),
-    'merge',
-    {
-      targetLiveId: activeLiveId
-    }
+    'merge'
   );
 
   const addedDetails: string[] = [];
@@ -653,10 +650,7 @@ async function startPollingLoop() {
                     price: item.price,
                     stock_qty: 200
                   })),
-                  'merge',
-                  {
-                    targetLiveId: activeLiveId
-                  }
+                  'merge'
                 );
 
                 const addedCodes = stockItems.map(item => `• <b>[${item.code.toUpperCase()}]</b> $${item.price.toFixed(2)}`);
