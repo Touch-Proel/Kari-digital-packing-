@@ -407,7 +407,9 @@ function BasketCardComponent({
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
           facebook_name: invoice.facebook_name,
-          total_amount: invoice.total_amount
+          total_amount: invoice.total_amount,
+          comment_id: invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]),
+          comment_ids: invoice.comment_ids || []
         })
       });
       const data = await res.json();
@@ -419,11 +421,16 @@ function BasketCardComponent({
 
       if (data.success) {
         invoice.msg_status = 'SENT';
+        if (data.msg_delivery_method) {
+          invoice.msg_delivery_method = data.msg_delivery_method;
+        }
         playSuccessFanfare();
-        onShowToast(`✅ បានផ្ញើ VIP ទៅ ${invoice.facebook_name} ជោគជ័យ!`, 'success');
+        const successTitle = data.method_title ? `[${data.method_title}] ` : '';
+        onShowToast(`✅ ${successTitle}${data.message || `បានផ្ញើ VIP ទៅ ${invoice.facebook_name} ជោគជ័យ!`}`, 'success');
         onDataChanged();
       } else {
         invoice.msg_status = 'FAILED';
+        invoice.msg_delivery_method = 'MANUAL_COPIED';
         playPureTone(320, 0.18, 'sawtooth');
         onShowToast(`❌ មិនអាចផ្ញើស្វ័យប្រវត្តិ (បាន Copy សាររួច) ➔ សូមចុច «ឆាតផ្ទាល់»!`, 'error');
         onDataChanged();
@@ -1894,8 +1901,16 @@ function BasketCardComponent({
                         {isSendingVip ? '⏳' : '✅'}
                       </span>
                       <div className="flex flex-col items-start min-w-0 text-left leading-tight">
-                        <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតជោគជ័យ</span>
-                        <span className="text-[10px] text-emerald-300/90 font-medium">ចុចមើល/ផ្ញើឡើងវិញ</span>
+                        <span className="font-black text-white text-xs sm:text-[13px] truncate">
+                          {invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                            ? 'Private Reply'
+                            : 'ឆាតជោគជ័យ'}
+                        </span>
+                        <span className="text-[10px] text-emerald-300/90 font-medium truncate">
+                          {invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                            ? 'វិធីទី ២ (រួចផុត ២៤h)'
+                            : 'វិធីទី ១ (Inbox)'}
+                        </span>
                       </div>
                     </button>
                   ) : invoice.msg_status === 'FAILED' ? (
@@ -1983,8 +1998,16 @@ function BasketCardComponent({
                       {isSendingVip ? '⏳' : '✅'}
                     </span>
                     <div className="flex flex-col items-start min-w-0 text-left leading-tight">
-                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតជោគជ័យ</span>
-                      <span className="text-[10px] text-emerald-300/90 font-medium">ចុចមើល/ផ្ញើឡើងវិញ</span>
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">
+                        {invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                          ? 'Private Reply'
+                          : 'ឆាតជោគជ័យ'}
+                      </span>
+                      <span className="text-[10px] text-emerald-300/90 font-medium truncate">
+                        {invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                          ? 'វិធីទី ២ (រួចផុត ២៤h)'
+                          : 'វិធីទី ១ (Inbox)'}
+                      </span>
                     </div>
                   </button>
                 ) : invoice.msg_status === 'FAILED' ? (
@@ -2087,8 +2110,16 @@ function BasketCardComponent({
                       {isSendingVip ? '⏳' : '✅'}
                     </span>
                     <div className="flex flex-col items-start min-w-0 text-left leading-tight">
-                      <span className="font-black text-white text-xs sm:text-[13px] truncate">ឆាតជោគជ័យ</span>
-                      <span className="text-[10px] text-emerald-300/90 font-medium">ចុចមើល/ផ្ញើឡើងវិញ</span>
+                      <span className="font-black text-white text-xs sm:text-[13px] truncate">
+                        {invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                          ? 'Private Reply'
+                          : 'ឆាតជោគជ័យ'}
+                      </span>
+                      <span className="text-[10px] text-emerald-300/90 font-medium truncate">
+                        {invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                          ? 'វិធីទី ២ (រួចផុត ២៤h)'
+                          : 'វិធីទី ១ (Inbox)'}
+                      </span>
                     </div>
                   </button>
                 ) : invoice.msg_status === 'FAILED' ? (

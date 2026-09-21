@@ -448,36 +448,78 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
   }
 }
 
-// Send Messenger Private Reply or Comment Reply with Dual-Layer Fallback & KHQR Image Attachment
+// Send Messenger Invoice with Multi-Tier Fallback:
+// Method 1: Direct Messenger Send API (Inbox)
+// Method 2: Private Reply via Comment ID (24-Hour Policy Exempt)
+// Fallback: Manual Clipboard Copy & 1-Tap Messenger Link
+export interface FacebookReplyResult {
+  success: boolean;
+  error?: string;
+  method?: 'SEND_API' | 'PRIVATE_REPLY' | 'MANUAL_COPIED' | 'SIMULATED';
+  methodTitle?: string;
+  detail?: string;
+  attemptLogs?: string[];
+}
+
 export async function sendFacebookReply(
   commentId: string | null,
   userId: string | null,
   messageText: string,
   token?: string,
   imageUrl?: string,
-  imageBuffer?: Buffer
-): Promise<{ success: boolean; error?: string; method?: 'PRIVATE_REPLY' | 'SEND_API' | 'PUBLIC_COMMENT' | 'SIMULATED' }> {
+  imageBuffer?: Buffer,
+  extraCommentIds?: string[]
+): Promise<FacebookReplyResult> {
   const activeToken = token || activeFacebookPage?.access_token;
   if (!activeToken || activeToken.startsWith('simulated_') || activeToken.length < 20) {
     console.log(`[VIP INVOICE NOTICE] No real Facebook Page Access Token configured. Message prepared for manual copy.`);
     return {
       success: false,
+      method: 'MANUAL_COPIED',
+      methodTitle: 'ផ្ញើដោយផ្ទាល់ (ចម្លងរួចរាល់)',
       error: 'មិនទាន់បានភ្ជាប់ Facebook Page Token (ឬ Token មិនត្រឹមត្រូវ) ➔ បានចម្លងអត្ថបទវិក្កយបត្ររួចរាល់ សូមចុច «ឆាតផ្ទាល់» ដើម្បីផ្ញើទៅកាន់ Messenger!'
     };
   }
 
   const cleanUid = String(userId || '').trim();
-  const cleanCid = String(commentId || '').trim();
-  const targetCidSuffix = cleanCid.includes('_') ? cleanCid.split('_').pop() || '' : '';
-  const commentIdCandidates = Array.from(new Set([cleanCid, targetCidSuffix])).filter(
-    c => c && !c.startsWith('sys_') && !c.startsWith('manual_') && c.length >= 6
-  );
+  const attemptLogs: string[] = [];
+
+  // Build ordered list of unique comment ID candidates
+  const rawIdPool: string[] = [];
+  if (commentId) rawIdPool.push(String(commentId).trim());
+  if (Array.isArray(extraCommentIds)) {
+    for (const ec of extraCommentIds) {
+      if (ec) rawIdPool.push(String(ec).trim());
+    }
+  }
+
+  const candidateCommentIds: string[] = [];
+  for (const raw of rawIdPool) {
+    if (!raw || raw.startsWith('sys_') || raw.startsWith('manual_')) continue;
+    // Skip simulated IDs like c_17269... unless purely numeric
+    if (raw.startsWith('c_') && !/^\d+$/.test(raw.replace(/^c_/, ''))) continue;
+
+    const cleaned = raw.replace(/^c_/, '');
+    if (cleaned.length >= 5) {
+      candidateCommentIds.push(cleaned);
+      if (cleaned.includes('_')) {
+        const parts = cleaned.split('_');
+        const suffix = parts[parts.length - 1];
+        if (suffix && suffix.length >= 5 && /^\d+$/.test(suffix)) {
+          candidateCommentIds.push(suffix);
+        }
+      }
+    }
+  }
+
+  const commentIdCandidates = Array.from(new Set(candidateCommentIds));
 
   console.log(`\n=======================================================`);
-  console.log(`🚀 [VIP DISPATCH]: Sending VIP message & KHQR...`);
-  console.log(`   ↳ User ID: ${cleanUid || 'None'} | Comment IDs: ${commentIdCandidates.join(', ') || 'None'}`);
-  if (imageBuffer) console.log(`   ↳ Image Buffer Attachment: ${imageBuffer.length} bytes`);
-  else if (imageUrl) console.log(`   ↳ Image URL Attachment: ${imageUrl}`);
+  console.log(`🚀 [VIP MULTI-METHOD DISPATCH]: Starting 3-method delivery cascade...`);
+  console.log(`   ↳ Recipient User ID: ${cleanUid || 'None'}`);
+  console.log(`   ↳ Candidate Comment IDs: ${commentIdCandidates.length > 0 ? commentIdCandidates.join(', ') : 'None'}`);
+  if (imageBuffer) console.log(`   ↳ Image Buffer: ${imageBuffer.length} bytes`);
+  else if (imageUrl) console.log(`   ↳ Image URL: ${imageUrl}`);
 
   let lastApiError = '';
 
@@ -486,7 +528,6 @@ export async function sendFacebookReply(
     if (!recipientId || recipientId === 'None' || recipientId.startsWith('FB_USER_ID')) return;
     try {
       if (imageBuffer && imageBuffer.length > 0) {
-        // Direct multipart upload (does NOT require Facebook to crawl external URL)
         const form = new FormData();
         form.append('recipient', JSON.stringify({ id: recipientId }));
         form.append('message', JSON.stringify({
@@ -504,9 +545,7 @@ export async function sendFacebookReply(
           body: form
         });
         if (imgData.message_id || imgData.recipient_id) {
-          console.log(`📸 [KHQR IMAGE BINARY SENT]: Successfully uploaded & delivered KHQR image to (${recipientId})!`);
-        } else {
-          console.warn(`[KHQR IMAGE UPLOAD RESPONSE]:`, imgData);
+          console.log(`📸 [KHQR BINARY ATTACHED]: Delivered KHQR image to User ID (${recipientId})!`);
         }
       } else if (imageUrl) {
         await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
@@ -517,59 +556,99 @@ export async function sendFacebookReply(
             message: {
               attachment: {
                 type: 'image',
-                payload: {
-                  url: imageUrl,
-                  is_reusable: true
-                }
+                payload: { url: imageUrl, is_reusable: true }
               }
             },
             messaging_type: 'RESPONSE'
           })
         });
-        console.log(`📸 [KHQR IMAGE SENT]: Successfully attached KHQR image to User ID (${recipientId})`);
+        console.log(`📸 [KHQR IMAGE SENT]: Attached KHQR image to User ID (${recipientId})`);
       }
     } catch (imgErr) {
-      console.warn(`[KHQR IMAGE ATTACH NOTE]:`, imgErr);
+      console.warn(`[KHQR ATTACH NOTE]:`, imgErr);
     }
   };
 
-  // ---------------------------------------------------------------------
-  // Layer 1 (PRIORITY FOR LIVE ORDERS): Private Reply by Comment ID
-  // 💡 Private Replies API is exempt from the 24-hour messaging window rule!
-  // ---------------------------------------------------------------------
-  for (const cid of commentIdCandidates) {
-    try {
-      const data = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipient: { comment_id: cid },
-          message: { text: messageText }
-        })
-      });
-      if (data.message_id || data.recipient_id) {
-        console.log(`🎉 [PRIVATE REPLY SUCCESS]: Sent VIP message via Comment ID (${cid}) - 24h Window Bypassed!`);
-        const targetRecipient = data.recipient_id || cleanUid;
-        if (targetRecipient && (imageUrl || imageBuffer)) {
-          await sendImageAttachment(targetRecipient);
-        }
-        console.log(`=======================================================\n`);
-        return { success: true, method: 'PRIVATE_REPLY' };
-      } else if (data.error) {
-        lastApiError = data.error.message || `Error code ${data.error.code}`;
-        console.log(`🔄 [PRIVATE REPLY NOTE]: Comment (${cid}) reply responded with: ${lastApiError}`);
+  // =====================================================================
+  // 1️⃣ METHOD 1: Private Reply via Comment ID (Meta Official Send API)
+  // Endpoint: POST /v21.0/me/messages with { "recipient": { "comment_id": target_cid } }
+  // Meta official standard: bypasses 24-hour messaging policy window!
+  // =====================================================================
+  let isDelivered = false;
+
+  if (commentIdCandidates.length > 0) {
+    console.log(`\n👉 [TRY METHOD 1]: Meta Official Private Reply via Comment ID (${commentIdCandidates.join(', ')})...`);
+
+    for (const rawCid of commentIdCandidates) {
+      const cleanCid = String(rawCid || '').trim();
+      const targetCid = cleanCid.includes('_') ? cleanCid.split('_').pop() || cleanCid : cleanCid;
+
+      // Prepare IDs to test: numeric suffix first, then full ID if different
+      const cidsToTest = [targetCid];
+      if (cleanCid !== targetCid) {
+        cidsToTest.push(cleanCid);
       }
-    } catch (e: any) {
-      lastApiError = e?.message || 'Network error';
-      console.warn(`[PRIVATE REPLY NOTE]: ${lastApiError}`);
+
+      for (const testCid of cidsToTest) {
+        if (!testCid || !/^\d+$/.test(testCid) || testCid.length < 8) continue;
+
+        try {
+          console.log(`   ↳ Dispatching POST /v21.0/me/messages with recipient.comment_id: ${testCid}...`);
+          const msgData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              recipient: { comment_id: testCid },
+              message: { text: messageText }
+            })
+          });
+
+          if (msgData.message_id || msgData.recipient_id) {
+            console.log(`🎉 [META OFFICIAL PRIVATE REPLY SUCCESS]: Delivered via recipient.comment_id (${testCid})!`);
+            isDelivered = true;
+            const targetRecipient = msgData.recipient_id || cleanUid;
+            if (targetRecipient && (imageUrl || imageBuffer)) {
+              await sendImageAttachment(targetRecipient);
+            }
+            attemptLogs.push(`✅ វិធីទី ១ (Private Reply) ជោគជ័យ៖ បានផ្ញើតាម Comment ID #${testCid} ចូល Messenger រួចផុតពីកំហិត ២៤ ម៉ោង`);
+            console.log(`=======================================================\n`);
+            return {
+              success: true,
+              method: 'PRIVATE_REPLY',
+              methodTitle: 'Private Reply (តាម Comment ID)',
+              detail: `បានផ្ញើ Private Reply តាម Comment #${testCid} ចូល Messenger រួចផុតពីកំហិត ២៤ ម៉ោង!`,
+              attemptLogs
+            };
+          } else if (msgData.error) {
+            const mErr = msgData.error.message || `Error code ${msgData.error.code}`;
+            console.log(`   ↳ Comment ID ${testCid} response: ${mErr}`);
+            lastApiError = mErr;
+          }
+        } catch (cidErr: any) {
+          console.warn(`   ↳ Comment ID ${testCid} error:`, cidErr?.message);
+          lastApiError = cidErr?.message || 'Private reply network error';
+        }
+      }
     }
+    attemptLogs.push(`⚠️ វិធីទី ១ (Private Reply តាម Comment ID) មិនអាចផ្ញើបាន៖ ${lastApiError}`);
+  } else {
+    console.log(`ℹ️ [METHOD 1 SKIPPED]: No comment ID available for this customer.`);
+    attemptLogs.push(`ℹ️ វិធីទី ១ រំលង (មិនមាន Comment ID)`);
   }
 
-  // ---------------------------------------------------------------------
-  // Layer 2: Send API via User ID (Standard Response & Message Tag Fallback)
-  // ---------------------------------------------------------------------
-  if (cleanUid && !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None', '', 'null', 'undefined'].includes(cleanUid)) {
-    // 1. Try standard RESPONSE first (compliant with Graph API v21+)
+  // =====================================================================
+  // 2️⃣ METHOD 2: Direct Messenger Send API (User PSID)
+  // Endpoint: POST /v21.0/me/messages with { "recipient": { "id": cleanUid }, "messaging_type": "RESPONSE" }
+  // Works if customer messaged the Page within the last 24 hours
+  // =====================================================================
+  const isValidUserUid = Boolean(
+    cleanUid &&
+    !['FB_USER_ID_STREAM', 'MANUAL_USER_ID', 'NONE', 'None', '', 'null', 'undefined'].includes(cleanUid) &&
+    cleanUid.length >= 6
+  );
+
+  if (!isDelivered && isValidUserUid) {
+    console.log(`\n👉 [TRY METHOD 2]: Direct Messenger Inbox (User ID: ${cleanUid})...`);
     try {
       const data = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
         method: 'POST',
@@ -580,75 +659,82 @@ export async function sendFacebookReply(
           messaging_type: 'RESPONSE'
         })
       });
+
       if (data.message_id) {
-        console.log(`📩 [SEND API SUCCESS]: Sent VIP message to User ID (${cleanUid})`);
+        console.log(`🎉 [METHOD 2 SUCCESS]: VIP message delivered directly to Inbox (${cleanUid})!`);
+        isDelivered = true;
         if (imageUrl || imageBuffer) {
           await sendImageAttachment(cleanUid);
         }
+        attemptLogs.push(`✅ វិធីទី ២ ជោគជ័យ៖ ផ្ញើចូល Inbox របស់ភ្ញៀវដោយផ្ទាល់`);
         console.log(`=======================================================\n`);
-        return { success: true, method: 'SEND_API' };
+        return {
+          success: true,
+          method: 'SEND_API',
+          methodTitle: 'Direct Messenger (តាម User ID)',
+          detail: 'បានផ្ញើសារវិក្កយបត្រ & KHQR ចូលប្រអប់សារ Messenger ដោយផ្ទាល់!',
+          attemptLogs
+        };
       } else if (data.error) {
         lastApiError = data.error.message || `Error code ${data.error.code}`;
-      }
-    } catch (e: any) {
-      lastApiError = e?.message || 'Send API error';
-    }
+        console.log(`⚠️ [METHOD 2 FAILED]: ${lastApiError}`);
+        attemptLogs.push(`⚠️ វិធីទី ២ (Direct Inbox) មិនអាចផ្ញើបាន៖ ${lastApiError}`);
 
-    // 2. Try with CONFIRMED_EVENT_UPDATE if supported
-    try {
-      const dataTagged = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipient: { id: cleanUid },
-          message: { text: messageText },
-          messaging_type: 'MESSAGE_TAG',
-          tag: 'CONFIRMED_EVENT_UPDATE'
-        })
-      });
-      if (dataTagged.message_id) {
-        console.log(`📩 [SEND API TAGGED SUCCESS]: Sent VIP invoice to User ID (${cleanUid}) via CONFIRMED_EVENT_UPDATE`);
-        if (imageUrl || imageBuffer) {
-          await sendImageAttachment(cleanUid);
+        // If not restricted by 24h window, optionally test tagged message
+        if (data.error.code !== 10 && data.error.error_subcode !== 2018278) {
+          try {
+            const taggedRes = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient: { id: cleanUid },
+                message: { text: messageText },
+                messaging_type: 'MESSAGE_TAG',
+                tag: 'CONFIRMED_EVENT_UPDATE'
+              })
+            });
+            if (taggedRes.message_id) {
+              console.log(`🎉 [METHOD 2 TAGGED SUCCESS]: Delivered via CONFIRMED_EVENT_UPDATE!`);
+              if (imageUrl || imageBuffer) await sendImageAttachment(cleanUid);
+              attemptLogs.push(`✅ វិធីទី ២ (Tagged) ជោគជ័យ`);
+              console.log(`=======================================================\n`);
+              return {
+                success: true,
+                method: 'SEND_API',
+                methodTitle: 'Direct Messenger (Tagged)',
+                detail: 'បានផ្ញើសារវិក្កយបត្រចូលប្រអប់សារ Messenger ដោយជោគជ័យ!',
+                attemptLogs
+              };
+            }
+          } catch {}
         }
-        console.log(`=======================================================\n`);
-        return { success: true, method: 'SEND_API' };
-      } else if (dataTagged.error && dataTagged.error.error_subcode !== 1893061) {
-        lastApiError = dataTagged.error.message || `Error code ${dataTagged.error.code}`;
       }
-    } catch (tagErr: any) {
-      // Ignore tag deprecation errors
+    } catch (m2Err: any) {
+      lastApiError = m2Err?.message || 'Send API error';
+      console.log(`⚠️ [METHOD 2 EXCEPTION]: ${lastApiError}`);
+      attemptLogs.push(`⚠️ វិធីទី ២ ជួបបញ្ហា៖ ${lastApiError}`);
     }
+  } else if (!isDelivered) {
+    console.log(`ℹ️ [METHOD 2 SKIPPED]: No valid Facebook User PSID available.`);
+    attemptLogs.push(`ℹ️ វិធីទី ២ រំលង (មិនមាន User PSID)`);
   }
 
-  // ---------------------------------------------------------------------
-  // Layer 3: Fallback to Public Comment Reply if Private Reply was blocked
-  // ---------------------------------------------------------------------
-  for (const cid of commentIdCandidates) {
-    try {
-      const pubData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${cid}/comments?access_token=${activeToken}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText })
-      });
-      if (pubData.id) {
-        console.log(`💬 [PUBLIC COMMENT SUCCESS]: Posted VIP reply on Comment ID (${cid})`);
-        console.log(`=======================================================\n`);
-        return { success: true, method: 'PUBLIC_COMMENT' };
-      } else if (pubData.error) {
-        lastApiError = pubData.error.message || `Error code ${pubData.error.code}`;
-      }
-    } catch (pubErr: any) {
-      console.warn(`[PUBLIC COMMENT ERROR]:`, pubErr);
-    }
-  }
-
+  // =====================================================================
+  // Fallback: Smart Manual Fallback
+  // Clipboard copied + One-tap button to open customer Messenger thread
+  // =====================================================================
   const reasonDetail = lastApiError ? ` (${lastApiError})` : '';
-  console.log(`ℹ️ [DISPATCH RESULT]: Direct automated delivery unavailable for this specific recipient: ${lastApiError || 'Facebook 24h Window / permissions restriction'}`);
+  console.log(`ℹ️ [DISPATCH RESULT]: Automated Facebook API blocked for this recipient: ${lastApiError || 'Facebook 24h Window / restricted permissions'}`);
   console.log(`=======================================================\n`);
+
+  attemptLogs.push(`📋 ជម្រើសផ្ញើផ្ទាល់ ៖ បានចម្លងអត្ថបទវិក្កយបត្រ VIP ចូលក្នុងក្តារចុច (Clipboard) រួចរាល់ អាចចុច Paste ក្នុង Messenger បានភ្លាមៗ`);
+
   return {
     success: false,
-    error: `Facebook API មិនទាន់អាចផ្ញើសារស្វ័យប្រវត្តិចូល Inbox បានទេ${reasonDetail} ➔ អត្ថបទត្រូវបាន Copy រួចរាល់ សូមចុច "ឆាតផ្ទាល់" ដើម្បី Paste ផ្ញើជូនភ្ញៀវ!`
+    method: 'MANUAL_COPIED',
+    methodTitle: 'ផ្ញើដោយផ្ទាល់ (ចម្លងរួចរាល់)',
+    error: `Facebook API មិនទាន់អាចផ្ញើស្វ័យប្រវត្តិចូល Inbox បានទេ${reasonDetail} ➔ អត្ថបទត្រូវបាន Copy រួចរាល់ សូមចុច "ឆាតផ្ទាល់" ដើម្បី Paste ផ្ញើជូនភ្ញៀវ!`,
+    attemptLogs
   };
 }
 

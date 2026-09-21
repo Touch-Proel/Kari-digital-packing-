@@ -96,7 +96,9 @@ export function VipInvoiceModal({
           invoice_id: invoice.invoice_id,
           facebook_name: invoice.facebook_name,
           custom_message: customMsg,
-          total_amount: invoice.total_amount
+          total_amount: invoice.total_amount,
+          comment_id: invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]),
+          comment_ids: invoice.comment_ids || []
         })
       });
 
@@ -110,12 +112,19 @@ export function VipInvoiceModal({
 
       if (data.success) {
         invoice.msg_status = 'SENT';
+        if (data.msg_delivery_method) {
+          invoice.msg_delivery_method = data.msg_delivery_method;
+        }
         playSuccessFanfare();
-        onShowToast(`✅ បានផ្ញើវិក្កយបត្រ VIP & Copy ចូល Clipboard រួចរាល់!`, 'success');
+        const successTitle = data.method_title ? `[${data.method_title}] ` : '';
+        onShowToast(`✅ ${successTitle}${data.message || 'បានផ្ញើវិក្កយបត្រ VIP ជោគជ័យ!'}`, 'success');
         onDataChanged();
-        setTimeout(() => onClose(), 600);
+        setTimeout(() => onClose(), 650);
       } else {
+        invoice.msg_status = 'FAILED';
+        invoice.msg_delivery_method = 'MANUAL_COPIED';
         onShowToast(`ℹ️ ${data.error || 'បាន Copy សារវិក្កយបត្ររួចរាល់ ➔ សូមចុចឆាតផ្ទាល់'}`, 'error');
+        onDataChanged();
       }
     } catch (err: any) {
       onShowToast(`❌ បរាជ័យក្នុងការផ្ញើវិក្កយបត្រ VIP៖ ${err?.message || err}`, 'error');
@@ -147,8 +156,13 @@ export function VipInvoiceModal({
               <h3 className="text-white font-black text-sm sm:text-base flex items-center gap-2">
                 <span>ផ្ញើវិក្កយបត្រ VIP (Messenger / ABA)</span>
                 {invoice.msg_status === 'SENT' ? (
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">
-                    ✅ ឆាតជោគជ័យ
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                    <span>✅</span>
+                    <span>
+                      {invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                        ? 'វិធីទី ២ (Private Reply)'
+                        : 'វិធីទី ១ (Direct Inbox)'}
+                    </span>
                   </span>
                 ) : invoice.msg_status === 'FAILED' ? (
                   <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 px-2 py-0.5 rounded-full font-bold animate-pulse">
@@ -175,6 +189,36 @@ export function VipInvoiceModal({
 
         {/* Message Preview Body */}
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-slate-950/70">
+          {/* Multi-Method Delivery Pipeline Indicator */}
+          <div className="bg-[#071120] border border-cyan-900/60 rounded-2xl p-3 shadow-sm">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-2">
+              <div className="flex items-center gap-1.5 text-cyan-300">
+                <span>🛡️</span>
+                <span>ប្រព័ន្ធធានាជោគជ័យ ២ ដំណាក់កាល (Inbox & Private Reply)</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono">Meta Graph API</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center gap-0.5 transition-all ${
+                invoice.msg_delivery_method === 'SEND_API'
+                  ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
+                  : 'bg-slate-900/70 border-slate-800 text-slate-400'
+              }`}>
+                <span className="font-black text-[10px] text-cyan-400">វិធីទី ១</span>
+                <span className="font-bold text-white text-[11px]">Direct Inbox</span>
+                <span className="text-[9px] text-slate-400">ផ្ញើចូល Messenger (ក្នុង ២៤ ម៉ោង)</span>
+              </div>
+              <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center gap-0.5 transition-all ${
+                invoice.msg_delivery_method === 'PRIVATE_REPLY'
+                  ? 'bg-emerald-950/80 border-emerald-400 text-emerald-200 ring-1 ring-emerald-500'
+                  : 'bg-slate-900/70 border-slate-800 text-slate-400'
+              }`}>
+                <span className="font-black text-[10px] text-cyan-400">វិធីទី ២</span>
+                <span className="font-bold text-white text-[11px]">Private Reply</span>
+                <span className="text-[9px] text-amber-300 font-medium">តាមខមិន (រួចផុត ២៤ ម៉ោង)</span>
+              </div>
+            </div>
+          </div>
           {invoice.msg_status === 'FAILED' && (
             <div className="bg-rose-950/60 border border-rose-600/70 rounded-2xl p-3 text-xs text-rose-200 flex items-start gap-2.5 shadow-md">
               <span className="text-lg">⚠️</span>

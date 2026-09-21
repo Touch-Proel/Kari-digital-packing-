@@ -54,6 +54,9 @@ export interface Invoice {
   payment_slip_url?: string;
   msg_status: 'SENT' | 'UNSENT' | 'FAILED';
   msg_error?: string;
+  msg_delivery_method?: 'SEND_API' | 'PRIVATE_REPLY' | 'MANUAL_COPIED';
+  last_comment_id?: string;
+  comment_ids?: string[];
   is_locked?: boolean;
   locked_by?: string | null;
   lock_timestamp?: number;

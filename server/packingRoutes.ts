@@ -622,7 +622,7 @@ router.get('/backlog_invoices', (req: Request, res: Response) => {
 
 // POST /api/send_vip_invoice & /api/notify_customer_packed
 router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invoice', '/api/notify_customer_packed'], async (req: Request, res: Response) => {
-  const { invoice_id, facebook_name, custom_message } = req.body;
+  const { invoice_id, facebook_name, custom_message, comment_id, comment_ids } = req.body;
   const cleanId = typeof invoice_id === 'number' ? invoice_id : parseInt(String(invoice_id || '').replace('#', '').trim(), 10);
   const inv = invoices.find(i => i.invoice_id === cleanId);
 
@@ -675,15 +675,49 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     `🙏 វេររួចសូមផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះចា៎ 🥰`
   );
 
-  // Find recent comment ID if any
-  let commentId: string | null = null;
-  const recentComment = rawComments.find(c => 
-    (c.invoice_id === cleanId || c.facebook_name?.toLowerCase() === customerName.toLowerCase() || (inv.facebook_user_id && c.facebook_user_id === inv.facebook_user_id)) &&
-    c.comment_id && !c.comment_id.startsWith('sys_') && !c.comment_id.startsWith('manual_')
-  );
-  if (recentComment?.comment_id) {
-    commentId = recentComment.comment_id;
+  // Collect all potential candidate comment IDs for multi-method fallback
+  const candidateCommentIds: string[] = [];
+  if (comment_id && typeof comment_id === 'string' && comment_id.trim()) {
+    candidateCommentIds.push(comment_id.trim());
   }
+  if (Array.isArray(comment_ids)) {
+    for (const cid of comment_ids) {
+      const clean = typeof cid === 'string' ? cid.trim() : String(cid || '').trim();
+      if (clean && !candidateCommentIds.includes(clean)) {
+        candidateCommentIds.push(clean);
+      }
+    }
+  }
+  if (inv.last_comment_id) {
+    candidateCommentIds.push(inv.last_comment_id);
+  }
+  if (Array.isArray(inv.comment_ids)) {
+    for (const cid of inv.comment_ids) {
+      if (cid && !candidateCommentIds.includes(cid)) {
+        candidateCommentIds.push(cid);
+      }
+    }
+  }
+
+  // Also query rawComments for this invoice or customer
+  const matchingRawComments = rawComments
+    .slice()
+    .reverse()
+    .filter(c => 
+      (c.invoice_id === cleanId || 
+       (inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' && c.facebook_user_id === inv.facebook_user_id) ||
+       (c.facebook_name && c.facebook_name.toLowerCase() === customerName.toLowerCase())) &&
+      c.comment_id && !c.comment_id.startsWith('sys_') && !c.comment_id.startsWith('manual_')
+    );
+
+  for (const rc of matchingRawComments) {
+    if (rc.comment_id && !candidateCommentIds.includes(rc.comment_id)) {
+      candidateCommentIds.push(rc.comment_id);
+    }
+  }
+
+  const primaryCommentId = candidateCommentIds[0] || null;
+  const extraCommentIds = candidateCommentIds.slice(1);
 
   // Generate KHQR PNG buffer for direct binary attachment
   let khqrPngBuffer: Buffer | undefined;
@@ -699,20 +733,35 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     console.warn('[VIP] Could not generate server KHQR PNG buffer:', qrErr);
   }
 
-  let replyRes: { success: boolean; error?: string } = { success: true };
+  let replyRes: any = { success: false };
   try {
-    replyRes = await sendFacebookReply(commentId, inv.facebook_user_id, vipMsg, undefined, khqrImageUrl, khqrPngBuffer);
+    replyRes = await sendFacebookReply(
+      primaryCommentId,
+      inv.facebook_user_id,
+      vipMsg,
+      undefined,
+      khqrImageUrl,
+      khqrPngBuffer,
+      extraCommentIds
+    );
   } catch (err: any) {
     console.warn('[VIP] sendFacebookReply error:', err);
-    replyRes = { success: false, error: err?.message || 'Meta API error' };
+    replyRes = {
+      success: false,
+      method: 'MANUAL_COPIED',
+      methodTitle: 'ផ្ញើដោយផ្ទាល់ (ចម្លងរួចរាល់)',
+      error: err?.message || 'Meta API error'
+    };
   }
 
-  // Update invoice message status accurately
+  // Update invoice message status and delivery method
   if (replyRes.success) {
     inv.msg_status = 'SENT';
+    inv.msg_delivery_method = replyRes.method;
     inv.msg_error = '';
   } else {
     inv.msg_status = 'FAILED';
+    inv.msg_delivery_method = 'MANUAL_COPIED';
     inv.msg_error = replyRes.error || 'Facebook Meta API rejected message';
   }
   bumpDataRevision();
@@ -721,8 +770,14 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
   res.json({
     success: replyRes.success,
     msg_status: inv.msg_status,
+    msg_delivery_method: replyRes.method,
+    method_title: replyRes.methodTitle,
+    delivery_detail: replyRes.detail,
+    attempt_logs: replyRes.attemptLogs || [],
     error: replyRes.error,
-    message: replyRes.success ? 'បានផ្ញើវិក្កយបត្រ VIP & រូបភាព KHQR ទៅកាន់ Messenger ជោគជ័យ!' : (replyRes.error || 'មិនអាចផ្ញើសារបានទេ ➔ សូមចុចឆាតផ្ទាល់'),
+    message: replyRes.success 
+      ? (replyRes.detail || 'បានផ្ញើវិក្កយបត្រ VIP ជោគជ័យ!') 
+      : (replyRes.error || 'មិនអាចផ្ញើសារបានទេ ➔ សូមចុចឆាតផ្ទាល់'),
     vip_message: vipMsg,
     khqr_image_url: khqrImageUrl,
     recipient_name: customerName,

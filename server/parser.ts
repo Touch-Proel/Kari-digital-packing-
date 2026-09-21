@@ -9,7 +9,7 @@ import {
   activeLiveId,
   settings
 } from './db';
-import { DeliveryZone, Invoice, OrderItem } from './types';
+import { DeliveryZone, Invoice, OrderItem, CustomerComment } from './types';
 import { detectDeliveryZone } from './locationHelper';
 
 export { detectDeliveryZone };
@@ -412,7 +412,7 @@ export function parseAndAllocateComment(
   if (commentId) processedCommentKeys.add(commentId);
   processedCommentKeys.add(signatureKey);
 
-  rawComments.push({
+  const newCommentEntry: CustomerComment = {
     comment_id: savedCommentId,
     live_id: liveId,
     facebook_user_id: fbUserId || 'FB_USER_ID_STREAM',
@@ -420,7 +420,8 @@ export function parseAndAllocateComment(
     comment_text: rawText,
     created_at: new Date().toISOString(),
     picture_url: userPicUrl
-  });
+  };
+  rawComments.push(newCommentEntry);
 
   const { zone, label, detectedLocation, hasExplicitLocation } = detectDeliveryZone(rawText);
 
@@ -511,6 +512,11 @@ export function parseAndAllocateComment(
 
   if (isQuestion || pairs.length === 0) {
     if (inv) {
+      newCommentEntry.invoice_id = inv.invoice_id;
+      inv.last_comment_id = savedCommentId;
+      if (!inv.comment_ids) inv.comment_ids = [];
+      if (!inv.comment_ids.includes(savedCommentId)) inv.comment_ids.push(savedCommentId);
+
       if (!inv.comments) inv.comments = [];
       if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
       if (!inv.unmatched_comments) inv.unmatched_comments = [];
@@ -583,12 +589,20 @@ export function parseAndAllocateComment(
       status: 'Pending',
       packing_stage: 'UNPICKED',
       msg_status: 'UNSENT',
+      last_comment_id: savedCommentId,
+      comment_ids: [savedCommentId],
       items: [],
       comments: [rawText],
       unmatched_comments: []
     };
+    newCommentEntry.invoice_id = inv.invoice_id;
     invoices.unshift(inv);
   } else {
+    newCommentEntry.invoice_id = inv.invoice_id;
+    inv.last_comment_id = savedCommentId;
+    if (!inv.comment_ids) inv.comment_ids = [];
+    if (!inv.comment_ids.includes(savedCommentId)) inv.comment_ids.push(savedCommentId);
+
     if (userPicUrl && !inv.picture_url) inv.picture_url = userPicUrl;
     if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) inv.phone_number = phone;
     
