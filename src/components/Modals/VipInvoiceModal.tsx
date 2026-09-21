@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Invoice } from '../../types';
 import { playPureTone, playSuccessFanfare } from '../../utils/audio';
-import { getKHQRConfig } from '../../utils/khqr';
 import { openMetaInboxDirect } from '../../utils/metaInbox';
 
 interface VipInvoiceModalProps {
@@ -34,7 +33,6 @@ export function VipInvoiceModal({
       setShowLogs(true);
       const initialCid = invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]) || '';
       setCustomCommentId(initialCid);
-      const khqrCfg = getKHQRConfig();
       const customerName = invoice.facebook_name || 'អតិថិជន VIP';
       const phone = invoice.phone_number && invoice.phone_number !== 'គ្មានលេខ' ? invoice.phone_number : 'មិនទាន់មាន';
       const address = invoice.address && !invoice.address.includes('មិនទាន់មាន') ? invoice.address : 'មិនទាន់មាន';
@@ -67,7 +65,6 @@ export function VipInvoiceModal({
         `------------------------\n` +
         `📦 សរុប ${totalQty} ឈុត ៖ $${subtotal.toFixed(2)}${shippingFee === 0 ? ' (ហ្វ្រីដឹក)' : ` + ដឹក $${shippingFee.toFixed(2)}`} = $${exactTotal.toFixed(2)}\n` +
         `💰 ទឹកប្រាក់ត្រូវបង់ ៖ $${exactTotal.toFixed(2)} (${totalKhr}៛)\n\n` +
-        `💳 វេរមក ABA ៖ ${khqrCfg.accountNumber || '124072117063906'} (${khqrCfg.accountName || 'TOCH PROEL'})\n\n` +
         `🙏 វេររួចសូមផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះចា៎ 🥰`;
 
       setCustomMsg(defaultText);

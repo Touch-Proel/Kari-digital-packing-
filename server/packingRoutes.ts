@@ -668,7 +668,6 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     `------------------------\n` +
     `📦 សរុប ${totalQty} ឈុត ៖ $${subtotal.toFixed(2)}${shippingFee === 0 ? ' (ហ្វ្រីដឹក)' : ` + ដឹក $${shippingFee.toFixed(2)}`} = $${exactTotal.toFixed(2)}\n` +
     `💰 ទឹកប្រាក់ត្រូវបង់ ៖ $${exactTotal.toFixed(2)} (${totalKhr}៛)\n\n` +
-    `💳 វេរមក ABA ៖ ${settings.account_number || '124072117063906'} (${settings.account_name || 'TOCH PROEL'})\n\n` +
     `🙏 វេររួចសូមផ្ញើ Slip មកកាន់ប្រអប់ឆាតនេះចា៎ 🥰`
   );
 
