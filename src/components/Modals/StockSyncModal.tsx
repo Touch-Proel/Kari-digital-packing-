@@ -875,7 +875,7 @@ export function StockSyncModal({
                   <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1">
                     {tgItems.map((item, idx) => {
                       const cleanCode = item.code.toUpperCase();
-                      const existingProd = products.find(p => p.code.toUpperCase() === cleanCode);
+                      const existingProd = products.find(p => (!activeLiveId || (p.live_id || activeLiveId) === activeLiveId) && p.code.toUpperCase() === cleanCode);
                       const isExisting = !!existingProd;
                       const isPriceChanged = isExisting && Math.abs(existingProd.price - item.price) > 0.001;
 

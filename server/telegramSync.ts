@@ -84,37 +84,22 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
 
 
 // 2. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
-export function findImageOnDiskForCode(code: string): string | null {
+export function findImageOnDiskForCode(code: string, targetLiveId?: string): string | null {
   try {
     if (!code) return null;
     const clean = code.trim().toLowerCase();
+    const live = targetLiveId || activeLiveId;
     
-    // 1. Check in-memory products first (if any product has image_file for this code)
-    const existingProd = products.find(p => p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
+    // 1. Check in-memory products ONLY for the target live session (never cross-contaminate across different live sessions)
+    const existingProd = products.find(
+      p => (p.live_id || activeLiveId) === live &&
+           p.code && p.code.trim().toLowerCase() === clean &&
+           p.image_file && p.image_file.trim() !== ''
+    );
     if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
       const relPath = existingProd.image_file.replace(/^\//, '');
       if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
         return existingProd.image_file;
-      }
-    }
-
-    // 2. Check disk uploads directory for matching {code}_*.jpg or {code}.*
-    const uploadDirs = [
-      path.join(process.cwd(), 'public', 'uploads'),
-      path.join(process.cwd(), 'dist', 'uploads'),
-      path.join(process.cwd(), 'uploads')
-    ];
-
-    for (const dir of uploadDirs) {
-      if (fs.existsSync(dir)) {
-        const files = fs.readdirSync(dir);
-        const match = files.find(f => {
-          const fLower = f.toLowerCase();
-          return fLower.startsWith(`${clean}_`) || fLower.startsWith(`${clean}.`);
-        });
-        if (match) {
-          return `/uploads/${match}`;
-        }
       }
     }
   } catch {}
@@ -348,6 +333,7 @@ export async function fetchTelegramStockUpdates(options: {
   markRead?: boolean;
   clearCache?: boolean;
   limit?: number;
+  targetLiveId?: string;
 }): Promise<{
   success: boolean;
   bot?: TelegramBotInfo;
@@ -358,6 +344,8 @@ export async function fetchTelegramStockUpdates(options: {
   error?: string;
 }> {
   const token = (options.token || settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+  const targetLive = options.targetLiveId || activeLiveId;
+
   if (!token) {
     return {
       success: false,
@@ -386,12 +374,9 @@ export async function fetchTelegramStockUpdates(options: {
   }
 
   const defaultQty = options.defaultQty || 200;
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-  const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
   try {
     // 2. Fetch updates from Telegram using Loop Pagination
-    // If not clearing cache and we already know lastScannedUpdateId, start incrementally (sub-second scan)
     const maxPages = 15; // Scans up to 1,500 Telegram updates
     const allUpdates: any[] = [];
     let currentOffset: number | undefined = (!options.clearCache && lastScannedUpdateId) ? lastScannedUpdateId + 1 : undefined;
@@ -486,8 +471,6 @@ export async function fetchTelegramStockUpdates(options: {
       let photoFileId: string | undefined = undefined;
       if (hasPhoto) {
         if (isPhoto) {
-          // ⚡ Choose optimal photo resolution (600px - 1000px):
-          // In Telegram, photo array has sizes: [small (90px), medium (320px), large (800px), extra-large (1280px), full-raw (4000px)]
           let chosenPhoto = msg.photo[msg.photo.length - 1]; // fallback
           for (let pIdx = msg.photo.length - 1; pIdx >= 0; pIdx--) {
             const p = msg.photo[pIdx];
@@ -504,8 +487,8 @@ export async function fetchTelegramStockUpdates(options: {
 
       for (let i = 0; i < parsedLines.length; i++) {
         const item = parsedLines[i];
+        const cleanUpperCode = item.code.toUpperCase();
         
-        // Instant check if we already downloaded this specific Telegram photoFileId in cache (0ms)
         let matchedImageUrl: string | undefined = undefined;
         if (photoFileId) {
           const inMem = downloadedPhotoCache.get(photoFileId);
@@ -514,9 +497,13 @@ export async function fetchTelegramStockUpdates(options: {
           }
         }
 
-        newlyParsedMap.set(item.code, {
-          code: item.code,
-          name: item.name || `កូដ ${item.code}`,
+        // Preserve previously downloaded photo for this code if a follow-up caption or text message is processed
+        const prevItem = newlyParsedMap.get(cleanUpperCode);
+        const effectiveImageUrl = matchedImageUrl || prevItem?.image_url;
+
+        newlyParsedMap.set(cleanUpperCode, {
+          code: cleanUpperCode,
+          name: item.name || prevItem?.name || `កូដ ${cleanUpperCode}`,
           price: item.price,
           stock_qty: defaultQty,
           chat_id: msg.chat?.id,
@@ -525,12 +512,11 @@ export async function fetchTelegramStockUpdates(options: {
           message_date: messageDate,
           original_text: rawText,
           message_id: msg.message_id,
-          image_url: matchedImageUrl
+          image_url: effectiveImageUrl
         });
 
-        // Only queue for network download if NOT already found on disk/cache
         if (photoFileId && !matchedImageUrl) {
-          photoToDownloadMap.set(item.code, { fileId: photoFileId, code: item.code, messageDate });
+          photoToDownloadMap.set(cleanUpperCode, { fileId: photoFileId, code: cleanUpperCode, messageDate });
         }
       }
     }
@@ -555,14 +541,14 @@ export async function fetchTelegramStockUpdates(options: {
       );
     }
 
-    // 5. Merge with cached items (keeps previously scanned items even if Telegram queue clears)
+    // 5. Merge with cached items (scoped to current session)
     const combinedMap = new Map<string, TelegramItemParsed>();
     for (const it of cachedTelegramItems) {
       if (!it.image_url) {
-        const diskImg = findImageOnDiskForCode(it.code);
+        const diskImg = findImageOnDiskForCode(it.code, targetLive);
         if (diskImg) it.image_url = diskImg;
       }
-      combinedMap.set(it.code, it);
+      combinedMap.set(it.code.toUpperCase(), it);
     }
     for (const [code, it] of newlyParsedMap.entries()) {
       const existing = combinedMap.get(code);
@@ -570,11 +556,11 @@ export async function fetchTelegramStockUpdates(options: {
         combinedMap.set(code, {
           ...existing,
           ...it,
-          image_url: it.image_url || existing.image_url || findImageOnDiskForCode(code) || undefined
+          image_url: it.image_url || existing.image_url || findImageOnDiskForCode(code, targetLive) || undefined
         });
       } else {
         if (!it.image_url) {
-          const diskImg = findImageOnDiskForCode(it.code);
+          const diskImg = findImageOnDiskForCode(it.code, targetLive);
           if (diskImg) it.image_url = diskImg;
         }
         combinedMap.set(code, it);
@@ -647,11 +633,13 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
-    const resolvedImage = (it.image_file && it.image_file.trim() !== '')
-      ? it.image_file.trim()
-      : findImageOnDiskForCode(cleanCode) || '';
-
     const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
+
+    const hasNewImage = Boolean(it.image_file && it.image_file.trim() !== '');
+    const resolvedImage = hasNewImage
+      ? it.image_file!.trim()
+      : (existing?.image_file || findImageOnDiskForCode(cleanCode, targetLive) || '');
+
     if (existing) {
       existing.live_id = targetLive;
       if (it.price !== undefined && it.price !== null) {
@@ -662,7 +650,9 @@ export function bulkImportStockItems(
       }
       if (it.name && it.name !== `កូដ ${cleanCode}`) existing.name = it.name.trim();
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
-      if (resolvedImage) existing.image_file = resolvedImage;
+      if (hasNewImage) {
+        existing.image_file = it.image_file!.trim();
+      }
       updatedCount++;
     } else {
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
@@ -681,7 +671,7 @@ export function bulkImportStockItems(
     }
   }
 
-  // Auto-sync all imported/updated stock prices, names, and photos to ALL active (non-dispatched) baskets
+  // Auto-sync all imported/updated stock prices, names, and photos to ALL active (non-dispatched) baskets in this live session
   syncAllActiveInvoicesWithStock(targetLive);
 
   bumpDataRevision();
@@ -747,11 +737,13 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
   tgAutoSyncState.running = true;
 
   try {
+    const targetLive = tgAutoSyncState.targetLiveId || activeLiveId;
     const res = await fetchTelegramStockUpdates({
       token: activeToken,
       defaultQty: 200,
       markRead: false,
-      clearCache: false
+      clearCache: false,
+      targetLiveId: targetLive
     });
 
     if (!res.success) {
