@@ -259,6 +259,44 @@ app.get('/api/fb/avatar/:userId', async (req: Request, res: Response) => {
   return res.send(generateFallbackAvatarSvg(fallbackName));
 });
 
+// 6.6 Resolve Direct Meta Business Suite Inbox URL for a User ID / PSID
+app.get('/api/fb/inbox_link/:userId', async (req: Request, res: Response) => {
+  const userId = String(req.params.userId || '').trim();
+  const token = activeFacebookPage?.access_token;
+  const pageId = activeFacebookPage?.id || '102094263212256';
+
+  let selectedItemId = userId;
+
+  if (userId && token && !token.startsWith('simulated_')) {
+    try {
+      const fbRes = await fetch(`https://graph.facebook.com/v21.0/${pageId}/conversations?user_id=${userId}&access_token=${token}`);
+      const fbJson: any = await fbRes.json();
+      if (fbJson?.data?.[0]?.link) {
+        const linkStr = String(fbJson.data[0].link);
+        // Extract thread folder ID from link: /102094263212256/inbox/4738716172883352/?section=messages
+        const match = linkStr.match(/\/inbox\/(\d+)/) || linkStr.match(/threadid=(\d+)/);
+        if (match && match[1]) {
+          selectedItemId = match[1];
+        }
+      }
+    } catch (err) {
+      console.warn(`[Inbox Link Resolver] Failed to resolve thread for ${userId}:`, err);
+    }
+  }
+
+  const directUrl = selectedItemId
+    ? `https://business.facebook.com/latest/inbox/messenger?selected_item_id=${selectedItemId}&mailbox_id=${pageId}&thread_type=FB_MESSAGE`
+    : `https://business.facebook.com/latest/inbox/messenger?mailbox_id=${pageId}&thread_type=FB_MESSAGE`;
+
+  res.json({
+    success: true,
+    userId,
+    selectedItemId,
+    pageId,
+    url: directUrl
+  });
+});
+
 // 7. Sync Live Comments from Facebook Graph API and Auto-Allocate into Baskets
 app.all('/api/fb/sync_comments', async (req: Request, res: Response) => {
   try {
