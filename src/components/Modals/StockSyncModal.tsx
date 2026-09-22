@@ -97,13 +97,17 @@ export function StockSyncModal({
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      // Patterns: 100=3.7, 100:3.7, 100 3.7$, កូដ 100 តម្លៃ 3.7$
-      const m1 = trimmed.match(/(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?/i);
+      // Patterns: 32=3កន្សែង, 33=3.25, 100=3.7, 100:3.7, 100 3.7$, កូដ 100 តម្លៃ 3.7$
+      const m1 = trimmed.match(/^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i);
       if (m1) {
         const code = m1[1].trim().toUpperCase();
         const price = parseFloat(m1[2]);
+        let name = m1[3]?.trim();
+        if (name) {
+          name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+        }
         if (code && !isNaN(price) && price > 0) {
-          result.push({ code, price, name: m1[3]?.trim() });
+          result.push({ code, price, name: name || undefined });
           continue;
         }
       }
