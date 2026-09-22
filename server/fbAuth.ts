@@ -641,7 +641,7 @@ export async function sendFacebookReply(
 
         try {
           console.log(`   ↳ Dispatching POST /v21.0/me/messages with recipient.comment_id: ${testCid}...`);
-          const msgData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+          let msgData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -649,6 +649,23 @@ export async function sendFacebookReply(
               message: { text: messageText }
             })
           });
+
+          // Secondary fallback: test direct /{comment_id}/private_replies endpoint
+          if (!msgData.message_id && !msgData.recipient_id && msgData.error?.code !== 10900) {
+            try {
+              const prData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${testCid}/private_replies`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  message: messageText,
+                  access_token: activeToken
+                })
+              });
+              if (prData.id || prData.recipient_id) {
+                msgData = { message_id: prData.id || prData.recipient_id, ...prData };
+              }
+            } catch {}
+          }
 
           if (msgData.message_id || msgData.recipient_id) {
             console.log(`🎉 [META OFFICIAL PRIVATE REPLY SUCCESS]: Delivered via recipient.comment_id (${testCid})!`);

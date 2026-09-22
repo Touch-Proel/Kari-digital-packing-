@@ -1,7 +1,8 @@
 /**
  * Helper to open Meta Business Suite Inbox directly in browser tab
+ * Format: https://business.facebook.com/latest/inbox/messenger?selected_item_id={USER_ID}&mailbox_id={PAGE_ID}&thread_type=FB_MESSAGE
  */
-export function openMetaInboxDirect(userId?: string) {
+export function openMetaInboxDirect(userId?: string, pageId?: string) {
   const cleanUid = String(userId || '').trim();
   const hasValidId = Boolean(
     cleanUid &&
@@ -9,9 +10,18 @@ export function openMetaInboxDirect(userId?: string) {
     cleanUid.length > 3
   );
 
-  const webUrl = hasValidId
-    ? `https://business.facebook.com/latest/inbox/messenger?selected_item_id=${cleanUid}`
-    : `https://business.facebook.com/latest/inbox/messenger`;
+  const cleanMailboxId = String(pageId || '102094263212256').trim();
+
+  const params = new URLSearchParams();
+  if (hasValidId) {
+    params.set('selected_item_id', cleanUid);
+  }
+  if (cleanMailboxId) {
+    params.set('mailbox_id', cleanMailboxId);
+  }
+  params.set('thread_type', 'FB_MESSAGE');
+
+  const webUrl = `https://business.facebook.com/latest/inbox/messenger?${params.toString()}`;
 
   // Use standard, safe tab navigation
   try {
