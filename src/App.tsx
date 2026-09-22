@@ -60,6 +60,7 @@ export default function App() {
   }>>(new Map());
   const isFetchingInvoicesRef = useRef<boolean>(false);
   const fetchRequestIdRef = useRef<number>(0);
+  const networkFailureCountRef = useRef<number>(0);
   const [networkOnline, setNetworkOnline] = useState<boolean>(true);
 
   // Workflow & UI Filters
@@ -512,9 +513,13 @@ export default function App() {
       const targetRev = overrideRev !== undefined ? overrideRev : currentRevisionRef.current;
       const res = await fetch(`/api/invoices?live_id=${encodeURIComponent(targetLive)}&rev=${targetRev}&t=${Date.now()}`);
       if (!res.ok) {
-        setNetworkOnline(false);
+        networkFailureCountRef.current += 1;
+        if (networkFailureCountRef.current >= 3) {
+          setNetworkOnline(false);
+        }
         return;
       }
+      networkFailureCountRef.current = 0;
       setNetworkOnline(true);
       const json = await res.json();
 
@@ -559,7 +564,10 @@ export default function App() {
         }
       }
     } catch (e) {
-      setNetworkOnline(false);
+      networkFailureCountRef.current += 1;
+      if (networkFailureCountRef.current >= 3) {
+        setNetworkOnline(false);
+      }
     } finally {
       isFetchingInvoicesRef.current = false;
     }

@@ -528,9 +528,9 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 4. Download photos in parallel batches of 16 (4x faster than 4 or 6)
+    // 4. Download photos in parallel batches of 8 (balanced CPU & network bandwidth)
     const downloadEntries = Array.from(photoToDownloadMap.entries());
-    const concurrency = 16;
+    const concurrency = 8;
     for (let i = 0; i < downloadEntries.length; i += concurrency) {
       const chunk = downloadEntries.slice(i, i + concurrency);
       await Promise.all(
