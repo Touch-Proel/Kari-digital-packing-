@@ -3,7 +3,6 @@ import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
 import { formatLiveShortBadge } from '../utils/liveUtils';
-import { openMetaInboxDirect } from '../utils/metaInbox';
 
 function renderCommentWithHighlightedCode(comment: string, code: string) {
   if (!comment) return null;
@@ -369,8 +368,8 @@ function BasketCardComponent({
     }
   };
 
-  // Open Meta Business Suite Inbox directly and copy VIP invoice text
-  const openFacebookDirectChat = async (e?: React.MouseEvent) => {
+  // Copy VIP invoice text to clipboard
+  const handleCopyVipInvoice = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     try {
       const res = await fetch('/api/send_vip_invoice', {
@@ -385,11 +384,12 @@ function BasketCardComponent({
       const data = await res.json();
       if (data.vip_message && navigator.clipboard) {
         await navigator.clipboard.writeText(data.vip_message);
-        onShowToast(`📋 បាន Copy វិក្កយបត្រ ${invoice.facebook_name} រួចរាល់! កំពុងបើក Meta Inbox (Chrome)...`, 'success');
+        playSuccessFanfare();
+        onShowToast(`📋 បានចម្លងវិក្កយបត្រ VIP (${invoice.facebook_name}) រួចរាល់!`, 'success');
       }
-    } catch {}
-
-    openMetaInboxDirect(invoice.facebook_user_id);
+    } catch {
+      onShowToast('❌ បរាជ័យក្នុងការចម្លងវិក្កយបត្រ', 'error');
+    }
   };
 
   // Notify VIP Messenger Invoice
@@ -987,11 +987,10 @@ function BasketCardComponent({
               #{invoice.basket_no || invoice.invoice_id}
             </span>
 
-            {/* Customer Avatar Circle (Clickable to open Meta Inbox) */}
+            {/* Customer Avatar Circle */}
             <div 
-              onClick={openFacebookDirectChat}
-              title={`ចុចដើម្បីបើកឆាត Meta Inbox ជាមួយ ${invoice.facebook_name || 'អតិថិជន'}`}
-              className="w-10 h-10 rounded-full border-2 border-cyan-400/80 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-lg relative ring-2 ring-cyan-500/20 cursor-pointer hover:border-emerald-400 hover:scale-105 active:scale-95 transition-all"
+              title={invoice.facebook_name || 'អតិថិជន'}
+              className="w-10 h-10 rounded-full border-2 border-cyan-400/80 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-lg relative ring-2 ring-cyan-500/20"
             >
               {invoice.picture_url || invoice.facebook_user_id ? (
                 <img
@@ -1917,16 +1916,16 @@ function BasketCardComponent({
                     <div className="flex items-center gap-1.5 min-w-0">
                       <button
                         type="button"
-                        onClick={openFacebookDirectChat}
+                        onClick={handleCopyVipInvoice}
                         className="flex-1 py-2.5 px-2.5 rounded-2xl bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-cyan-900/90 hover:from-rose-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md border border-rose-500/60 active:scale-[0.98] transition-all cursor-pointer min-w-0"
-                        title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បីបើក Messenger និង Paste សារ (Copy រួចរាល់)"
+                        title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បី Copy អត្ថបទវិក្កយបត្រ"
                       >
                         <span className="w-7 h-7 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-sm flex-shrink-0 animate-pulse">
-                          💬
+                          📋
                         </span>
                         <div className="flex flex-col items-start min-w-0 text-left leading-tight truncate">
-                          <span className="font-black text-rose-100 text-xs truncate">ឆាតផ្ទាល់ (Copy រួច)</span>
-                          <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យ · បើក Messenger</span>
+                          <span className="font-black text-rose-100 text-xs truncate">ចម្លងវិក្កយបត្រ (Copy)</span>
+                          <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យស្វ័យប្រវត្តិ</span>
                         </div>
                       </button>
                       <button
@@ -2014,16 +2013,16 @@ function BasketCardComponent({
                   <div className="flex items-center gap-1.5 min-w-0">
                     <button
                       type="button"
-                      onClick={openFacebookDirectChat}
+                      onClick={handleCopyVipInvoice}
                       className="flex-1 py-2.5 px-2.5 rounded-2xl bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-cyan-900/90 hover:from-rose-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md border border-rose-500/60 active:scale-[0.98] transition-all cursor-pointer min-w-0"
-                      title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បីបើក Messenger និង Paste សារ (Copy រួចរាល់)"
+                      title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បី Copy អត្ថបទវិក្កយបត្រ"
                     >
                       <span className="w-7 h-7 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-sm flex-shrink-0 animate-pulse">
-                        💬
+                        📋
                       </span>
                       <div className="flex flex-col items-start min-w-0 text-left leading-tight truncate">
-                        <span className="font-black text-rose-100 text-xs truncate">ឆាតផ្ទាល់ (Copy រួច)</span>
-                        <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យ · បើក Messenger</span>
+                        <span className="font-black text-rose-100 text-xs truncate">ចម្លងវិក្កយបត្រ (Copy)</span>
+                        <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យស្វ័យប្រវត្តិ</span>
                       </div>
                     </button>
                     <button
@@ -2126,16 +2125,16 @@ function BasketCardComponent({
                   <div className="flex items-center gap-1.5 min-w-0">
                     <button
                       type="button"
-                      onClick={openFacebookDirectChat}
+                      onClick={handleCopyVipInvoice}
                       className="flex-1 py-2.5 px-2.5 rounded-2xl bg-gradient-to-r from-rose-900/90 via-rose-800/90 to-cyan-900/90 hover:from-rose-800 hover:to-cyan-800 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-md border border-rose-500/60 active:scale-[0.98] transition-all cursor-pointer min-w-0"
-                      title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បីបើក Messenger និង Paste សារ (Copy រួចរាល់)"
+                      title="ផ្ញើស្វ័យប្រវត្តិមិនបានជោគជ័យ ➔ ចុចដើម្បី Copy អត្ថបទវិក្កយបត្រ"
                     >
                       <span className="w-7 h-7 rounded-xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-sm flex-shrink-0 animate-pulse">
-                        💬
+                        📋
                       </span>
                       <div className="flex flex-col items-start min-w-0 text-left leading-tight truncate">
-                        <span className="font-black text-rose-100 text-xs truncate">ឆាតផ្ទាល់ (Copy រួច)</span>
-                        <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យ · បើក Messenger</span>
+                        <span className="font-black text-rose-100 text-xs truncate">ចម្លងវិក្កយបត្រ (Copy)</span>
+                        <span className="text-[9px] text-rose-300 font-medium truncate">❌ បរាជ័យស្វ័យប្រវត្តិ</span>
                       </div>
                     </button>
                     <button

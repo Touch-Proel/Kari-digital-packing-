@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Invoice } from '../../types';
 import { playPureTone, playSuccessFanfare } from '../../utils/audio';
-import { openMetaInboxDirect } from '../../utils/metaInbox';
 
 interface VipInvoiceModalProps {
   isOpen: boolean;
@@ -155,10 +154,6 @@ export function VipInvoiceModal({
       playSuccessFanfare();
       onShowToast('📋 បានចម្លងអត្ថបទវិក្កយបត្រ VIP រួចរាល់!', 'success');
     }
-  };
-
-  const openMessengerDirect = () => {
-    openMetaInboxDirect(invoice?.facebook_user_id);
   };
 
   return (
@@ -329,24 +324,14 @@ export function VipInvoiceModal({
             <span>{isSending ? 'កំពុងបញ្ជូនសារវិក្កយបត្រ...' : 'ផ្ញើវិក្កយបត្រ VIP ស្វ័យប្រវត្តិ (1-Tap)'}</span>
           </button>
 
-          {/* Secondary Buttons: Copy only & Open Messenger */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={handleCopyOnly}
-              className="py-2.5 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 font-medium text-xs flex items-center justify-center gap-1.5 border border-slate-700/80 active:scale-95 transition-all cursor-pointer"
-            >
-              <span>📋</span>
-              <span>ចម្លងអត្ថបទ (Copy)</span>
-            </button>
-
-            <button
-              onClick={openMessengerDirect}
-              className="py-2.5 px-3 rounded-xl bg-[#0084FF]/15 hover:bg-[#0084FF]/25 text-[#40B0FF] font-medium text-xs flex items-center justify-center gap-1.5 border border-[#0084FF]/40 active:scale-95 transition-all cursor-pointer"
-            >
-              <span>💬</span>
-              <span>បើក Messenger</span>
-            </button>
-          </div>
+          {/* Secondary Button: Copy only */}
+          <button
+            onClick={handleCopyOnly}
+            className="w-full py-2.5 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 font-medium text-xs flex items-center justify-center gap-1.5 border border-slate-700/80 active:scale-95 transition-all cursor-pointer"
+          >
+            <span>📋</span>
+            <span>ចម្លងអត្ថបទវិក្កយបត្រ (Copy Text)</span>
+          </button>
         </div>
       </div>
     </div>
