@@ -152,8 +152,13 @@ async function handleIncomingStockItemPhoto(
   saveDatabaseToDisk();
   bumpDataRevision();
 
-  // 100% Silent Mode: Do not reply or send messages into the Telegram group/channel
-  console.log(`[Telegram Stock Sync] Silently added/updated ${stockItems.length} items from chat ${chatId}: ${stockItems.map(s => s.code).join(', ')}`);
+  const successMsg = `🛍️ <b>បានបញ្ចូលទំនិញចូលស្តុក POS រួចរាល់!</b> ✨
+━━━━━━━━━━━━━━━━━━
+${addedDetails.join('\n')}
+${photoUrl ? '🖼️ <b>រូបភាព:</b> បានទាញយក & រក្សាទុក HD រួចរាល់' : ''}
+🔢 <b>ចំនួនមុខទំនិញសរុប:</b> ${products.length} មុខ`;
+
+  await sendTelegramMessage(token, chatId, successMsg, messageId);
 }
 
 /**
@@ -652,8 +657,11 @@ async function startPollingLoop() {
                 saveDatabaseToDisk();
                 bumpDataRevision();
 
-                // 100% Silent Mode: Do not reply or send messages into the Telegram group/channel
-                console.log(`[Telegram Stock Sync] Silently recorded text items from chat ${chatId}: ${stockItems.map(s => s.code).join(', ')}`);
+                const textStockMsg = `🛍️ <b>បានកត់ត្រាទំនិញចូលស្តុក POS រួចរាល់!</b>
+━━━━━━━━━━━━━━━━━━
+${addedCodes.join('\n')}
+🛒 <b>សរុបទំនិញក្នុងស្តុក:</b> ${products.length} មុខ`;
+                sendTelegramMessage(token, chatId, textStockMsg, messageId).catch(() => {});
               }
             }
             continue;
