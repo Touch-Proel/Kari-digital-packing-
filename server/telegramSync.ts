@@ -90,8 +90,8 @@ export function findImageOnDiskForCode(code: string, liveId?: string): string | 
     const clean = code.trim().toLowerCase();
     const targetLive = liveId || activeLiveId;
     
-    // 1. Check in-memory products ONLY for the target live session
-    const existingProd = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
+    // 1. Check in-memory products ONLY for the specific target live session
+    const existingProd = products.find(p => p.live_id === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
     if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
       const relPath = existingProd.image_file.replace(/^\//, '');
       if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
@@ -501,9 +501,10 @@ export async function fetchTelegramStockUpdates(options: {
           }
         }
 
+        const existingInMap = newlyParsedMap.get(item.code);
         newlyParsedMap.set(item.code, {
           code: item.code,
-          name: item.name || `កូដ ${item.code}`,
+          name: item.name || existingInMap?.name || `កូដ ${item.code}`,
           price: item.price,
           stock_qty: defaultQty,
           chat_id: msg.chat?.id,
@@ -512,7 +513,7 @@ export async function fetchTelegramStockUpdates(options: {
           message_date: messageDate,
           original_text: rawText,
           message_id: msg.message_id,
-          image_url: matchedImageUrl
+          image_url: matchedImageUrl || existingInMap?.image_url
         });
 
         // Only queue for network download if NOT already found on disk/cache
@@ -634,10 +635,6 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
-    const resolvedImage = (it.image_file && it.image_file.trim() !== '')
-      ? it.image_file.trim()
-      : findImageOnDiskForCode(cleanCode, targetLive) || '';
-
     const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
     if (existing) {
       existing.live_id = targetLive;
@@ -649,9 +646,15 @@ export function bulkImportStockItems(
       }
       if (it.name && it.name !== `កូដ ${cleanCode}`) existing.name = it.name.trim();
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
-      if (resolvedImage) existing.image_file = resolvedImage;
+      if (it.image_file && it.image_file.trim() !== '') {
+        existing.image_file = it.image_file.trim();
+      }
       updatedCount++;
     } else {
+      const resolvedImage = (it.image_file && it.image_file.trim() !== '')
+        ? it.image_file.trim()
+        : findImageOnDiskForCode(cleanCode, targetLive) || '';
+
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       const newProd: Product = {
         id: nextId,
