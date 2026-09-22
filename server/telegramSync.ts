@@ -84,37 +84,18 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
 
 
 // 2. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
-export function findImageOnDiskForCode(code: string): string | null {
+export function findImageOnDiskForCode(code: string, liveId?: string): string | null {
   try {
     if (!code) return null;
     const clean = code.trim().toLowerCase();
+    const targetLive = liveId || activeLiveId;
     
-    // 1. Check in-memory products first (if any product has image_file for this code)
-    const existingProd = products.find(p => p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
+    // 1. Check in-memory products ONLY for the specific target live session
+    const existingProd = products.find(p => p.live_id === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
     if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
       const relPath = existingProd.image_file.replace(/^\//, '');
       if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
         return existingProd.image_file;
-      }
-    }
-
-    // 2. Check disk uploads directory for matching {code}_*.jpg or {code}.*
-    const uploadDirs = [
-      path.join(process.cwd(), 'public', 'uploads'),
-      path.join(process.cwd(), 'dist', 'uploads'),
-      path.join(process.cwd(), 'uploads')
-    ];
-
-    for (const dir of uploadDirs) {
-      if (fs.existsSync(dir)) {
-        const files = fs.readdirSync(dir);
-        const match = files.find(f => {
-          const fLower = f.toLowerCase();
-          return fLower.startsWith(`${clean}_`) || fLower.startsWith(`${clean}.`);
-        });
-        if (match) {
-          return `/uploads/${match}`;
-        }
       }
     }
   } catch {}
@@ -262,29 +243,35 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
     if (!trimmed) continue;
 
     // Pattern 1: [កូដ] <code> [= / : / - / x] [តម្លៃ] <price> [$ / usd] [name]
-    // Examples: 100=3.7, 95=4, 99=1.5, 105: 4.5$, 100=3.7 អាវយឺត, កូដ 100 តម្លៃ 3.7$
-    const pat1 = /(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?/i;
+    // Examples: 32=3កន្សែង, 33=3.25, 100=3.7, 95=4, 99=1.5, 105: 4.5$, 100=3.7 អាវយឺត, កូដ 100 តម្លៃ 3.7$
+    const pat1 = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
     const m1 = trimmed.match(pat1);
     if (m1) {
       const code = m1[1].trim().toUpperCase();
       const price = parseFloat(m1[2]);
-      const name = m1[3]?.trim();
+      let name = m1[3]?.trim();
+      if (name) {
+        name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+      }
       if (code && !isNaN(price) && price >= 0) {
-        items.push({ code, price, name });
+        items.push({ code, price, name: name || undefined });
         continue;
       }
     }
 
-    // Pattern 2: Khmer explicit: កូដ <Code> [តម្លៃ] <Price>$
-    // Examples: កូដ 105 5$, កូដ A01 តម្លៃ 4.5
-    const pat2 = /កូដ\s*([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:តម្លៃ|ថ្លៃ)?\s*\$?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?/i;
+    // Pattern 2: Khmer explicit: កូដ <Code> [តម្លៃ] <Price>$ [name]
+    // Examples: កូដ 105 5$, កូដ A01 តម្លៃ 4.5កន្សែង
+    const pat2 = /^កូដ\s*([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:តម្លៃ|ថ្លៃ)?\s*\$?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
     const m2 = trimmed.match(pat2);
     if (m2) {
       const code = m2[1].trim().toUpperCase();
       const price = parseFloat(m2[2]);
-      const name = m2[3]?.trim();
+      let name = m2[3]?.trim();
+      if (name) {
+        name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+      }
       if (code && !isNaN(price) && price >= 0) {
-        items.push({ code, price, name });
+        items.push({ code, price, name: name || undefined });
         continue;
       }
     }
@@ -514,9 +501,10 @@ export async function fetchTelegramStockUpdates(options: {
           }
         }
 
+        const existingInMap = newlyParsedMap.get(item.code);
         newlyParsedMap.set(item.code, {
           code: item.code,
-          name: item.name || `កូដ ${item.code}`,
+          name: item.name || existingInMap?.name || `កូដ ${item.code}`,
           price: item.price,
           stock_qty: defaultQty,
           chat_id: msg.chat?.id,
@@ -525,7 +513,7 @@ export async function fetchTelegramStockUpdates(options: {
           message_date: messageDate,
           original_text: rawText,
           message_id: msg.message_id,
-          image_url: matchedImageUrl
+          image_url: matchedImageUrl || existingInMap?.image_url
         });
 
         // Only queue for network download if NOT already found on disk/cache
@@ -559,7 +547,7 @@ export async function fetchTelegramStockUpdates(options: {
     const combinedMap = new Map<string, TelegramItemParsed>();
     for (const it of cachedTelegramItems) {
       if (!it.image_url) {
-        const diskImg = findImageOnDiskForCode(it.code);
+        const diskImg = findImageOnDiskForCode(it.code, activeLiveId);
         if (diskImg) it.image_url = diskImg;
       }
       combinedMap.set(it.code, it);
@@ -570,11 +558,11 @@ export async function fetchTelegramStockUpdates(options: {
         combinedMap.set(code, {
           ...existing,
           ...it,
-          image_url: it.image_url || existing.image_url || findImageOnDiskForCode(code) || undefined
+          image_url: it.image_url || existing.image_url || findImageOnDiskForCode(code, activeLiveId) || undefined
         });
       } else {
         if (!it.image_url) {
-          const diskImg = findImageOnDiskForCode(it.code);
+          const diskImg = findImageOnDiskForCode(it.code, activeLiveId);
           if (diskImg) it.image_url = diskImg;
         }
         combinedMap.set(code, it);
@@ -647,10 +635,6 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
-    const resolvedImage = (it.image_file && it.image_file.trim() !== '')
-      ? it.image_file.trim()
-      : findImageOnDiskForCode(cleanCode) || '';
-
     const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
     if (existing) {
       existing.live_id = targetLive;
@@ -662,9 +646,15 @@ export function bulkImportStockItems(
       }
       if (it.name && it.name !== `កូដ ${cleanCode}`) existing.name = it.name.trim();
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
-      if (resolvedImage) existing.image_file = resolvedImage;
+      if (it.image_file && it.image_file.trim() !== '') {
+        existing.image_file = it.image_file.trim();
+      }
       updatedCount++;
     } else {
+      const resolvedImage = (it.image_file && it.image_file.trim() !== '')
+        ? it.image_file.trim()
+        : findImageOnDiskForCode(cleanCode, targetLive) || '';
+
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       const newProd: Product = {
         id: nextId,

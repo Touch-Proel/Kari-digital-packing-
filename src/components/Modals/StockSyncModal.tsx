@@ -97,13 +97,17 @@ export function StockSyncModal({
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      // Patterns: 100=3.7, 100:3.7, 100 3.7$, កូដ 100 តម្លៃ 3.7$
-      const m1 = trimmed.match(/(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?/i);
+      // Patterns: 32=3កន្សែង, 33=3.25, 100=3.7, 100:3.7, 100 3.7$, កូដ 100 តម្លៃ 3.7$
+      const m1 = trimmed.match(/^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i);
       if (m1) {
         const code = m1[1].trim().toUpperCase();
         const price = parseFloat(m1[2]);
+        let name = m1[3]?.trim();
+        if (name) {
+          name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+        }
         if (code && !isNaN(price) && price > 0) {
-          result.push({ code, price, name: m1[3]?.trim() });
+          result.push({ code, price, name: name || undefined });
           continue;
         }
       }
@@ -537,129 +541,171 @@ export function StockSyncModal({
 
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[999999] flex items-center justify-center p-3 animate-fadeIn">
-      <div className="bg-[#0B1426] border-[1.5px] border-sky-500/60 rounded-2xl w-full max-w-[560px] flex flex-col overflow-hidden shadow-2xl max-h-[92vh]">
+      <div className="bg-[#0f172a] border border-slate-700/80 rounded-2xl w-full max-w-[580px] flex flex-col overflow-hidden shadow-2xl max-h-[92vh]">
         {/* Header */}
-        <div className="p-3.5 bg-[#121E38] border-b border-slate-700 flex justify-between items-center flex-shrink-0">
-          <div className="font-black text-sm text-cyan-400 flex items-center gap-2 flex-wrap">
-            <span>📦 នាំចូល & នាំចេញស្តុក</span>
-            {activeLiveId && (
-              <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950 px-1.5 py-0.5 rounded border border-cyan-700/60">
-                🎥 #{activeLiveId.length > 10 ? activeLiveId.slice(-8) : activeLiveId}
-              </span>
-            )}
+        <div className="p-4 bg-[#1e293b] border-b border-slate-700/80 flex justify-between items-center flex-shrink-0">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center text-lg border border-sky-500/30">
+              📦
+            </div>
+            <div>
+              <div className="font-black text-sm text-slate-100 flex items-center gap-2">
+                <span>នាំចូល & នាំចេញស្តុក</span>
+                {activeLiveId && (
+                  <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/80 px-2 py-0.5 rounded-full border border-cyan-700/60">
+                    🎥 #{activeLiveId.length > 10 ? activeLiveId.slice(-8) : activeLiveId}
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400">គ្រប់គ្រងស្តុកតាម Telegram, Paste, CSV ឬ Excel</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleSyncBasketsPrice}
               disabled={syncingBaskets}
-              className="text-[11px] bg-emerald-700 hover:bg-emerald-600 text-white font-black px-2.5 py-1 rounded-lg border border-emerald-500/60 shadow flex items-center gap-1 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+              className="text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 py-1.5 rounded-xl border border-emerald-400/40 shadow-sm flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
               title="ធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញគ្រប់កន្ត្រកក្នុង Live នេះឱ្យត្រូវតាមតម្លៃស្តុកបច្ចុប្បន្នភ្លាមៗ"
             >
-              <span>{syncingBaskets ? '⏳ កំពុង Sync...' : '🔄 Sync តម្លៃកន្ត្រក'}</span>
+              <span>{syncingBaskets ? '⏳...' : '🔄'}</span>
+              <span className="hidden sm:inline">Sync តម្លៃកន្ត្រក</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-slate-800/80 text-slate-300 hover:text-white font-bold flex items-center justify-center hover:bg-slate-700 active:scale-95 cursor-pointer border border-slate-700"
+            >
+              ✕
             </button>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-lg bg-slate-800 text-white font-bold flex items-center justify-center hover:bg-slate-700 active:scale-95 cursor-pointer"
-          >
-            ✕
-          </button>
         </div>
 
         {/* Tab Navigation */}
-        <div className="grid grid-cols-4 bg-[#080E1C] border-b border-slate-800 text-xs font-bold p-1 gap-1 flex-shrink-0">
+        <div className="grid grid-cols-4 bg-[#090e17] border-b border-slate-800/80 p-1.5 gap-1.5 flex-shrink-0">
           <button
             onClick={() => setActiveTab('telegram')}
-            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 cursor-pointer text-center ${
+            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer text-center ${
               activeTab === 'telegram'
-                ? 'bg-sky-600 text-white shadow-md font-black'
-                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-800/60'
+                ? 'bg-gradient-to-r from-sky-600 to-cyan-600 text-white shadow-md font-black ring-1 ring-cyan-400/30'
+                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-800/60 font-semibold'
             }`}
           >
-            <span>✈️</span>
-            <span className="text-[11px] truncate">Telegram Bot</span>
+            <span className="text-base">✈️</span>
+            <span className="text-xs truncate">Telegram Bot</span>
           </button>
 
           <button
             onClick={() => setActiveTab('paste')}
-            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 cursor-pointer text-center ${
+            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer text-center ${
               activeTab === 'paste'
-                ? 'bg-sky-600 text-white shadow-md font-black'
-                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-800/60'
+                ? 'bg-gradient-to-r from-sky-600 to-cyan-600 text-white shadow-md font-black ring-1 ring-cyan-400/30'
+                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-800/60 font-semibold'
             }`}
           >
-            <span>📝</span>
-            <span className="text-[11px] truncate">បិទភ្ជាប់ (Paste)</span>
+            <span className="text-base">📝</span>
+            <span className="text-xs truncate">បិទភ្ជាប់ (Paste)</span>
           </button>
 
           <button
             onClick={() => setActiveTab('file')}
-            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 cursor-pointer text-center ${
+            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer text-center ${
               activeTab === 'file'
-                ? 'bg-sky-600 text-white shadow-md font-black'
-                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-800/60'
+                ? 'bg-gradient-to-r from-sky-600 to-cyan-600 text-white shadow-md font-black ring-1 ring-cyan-400/30'
+                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-800/60 font-semibold'
             }`}
           >
-            <span>📁</span>
-            <span className="text-[11px] truncate">File (CSV/JSON)</span>
+            <span className="text-base">📁</span>
+            <span className="text-xs truncate">File (CSV)</span>
           </button>
 
           <button
             onClick={() => setActiveTab('export')}
-            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1 cursor-pointer text-center ${
+            className={`py-2 px-1 rounded-xl transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer text-center ${
               activeTab === 'export'
-                ? 'bg-emerald-600 text-white shadow-md font-black'
-                : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-800/60'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md font-black ring-1 ring-emerald-400/30'
+                : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-800/60 font-semibold'
             }`}
           >
-            <span>📤</span>
-            <span className="text-[11px] truncate">នាំចេញ (Export)</span>
+            <span className="text-base">📤</span>
+            <span className="text-xs truncate">នាំចេញ</span>
           </button>
         </div>
 
         {/* Scrollable Modal Content */}
-        <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-4 bg-[#070D1B]">
+        <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-4 bg-[#0b1120]">
 
           {/* TAB 1: TELEGRAM BOT SYNC */}
           {activeTab === 'telegram' && (
             <div className="flex flex-col gap-3.5 animate-fadeIn">
-              {/* Instructions Banner */}
-              <div className="bg-sky-950/40 border border-sky-600/40 rounded-xl p-3 text-xs text-sky-200 flex flex-col gap-1 leading-relaxed">
-                <div className="font-bold text-cyan-300 flex items-center gap-1.5 text-xs">
-                  <span>💡 វិធីប្រើ Telegram Bot Token តែមួយគត់ (ងាយស្រួល ១០០%) ៖</span>
+              
+              {/* Auto Sync Switch Card */}
+              <div className="bg-gradient-to-r from-slate-900 to-[#131f37] border border-cyan-500/30 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl transition-all ${
+                    autoSyncEnabled ? 'bg-emerald-500/20 text-emerald-400 ring-2 ring-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.3)]' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    {autoSyncEnabled ? '⚡' : '⏱️'}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-xs sm:text-sm text-slate-100">Auto-Sync ស្វ័យប្រវត្តិ</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                        autoSyncEnabled 
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse'
+                          : 'bg-slate-800 text-slate-400 border border-slate-700'
+                      }`}>
+                        {autoSyncEnabled ? 'កំពុងដំណើរការ (ON)' : 'បានបិទ (OFF)'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      {autoSyncEnabled 
+                        ? '🔄 ប្រព័ន្ធកំពុងឆែកទាញរូប & កូដពី Telegram ស្វ័យប្រវត្តិតាមពេលកំណត់'
+                        : 'ចុចប៊ូតុងខាងស្តាំដើម្បីបើកការទាញទិន្នន័យស្វ័យប្រវត្តិរាល់ ១០ វិនាទីម្តង'}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-[11.5px] text-slate-300 space-y-0.5">
-                  <div>1. បញ្ចូល <b>Bot Token</b> របស់អ្នក (ដែលបានពី @BotFather) ខាងក្រោម។</div>
-                  <div>2. Add Bot នោះចូលក្នុង <b>Telegram Group</b> ឬ Channel របស់បង (ឱ្យសិទ្ធិ Administrator)។</div>
-                  <div>3. ផ្ញើរូបភាពទំនិញភ្ជាប់ជាមួយ Caption <b>100=3.7</b> ឬសរសេរកូដក្នុង Group។</div>
-                  <div>4. ចុចប៊ូតុង <b>«ស្កេនទាញកូដ និងរូបភាព»</b> នោះប្រព័ន្ធនឹងទាញទិន្នន័យស្វ័យប្រវត្តិ!</div>
-                </div>
+
+                <button
+                  type="button"
+                  onClick={toggleAutoSync}
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer flex-shrink-0 shadow-md ${
+                    autoSyncEnabled
+                      ? 'bg-rose-600 hover:bg-rose-500 text-white ring-2 ring-rose-400/30'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white ring-2 ring-emerald-400/30 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                  }`}
+                >
+                  <span>{autoSyncEnabled ? '⏹️ បិទ Auto Sync' : '▶️ បើក Auto Sync'}</span>
+                </button>
               </div>
 
-              {/* Bot Token Input Row */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs text-slate-300 font-bold flex justify-between items-center">
-                  <span>🔑 Telegram Bot Token ៖</span>
+              {/* Bot Token Input Card */}
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-200 font-bold flex items-center gap-1.5">
+                    <span>🔑 Telegram Bot Token</span>
+                  </span>
                   {tokenStatus === 'valid' && (
-                    <span className="text-emerald-400 font-bold text-[11px] flex items-center gap-1">
-                      <span>🟢 ភ្ជាប់រួច៖ @{botUsername}</span>
+                    <span className="text-emerald-400 font-bold text-[11px] bg-emerald-950/60 border border-emerald-600/50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span>🟢 @{botUsername || 'Pitoubot_bot'}</span>
                     </span>
                   )}
                   {tokenStatus === 'invalid' && (
-                    <span className="text-rose-400 font-bold text-[11px]">
+                    <span className="text-rose-400 font-bold text-[11px] bg-rose-950/60 border border-rose-600/50 px-2 py-0.5 rounded-full">
                       🔴 Token មិនត្រឹមត្រូវ
                     </span>
                   )}
-                </label>
+                </div>
+
                 <div className="flex gap-2">
                   <input
                     type="password"
-                    placeholder="ឧទាហរណ៍៖ 8123456789:AAHfkj_sdfk..."
+                    placeholder="ឧ. 8123456789:AAHfkj_sdfk..."
                     value={botToken}
                     onChange={e => {
                       setBotToken(e.target.value);
                       setTokenStatus('idle');
                     }}
-                    className="flex-1 bg-slate-900 border border-sky-700/60 rounded-xl px-3 py-2 text-xs font-mono text-cyan-300 outline-none focus:border-cyan-400"
+                    className="flex-1 bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-mono text-cyan-300 outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 transition-all placeholder:text-slate-600"
                   />
                   <button
                     type="button"
@@ -667,7 +713,7 @@ export function StockSyncModal({
                     disabled={testingToken || !botToken.trim()}
                     className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-bold active:scale-95 disabled:opacity-50 cursor-pointer flex-shrink-0"
                   >
-                    {testingToken ? '⏳...' : 'តេស្ត Token'}
+                    {testingToken ? '⏳...' : 'តេស្ត'}
                   </button>
                   <button
                     type="button"
@@ -682,10 +728,23 @@ export function StockSyncModal({
                     type="button"
                     onClick={handleSaveToken}
                     disabled={!botToken.trim()}
-                    className="px-3 py-2 rounded-xl bg-sky-800 hover:bg-sky-700 border border-sky-500 text-sky-200 text-xs font-bold active:scale-95 disabled:opacity-50 cursor-pointer flex-shrink-0"
+                    className="px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold active:scale-95 disabled:opacity-50 cursor-pointer flex-shrink-0 shadow-sm"
                   >
                     💾 រក្សាទុក
                   </button>
+                </div>
+              </div>
+
+              {/* Instructions Banner Accordion/Summary */}
+              <div className="bg-sky-950/30 border border-sky-600/30 rounded-2xl p-3 text-xs text-sky-200 flex flex-col gap-1.5 leading-relaxed">
+                <div className="font-bold text-cyan-300 flex items-center gap-1.5 text-xs">
+                  <span>💡 វិធីប្រើ Telegram Sync (ស្ងាត់ ១០០%) ៖</span>
+                </div>
+                <div className="text-[11.5px] text-slate-300 space-y-1">
+                  <div>1. បញ្ចូល <b>Bot Token</b> របស់អ្នក (ដែលបានពី @BotFather) ខាងលើ។</div>
+                  <div>2. Add Bot ចូលក្នុង <b>Telegram Group</b> ឬ Channel របស់អ្នក (ឱ្យសិទ្ធិ Administrator)។</div>
+                  <div>3. ផ្ញើរូបភាពទំនិញភ្ជាប់ជាមួយ Caption <b>100=3.7</b> ឬសរសេរកូដក្នុង Group។</div>
+                  <div>4. ចុច <b>«ស្កេនទាញកូដ»</b> ឬបើក <b>«Auto-Sync»</b> ខាងលើ នោះប្រព័ន្ធនឹងទាញទិន្នន័យស្វ័យប្រវត្តិដោយគ្មានការផ្ញើសាររញ៉េរញ៉ៃចូល Group ឡើយ!</div>
                 </div>
               </div>
 
