@@ -133,6 +133,7 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
 
     const comments = result.data || [];
     let newAllocatedCount = 0;
+    let newProcessedCommentsCount = 0;
 
     for (const c of comments) {
       const parsed = parseAndAllocateComment(
@@ -143,6 +144,10 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
         c.id,
         c.from?.picture?.data?.url
       );
+
+      if (parsed.status !== 'IGNORED') {
+        newProcessedCommentsCount++;
+      }
 
       if (parsed.status === 'SUCCESS') {
         newAllocatedCount++;
@@ -183,10 +188,10 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
     liveSyncState.lastNewOrdersCount = newAllocatedCount;
     liveSyncState.lastError = null;
 
-    if (newAllocatedCount > 0) {
+    if (newProcessedCommentsCount > 0) {
       bumpDataRevision();
       saveDatabaseToDisk();
-      console.log(`🎉 [Live Real-Time Sync]: Allocated ${newAllocatedCount} new orders into baskets from Live #${targetId}!`);
+      console.log(`🎉 [Live Real-Time Sync]: Processed ${newProcessedCommentsCount} comments (${newAllocatedCount} new orders) from Live #${targetId}!`);
     }
 
     const activeBaskets = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled');

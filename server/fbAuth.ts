@@ -396,7 +396,7 @@ function getSimulatedSampleComments() {
 }
 
 // Fetch Comments for a Post or Live Stream with full pagination
-export async function fetchFacebookComments(targetPostId: string, pageAccessToken?: string, maxLimit = 5000) {
+export async function fetchFacebookComments(targetPostId: string, pageAccessToken?: string, maxLimit = 10000) {
   const token = pageAccessToken || activeFacebookPage?.access_token;
   const isSimulatedTarget = !targetPostId || targetPostId.startsWith('LIVE_') || targetPostId.startsWith('sim_') || targetPostId.startsWith('POST_');
 
@@ -405,36 +405,66 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
   }
 
   try {
-    const cleanId = targetPostId.includes('_') ? targetPostId.split('_').pop() : targetPostId;
+    const rawTarget = targetPostId.trim();
+    const cleanId = rawTarget.includes('_') ? rawTarget.split('_').pop() : rawTarget;
     const allComments: any[] = [];
-    let nextUrl: string | null = `https://graph.facebook.com/v21.0/${cleanId}/comments?fields=from{id,name,picture},message,id,created_time&order=chronological&limit=100&access_token=${token}`;
-    let pageCount = 0;
-    const maxPages = Math.ceil(maxLimit / 100);
+    const seenCommentIds = new Set<string>();
 
-    while (nextUrl && pageCount < maxPages && allComments.length < maxLimit) {
-      pageCount++;
-      const data: any = await safeGraphApiFetch(nextUrl);
+    // Try fetching with filter=stream and live_filter=all_comments to bypass Facebook's spam/relevance filter and fetch all comments
+    const tryTargetIds = [cleanId];
+    if (rawTarget !== cleanId) {
+      tryTargetIds.push(rawTarget);
+    }
 
-      if (data.error) {
-        console.error(`Facebook Graph API error on page ${pageCount}:`, data.error);
-        // If first page failed with error, return simulated fallback comments or error
-        if (allComments.length === 0) {
-          console.log(`[FB Sync Fallback]: Returning simulated live comments due to Graph API notice: ${data.error.message}`);
-          return { data: getSimulatedSampleComments(), isSimulated: true, error: data.error.message };
+    for (const targetId of tryTargetIds) {
+      if (allComments.length > 0) break;
+
+      let nextUrl: string | null = `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&filter=stream&live_filter=all_comments&order=chronological&limit=100&access_token=${token}`;
+      let pageCount = 0;
+      const maxPages = Math.ceil(maxLimit / 100);
+
+      while (nextUrl && pageCount < maxPages && allComments.length < maxLimit) {
+        pageCount++;
+        const data: any = await safeGraphApiFetch(nextUrl);
+
+        if (data.error) {
+          console.error(`Facebook Graph API error on target ${targetId} page ${pageCount}:`, data.error);
+          // If stream filter failed (e.g. standard post doesn't support live_filter), fallback to standard query
+          if (pageCount === 1 && data.error.code !== 190) {
+            const fallbackUrl = `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&filter=stream&order=chronological&limit=100&access_token=${token}`;
+            const fallbackData: any = await safeGraphApiFetch(fallbackUrl);
+            if (fallbackData?.data && Array.isArray(fallbackData.data)) {
+              for (const itm of fallbackData.data) {
+                if (itm.id && !seenCommentIds.has(itm.id)) {
+                  seenCommentIds.add(itm.id);
+                  allComments.push(itm);
+                }
+              }
+              if (fallbackData.paging?.next) {
+                nextUrl = fallbackData.paging.next;
+                continue;
+              }
+            }
+          }
+          break;
         }
-        break;
-      }
 
-      const items = data.data || [];
-      if (items.length === 0) break;
+        const items = data.data || [];
+        if (items.length === 0) break;
 
-      allComments.push(...items);
-      console.log(`[FB Sync] Page ${pageCount}: fetched ${items.length} comments (Total: ${allComments.length})`);
+        for (const itm of items) {
+          if (itm.id && !seenCommentIds.has(itm.id)) {
+            seenCommentIds.add(itm.id);
+            allComments.push(itm);
+          }
+        }
+        console.log(`[FB Sync] Target ${targetId} Page ${pageCount}: fetched ${items.length} comments (Total Unique: ${allComments.length})`);
 
-      if (data.paging && data.paging.next) {
-        nextUrl = data.paging.next;
-      } else {
-        nextUrl = null;
+        if (data.paging && data.paging.next) {
+          nextUrl = data.paging.next;
+        } else {
+          nextUrl = null;
+        }
       }
     }
 
