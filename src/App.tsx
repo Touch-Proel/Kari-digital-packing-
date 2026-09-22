@@ -1199,17 +1199,15 @@ export default function App() {
         </div>
       </div>
 
-      {/* Network Status Badge */}
-      <div
-        className={`fixed bottom-3 right-3 px-2.5 py-1 rounded-xl text-[11px] font-black z-[99999] shadow-lg flex items-center gap-1 ${
-          networkOnline
-            ? 'bg-emerald-950/90 border border-emerald-500 text-emerald-300'
-            : 'bg-rose-950/90 border border-rose-500 text-rose-300'
-        }`}
-      >
-        <span className={`w-2 h-2 rounded-full ${networkOnline ? 'bg-emerald-400' : 'bg-rose-500 animate-ping'}`}></span>
-        <span>{networkOnline ? 'WiFi ភ្ជាប់រួចរាល់' : 'ដាច់សេវា WiFi!'}</span>
-      </div>
+      {/* Network Status Indicator (Only floating alert if offline, otherwise subtle indicator) */}
+      {!networkOnline && (
+        <div
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full text-xs font-black z-[99999] shadow-2xl flex items-center gap-1.5 bg-rose-950/95 border border-rose-500 text-rose-200 animate-bounce"
+        >
+          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+          <span>⚠️ ដាច់សេវាបណ្តាញ WiFi!</span>
+        </div>
+      )}
 
       {/* All Modals */}
       <QCModal

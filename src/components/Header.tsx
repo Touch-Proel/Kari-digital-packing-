@@ -40,35 +40,35 @@ export function Header({
   totalBasketCount
 }: HeaderProps) {
   return (
-    <div className="bg-[#081122]/95 backdrop-blur-md border border-[#182848] p-2.5 rounded-3xl flex flex-col gap-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
+    <div className="bg-[#081122]/95 backdrop-blur-md border border-[#182848] p-2.5 rounded-2xl flex flex-col gap-2 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
       {/* 2 Big Top Buttons Side-by-Side (ទទឹមគ្នា ២ ប៊ូតុងធំៗ) */}
       <div className="grid grid-cols-2 gap-2">
         {/* Button 1 (Left): KARI ARNETT OS (Settings & System) */}
         <button
           type="button"
           onClick={onOpenSystemSettings}
-          className="bg-gradient-to-br from-[#0B1E3D] via-[#102A54] to-[#0A1830] hover:from-[#0E264D] hover:to-[#0F203D] border-[1.5px] border-cyan-500/60 hover:border-cyan-400 p-2.5 rounded-2xl flex flex-col justify-between items-start text-left shadow-[0_4px_15px_rgba(6,182,212,0.15)] active:scale-[0.98] transition-all cursor-pointer group min-h-[72px]"
+          className="bg-gradient-to-br from-[#0B1E3D] via-[#102A54] to-[#0A1830] hover:from-[#0E264D] hover:to-[#0F203D] border-[1.5px] border-cyan-500/60 hover:border-cyan-400 p-2 rounded-xl flex flex-col justify-between items-start text-left shadow-[0_4px_15px_rgba(6,182,212,0.15)] active:scale-[0.98] transition-all cursor-pointer group min-h-[64px]"
           title="ចុចដើម្បីបើកការកំណត់ទូទៅ ប្រព័ន្ធ និង Profile អ្នកច្រក"
         >
-          <div className="w-full flex items-center justify-between">
-            <div className="flex items-center gap-1 font-black text-xs sm:text-sm bg-gradient-to-r from-[#00F0FF] to-[#38BDF8] bg-clip-text text-transparent truncate">
+          <div className="w-full flex items-center justify-between gap-1">
+            <div className="flex items-center gap-1 font-black text-xs bg-gradient-to-r from-[#00F0FF] to-[#38BDF8] bg-clip-text text-transparent whitespace-nowrap">
               <span>⚡</span>
-              <span className="truncate">KARI ARNETT OS</span>
+              <span>KARI OS</span>
             </div>
-            <span className="text-[11px] text-cyan-400 bg-cyan-950/80 px-1.5 py-0.2 rounded-md border border-cyan-500/40 font-bold group-hover:scale-105 transition-transform flex-shrink-0">
+            <span className="text-[10px] text-cyan-400 bg-cyan-950/90 px-1.5 py-0.5 rounded border border-cyan-500/40 font-bold group-hover:scale-105 transition-transform flex-shrink-0 whitespace-nowrap">
               ⚙️ កំណត់
             </span>
           </div>
 
           {/* Subtitle & Quick Status Info */}
-          <div className="w-full flex items-center justify-between gap-1 text-[10.5px] text-slate-300 font-medium pt-1 border-t border-cyan-900/40">
-            <span className="truncate flex items-center gap-1">
+          <div className="w-full flex items-center justify-between gap-1 text-[10px] text-slate-300 font-medium pt-1 border-t border-cyan-900/40">
+            <span className="truncate flex items-center gap-1 max-w-[95px]">
               <span className="text-slate-400">👤</span>
-              <span className="truncate text-cyan-200 font-bold">{packerName || 'កំណត់ឈ្មោះ'}</span>
+              <span className="truncate text-cyan-200 font-bold">{packerName || 'អ្នកច្រក'}</span>
             </span>
             <span className="flex items-center gap-1 flex-shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-emerald-400 font-bold">ON</span>
+              <span className="text-emerald-400 font-bold text-[9.5px]">ON</span>
             </span>
           </div>
         </button>
@@ -77,32 +77,32 @@ export function Header({
         <button
           type="button"
           onClick={onOpenFullStockManager}
-          className="bg-gradient-to-br from-[#0B2544] via-[#0E325C] to-[#081B33] hover:from-[#0D2D52] hover:to-[#0B2444] border-[1.5px] border-[#0284C7] hover:border-sky-400 p-2.5 rounded-2xl flex flex-col justify-between items-start text-left shadow-[0_4px_15px_rgba(2,132,199,0.2)] active:scale-[0.98] transition-all cursor-pointer group min-h-[72px]"
+          className="bg-gradient-to-br from-[#0B2544] via-[#0E325C] to-[#081B33] hover:from-[#0D2D52] hover:to-[#0B2444] border-[1.5px] border-[#0284C7] hover:border-sky-400 p-2 rounded-xl flex flex-col justify-between items-start text-left shadow-[0_4px_15px_rgba(2,132,199,0.2)] active:scale-[0.98] transition-all cursor-pointer group min-h-[64px]"
           title="ចុចដើម្បីបើកផ្ទាំងគ្រប់គ្រងស្តុកធំពេញអេក្រង់ (Full Screen Stock Manager)"
         >
-          <div className="w-full flex items-center justify-between">
-            <div className="flex items-center gap-1 font-black text-xs sm:text-sm text-sky-300 group-hover:text-cyan-200 truncate">
+          <div className="w-full flex items-center justify-between gap-1">
+            <div className="flex items-center gap-1 font-black text-xs text-sky-300 group-hover:text-cyan-200 whitespace-nowrap">
               <span>📦</span>
-              <span className="truncate">គ្រប់គ្រងស្តុក LIVE</span>
+              <span>ស្តុក LIVE</span>
             </div>
-            <span className="text-[10.5px] bg-sky-950/90 text-cyan-300 border border-sky-500/50 px-1.5 py-0.2 rounded-md font-mono font-bold flex-shrink-0">
+            <span className="text-[10px] bg-sky-950/90 text-cyan-300 border border-sky-500/50 px-1.5 py-0.5 rounded font-mono font-bold flex-shrink-0 whitespace-nowrap">
               {productsCount} មុខ
             </span>
           </div>
 
           {/* Subtitle & Stock Quick Alert */}
-          <div className="w-full flex items-center justify-between gap-1 text-[10.5px] font-medium pt-1 border-t border-sky-900/40">
-            <span className="text-emerald-400 font-bold flex items-center gap-1 truncate">
+          <div className="w-full flex items-center justify-between gap-1 text-[10px] font-medium pt-1 border-t border-sky-900/40">
+            <span className="text-emerald-400 font-bold flex items-center gap-1 flex-shrink-0 text-[9.5px]">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-              <span>REAL-TIME</span>
+              <span>LIVE</span>
             </span>
             {outStockCount > 0 ? (
-              <span className="text-rose-300 bg-rose-950/80 px-1.5 py-0.2 rounded text-[9.5px] font-bold border border-rose-500/50 flex-shrink-0">
+              <span className="text-rose-300 bg-rose-950/90 px-1.5 py-0.5 rounded text-[9px] font-bold border border-rose-500/50 flex-shrink-0 whitespace-nowrap">
                 🔴 អស់ ({outStockCount})
               </span>
             ) : (
-              <span className="text-cyan-400 text-[10px] font-bold flex-shrink-0">
-                🔍 បើកមើល ➔
+              <span className="text-cyan-400 text-[9.5px] font-bold flex-shrink-0 whitespace-nowrap">
+                🔍 មើលស្តុក ➔
               </span>
             )}
           </div>
@@ -137,7 +137,7 @@ export function Header({
               <button
                 type="button"
                 onClick={onOpenManageLiveModal}
-                className="w-full bg-[#050B16] hover:bg-[#091428] text-sky-300 border border-sky-600/40 hover:border-cyan-400 px-3 py-1.5 rounded-xl text-xs font-bold truncate flex items-center justify-between gap-1 shadow-inner active:scale-[0.98] transition-all cursor-pointer text-left h-8.5"
+                className="w-full bg-[#050B16] hover:bg-[#091428] text-sky-300 border border-sky-600/40 hover:border-cyan-400 px-2.5 py-1 rounded-xl text-xs font-bold truncate flex items-center justify-between gap-1 shadow-inner active:scale-[0.98] transition-all cursor-pointer text-left h-8"
                 title="ចុចដើម្បីប្តូរ ឬលុបវគ្គ Live"
               >
                 <span className="truncate">{liveDisplayTitle}</span>
@@ -152,7 +152,7 @@ export function Header({
           <button
             type="button"
             onClick={onCreateLiveSession}
-            className="w-8.5 h-8.5 rounded-xl bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm"
+            className="w-8 h-8 rounded-xl bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm"
             title="បង្កើតវគ្គ Live ថ្មី"
           >
             <span>➕</span>
@@ -163,7 +163,7 @@ export function Header({
         <button
           type="button"
           onClick={onOpenPickingModal}
-          className="bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/70 px-2.5 py-1.5 rounded-xl font-bold text-xs whitespace-nowrap active:scale-95 transition-all shadow-sm flex items-center gap-1 h-8.5 flex-shrink-0 cursor-pointer"
+          className="bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/70 px-2 py-1 rounded-xl font-bold text-xs whitespace-nowrap active:scale-95 transition-all shadow-sm flex items-center gap-1 h-8 flex-shrink-0 cursor-pointer"
           title="បើកបញ្ជីប្រមូលទំនិញ (Picking List)"
         >
           <span>📋</span>
@@ -174,7 +174,7 @@ export function Header({
         <button
           type="button"
           onClick={onToggleCommentStream}
-          className={`px-2.5 py-1.5 rounded-xl font-bold text-xs border flex items-center gap-1 transition-all h-8.5 flex-shrink-0 cursor-pointer ${
+          className={`px-2 py-1 rounded-xl font-bold text-xs border flex items-center gap-1 transition-all h-8 flex-shrink-0 cursor-pointer ${
             isStreamOpen
               ? 'bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
               : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:border-slate-500'
@@ -182,7 +182,7 @@ export function Header({
           title="បើក/បិទ ផ្ទាំងចាប់ខំមិន Live"
         >
           <span>💬</span>
-          <span className="hidden xs:inline">ខំមិន</span>
+          <span>ខំមិន</span>
         </button>
       </div>
     </div>

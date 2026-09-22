@@ -118,6 +118,7 @@ export interface AppSettings {
   telegram_token: string;
   telegram_chat_id: string;
   gemini_api_key?: string;
+  admin_pin?: string;
   parser_strict_catalog?: boolean;
   parser_allow_standalone?: boolean;
 }
