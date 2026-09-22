@@ -119,7 +119,8 @@ async function handleIncomingStockItemPhoto(
       stock_qty: 200,
       image_file: photoUrl
     })),
-    'merge'
+    'merge',
+    { targetLiveId: activeLiveId }
   );
 
   const addedDetails: string[] = [];
