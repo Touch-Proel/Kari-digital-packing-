@@ -106,7 +106,8 @@ export async function downloadTelegramPhoto(
   token: string,
   fileId: string,
   codeHint: string,
-  dateHint?: string | number
+  dateHint?: string | number,
+  forceFresh: boolean = false
 ): Promise<string | undefined> {
   const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
 
@@ -125,44 +126,46 @@ export async function downloadTelegramPhoto(
   const dd = String(d.getDate()).padStart(2, '0');
   const dateStr = `${yyyy}${mm}${dd}`;
 
-  const fileHash = fileId.slice(-8).replace(/[^a-zA-Z0-9]/g, '');
-  const standardFilename = `${safeCode}_${fileHash || 'img'}.jpg`;
+  const cleanFileKey = fileId.replace(/[^a-zA-Z0-9]/g, '').slice(-16) || 'img';
+  const standardFilename = `${safeCode}_${cleanFileKey}.jpg`;
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
-  // 1. In-memory cache check by exact fileId (0ms)
-  if (downloadedPhotoCache.has(fileId)) {
-    const cached = downloadedPhotoCache.get(fileId);
-    if (cached) {
-      const p1 = path.join(process.cwd(), 'public', cached.replace(/^\//, ''));
-      const p2 = path.join(process.cwd(), 'dist', cached.replace(/^\//, ''));
-      if (fs.existsSync(p1) || fs.existsSync(p2)) {
-        return cached;
+  if (!forceFresh) {
+    // 1. In-memory cache check by exact fileId (0ms)
+    if (downloadedPhotoCache.has(fileId)) {
+      const cached = downloadedPhotoCache.get(fileId);
+      if (cached) {
+        const p1 = path.join(process.cwd(), 'public', cached.replace(/^\//, ''));
+        const p2 = path.join(process.cwd(), 'dist', cached.replace(/^\//, ''));
+        if (fs.existsSync(p1) || fs.existsSync(p2)) {
+          return cached;
+        }
       }
     }
-  }
 
-  // 2. Fast disk check: if photo for this specific fileId is already downloaded
-  const existingPath = path.join(uploadDir, standardFilename);
-  const existingDistPath = path.join(distUploadDir, standardFilename);
-  if (fs.existsSync(existingPath)) {
-    try {
-      const stat = fs.statSync(existingPath);
-      if (stat.size > 1000) {
-        const cachedUrl = `/uploads/${standardFilename}`;
-        downloadedPhotoCache.set(fileId, cachedUrl);
-        return cachedUrl;
-      }
-    } catch {}
-  } else if (fs.existsSync(existingDistPath)) {
-    try {
-      const stat = fs.statSync(existingDistPath);
-      if (stat.size > 1000) {
-        const cachedUrl = `/uploads/${standardFilename}`;
-        downloadedPhotoCache.set(fileId, cachedUrl);
-        return cachedUrl;
-      }
-    } catch {}
+    // 2. Fast disk check: if photo for this specific fileId is already downloaded
+    const existingPath = path.join(uploadDir, standardFilename);
+    const existingDistPath = path.join(distUploadDir, standardFilename);
+    if (fs.existsSync(existingPath)) {
+      try {
+        const stat = fs.statSync(existingPath);
+        if (stat.size > 1000) {
+          const cachedUrl = `/uploads/${standardFilename}`;
+          downloadedPhotoCache.set(fileId, cachedUrl);
+          return cachedUrl;
+        }
+      } catch {}
+    } else if (fs.existsSync(existingDistPath)) {
+      try {
+        const stat = fs.statSync(existingDistPath);
+        if (stat.size > 1000) {
+          const cachedUrl = `/uploads/${standardFilename}`;
+          downloadedPhotoCache.set(fileId, cachedUrl);
+          return cachedUrl;
+        }
+      } catch {}
+    }
   }
 
   try {
@@ -325,6 +328,8 @@ export let cachedTelegramItems: TelegramItemParsed[] = [];
 
 export function clearScannedTelegramCache() {
   cachedTelegramItems = [];
+  lastScannedUpdateId = undefined;
+  downloadedPhotoCache.clear();
 }
 
 // 4. Fetch and Parse stock updates from Telegram via Bot Token Only
@@ -531,7 +536,7 @@ export async function fetchTelegramStockUpdates(options: {
       await Promise.all(
         chunk.map(async ([code, { fileId, messageDate }]) => {
           try {
-            const url = await downloadTelegramPhoto(token, fileId, code, messageDate);
+            const url = await downloadTelegramPhoto(token, fileId, code, messageDate, !!options.clearCache);
             const item = newlyParsedMap.get(code);
             if (item && url) {
               item.image_url = url;
