@@ -66,58 +66,96 @@ export function CameraScannerModal({
     return text;
   };
 
-  // Decode Image File (from Camera capture or upload)
-  const processImageFile = (file: File) => {
+  // Decode Image File (from Camera capture or upload) with BarcodeDetector + Multi-scale jsQR
+  const processImageFile = async (file: File) => {
     setIsProcessingFile(true);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          setIsProcessingFile(false);
-          return;
-        }
-
-        // Limit size for optimal jsQR scanning performance
-        const maxDim = 1200;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+    try {
+      // 1. Try Native Hardware BarcodeDetector API first (Standard in Chrome for Android)
+      if ('BarcodeDetector' in window) {
+        try {
+          const barcodeDetector = new (window as any).BarcodeDetector({
+            formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8']
+          });
+          const imageBitmap = await createImageBitmap(file);
+          const detectedCodes = await barcodeDetector.detect(imageBitmap);
+          if (detectedCodes && detectedCodes.length > 0 && detectedCodes[0].rawValue) {
+            const parsed = parseScannedText(detectedCodes[0].rawValue);
+            playScanBeep();
+            stopCamera();
+            setIsProcessingFile(false);
+            onScanSuccess(parsed);
+            onClose();
+            return;
           }
+        } catch (e) {
+          console.warn('Native BarcodeDetector pass failed, falling back to jsQR', e);
         }
+      }
 
-        canvas.width = w;
-        canvas.height = h;
-        ctx.drawImage(img, 0, 0, w, h);
+      // 2. Multi-scale jsQR Processing
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (!ctx) {
+            setIsProcessingFile(false);
+            return;
+          }
 
-        const imageData = ctx.getImageData(0, 0, w, h);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'dontInvert'
-        });
+          // Try multi-scale passes: 1200px, 800px, and original
+          const targetSizes = [1200, 800, Math.max(img.width, img.height)];
+          let foundCode: string | null = null;
 
-        setIsProcessingFile(false);
+          for (const maxDim of targetSizes) {
+            let w = img.width;
+            let h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
+            }
 
-        if (code && code.data) {
-          const parsed = parseScannedText(code.data);
-          playScanBeep();
-          stopCamera();
-          onScanSuccess(parsed);
-          onClose();
-        } else {
-          onShowToast('❌ រកមិនឃើញ QR Code ក្នុងរូបថតទេ! សូមព្យាយាមថតជិត និងច្បាស់ជាងនេះ។', 'error');
-        }
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(img, 0, 0, w, h);
+
+            const imageData = ctx.getImageData(0, 0, w, h);
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+              inversionAttempts: 'attemptBoth'
+            });
+
+            if (code && code.data) {
+              foundCode = code.data;
+              break;
+            }
+          }
+
+          setIsProcessingFile(false);
+
+          if (foundCode) {
+            const parsed = parseScannedText(foundCode);
+            playScanBeep();
+            stopCamera();
+            onScanSuccess(parsed);
+            onClose();
+          } else {
+            onShowToast('❌ រកមិនឃើញ QR Code ក្នុងរូបថតទេ! សូមព្យាយាមថតឱ្យចំ និងច្បាស់។', 'error');
+          }
+        };
+        img.src = e.target?.result as string;
       };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('File scan error:', err);
+      setIsProcessingFile(false);
+      onShowToast('❌ បរាជ័យក្នុងការស្កេនរូបថត', 'error');
+    }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
