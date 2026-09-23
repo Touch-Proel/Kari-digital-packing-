@@ -176,9 +176,9 @@ export function renderInvoiceTo576Canvas(
     const noteExtra = noteLines.length > 0 ? noteLines.length * 28 + 6 : 0;
     return acc + 60 + noteExtra;
   }, 0);
-  const dualQrHeight = 225; // Side-by-side Dual Compact QRs (Customer photos + Staff fast check)
+  const singleQrHeight = 145; // Side-by-side single compact QR (Customer photos & Fast Check)
   const khqrHeight = showKHQR ? 370 : 0;
-  const footerHeight = 440 + khqrHeight + dualQrHeight;
+  const footerHeight = 310 + khqrHeight + singleQrHeight;
   const totalHeight = headerHeight + itemsHeight + footerHeight;
 
   const canvas = document.createElement('canvas');
@@ -405,45 +405,31 @@ export function renderInvoiceTo576Canvas(
   ctx.fillText(`( ${formattedRiel} R )`, centerX, y);
   y += 52;
 
-  // 7.2. DUAL COMPACT QR CODES (Side-by-side: 1. Customer Image Portal, 2. Staff Fast Basket Verification)
+  // 7.2. COMPACT SINGLE QR CODE SIDE-BY-SIDE WITH FOOTER POLICY (Maximum Paper Saving)
   drawLine(y, 2);
-  y += 10;
+  y += 14;
 
-  const colWidth = maxContentWidth / 2;
-  const leftColCenterX = safeLeft + colWidth / 2;
-  const rightColCenterX = safeRight - colWidth / 2;
-  const qrSize = 120;
-
-  // Header labels
-  ctx.textAlign = 'center';
-  ctx.font = `900 20px ${fontKhmer}`;
-  ctx.fillText('📱 ភ្ញៀវមើលរូបទំនិញ', leftColCenterX, y);
-  ctx.fillText('⚡ ផ្ទៀងផ្ទាត់កន្ត្រក', rightColCenterX, y);
-  y += 26;
-
-  // Draw Dual QR codes
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const customerUrl = `${origin}/?order=${invoice.invoice_id || invoice.basket_no}`;
-  const staffUrl = `${origin}/?open_basket=${invoice.basket_no || invoice.invoice_id}&live=${invoice.live_id || ''}`;
+  const qrSize = 100;
+  const qrX = safeRight - qrSize / 2;
+  const textMaxW = maxContentWidth - qrSize - 20;
 
-  drawKHQRToCanvas(ctx, customerUrl, leftColCenterX, y, qrSize);
-  drawKHQRToCanvas(ctx, staffUrl, rightColCenterX, y, qrSize);
-  y += qrSize + 8;
+  // Draw Footer text on the Left
+  ctx.textAlign = 'left';
+  ctx.font = `900 24px ${fontKhmer}`;
+  ctx.fillText('អរគុណចំពោះការគាំទ្រ KARI ARNETT!', safeLeft, y + 6);
 
-  // Subtitles / Labels
-  ctx.font = `800 17px ${fontMono}`;
-  ctx.fillText(`Order #${invoice.basket_no || invoice.invoice_id}`, leftColCenterX, y);
-  ctx.fillText(`Basket #${invoice.basket_no || invoice.invoice_id}`, rightColCenterX, y);
-  y += 24;
+  ctx.font = `800 20px ${fontKhmer}`;
+  ctx.fillText('ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ', safeLeft, y + 38);
 
-  // Vertical divider between the two QR columns
-  ctx.beginPath();
-  ctx.strokeStyle = '#cccccc';
-  ctx.lineWidth = 1.5;
-  ctx.moveTo(centerX, y - qrSize - 48);
-  ctx.lineTo(centerX, y - 6);
-  ctx.stroke();
+  ctx.font = `900 18px ${fontMono}`;
+  ctx.fillText(`📱 ស្កេនមើលទំនិញ • Order #${invoice.basket_no || invoice.invoice_id}`, safeLeft, y + 68);
 
+  // Draw Compact Single QR on the Right
+  drawKHQRToCanvas(ctx, customerUrl, qrX, y, qrSize);
+
+  y += qrSize + 16;
   drawLine(y, 2);
   y += 14;
 
@@ -478,16 +464,8 @@ export function renderInvoiceTo576Canvas(
     y += 32;
   }
 
-  // 8. FOOTER POLICY & CUT LINE
-  ctx.font = `900 23px ${fontKhmer}`;
-  ctx.fillText('អរគុណចំពោះការគាំទ្រ KARI ARNETT!', centerX, y);
-  y += 30;
-
-  ctx.font = `800 19px ${fontKhmer}`;
-  ctx.fillText('ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ', centerX, y);
-  y += 34;
-
-  // Dot cut line
+  // 8. CUT LINE
+  ctx.textAlign = 'center';
   ctx.font = `800 18px ${fontMono}`;
   ctx.fillStyle = '#555555';
   ctx.fillText('- - - - - - - - [ កាត់ត្រង់នេះ ✂️ ] - - - - - - - -', centerX, y);

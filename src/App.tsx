@@ -32,6 +32,7 @@ import { BacklogModal } from './components/Modals/BacklogModal';
 import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
 import { CustomerOrderPortal } from './components/CustomerOrderPortal';
 import { AdminPinModal } from './components/Modals/AdminPinModal';
+import { CameraScannerModal } from './components/Modals/CameraScannerModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -119,7 +120,7 @@ export default function App() {
     document.body.setAttribute('data-khmer-font', khmerFont);
   }, [khmerFont]);
 
-  // ⚡ Handle QR-Scanned Instant Basket Verification for Staff
+  // ⚡ Handle QR-Scanned Instant Basket Verification with Security Guard
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
@@ -128,6 +129,15 @@ export default function App() {
 
     if (scanBasket) {
       const cleanBasket = scanBasket.trim().replace(/^#/, '');
+
+      // 🔒 SECURITY CHECK: If this is an external customer device (not authenticated shop staff),
+      // safely redirect them directly to the Read-Only Customer Order Portal!
+      const isStaffDevice = Boolean(localStorage.getItem('isStaffDevice') || localStorage.getItem('userRole') || localStorage.getItem('packerName'));
+      if (!isStaffDevice) {
+        setPublicOrderId(cleanBasket);
+        return;
+      }
+
       setSearchQuery(cleanBasket);
       setActiveSubFilter('ALL');
 
@@ -211,6 +221,40 @@ export default function App() {
   const [zoomItems, setZoomItems] = useState<{ code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; quantity?: number; comment?: string; isChecked?: boolean }[]>([]);
   const [zoomInitialIndex, setZoomInitialIndex] = useState<number>(0);
   const [zoomInvoiceId, setZoomInvoiceId] = useState<number | undefined>(undefined);
+
+  // 📷 In-App Camera Scanner State
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+
+  const handleCameraScanSuccess = useCallback((scannedVal: string) => {
+    const cleanBasket = scannedVal.trim().replace(/^#/, '');
+    setSearchQuery(cleanBasket);
+    setActiveSubFilter('ALL');
+
+    // Query server to find basket & stage
+    fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && data.found) {
+          if (data.live_id && data.live_id !== selectedLiveId) {
+            setSelectedLiveId(data.live_id);
+            localStorage.setItem('selectedLiveId', data.live_id);
+            fetchInvoices(data.live_id);
+          }
+          if (data.stage) {
+            setCurrentMasterStage(data.stage);
+          }
+          playSuccessFanfare();
+          showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
+        } else {
+          playSuccessFanfare();
+          showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+        }
+      })
+      .catch(() => {
+        playSuccessFanfare();
+        showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+      });
+  }, [selectedLiveId, showToast]);
 
   // Cross-Live Backlog Alert & Modal State
   const [isBacklogModalOpen, setIsBacklogModalOpen] = useState(false);
@@ -1325,6 +1369,7 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           totalFilteredBaskets={totalFilteredBaskets}
+          onOpenScanner={() => setIsCameraScannerOpen(true)}
         />
 
         {/* 6. Baskets Feed */}
@@ -1728,6 +1773,14 @@ export default function App() {
           fetchBacklogCount(selectedLiveId);
           showToast(`🎉 បានសម្គាល់បង់រួច ${count} កន្ត្រកដោយជោគជ័យ!`, 'success');
         }}
+        onShowToast={showToast}
+      />
+
+      {/* 📷 In-App Camera Scanner Modal (QR & Barcode) */}
+      <CameraScannerModal
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScanSuccess={handleCameraScanSuccess}
         onShowToast={showToast}
       />
     </div>

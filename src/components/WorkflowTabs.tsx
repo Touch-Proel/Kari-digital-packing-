@@ -29,6 +29,7 @@ interface WorkflowTabsProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   totalFilteredBaskets: number;
+  onOpenScanner?: () => void;
 }
 
 export function WorkflowTabs({
@@ -52,7 +53,8 @@ export function WorkflowTabs({
   onSetSubFilter,
   searchQuery,
   onSearchChange,
-  totalFilteredBaskets
+  totalFilteredBaskets,
+  onOpenScanner
 }: WorkflowTabsProps) {
   return (
     <div className="flex flex-col gap-2.5">
@@ -401,16 +403,30 @@ export function WorkflowTabs({
       )}
 
       {/* 🔍 SEARCH HUD */}
-      <div className="flex gap-2 items-center">
+      <div className="flex gap-1.5 items-center">
         <input
           type="text"
           value={searchQuery}
           onChange={e => onSearchChange(e.target.value)}
           placeholder="🔍 ស្វែងរកកូដ, ឈ្មោះ, លេខ, កន្ត្រក #..."
-          className="flex-1 bg-slate-900/90 border-[1.5px] border-slate-700 text-white px-3.5 py-2 rounded-xl text-xs outline-none focus:border-cyan-400 transition-all placeholder:text-slate-500 font-medium"
+          className="flex-1 bg-slate-900/90 border-[1.5px] border-slate-700 text-white px-3 py-2 rounded-xl text-xs outline-none focus:border-cyan-400 transition-all placeholder:text-slate-500 font-medium"
         />
-        <div className="bg-slate-900 border-[1.5px] border-cyan-400/80 text-cyan-400 px-3 py-2 rounded-xl font-black text-xs whitespace-nowrap font-mono shadow-sm">
-          📦 {totalFilteredBaskets} កន្ត្រក
+
+        {/* 📷 In-App Camera Scanner Button */}
+        {onOpenScanner && (
+          <button
+            type="button"
+            onClick={onOpenScanner}
+            className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-2.5 sm:px-3 py-2 rounded-xl font-black text-xs whitespace-nowrap shadow-md active:scale-95 transition-all flex items-center gap-1 border border-cyan-400/50 cursor-pointer flex-shrink-0"
+            title="ស្កេនកាមេរ៉ា (QR & Barcode)"
+          >
+            <span>📷</span>
+            <span className="hidden sm:inline">ស្កេន</span>
+          </button>
+        )}
+
+        <div className="bg-slate-900 border-[1.5px] border-cyan-400/80 text-cyan-400 px-2.5 py-2 rounded-xl font-black text-xs whitespace-nowrap font-mono shadow-sm flex-shrink-0">
+          📦 {totalFilteredBaskets}
         </div>
       </div>
     </div>

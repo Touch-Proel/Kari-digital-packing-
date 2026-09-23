@@ -945,61 +945,39 @@ export function ReceiptModal({
               </div>
             </div>
 
-            {/* 6.5. Dual Compact QR Codes (Side-by-side: 1. Customer Image Portal, 2. Staff Fast Basket Verification) */}
-            <div className="border-b-2 border-black py-2">
-              <div className="grid grid-cols-2 gap-2 text-center">
-                {/* Left QR: Customer Photo Portal */}
-                <div className="flex flex-col items-center bg-white p-1 rounded">
-                  <span className="text-[11px] font-black text-black leading-tight mb-1">
-                    📱 ភ្ញៀវមើលរូបទំនិញ
-                  </span>
-                  {customerQrDataUrl ? (
-                    <img
-                      src={customerQrDataUrl}
-                      alt="Customer Portal QR"
-                      className="w-[84px] h-[84px] border border-black p-0.5"
-                    />
-                  ) : (
-                    <div className="w-[84px] h-[84px] border border-black bg-gray-100 flex items-center justify-center text-[10px]">
-                      QR Loading...
-                    </div>
-                  )}
-                  <span className="font-mono font-bold text-[10px] text-black mt-0.5">
-                    Order #{invoice.basket_no || invoice.invoice_id}
-                  </span>
+            {/* 6.5. Single Compact QR Code Side-by-Side with Footer Text (Maximum Paper Saving) */}
+            <div className="border-b-2 border-black py-2.5 flex items-center justify-between gap-2">
+              {/* Left: Thank you & Store Policy */}
+              <div className="text-left flex-1">
+                <div className="font-black text-xs sm:text-sm text-black leading-tight">
+                  អរគុណចំពោះការគាំទ្រ KARI ARNETT!
                 </div>
+                <div className="text-[11px] font-bold text-black mt-0.5">
+                  ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ
+                </div>
+                <div className="text-[10px] font-black font-mono text-black mt-1">
+                  📱 ស្កេនមើលទំនិញ • Order #{invoice.basket_no || invoice.invoice_id}
+                </div>
+              </div>
 
-                {/* Right QR: Staff Instant Basket Check */}
-                <div className="flex flex-col items-center bg-white p-1 rounded border-l border-gray-300">
-                  <span className="text-[11px] font-black text-black leading-tight mb-1">
-                    ⚡ ផ្ទៀងផ្ទាត់កន្ត្រក
-                  </span>
-                  {staffQrDataUrl ? (
-                    <img
-                      src={staffQrDataUrl}
-                      alt="Staff Basket QR"
-                      className="w-[84px] h-[84px] border border-black p-0.5"
-                    />
-                  ) : (
-                    <div className="w-[84px] h-[84px] border border-black bg-gray-100 flex items-center justify-center text-[10px]">
-                      QR Loading...
-                    </div>
-                  )}
-                  <span className="font-mono font-bold text-[10px] text-black mt-0.5">
-                    Basket #{invoice.basket_no || invoice.invoice_id}
-                  </span>
-                </div>
+              {/* Right: Single Compact QR */}
+              <div className="flex flex-col items-center bg-white p-0.5 rounded border border-black shrink-0">
+                {customerQrDataUrl ? (
+                  <img
+                    src={customerQrDataUrl}
+                    alt="Order QR"
+                    className="w-[78px] h-[78px] object-contain"
+                  />
+                ) : (
+                  <div className="w-[78px] h-[78px] bg-gray-100 flex items-center justify-center text-[9px] text-gray-500">
+                    QR...
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* 7. Footer Policy */}
-            <div className="text-center font-bold text-xs text-black pt-1 leading-snug">
-              <div className="font-black">អរគុណចំពោះការគាំទ្រ KARI ARNETT!</div>
-              <div className="text-[11px]">ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ</div>
-            </div>
-
             {/* Cut Line */}
-            <div className="text-center text-[10px] text-gray-500 font-mono tracking-widest pt-1 border-t border-dotted border-gray-400">
+            <div className="text-center text-[10px] text-gray-500 font-mono tracking-widest pt-1">
               - - - - - - - - [ កាត់ត្រង់នេះ ✂️ ] - - - - - - - -
             </div>
           </div>
@@ -1293,56 +1271,35 @@ export function ReceiptModal({
               </div>
             </div>
 
-            {/* 6.5. Dual Compact QR Codes for 576px POS */}
-            <div style={{ borderBottom: '3px solid #000000', paddingBottom: '12px', marginBottom: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
-                {/* Left QR: Customer Photo Portal */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', width: '220px' }}>
-                  <span style={{ fontSize: '20px', fontWeight: 900, color: '#000000', marginBottom: '4px' }}>
-                    📱 ភ្ញៀវមើលរូបទំនិញ
-                  </span>
-                  {customerQrDataUrl ? (
-                    <img
-                      src={customerQrDataUrl}
-                      alt="Customer Portal QR"
-                      style={{ width: '135px', height: '135px', border: '2px solid #000000', padding: '2px' }}
-                    />
-                  ) : null}
-                  <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '18px', color: '#000000', marginTop: '4px' }}>
-                    Order #{invoice.basket_no || invoice.invoice_id}
-                  </span>
+            {/* Footer with Side-by-Side Compact QR Code (Saves Maximum Paper Length) */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '2px dashed #000000', marginBottom: '8px' }}>
+              {/* Left: Store Thank You & Terms */}
+              <div style={{ textAlign: 'left', flex: 1, paddingRight: '12px' }}>
+                <div style={{ fontSize: '24px', fontWeight: 900, color: '#000000', lineHeight: 1.3 }}>
+                  អរគុណចំពោះការគាំទ្រ KARI ARNETT!
                 </div>
-
-                {/* Vertical Divider */}
-                <div style={{ width: '2px', height: '160px', backgroundColor: '#888888' }} />
-
-                {/* Right QR: Staff Instant Basket Check */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', width: '220px' }}>
-                  <span style={{ fontSize: '20px', fontWeight: 900, color: '#000000', marginBottom: '4px' }}>
-                    ⚡ ផ្ទៀងផ្ទាត់កន្ត្រក
-                  </span>
-                  {staffQrDataUrl ? (
-                    <img
-                      src={staffQrDataUrl}
-                      alt="Staff Basket QR"
-                      style={{ width: '135px', height: '135px', border: '2px solid #000000', padding: '2px' }}
-                    />
-                  ) : null}
-                  <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '18px', color: '#000000', marginTop: '4px' }}>
-                    Basket #{invoice.basket_no || invoice.invoice_id}
-                  </span>
+                <div style={{ fontSize: '20px', fontWeight: 800, color: '#000000', marginTop: '4px' }}>
+                  ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', marginTop: '4px' }}>
+                  📱 ស្កេនមើលទំនិញ • Order #{invoice.basket_no || invoice.invoice_id}
                 </div>
               </div>
-            </div>
 
-            {/* Footer */}
-            <div style={{ textAlign: 'center', fontSize: '24px', fontWeight: 900, color: '#000000', lineHeight: 1.4 }}>
-              <div>អរគុណចំពោះការគាំទ្រ KARI ARNETT!</div>
-              <div style={{ fontSize: '20px', fontWeight: 800 }}>ទំនិញទិញហើយមិនអាចប្តូរវិញបានទេ</div>
+              {/* Right: Single Compact QR Code */}
+              {customerQrDataUrl && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                  <img
+                    src={customerQrDataUrl}
+                    alt="Order QR"
+                    style={{ width: '105px', height: '105px', border: '2px solid #000000', padding: '2px' }}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Cut Line */}
-            <div style={{ textAlign: 'center', fontSize: '18px', fontWeight: 800, marginTop: '12px', borderTop: '2px dashed #000000', paddingTop: '8px' }}>
+            <div style={{ textAlign: 'center', fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>
               - - - - - - - - - - [ កាត់ត្រង់នេះ ✂️ ] - - - - - - - - - -
             </div>
           </div>
