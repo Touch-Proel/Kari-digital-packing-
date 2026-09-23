@@ -105,7 +105,7 @@ export const settings: AppSettings = {
   telegram_token: process.env.TELEGRAM_BOT_TOKEN || '',
   telegram_chat_id: process.env.TELEGRAM_CHAT_ID || '',
   gemini_api_key: process.env.GEMINI_API_KEY || '',
-  admin_pin: '8888',
+  admin_pin: '1688',
   parser_strict_catalog: false,
   parser_allow_standalone: true
 };
