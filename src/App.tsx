@@ -234,48 +234,6 @@ export default function App() {
     invoice: Invoice;
   } | null>(null);
 
-  const handleCameraScanSuccess = useCallback(async (scannedVal: string) => {
-    const cleanBasket = scannedVal.trim().replace(/^#/, '');
-    setSearchQuery(cleanBasket);
-    setActiveSubFilter('ALL');
-
-    try {
-      // Query server to find basket & stage across ALL live sessions
-      const res = await fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}`);
-      const data = await res.json();
-
-      if (data.success && data.found) {
-        let stageNum = 1;
-        if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED') stageNum = 2;
-        else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID') stageNum = 3;
-        else if (data.stage === 'DISPATCHED') stageNum = 4;
-
-        if (data.live_id && data.live_id !== selectedLiveId) {
-          setSelectedLiveId(data.live_id);
-          localStorage.setItem('selectedLiveId', data.live_id);
-          setCurrentRevision(0);
-          currentRevisionRef.current = 0;
-          await fetchInvoices(data.live_id, 0);
-          await fetchStock(data.live_id);
-        }
-
-        if (data.invoice) {
-          handleUpdateInvoice(data.invoice);
-        }
-
-        setCurrentMasterStage(stageNum);
-        playSuccessFanfare();
-        showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
-      } else {
-        playSuccessFanfare();
-        showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
-      }
-    } catch {
-      playSuccessFanfare();
-      showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
-    }
-  }, [selectedLiveId, showToast, handleUpdateInvoice]);
-
   // Cross-Live Backlog Alert & Modal State
   const [isBacklogModalOpen, setIsBacklogModalOpen] = useState(false);
   const [backlogCount, setBacklogCount] = useState(0);
@@ -875,6 +833,49 @@ export default function App() {
       }
     } catch (e) {}
   };
+
+  // 📷 In-App Camera Scanner Handler (Cross-Live Session Auto-Switch)
+  const handleCameraScanSuccess = useCallback(async (scannedVal: string) => {
+    const cleanBasket = scannedVal.trim().replace(/^#/, '');
+    setSearchQuery(cleanBasket);
+    setActiveSubFilter('ALL');
+
+    try {
+      // Query server to find basket & stage across ALL live sessions
+      const res = await fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}`);
+      const data = await res.json();
+
+      if (data.success && data.found) {
+        let stageNum = 1;
+        if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED') stageNum = 2;
+        else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID') stageNum = 3;
+        else if (data.stage === 'DISPATCHED') stageNum = 4;
+
+        if (data.live_id && data.live_id !== selectedLiveId) {
+          setSelectedLiveId(data.live_id);
+          localStorage.setItem('selectedLiveId', data.live_id);
+          setCurrentRevision(0);
+          currentRevisionRef.current = 0;
+          await fetchInvoices(data.live_id, 0);
+          await fetchStock(data.live_id);
+        }
+
+        if (data.invoice) {
+          handleUpdateInvoice(data.invoice);
+        }
+
+        setCurrentMasterStage(stageNum);
+        playSuccessFanfare();
+        showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
+      } else {
+        playSuccessFanfare();
+        showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+      }
+    } catch {
+      playSuccessFanfare();
+      showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+    }
+  }, [selectedLiveId, showToast, handleUpdateInvoice]);
 
   // Initial loads and polling
   useEffect(() => {

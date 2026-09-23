@@ -1426,11 +1426,11 @@ function BasketCardComponent({
                           const p = productMap ? (productMap[it.product_code.toUpperCase()] || productMap[it.product_code]) : undefined;
                           const itImg = (isCurrentLiveOrder && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' && p?.image_file && p.image_file.trim() !== '')
                             ? p.image_file
-                            : (it.image_file && it.image_file.trim() !== '' ? it.image_file : (p?.image_file || it.image_url || p?.image_url || ''));
+                            : (it.image_file && it.image_file.trim() !== '' ? it.image_file : (p?.image_file || (it as any).image_url || (p as any)?.image_url || ''));
                           const itPrice = typeof p?.price === 'number' && p.price > 0 && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED'
                             ? p.price
                             : (it.price || 0);
-                          const isItChecked = checkedState[`${invoice.invoice_id}_${it.product_code}`] ?? (invoice.checked_items || []).includes(it.product_code);
+                          const isItChecked = checkedState[`${invoice.invoice_id}_${it.product_code}`] ?? ((invoice as any).checked_items || []).includes(it.product_code);
                           
                           const itMatchingComment = invoice.comments?.find(c => {
                             const converted = convertKhmerNumeralsToGlobal(c || '');

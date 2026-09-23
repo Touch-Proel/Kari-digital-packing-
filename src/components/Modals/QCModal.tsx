@@ -132,7 +132,7 @@ export function QCModal({
                       e.stopPropagation();
                       const allQcZoomItems = (invoice.items || []).map(item => {
                         const p = productMap ? (productMap[item.product_code.toUpperCase()] || productMap[item.product_code]) : undefined;
-                        const img = (item.image_file && item.image_file.trim() !== '') ? item.image_file : (p?.image_file || item.image_url || p?.image_url || '');
+                        const img = (item.image_file && item.image_file.trim() !== '') ? item.image_file : (p?.image_file || (item as any).image_url || (p as any)?.image_url || '');
                         return {
                           code: item.product_code,
                           name: item.product_name || p?.name || `កូដ ${item.product_code}`,

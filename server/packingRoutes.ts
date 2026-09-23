@@ -290,9 +290,9 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
     data: {
       invoice_id: inv.invoice_id,
       facebook_name: inv.facebook_name,
-      customer_id: inv.customer_id,
-      phone: inv.phone,
-      shipping_address: inv.shipping_address || inv.delivery_address,
+      customer_id: (inv as any).customer_id || inv.facebook_user_id,
+      phone: inv.phone_number || (inv as any).phone,
+      shipping_address: inv.address || (inv as any).shipping_address || (inv as any).delivery_address,
       status: inv.status,
       payment_status: inv.payment_status,
       items: enrichedItems,
@@ -302,12 +302,12 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
       comments: inv.comments || [],
       location_zone: inv.location_zone || 'PP',
       created_at: inv.created_at || (inv as any).timestamp,
-      is_dispatched: inv.status === 'DISPATCHED' || (inv as any).is_dispatched,
-      is_picked: inv.status === 'STAGED' || inv.status === 'PAID' || inv.status === 'PACKED' || inv.status === 'DISPATCHED',
-      packer_name: inv.packer_name || inv.packed_by,
-      bakong_khqr: settings?.bakong_account_id ? {
-        account_id: settings.bakong_account_id,
-        merchant_name: settings.bakong_merchant_name || 'LIVE STORE'
+      is_dispatched: (inv.status as any) === 'DISPATCHED' || inv.status === 'Dispatched' || (inv as any).is_dispatched,
+      is_picked: (inv.status as any) === 'STAGED' || (inv.status as any) === 'PAID' || (inv.status as any) === 'PACKED' || inv.status === 'Paid' || inv.status === 'Packed' || inv.status === 'Dispatched',
+      packer_name: (inv as any).packer_name || (inv as any).packed_by,
+      bakong_khqr: (settings as any)?.bakong_account_id || settings?.bakong_id ? {
+        account_id: (settings as any)?.bakong_account_id || settings.bakong_id,
+        merchant_name: (settings as any)?.bakong_merchant_name || settings.merchant_name || 'LIVE STORE'
       } : null
     }
   });
@@ -323,11 +323,13 @@ router.post('/public/order/:id/update_info', (req: Request, res: Response) => {
   }
 
   if (phone && phone.trim()) {
-    inv.phone = String(phone).trim();
+    inv.phone_number = String(phone).trim();
+    (inv as any).phone = String(phone).trim();
   }
   if (address && address.trim()) {
-    inv.shipping_address = String(address).trim();
-    inv.delivery_address = String(address).trim();
+    inv.address = String(address).trim();
+    (inv as any).shipping_address = String(address).trim();
+    (inv as any).delivery_address = String(address).trim();
   }
 
   bumpDataRevision();
@@ -337,8 +339,8 @@ router.post('/public/order/:id/update_info', (req: Request, res: Response) => {
     success: true,
     message: 'ព័ត៌មានត្រូវបានរក្សាទុកជោគជ័យ!',
     data: {
-      phone: inv.phone,
-      shipping_address: inv.shipping_address
+      phone: inv.phone_number,
+      shipping_address: inv.address
     }
   });
 });
@@ -1836,11 +1838,15 @@ router.get('/find_basket', (req: Request, res: Response) => {
     });
   }
 
-  const stage = matched.packing_stage || 'WAITING_PRINT';
+  const stage = matched.packing_stage || 'UNPICKED';
   let stageName = 'មិនទាន់រើស';
-  if (stage === 'WAITING_PAYMENT') stageName = 'រង់ចាំបង់ប្រាក់';
-  else if (stage === 'QC_VERIFY') stageName = 'បង់រួច - QC';
-  else if (stage === 'DISPATCHED') stageName = 'ចេញដឹកហើយ';
+  if ((matched.status as any) === 'Paid' || (matched.payment_status as any) === 'Paid' || Boolean((matched as any).paid_at)) {
+    stageName = 'បង់រួច - QC';
+  } else if (stage === 'STAGED' || (stage as any) === 'WAITING_PAYMENT') {
+    stageName = 'រង់ចាំបង់ប្រាក់';
+  } else if (stage === 'DISPATCHED' || matched.status === 'Dispatched' || matched.status === 'Packed') {
+    stageName = 'ចេញដឹកហើយ';
+  }
 
   res.json({
     success: true,
