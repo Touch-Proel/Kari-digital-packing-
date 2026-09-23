@@ -326,41 +326,44 @@ export function ImageZoomModal({
 
         {/* Top Floating Action Bar */}
         <div className="absolute top-3 inset-x-3 z-30 flex items-center justify-between pointer-events-none">
-          {/* Item Counter / Carousel Badge + Quantity */}
-          <div className="pointer-events-auto flex items-center gap-1.5">
-            {hasMultiple ? (
-              <div className="bg-black/80 backdrop-blur-md border border-cyan-500/50 text-cyan-300 px-3 py-1 rounded-full text-xs font-black shadow-lg flex items-center gap-1.5 font-mono">
-                <span>📸</span>
-                <span>{currentIndex + 1} / {activeItems.length}</span>
-              </div>
-            ) : (
-              <div className="bg-black/80 backdrop-blur-md border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full text-[11px] font-bold shadow">
-                🔍 ចុច ២ ដងដើម្បីពង្រីក
+          {/* Left Island: Index Counter + Quantity */}
+          <div className="pointer-events-auto flex items-center gap-1.5 bg-black/60 backdrop-blur-xl p-1 rounded-2xl border border-white/10 shadow-2xl">
+            {hasMultiple && (
+              <div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-400/40 text-cyan-300 px-2.5 py-1 rounded-xl text-xs font-black font-mono flex items-center gap-1.5 shadow-sm">
+                <span className="text-[11px] opacity-80">📸</span>
+                <span>{currentIndex + 1}<span className="opacity-50 text-[10px]">/</span>{activeItems.length}</span>
               </div>
             )}
 
-            {/* Prominent Floating Quantity Badge */}
-            <div className="bg-amber-400 text-slate-950 px-2.5 py-1 rounded-full text-xs font-black shadow-[0_0_12px_rgba(251,191,36,0.6)] flex items-center gap-1 font-mono ring-1 ring-amber-200 animate-pulse">
-              <span>🛍️</span>
+            {/* Prominent High-End Quantity Badge */}
+            <div
+              className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono flex items-center gap-1 shadow-md transition-all ${
+                (currentItem.quantity || 1) > 1
+                  ? 'bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 text-slate-950 ring-1 ring-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.6)] animate-pulse'
+                  : 'bg-slate-800/90 text-amber-300 border border-amber-500/30'
+              }`}
+            >
+              <span className="text-[11px]">🛍️</span>
               <span>x{currentItem.quantity || 1}</span>
             </div>
           </div>
 
-          {/* Right Action Tools */}
-          <div className="pointer-events-auto flex items-center gap-2">
+          {/* Right Action Tools Island */}
+          <div className="pointer-events-auto flex items-center gap-1.5 bg-black/60 backdrop-blur-xl p-1 rounded-2xl border border-white/10 shadow-2xl">
             {/* Zoom Toggle Button */}
             {currentImageUrl && (
               <button
                 type="button"
                 onClick={() => setIsDoubleZoomed(prev => !prev)}
-                className={`p-1.5 px-2.5 rounded-xl text-xs font-bold backdrop-blur-md border shadow transition-all active:scale-95 ${
+                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-1 cursor-pointer ${
                   isDoubleZoomed
-                    ? 'bg-cyan-500 text-slate-950 border-cyan-300 font-black ring-2 ring-cyan-400/60'
-                    : 'bg-black/70 hover:bg-black/90 text-cyan-300 border-cyan-500/50'
+                    ? 'bg-cyan-400 text-slate-950 font-black shadow-[0_0_12px_rgba(34,211,238,0.7)]'
+                    : 'text-cyan-300 hover:bg-white/10 border border-cyan-500/30'
                 }`}
-                title="ពង្រីកមើលព័ត៌មានលម្អិត"
+                title="ពង្រីកមើលរូបភាព (Double Tap)"
               >
-                <span>{isDoubleZoomed ? '🔍 1x ធម្មតា' : '🔍 2.5x ពង្រីក'}</span>
+                <span>🔍</span>
+                <span className="font-mono text-[11px] font-black">{isDoubleZoomed ? '1x' : '2.5x'}</span>
               </button>
             )}
 
@@ -369,28 +372,47 @@ export function ImageZoomModal({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              className="bg-black/70 hover:bg-black/90 text-amber-300 border border-amber-500/60 px-2.5 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md shadow flex items-center gap-1 active:scale-95 cursor-pointer"
+              className="text-amber-300 hover:bg-amber-400/20 border border-amber-500/30 p-1.5 px-2 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1"
               title="ប្តូរ ឬថតរូបថ្មី"
             >
-              <span>{uploading ? '⏳...' : '📷 ប្តូររូប'}</span>
+              <span>📷</span>
+              <span className="hidden sm:inline text-[11px]">{uploading ? '...' : 'ប្តូររូប'}</span>
             </button>
 
             {/* Close Button */}
             <button
               type="button"
               onClick={onClose}
-              className="bg-black/80 hover:bg-rose-900 border border-slate-700 hover:border-rose-500 text-white w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm shadow active:scale-95 cursor-pointer transition-all"
-              title="បិទ (Close / Esc)"
+              className="bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white border border-rose-500/40 w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shadow transition-all active:scale-90 cursor-pointer"
+              title="បិទ (Esc / Swipe Down)"
             >
               ✕
             </button>
           </div>
         </div>
 
+        {/* Story-like Progress Bar at Top for Multi-Items */}
+        {hasMultiple && (
+          <div className="absolute top-0 inset-x-0 z-40 flex items-center gap-1 px-3 pt-1.5 pointer-events-none">
+            {activeItems.map((item, idx) => (
+              <div
+                key={idx}
+                className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                  idx === currentIndex
+                    ? 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]'
+                    : item.isChecked
+                    ? 'bg-emerald-500/80'
+                    : 'bg-white/15'
+                }`}
+              />
+            ))}
+          </div>
+        )}
+
         {/* Image Display Area with Swipe & Zoom */}
         <div
           onClick={handleDoubleTap}
-          className="w-full h-84 sm:h-96 bg-gradient-to-br from-slate-950 via-[#0C192E] to-[#070D1B] flex flex-col items-center justify-center relative overflow-hidden group cursor-zoom-in"
+          className="w-full h-84 sm:h-96 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#11203d] via-[#080f1e] to-[#040810] flex flex-col items-center justify-center relative overflow-hidden group cursor-zoom-in"
         >
           {currentImageUrl ? (
             <div className="w-full h-full flex items-center justify-center relative overflow-hidden">
@@ -432,7 +454,7 @@ export function ImageZoomModal({
                 e.stopPropagation();
                 handlePrev();
               }}
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-2xl bg-black/60 hover:bg-black/90 text-white border border-cyan-500/50 flex items-center justify-center text-xl font-bold shadow-xl backdrop-blur-sm active:scale-90 transition-all z-20"
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-2xl bg-black/50 hover:bg-black/85 text-white/90 hover:text-cyan-300 border border-white/10 hover:border-cyan-400/50 flex items-center justify-center text-2xl font-bold shadow-2xl backdrop-blur-md active:scale-90 transition-all z-20"
               title="មើលទំនិញមុន (Left Arrow)"
             >
               ‹
@@ -447,7 +469,7 @@ export function ImageZoomModal({
                 e.stopPropagation();
                 handleNext();
               }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-2xl bg-black/60 hover:bg-black/90 text-white border border-cyan-500/50 flex items-center justify-center text-xl font-bold shadow-xl backdrop-blur-sm active:scale-90 transition-all z-20"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-2xl bg-black/50 hover:bg-black/85 text-white/90 hover:text-cyan-300 border border-white/10 hover:border-cyan-400/50 flex items-center justify-center text-2xl font-bold shadow-2xl backdrop-blur-md active:scale-90 transition-all z-20"
               title="មើលទំនិញបន្ទាប់ (Right Arrow)"
             >
               ›
@@ -459,10 +481,11 @@ export function ImageZoomModal({
         {hasMultiple && (
           <div
             ref={thumbnailScrollRef}
-            className="px-3 py-2 bg-[#091122] border-t border-slate-800 flex items-center gap-2 overflow-x-auto scrollbar-none"
+            className="px-3 py-2.5 bg-[#070e1c] border-t border-slate-800/80 flex items-center gap-2 overflow-x-auto scrollbar-none"
           >
             {activeItems.map((item, idx) => {
               const isSelected = idx === currentIndex;
+              const hasMultipleQty = (item.quantity || 1) > 1;
               return (
                 <button
                   key={`${item.code}-${idx}`}
@@ -473,10 +496,12 @@ export function ImageZoomModal({
                     playPureTone(700, 0.03);
                     setCurrentIndex(idx);
                   }}
-                  className={`relative flex-shrink-0 w-13 h-13 rounded-xl overflow-hidden border-2 transition-all cursor-pointer ${
+                  className={`relative flex-shrink-0 w-14 h-14 rounded-2xl overflow-hidden border-2 transition-all cursor-pointer ${
                     isSelected
-                      ? 'border-cyan-400 ring-2 ring-cyan-400/50 scale-105 shadow-md shadow-cyan-500/20'
-                      : 'border-slate-700 opacity-60 hover:opacity-100 hover:border-slate-500'
+                      ? 'border-cyan-400 ring-2 ring-cyan-400/60 scale-105 shadow-lg shadow-cyan-500/25 bg-cyan-950/40'
+                      : item.isChecked
+                      ? 'border-emerald-500/60 opacity-80 hover:opacity-100 hover:border-emerald-400'
+                      : 'border-slate-800 opacity-60 hover:opacity-100 hover:border-slate-600 bg-slate-900'
                   }`}
                 >
                   {item.imageUrl ? (
@@ -487,19 +512,25 @@ export function ImageZoomModal({
                     </div>
                   )}
 
-                  {/* Code Label */}
-                  <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[9px] font-mono font-black text-cyan-300 text-center truncate px-0.5">
+                  {/* Code Label with Dark Frosted Gradient */}
+                  <span className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black via-black/80 to-transparent text-[9.5px] font-mono font-black text-cyan-300 text-center truncate px-0.5 pt-1 pb-0.5">
                     {item.code}
                   </span>
 
-                  {/* Quantity Badge on Thumbnail */}
-                  <span className="absolute top-0.5 left-0.5 bg-amber-400 text-slate-950 font-black text-[9px] px-1 rounded-md font-mono shadow leading-tight">
+                  {/* Quantity Badge on Thumbnail with Vivid Color */}
+                  <span
+                    className={`absolute top-0.5 left-0.5 font-black text-[9px] px-1.5 py-0.2 rounded-md font-mono shadow-md leading-tight ${
+                      hasMultipleQty
+                        ? 'bg-amber-400 text-slate-950 ring-1 ring-amber-200 font-black'
+                        : 'bg-black/75 text-slate-300 border border-white/20'
+                    }`}
+                  >
                     x{item.quantity || 1}
                   </span>
 
                   {/* Check Indicator */}
                   {item.isChecked && (
-                    <span className="absolute top-0.5 right-0.5 w-3.5 h-3.5 bg-emerald-500 text-slate-950 rounded-full flex items-center justify-center text-[8px] font-black shadow">
+                    <span className="absolute top-0.5 right-0.5 w-4 h-4 bg-emerald-500 text-slate-950 rounded-full flex items-center justify-center text-[9px] font-black shadow-md ring-1 ring-emerald-300">
                       ✓
                     </span>
                   )}
@@ -509,70 +540,86 @@ export function ImageZoomModal({
           </div>
         )}
 
-        {/* Product Details & Action Bar */}
-        <div className="p-3.5 bg-[#121E38] flex flex-col gap-2 border-t border-slate-700">
-          <div className="flex justify-between items-start gap-2">
-            <div className="flex flex-col gap-1 overflow-hidden flex-1">
+        {/* Product Details & Action Bar - Luxury Glass Card */}
+        <div className="p-3.5 sm:p-4 bg-gradient-to-b from-[#0e192f] to-[#091122] flex flex-col gap-2.5 border-t border-cyan-500/20 shadow-inner">
+          <div className="flex justify-between items-start gap-2.5">
+            <div className="flex flex-col gap-1.5 overflow-hidden flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="bg-cyan-500 text-slate-950 font-mono font-black px-2.5 py-0.5 rounded-lg text-sm shadow flex-shrink-0">
+                {/* Code Badge */}
+                <span className="bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-mono font-black px-2.5 py-0.5 rounded-xl text-sm shadow-[0_0_12px_rgba(6,182,212,0.4)] flex-shrink-0 tracking-wide">
                   [{currentItem.code}]
                 </span>
 
-                {/* Big Prominent Ordered Quantity Badge */}
-                <span className="bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 font-mono font-black px-2.5 py-0.5 rounded-lg text-sm shadow-[0_0_12px_rgba(251,191,36,0.5)] flex items-center gap-1 flex-shrink-0">
-                  <span className="text-xs opacity-80">ចំនួន:</span>
+                {/* Big Luxury Quantity Badge */}
+                <div className="bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 text-slate-950 font-mono font-black px-2.5 py-0.5 rounded-xl text-sm shadow-[0_0_15px_rgba(251,191,36,0.6)] flex items-center gap-1.5 flex-shrink-0 ring-1 ring-amber-200">
+                  <span className="text-[11px] uppercase tracking-wider font-bold opacity-80">ចំនួន</span>
                   <span className="text-base font-black">x{currentItem.quantity || 1}</span>
-                </span>
+                  <span className="text-xs font-bold text-slate-900">ដើម</span>
+                </div>
 
-                <span className="font-extrabold text-white text-sm truncate">
+                <span className="font-black text-white text-sm truncate">
                   {currentItem.name || `កូដ ${currentItem.code}`}
                 </span>
               </div>
 
-              {/* Customer Comment / Note */}
+              {/* Customer Comment / Note - Glass Box */}
               {currentItem.comment && (
-                <div className="flex items-center gap-1.5 text-xs text-amber-200 bg-amber-950/70 border border-amber-500/40 px-2 py-0.5 rounded-lg font-mono mt-0.5">
-                  <span className="text-amber-400 font-bold">💬 ខមិន:</span>
-                  <span className="font-bold truncate text-white">{currentItem.comment}</span>
+                <div className="flex items-center gap-2 text-xs text-amber-200 bg-gradient-to-r from-amber-950/60 to-amber-900/30 border border-amber-500/40 px-2.5 py-1 rounded-xl font-mono shadow-sm">
+                  <span className="text-amber-400 font-bold flex items-center gap-1 flex-shrink-0">
+                    <span>💬</span>
+                    <span>ខមិន:</span>
+                  </span>
+                  <span className="font-black text-white truncate">{currentItem.comment}</span>
                 </div>
               )}
             </div>
 
-            {/* Quick Check Action Button */}
+            {/* Quick Check Action Button - High Polish */}
             {invoiceId && onToggleItemCheck && (
               <button
                 type="button"
                 onClick={handleQuickCheck}
-                className={`px-3 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer flex-shrink-0 ${
+                className={`px-3.5 py-2.5 rounded-2xl font-black text-xs flex items-center gap-1.5 shadow-lg transition-all active:scale-95 cursor-pointer flex-shrink-0 ${
                   currentItem.isChecked
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white ring-2 ring-emerald-400/40'
-                    : 'bg-slate-800 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/50'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 ring-2 ring-emerald-300/80 shadow-[0_0_15px_rgba(16,185,129,0.5)]'
+                    : 'bg-slate-800/90 hover:bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 hover:border-emerald-400'
                 }`}
               >
-                <span>{currentItem.isChecked ? '✓ បានផ្ទៀងត្រូវ' : '☑ ផ្ទៀងត្រូវ'}</span>
+                <span>{currentItem.isChecked ? '✓ ផ្ទៀងរួច' : '☑ ផ្ទៀងត្រូវ'}</span>
               </button>
             )}
           </div>
 
-          <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-700/50">
-            <div className="flex items-center gap-3">
+          {/* Pricing & Stock Stats Strip */}
+          <div className="flex justify-between items-center text-xs pt-2 border-t border-white/10">
+            <div className="flex items-center gap-3 flex-wrap">
               {currentItem.price !== undefined && (
-                <span className="text-amber-400 font-mono font-black text-sm">
-                  ${currentItem.price.toFixed(2)}
-                </span>
+                <div className="flex items-center gap-1.5 font-mono">
+                  <span className="text-amber-400 font-black text-sm">
+                    ${currentItem.price.toFixed(2)}
+                  </span>
+                  {(currentItem.quantity || 1) > 1 && (
+                    <span className="text-amber-300/80 text-[11px] bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/30">
+                      សរុប: ${(currentItem.price * (currentItem.quantity || 1)).toFixed(2)}
+                    </span>
+                  )}
+                </div>
               )}
+
               {currentItem.stockQty !== undefined && (
                 <span
-                  className={`font-mono font-bold text-xs ${
-                    currentItem.stockQty <= 0 ? 'text-rose-400' : 'text-emerald-400'
+                  className={`font-mono font-bold text-xs px-2 py-0.5 rounded-lg border ${
+                    currentItem.stockQty <= 0
+                      ? 'text-rose-400 bg-rose-950/40 border-rose-500/30'
+                      : 'text-emerald-300 bg-emerald-950/40 border-emerald-500/30'
                   }`}
                 >
-                  {currentItem.stockQty <= 0 ? '🔴 អស់ស្តុក' : `🟢 នៅសល់ ${currentItem.stockQty} ដើម`}
+                  {currentItem.stockQty <= 0 ? '🔴 អស់ស្តុក' : `🟢 ស្តុកនៅសល់: ${currentItem.stockQty} ដើម`}
                 </span>
               )}
             </div>
 
-            <span className="text-[10.5px] text-sky-300/80 font-mono flex items-center gap-1">
+            <span className="text-[10.5px] text-cyan-300/70 font-mono flex items-center gap-1">
               <span>👈 អូសឆ្វេងស្តាំ 👉</span>
             </span>
           </div>
