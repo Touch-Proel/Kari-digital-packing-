@@ -1273,7 +1273,26 @@ function BasketCardComponent({
               </button>
             )}
 
-            {/* Direct Meta Inbox / VIP Message buttons removed for cleaner UI */}
+            {/* Public Customer Order Link (Direct Photo & Order View) */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const publicUrl = `${window.location.origin}/?order=${invoice.invoice_id}`;
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(publicUrl);
+                  playSuccessFanfare();
+                  onShowToast(`🔗 បានចម្លង Link ផ្ញើឱ្យភ្ញៀវ (${invoice.facebook_name}) រួចរាល់!`, 'success');
+                } else {
+                  prompt('Copy Link ផ្ញើឱ្យភ្ញៀវ៖', publicUrl);
+                }
+              }}
+              className="bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition-all shadow-sm active:scale-95 cursor-pointer ml-auto"
+              title="ចុចដើម្បី Copy Link ផ្ញើឱ្យភ្ញៀវមើលរូបភាព និងវិក្កយបត្រផ្ទាល់ខ្លួន"
+            >
+              <span>🔗</span>
+              <span>Link ភ្ញៀវ</span>
+            </button>
           </div>
 
           {/* Progress Row & Sleek Progress Bar */}

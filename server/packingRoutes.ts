@@ -189,6 +189,102 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
   res.json({ success: true, data: prod });
 });
 
+// -------------------------------------------------------------
+// 🌐 Public Customer Order Portal Endpoints (No Auth Required)
+// -------------------------------------------------------------
+
+// GET /api/public/order/:id
+router.get('/public/order/:id', (req: Request, res: Response) => {
+  const invId = parseInt(req.params.id, 10);
+  if (isNaN(invId)) {
+    return res.status(400).json({ success: false, error: 'Invalid invoice ID' });
+  }
+
+  const inv = invoices.find(i => i.invoice_id === invId);
+  if (!inv) {
+    return res.status(404).json({ success: false, error: 'រកមិនឃើញវិក្កយបត្រនេះទេ' });
+  }
+
+  // Enrich items with product data (images, names, prices)
+  const enrichedItems = (inv.items || []).map(it => {
+    const prod = products.find(p => {
+      const pCode = p.code.toUpperCase().trim();
+      const itCode = it.product_code.toUpperCase().trim();
+      return pCode === itCode && (p.live_id || activeLiveId) === (inv.live_id || activeLiveId);
+    }) || products.find(p => p.code.toUpperCase().trim() === it.product_code.toUpperCase().trim());
+
+    return {
+      product_code: it.product_code,
+      product_name: it.product_name || prod?.name || `កូដ ${it.product_code}`,
+      quantity: it.quantity || 1,
+      price: it.price !== undefined ? it.price : (prod?.price || 0),
+      image_file: it.image_file || prod?.image_file || '',
+      item_comment: it.item_comment
+    };
+  });
+
+  const subtotal = enrichedItems.reduce((sum, it) => sum + (it.price * (it.quantity || 1)), 0);
+  const shippingFee = inv.shipping_fee || 0;
+  const total = inv.total_amount || (subtotal + shippingFee);
+
+  return res.json({
+    success: true,
+    data: {
+      invoice_id: inv.invoice_id,
+      facebook_name: inv.facebook_name,
+      customer_id: inv.customer_id,
+      phone: inv.phone,
+      shipping_address: inv.shipping_address || inv.delivery_address,
+      status: inv.status,
+      payment_status: inv.payment_status,
+      items: enrichedItems,
+      subtotal,
+      shipping_fee: shippingFee,
+      total_amount: total,
+      comments: inv.comments || [],
+      location_zone: inv.location_zone || 'PP',
+      created_at: inv.created_at || (inv as any).timestamp,
+      is_dispatched: inv.status === 'DISPATCHED' || (inv as any).is_dispatched,
+      is_picked: inv.status === 'STAGED' || inv.status === 'PAID' || inv.status === 'PACKED' || inv.status === 'DISPATCHED',
+      packer_name: inv.packer_name || inv.packed_by,
+      bakong_khqr: settings?.bakong_account_id ? {
+        account_id: settings.bakong_account_id,
+        merchant_name: settings.bakong_merchant_name || 'LIVE STORE'
+      } : null
+    }
+  });
+});
+
+// POST /api/public/order/:id/update_info
+router.post('/public/order/:id/update_info', (req: Request, res: Response) => {
+  const invId = parseInt(req.params.id, 10);
+  const { phone, address } = req.body;
+  const inv = invoices.find(i => i.invoice_id === invId);
+  if (!inv) {
+    return res.status(404).json({ success: false, error: 'រកមិនឃើញវិក្កយបត្រនេះទេ' });
+  }
+
+  if (phone && phone.trim()) {
+    inv.phone = String(phone).trim();
+  }
+  if (address && address.trim()) {
+    inv.shipping_address = String(address).trim();
+    inv.delivery_address = String(address).trim();
+  }
+
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  return res.json({
+    success: true,
+    message: 'ព័ត៌មានត្រូវបានរក្សាទុកជោគជ័យ!',
+    data: {
+      phone: inv.phone,
+      shipping_address: inv.shipping_address
+    }
+  });
+});
+
 // POST /api/delete_product
 router.post('/delete_product', (req: Request, res: Response) => {
   const { code, remove_from_baskets, live_id } = req.body;

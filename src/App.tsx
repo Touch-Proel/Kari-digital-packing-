@@ -30,9 +30,19 @@ import { RequirePackerNameModal } from './components/Modals/RequirePackerNameMod
 import { CreateLiveSessionModal } from './components/Modals/CreateLiveSessionModal';
 import { BacklogModal } from './components/Modals/BacklogModal';
 import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
+import { CustomerOrderPortal } from './components/CustomerOrderPortal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
+  // Check if current user is viewing as a customer via public link
+  const [publicOrderId, setPublicOrderId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('order') || params.get('invoice') || params.get('id') || params.get('bill') || params.get('track');
+    }
+    return null;
+  });
+
   // Application Data States
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -1040,6 +1050,19 @@ export default function App() {
 
   const totalFilteredBaskets = filtered.length;
   const visibleBaskets = filtered.slice(0, displayedLimit);
+
+  // If customer is viewing public order link (?order=123 or ?id=123)
+  if (publicOrderId) {
+    return (
+      <CustomerOrderPortal
+        orderId={publicOrderId}
+        onBackToApp={() => {
+          window.history.pushState({}, '', window.location.pathname);
+          setPublicOrderId(null);
+        }}
+      />
+    );
+  }
 
   return (
     <div
