@@ -176,8 +176,9 @@ export function renderInvoiceTo576Canvas(
     const noteExtra = noteLines.length > 0 ? noteLines.length * 28 + 6 : 0;
     return acc + 60 + noteExtra;
   }, 0);
+  const dualQrHeight = 225; // Side-by-side Dual Compact QRs (Customer photos + Staff fast check)
   const khqrHeight = showKHQR ? 370 : 0;
-  const footerHeight = 440 + khqrHeight;
+  const footerHeight = 440 + khqrHeight + dualQrHeight;
   const totalHeight = headerHeight + itemsHeight + footerHeight;
 
   const canvas = document.createElement('canvas');
@@ -403,6 +404,48 @@ export function renderInvoiceTo576Canvas(
   ctx.font = `900 40px ${fontMono}`;
   ctx.fillText(`( ${formattedRiel} R )`, centerX, y);
   y += 52;
+
+  // 7.2. DUAL COMPACT QR CODES (Side-by-side: 1. Customer Image Portal, 2. Staff Fast Basket Verification)
+  drawLine(y, 2);
+  y += 10;
+
+  const colWidth = maxContentWidth / 2;
+  const leftColCenterX = safeLeft + colWidth / 2;
+  const rightColCenterX = safeRight - colWidth / 2;
+  const qrSize = 120;
+
+  // Header labels
+  ctx.textAlign = 'center';
+  ctx.font = `900 20px ${fontKhmer}`;
+  ctx.fillText('📱 ភ្ញៀវមើលរូបទំនិញ', leftColCenterX, y);
+  ctx.fillText('⚡ ផ្ទៀងផ្ទាត់កន្ត្រក', rightColCenterX, y);
+  y += 26;
+
+  // Draw Dual QR codes
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const customerUrl = `${origin}/?order=${invoice.invoice_id || invoice.basket_no}`;
+  const staffUrl = `${origin}/?open_basket=${invoice.basket_no || invoice.invoice_id}&live=${invoice.live_id || ''}`;
+
+  drawKHQRToCanvas(ctx, customerUrl, leftColCenterX, y, qrSize);
+  drawKHQRToCanvas(ctx, staffUrl, rightColCenterX, y, qrSize);
+  y += qrSize + 8;
+
+  // Subtitles / Labels
+  ctx.font = `800 17px ${fontMono}`;
+  ctx.fillText(`Order #${invoice.basket_no || invoice.invoice_id}`, leftColCenterX, y);
+  ctx.fillText(`Basket #${invoice.basket_no || invoice.invoice_id}`, rightColCenterX, y);
+  y += 24;
+
+  // Vertical divider between the two QR columns
+  ctx.beginPath();
+  ctx.strokeStyle = '#cccccc';
+  ctx.lineWidth = 1.5;
+  ctx.moveTo(centerX, y - qrSize - 48);
+  ctx.lineTo(centerX, y - 6);
+  ctx.stroke();
+
+  drawLine(y, 2);
+  y += 14;
 
   // 7.5. BAKONG DYNAMIC KHQR (80mm Thermal Optimized)
   if (showKHQR && exactTotal > 0) {

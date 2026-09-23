@@ -93,23 +93,6 @@ export default function App() {
   const [fontScale, setFontScale] = useState<number>(() => parseFloat(localStorage.getItem('fontScale') || '1'));
   const [khmerFont, setKhmerFont] = useState<string>(() => localStorage.getItem('khmerFont') || 'kantumruy');
 
-  useEffect(() => {
-    document.body.setAttribute('data-khmer-font', khmerFont);
-  }, [khmerFont]);
-
-  useEffect(() => {
-    const validScale = Number.isFinite(fontScale) && fontScale >= 0.7 && fontScale <= 1.8 ? fontScale : 1;
-    document.documentElement.style.fontSize = `${validScale * 100}%`;
-    document.documentElement.style.setProperty('--font-scale', String(validScale));
-  }, [fontScale]);
-  const [checkedState, setCheckedState] = useState<Record<string, boolean>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('checkedItemsState') || '{}');
-    } catch {
-      return {};
-    }
-  });
-
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
@@ -123,6 +106,48 @@ export default function App() {
       setToastMessage(null);
     }, 2200);
   }, []);
+
+  const [checkedState, setCheckedState] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('checkedItemsState') || '{}');
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    document.body.setAttribute('data-khmer-font', khmerFont);
+  }, [khmerFont]);
+
+  // ⚡ Handle QR-Scanned Instant Basket Verification for Staff
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const scanBasket = params.get('open_basket') || params.get('basket') || params.get('verify') || params.get('staff_basket');
+    const scanLive = params.get('live');
+
+    if (scanBasket) {
+      const cleanBasket = scanBasket.trim().replace(/^#/, '');
+      setSearchQuery(cleanBasket);
+      setActiveSubFilter('ALL');
+      if (scanLive) {
+        setSelectedLiveId(scanLive);
+        localStorage.setItem('selectedLiveId', scanLive);
+      }
+      playSuccessFanfare();
+      showToast(`⚡ ស្កេនបានជោគជ័យ! បើកផ្ទៀងផ្ទាត់កន្ត្រក #${cleanBasket} ភ្លាមៗ`, 'success');
+      
+      // Clean URL parameter without reloading page
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    const validScale = Number.isFinite(fontScale) && fontScale >= 0.7 && fontScale <= 1.8 ? fontScale : 1;
+    document.documentElement.style.fontSize = `${validScale * 100}%`;
+    document.documentElement.style.setProperty('--font-scale', String(validScale));
+  }, [fontScale]);
 
   // Modals visibility
   const [isQCModalOpen, setIsQCModalOpen] = useState(false);
