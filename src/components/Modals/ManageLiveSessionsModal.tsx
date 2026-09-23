@@ -20,6 +20,8 @@ interface ManageLiveSessionsModalProps {
   onCreateNewLive: () => void;
   onRefreshLiveSessions: () => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
+  userRole?: 'admin' | 'staff';
+  onRequireAdminPin?: () => void;
 }
 
 export function ManageLiveSessionsModal({
@@ -30,7 +32,9 @@ export function ManageLiveSessionsModal({
   onSelectLiveId,
   onCreateNewLive,
   onRefreshLiveSessions,
-  onShowToast
+  onShowToast,
+  userRole = 'staff',
+  onRequireAdminPin
 }: ManageLiveSessionsModalProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -213,17 +217,31 @@ export function ManageLiveSessionsModal({
               </button>
             )}
           </div>
-          <button
-            onClick={() => {
-              playPureTone(650, 0.08);
-              onCreateNewLive();
-              onClose();
-            }}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs sm:text-sm font-black shadow-[0_0_15px_rgba(6,182,212,0.35)] active:scale-95 transition-all flex items-center justify-center gap-1.5 flex-shrink-0 cursor-pointer border border-cyan-300/30"
-          >
-            <span className="text-base leading-none">➕</span>
-            <span>បង្កើត Live ថ្មី</span>
-          </button>
+          {userRole === 'admin' ? (
+            <button
+              onClick={() => {
+                playPureTone(650, 0.08);
+                onCreateNewLive();
+                onClose();
+              }}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs sm:text-sm font-black shadow-[0_0_15px_rgba(6,182,212,0.35)] active:scale-95 transition-all flex items-center justify-center gap-1.5 flex-shrink-0 cursor-pointer border border-cyan-300/30"
+            >
+              <span className="text-base leading-none">➕</span>
+              <span>បង្កើត Live ថ្មី</span>
+            </button>
+          ) : onRequireAdminPin ? (
+            <button
+              onClick={() => {
+                playPureTone(600, 0.06);
+                onRequireAdminPin();
+              }}
+              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 hover:border-amber-400/60 text-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 flex-shrink-0 cursor-pointer"
+              title="បញ្ចូល PIN ដើម្បីបង្កើត Live ថ្មី"
+            >
+              <span>🔒</span>
+              <span className="text-amber-400">Admin PIN</span>
+            </button>
+          ) : null}
         </div>
 
         {/* Sessions List */}
@@ -265,8 +283,8 @@ export function ManageLiveSessionsModal({
                       )}
                     </div>
 
-                    {/* Delete button (top right) */}
-                    {!isConfirmingThis && (
+                    {/* Delete button (top right, Admin Only) */}
+                    {userRole === 'admin' && !isConfirmingThis && (
                       <button
                         onClick={() => {
                           playPureTone(350, 0.06);

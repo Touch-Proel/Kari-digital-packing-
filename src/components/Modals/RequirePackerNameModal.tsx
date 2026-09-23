@@ -3,7 +3,8 @@ import React, { useState } from 'react';
 interface RequirePackerNameModalProps {
   isOpen: boolean;
   currentPackerName: string;
-  onSavePackerName: (name: string) => void;
+  onSavePackerName: (name: string, role?: 'admin' | 'staff') => void;
+  onOpenAdminPinModal?: () => void;
 }
 
 const COMMON_PACKER_NAMES = [
@@ -18,7 +19,8 @@ const COMMON_PACKER_NAMES = [
 export const RequirePackerNameModal: React.FC<RequirePackerNameModalProps> = ({
   isOpen,
   currentPackerName,
-  onSavePackerName
+  onSavePackerName,
+  onOpenAdminPinModal
 }) => {
   const [selectedName, setSelectedName] = useState(currentPackerName || '');
   const [customInput, setCustomInput] = useState('');
@@ -33,7 +35,7 @@ export const RequirePackerNameModal: React.FC<RequirePackerNameModalProps> = ({
       return;
     }
     setErrorMsg('');
-    onSavePackerName(finalName);
+    onSavePackerName(finalName, 'staff');
   };
 
   return (
@@ -111,11 +113,25 @@ export const RequirePackerNameModal: React.FC<RequirePackerNameModalProps> = ({
         <button
           onClick={() => handleConfirm()}
           type="button"
-          className="mt-6 w-full py-3.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-base rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+          className="mt-5 w-full py-3.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-black font-black text-base rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
         >
           <span>✅</span>
           <span>រក្សាទុក & ចាប់ផ្តើមច្រកអីវ៉ាន់</span>
         </button>
+
+        {/* Admin Login Option */}
+        {onOpenAdminPinModal && (
+          <div className="mt-3 pt-3 border-t border-slate-800/80 text-center">
+            <button
+              type="button"
+              onClick={onOpenAdminPinModal}
+              className="text-xs font-black text-amber-400 hover:text-amber-300 flex items-center justify-center gap-1.5 mx-auto py-1 px-3 rounded-xl bg-amber-950/40 hover:bg-amber-950/70 border border-amber-500/30 transition-all cursor-pointer"
+            >
+              <span>👑</span>
+              <span>ចូលជាម្ចាស់ហាង (Admin Mode)</span>
+            </button>
+          </div>
+        )}
 
       </div>
     </div>

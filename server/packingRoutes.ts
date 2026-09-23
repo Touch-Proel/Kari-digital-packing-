@@ -285,6 +285,57 @@ router.post('/public/order/:id/update_info', (req: Request, res: Response) => {
   });
 });
 
+// -------------------------------------------------------------
+// 🔐 Admin PIN Authentication Endpoints
+// -------------------------------------------------------------
+
+// POST /api/auth/verify_pin
+router.post('/auth/verify_pin', (req: Request, res: Response) => {
+  const { pin } = req.body;
+  const targetPin = (settings as any).admin_pin || '1688';
+
+  if (!pin || String(pin).trim() !== String(targetPin).trim()) {
+    return res.status(401).json({
+      success: false,
+      message: 'លេខកូដ PIN មិនត្រឹមត្រូវឡើយ!'
+    });
+  }
+
+  return res.json({
+    success: true,
+    role: 'admin',
+    message: 'ផ្ទៀងផ្ទាត់ Admin ជោគជ័យ!'
+  });
+});
+
+// POST /api/auth/change_pin
+router.post('/auth/change_pin', (req: Request, res: Response) => {
+  const { current_pin, new_pin } = req.body;
+  const targetPin = (settings as any).admin_pin || '1688';
+
+  if (!current_pin || String(current_pin).trim() !== String(targetPin).trim()) {
+    return res.status(401).json({
+      success: false,
+      message: 'លេខកូដ PIN ចាស់មិនត្រឹមត្រូវ!'
+    });
+  }
+
+  if (!new_pin || String(new_pin).trim().length < 4) {
+    return res.status(400).json({
+      success: false,
+      message: 'លេខកូដ PIN ថ្មីត្រូវមានយ៉ាងតិច ៤ ខ្ទង់!'
+    });
+  }
+
+  (settings as any).admin_pin = String(new_pin).trim();
+  saveDatabaseToDisk();
+
+  return res.json({
+    success: true,
+    message: 'បានប្តូរលេខកូដ Admin PIN ដោយជោគជ័យ!'
+  });
+});
+
 // POST /api/delete_product
 router.post('/delete_product', (req: Request, res: Response) => {
   const { code, remove_from_baskets, live_id } = req.body;

@@ -21,6 +21,8 @@ interface SystemSettingsModalProps {
   fontScale: number;
   onAdjustFontSize: (delta: number) => void;
   onResetFontSize: () => void;
+  userRole?: 'admin' | 'staff';
+  onLockAdmin?: () => void;
 }
 
 export function SystemSettingsModal({
@@ -40,10 +42,19 @@ export function SystemSettingsModal({
   onChangeKhmerFont,
   fontScale,
   onAdjustFontSize,
-  onResetFontSize
+  onResetFontSize,
+  userRole = 'staff',
+  onLockAdmin
 }: SystemSettingsModalProps) {
   const [strictCatalogMode, setStrictCatalogMode] = useState(false);
   const [loadingStrict, setLoadingStrict] = useState(false);
+
+  // Admin PIN Change State
+  const [currentPinInput, setCurrentPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [isChangingPin, setIsChangingPin] = useState(false);
+  const [pinFeedback, setPinFeedback] = useState<string | null>(null);
+  const [showPinSection, setShowPinSection] = useState(false);
 
   // Gemini API Key State
   const [geminiStatus, setGeminiStatus] = useState<{
@@ -102,6 +113,45 @@ export function SystemSettingsModal({
   const [isSavingTg, setIsSavingTg] = useState(false);
   const [tgFeedback, setTgFeedback] = useState<string | null>(null);
   const [showTgGuide, setShowTgGuide] = useState(false);
+
+  const handleChangeAdminPin = async () => {
+    if (!currentPinInput.trim() || !newPinInput.trim()) {
+      setPinFeedback('⚠️ សូមវាយបញ្ចូលលេខ PIN ចាស់ និង PIN ថ្មី!');
+      return;
+    }
+    if (newPinInput.trim().length < 4) {
+      setPinFeedback('⚠️ លេខកូដ PIN ថ្មីត្រូវមានយ៉ាងតិច ៤ ខ្ទង់!');
+      return;
+    }
+
+    setIsChangingPin(true);
+    setPinFeedback(null);
+    try {
+      const res = await fetch('/api/auth/change_pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_pin: currentPinInput.trim(),
+          new_pin: newPinInput.trim()
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPinFeedback('✅ បានប្តូរលេខកូដ Admin PIN ជោគជ័យ!');
+        setCurrentPinInput('');
+        setNewPinInput('');
+        setShowPinSection(false);
+        playPureTone(880, 0.1);
+      } else {
+        setPinFeedback(`❌ ${data.message || 'បរាជ័យក្នុងការប្តូរ PIN'}`);
+      }
+    } catch {
+      setPinFeedback('❌ មានបញ្ហាតភ្ជាប់');
+    } finally {
+      setIsChangingPin(false);
+      setTimeout(() => setPinFeedback(null), 4000);
+    }
+  };
 
   const handleSaveTgToken = async () => {
     setIsSavingTg(true);
@@ -214,6 +264,98 @@ export function SystemSettingsModal({
 
         {/* Scrollable Content */}
         <div className="p-4 overflow-y-auto space-y-4 text-slate-200 text-xs">
+          
+          {/* Section 0: Admin Security & Role Status */}
+          <div className="bg-[#0c1629] border-2 border-amber-500/50 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-[0_0_20px_rgba(245,158,11,0.15)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">👑</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-amber-300 text-sm">សិទ្ធិគ្រប់គ្រង (Admin Mode)</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-400/50">
+                      ម្ចាស់ហាង
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">គ្រប់គ្រងការកំណត់, បង្កើត/លុប Live, និងប្រព័ន្ធសុវត្ថិភាព</p>
+                </div>
+              </div>
+
+              {onLockAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onLockAdmin();
+                  }}
+                  className="bg-amber-950/80 hover:bg-rose-950 border border-amber-500/60 hover:border-rose-500 text-amber-300 hover:text-rose-300 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm"
+                  title="ចាកចេញពី Admin ដើម្បីប្តូរទៅជា Staff Mode"
+                >
+                  <span>🔒</span>
+                  <span>ចាក់សោរ</span>
+                </button>
+              )}
+            </div>
+
+            {/* Change PIN Accordion */}
+            <div className="pt-1 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowPinSection(!showPinSection)}
+                className="text-[11px] text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+              >
+                <span>{showPinSection ? '▼ បិទផ្ទាំងប្តូរ PIN' : '🔑 ចុចទីនេះដើម្បីប្តូរលេខកូដ Admin PIN'}</span>
+              </button>
+
+              {showPinSection && (
+                <div className="mt-2.5 p-3 bg-slate-950 border border-amber-500/30 rounded-xl space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10.5px] text-slate-400 mb-1">PIN ចាស់ (បច្ចុប្បន្ន) ៖</label>
+                      <input
+                        type="password"
+                        maxLength={8}
+                        value={currentPinInput}
+                        onChange={e => setCurrentPinInput(e.target.value)}
+                        placeholder="ឧ. 1688"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs text-amber-200 outline-none font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10.5px] text-slate-400 mb-1">PIN ថ្មី (យ៉ាងតិច ៤ ខ្ទង់) ៖</label>
+                      <input
+                        type="password"
+                        maxLength={8}
+                        value={newPinInput}
+                        onChange={e => setNewPinInput(e.target.value)}
+                        placeholder="PIN ថ្មី..."
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs text-amber-200 outline-none font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[10px] text-slate-500">PIN លំនាំដើម ៖ 1688</span>
+                    <button
+                      type="button"
+                      disabled={isChangingPin || !currentPinInput || !newPinInput}
+                      onClick={handleChangeAdminPin}
+                      className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-sm"
+                    >
+                      {isChangingPin ? '⏳ កំពុងប្តូរ...' : '💾 រក្សាទុក PIN ថ្មី'}
+                    </button>
+                  </div>
+
+                  {pinFeedback && (
+                    <div className="text-[11px] font-bold text-amber-300 animate-fade-in pt-1">
+                      {pinFeedback}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Section 1: Packer Profile */}
           <div className="bg-[#080F1E] border border-cyan-500/30 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-sm">
             <div className="flex items-center justify-between">

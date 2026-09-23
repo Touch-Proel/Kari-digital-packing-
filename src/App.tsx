@@ -31,6 +31,7 @@ import { CreateLiveSessionModal } from './components/Modals/CreateLiveSessionMod
 import { BacklogModal } from './components/Modals/BacklogModal';
 import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
 import { CustomerOrderPortal } from './components/CustomerOrderPortal';
+import { AdminPinModal } from './components/Modals/AdminPinModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -79,7 +80,14 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [displayedLimit, setDisplayedLimit] = useState<number>(25);
 
-  // User / Packer Settings
+  // User / Packer Settings & Role (Admin vs Staff)
+  const [userRole, setUserRole] = useState<'admin' | 'staff'>(() => {
+    return (localStorage.getItem('userRole') as 'admin' | 'staff') || 'staff';
+  });
+  const [isAdminPinModalOpen, setIsAdminPinModalOpen] = useState<boolean>(false);
+  const [pendingAdminAction, setPendingAdminAction] = useState<(() => void) | null>(null);
+  const [adminPinModalDesc, setAdminPinModalDesc] = useState<string>('មុខងារនេះតម្រូវឱ្យមានការអនុញ្ញាតពីម្ចាស់ហាង (Admin Only)');
+
   const [packerName, setPackerName] = useState<string>(() => localStorage.getItem('packerName') || '');
   const [isRequirePackerModalOpen, setIsRequirePackerModalOpen] = useState<boolean>(() => !localStorage.getItem('packerName'));
   const [fontScale, setFontScale] = useState<number>(() => parseFloat(localStorage.getItem('fontScale') || '1'));
@@ -357,10 +365,40 @@ export default function App() {
     showToast(`✨ បានប្តូរ Font ៖ ${names[font] || font}`);
   };
 
-  const handleChangePackerName = (newName: string) => {
+  const handleChangePackerName = (newName: string, role: 'admin' | 'staff' = 'staff') => {
     setPackerName(newName);
     localStorage.setItem('packerName', newName);
-    showToast(`👤 ប្តូរឈ្មោះអ្នកច្រក៖ ${newName}`);
+    setUserRole(role);
+    localStorage.setItem('userRole', role);
+    showToast(role === 'admin' ? `👑 ចូលជា Admin៖ ${newName}` : `👤 ប្តូរឈ្មោះអ្នកច្រក៖ ${newName}`);
+  };
+
+  const handleRequestAdminAccess = (action?: () => void, customDesc?: string) => {
+    if (userRole === 'admin') {
+      if (action) action();
+      return;
+    }
+    setPendingAdminAction(() => action || null);
+    if (customDesc) setAdminPinModalDesc(customDesc);
+    else setAdminPinModalDesc('មុខងារនេះតម្រូវឱ្យមានការអនុញ្ញាតពីម្ចាស់ហាង (Admin Only)');
+    setIsAdminPinModalOpen(true);
+  };
+
+  const handleAdminPinSuccess = () => {
+    setUserRole('admin');
+    localStorage.setItem('userRole', 'admin');
+    showToast('👑 បានផ្ទៀងផ្ទាត់ Admin Mode ជោគជ័យ!', 'success');
+    if (pendingAdminAction) {
+      pendingAdminAction();
+      setPendingAdminAction(null);
+    }
+  };
+
+  const handleLockAdmin = () => {
+    setUserRole('staff');
+    localStorage.setItem('userRole', 'staff');
+    playPureTone(450, 0.08);
+    showToast('🔒 បានចាក់សោរ & ប្តូរមកជា Staff Mode!');
   };
 
   const handleToggleItemCheck = useCallback((invId: number, code: string) => {
@@ -1087,7 +1125,13 @@ export default function App() {
       <div className="w-full max-w-[480px] flex flex-col gap-2.5 pb-16">
         {/* 1. Sleek 2-Button Header */}
         <Header
-          onOpenSystemSettings={() => setIsSystemSettingsOpen(true)}
+          onOpenSystemSettings={() => {
+            if (userRole === 'admin') {
+              setIsSystemSettingsOpen(true);
+            } else {
+              handleRequestAdminAccess(() => setIsSystemSettingsOpen(true), 'សូមបញ្ចូលលេខកូដ Admin PIN ដើម្បីបើកការកំណត់ (Settings)');
+            }
+          }}
           onOpenFullStockManager={() => setIsFullStockManagerOpen(true)}
           productsCount={products.length}
           outStockCount={products.filter(p => (p.stock_qty ?? 0) <= 0).length}
@@ -1100,12 +1144,19 @@ export default function App() {
             handleSelectLiveSession(id);
             showToast(`🎥 ប្តូរវគ្គ Live៖ ${id.length > 10 ? id.slice(-8) : id}`);
           }}
-          onCreateLiveSession={() => setIsCreateLiveModalOpen(true)}
+          onCreateLiveSession={() => {
+            if (userRole === 'admin') {
+              setIsCreateLiveModalOpen(true);
+            } else {
+              handleRequestAdminAccess(() => setIsCreateLiveModalOpen(true), 'សូមបញ្ចូលលេខកូដ Admin PIN ដើម្បីបង្កើត Live ថ្មី');
+            }
+          }}
           onOpenManageLiveModal={() => setIsManageLiveModalOpen(true)}
           onOpenPickingModal={() => setIsPickingModalOpen(true)}
           onToggleCommentStream={() => setIsCommentStreamOpen(!isCommentStreamOpen)}
           isStreamOpen={isCommentStreamOpen}
           totalBasketCount={invoices.filter(i => i.status !== 'Cancelled').length}
+          userRole={userRole}
         />
 
         {/* 2. Live Comment Stream Drawer / Simulator */}
@@ -1423,22 +1474,46 @@ export default function App() {
           handleSelectLiveSession(id);
           showToast(`🎥 បានប្តូរទៅកាន់វគ្គ Live៖ ${id.length > 10 ? id.slice(-8) : id}`);
         }}
-        onCreateNewLive={() => setIsCreateLiveModalOpen(true)}
+        onCreateNewLive={() => {
+          if (userRole === 'admin') {
+            setIsCreateLiveModalOpen(true);
+          } else {
+            handleRequestAdminAccess(() => setIsCreateLiveModalOpen(true), 'សូមបញ្ចូលលេខកូដ Admin PIN ដើម្បីបង្កើត Live ថ្មី');
+          }
+        }}
         onRefreshLiveSessions={() => {
           fetchLiveSessions();
           fetchInvoices();
           fetchStock();
         }}
         onShowToast={showToast}
+        userRole={userRole}
+        onRequireAdminPin={() => handleRequestAdminAccess(() => setIsCreateLiveModalOpen(true), 'សូមបញ្ចូល Admin PIN ដើម្បីដោះសោរបង្កើត & លុប Live')}
       />
 
       <RequirePackerNameModal
         isOpen={isRequirePackerModalOpen || !packerName}
         currentPackerName={packerName}
-        onSavePackerName={name => {
-          handleChangePackerName(name);
+        onSavePackerName={(name, role) => {
+          handleChangePackerName(name, role || 'staff');
           setIsRequirePackerModalOpen(false);
         }}
+        onOpenAdminPinModal={() => {
+          setIsRequirePackerModalOpen(false);
+          handleRequestAdminAccess(undefined, 'បញ្ចូល Admin PIN ដើម្បីចូលជាម្ចាស់ហាង');
+        }}
+      />
+
+      {/* Admin PIN Verification Modal */}
+      <AdminPinModal
+        isOpen={isAdminPinModalOpen}
+        onClose={() => {
+          setIsAdminPinModalOpen(false);
+          setPendingAdminAction(null);
+        }}
+        onSuccess={handleAdminPinSuccess}
+        title="🔒 ផ្ទៀងផ្ទាត់ Admin PIN"
+        description={adminPinModalDesc}
       />
 
       {/* System & Settings Modal (Button 1) */}
@@ -1466,6 +1541,8 @@ export default function App() {
         fontScale={fontScale}
         onAdjustFontSize={handleAdjustFontSize}
         onResetFontSize={handleResetFontSize}
+        userRole={userRole}
+        onLockAdmin={handleLockAdmin}
       />
 
       {/* Full-Screen Stock Management Modal (Button 2) */}

@@ -19,6 +19,7 @@ interface HeaderProps {
   onToggleCommentStream: () => void;
   isStreamOpen: boolean;
   totalBasketCount?: number;
+  userRole?: 'admin' | 'staff';
 }
 
 export function Header({
@@ -37,7 +38,8 @@ export function Header({
   onOpenPickingModal,
   onToggleCommentStream,
   isStreamOpen,
-  totalBasketCount
+  totalBasketCount,
+  userRole = 'staff'
 }: HeaderProps) {
   return (
     <div className="bg-[#081122]/95 backdrop-blur-md border border-[#182848] p-2.5 rounded-2xl flex flex-col gap-2 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
@@ -55,16 +57,22 @@ export function Header({
               <span>⚡</span>
               <span>KARI OS</span>
             </div>
-            <span className="text-[10px] text-cyan-400 bg-cyan-950/90 px-1.5 py-0.5 rounded border border-cyan-500/40 font-bold group-hover:scale-105 transition-transform flex-shrink-0 whitespace-nowrap">
-              ⚙️ កំណត់
+            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold group-hover:scale-105 transition-transform flex-shrink-0 whitespace-nowrap ${
+              userRole === 'admin'
+                ? 'text-amber-300 bg-amber-950/90 border-amber-500/50'
+                : 'text-cyan-400 bg-cyan-950/90 border-cyan-500/40'
+            }`}>
+              {userRole === 'admin' ? '👑 Admin' : '⚙️ កំណត់'}
             </span>
           </div>
 
           {/* Subtitle & Quick Status Info */}
           <div className="w-full flex items-center justify-between gap-1 text-[10px] text-slate-300 font-medium pt-1 border-t border-cyan-900/40">
             <span className="truncate flex items-center gap-1 max-w-[95px]">
-              <span className="text-slate-400">👤</span>
-              <span className="truncate text-cyan-200 font-bold">{packerName || 'អ្នកច្រក'}</span>
+              <span className="text-slate-400">{userRole === 'admin' ? '👑' : '👤'}</span>
+              <span className={`truncate font-bold ${userRole === 'admin' ? 'text-amber-300' : 'text-cyan-200'}`}>
+                {userRole === 'admin' ? 'ម្ចាស់ហាង' : (packerName || 'អ្នកច្រក')}
+              </span>
             </span>
             <span className="flex items-center gap-1 flex-shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
