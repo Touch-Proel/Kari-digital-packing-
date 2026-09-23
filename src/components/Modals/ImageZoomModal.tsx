@@ -100,6 +100,10 @@ export function ImageZoomModal({
     stockQty: singleStockQty
   };
 
+  const currentImageUrl = (currentItem.imageUrl && currentItem.imageUrl.trim() !== '')
+    ? currentItem.imageUrl
+    : (currentIndex === 0 && singleImageUrl && singleImageUrl.trim() !== '' ? singleImageUrl : '');
+
   const handlePrev = useCallback(() => {
     if (activeItems.length <= 1) return;
     setIsDoubleZoomed(false);
@@ -327,7 +331,7 @@ export function ImageZoomModal({
           {/* Right Action Tools */}
           <div className="pointer-events-auto flex items-center gap-2">
             {/* Zoom Toggle Button */}
-            {currentItem.imageUrl && (
+            {currentImageUrl && (
               <button
                 type="button"
                 onClick={() => setIsDoubleZoomed(prev => !prev)}
@@ -370,10 +374,10 @@ export function ImageZoomModal({
           onClick={handleDoubleTap}
           className="w-full h-84 sm:h-96 bg-gradient-to-br from-slate-950 via-[#0C192E] to-[#070D1B] flex flex-col items-center justify-center relative overflow-hidden group cursor-zoom-in"
         >
-          {currentItem.imageUrl ? (
+          {currentImageUrl ? (
             <div className="w-full h-full flex items-center justify-center relative overflow-hidden">
               <img
-                src={currentItem.imageUrl}
+                src={currentImageUrl}
                 alt={currentItem.name || currentItem.code}
                 className={`w-full h-full object-contain p-2 transition-transform duration-200 ${
                   isDoubleZoomed ? 'scale-[2.4] cursor-grab active:cursor-grabbing' : 'scale-100'

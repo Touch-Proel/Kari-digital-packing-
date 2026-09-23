@@ -1404,22 +1404,26 @@ function BasketCardComponent({
                       onClick={e => {
                         e.stopPropagation();
                         const allBasketZoomItems = (invoice.items || []).map(it => {
-                          const p = productMap ? productMap[it.product_code.toUpperCase()] : undefined;
-                          const img = (it.image_url && it.image_url.trim() !== '') ? it.image_url : p?.image_url;
-                          const pr = it.price !== undefined ? it.price : p?.price;
+                          const p = productMap ? (productMap[it.product_code.toUpperCase()] || productMap[it.product_code]) : undefined;
+                          const itImg = (isCurrentLiveOrder && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' && p?.image_file && p.image_file.trim() !== '')
+                            ? p.image_file
+                            : (it.image_file && it.image_file.trim() !== '' ? it.image_file : (p?.image_file || it.image_url || p?.image_url || ''));
+                          const itPrice = typeof p?.price === 'number' && p.price > 0 && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED'
+                            ? p.price
+                            : (it.price || 0);
                           const isItChecked = checkedState[`${invoice.invoice_id}_${it.product_code}`] ?? (invoice.checked_items || []).includes(it.product_code);
                           return {
                             code: it.product_code,
-                            name: it.product_name || `កូដ ${it.product_code}`,
-                            imageUrl: img,
-                            price: pr,
+                            name: it.product_name || p?.name || `កូដ ${it.product_code}`,
+                            imageUrl: itImg,
+                            price: itPrice,
                             stockQty: p?.stock_qty,
                             isChecked: isItChecked
                           };
                         });
                         onOpenZoomModal(
                           activeTypedCode || item.product_code,
-                          item.product_name,
+                          item.product_name || activeProd?.name || `កូដ ${item.product_code}`,
                           displayImage,
                           displayPrice,
                           activeProd?.stock_qty,

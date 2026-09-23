@@ -131,11 +131,11 @@ export function QCModal({
                     if (displayImage && onOpenZoomModal && invoice) {
                       e.stopPropagation();
                       const allQcZoomItems = (invoice.items || []).map(item => {
-                        const p = productMap ? productMap[item.product_code.toUpperCase()] : undefined;
-                        const img = (item.image_url && item.image_url.trim() !== '') ? item.image_url : p?.image_url;
+                        const p = productMap ? (productMap[item.product_code.toUpperCase()] || productMap[item.product_code]) : undefined;
+                        const img = (item.image_file && item.image_file.trim() !== '') ? item.image_file : (p?.image_file || item.image_url || p?.image_url || '');
                         return {
                           code: item.product_code,
-                          name: item.product_name || `កូដ ${item.product_code}`,
+                          name: item.product_name || p?.name || `កូដ ${item.product_code}`,
                           imageUrl: img,
                           price: item.price !== undefined ? item.price : p?.price,
                           stockQty: p?.stock_qty,
@@ -144,7 +144,7 @@ export function QCModal({
                       });
                       onOpenZoomModal(
                         it.product_code,
-                        it.product_name,
+                        it.product_name || prod?.name || `កូដ ${it.product_code}`,
                         displayImage,
                         it.price,
                         prod?.stock_qty,
