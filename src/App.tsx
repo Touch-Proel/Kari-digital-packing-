@@ -224,37 +224,57 @@ export default function App() {
 
   // 📷 In-App Camera Scanner State
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
+  const [crossLiveMatch, setCrossLiveMatch] = useState<{
+    live_id: string;
+    live_title?: string;
+    stage_num: number;
+    stage_name: string;
+    basket_no: string | number;
+    customer_name: string;
+    invoice: Invoice;
+  } | null>(null);
 
-  const handleCameraScanSuccess = useCallback((scannedVal: string) => {
+  const handleCameraScanSuccess = useCallback(async (scannedVal: string) => {
     const cleanBasket = scannedVal.trim().replace(/^#/, '');
     setSearchQuery(cleanBasket);
     setActiveSubFilter('ALL');
 
-    // Query server to find basket & stage
-    fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.success && data.found) {
-          if (data.live_id && data.live_id !== selectedLiveId) {
-            setSelectedLiveId(data.live_id);
-            localStorage.setItem('selectedLiveId', data.live_id);
-            fetchInvoices(data.live_id);
-          }
-          if (data.stage) {
-            setCurrentMasterStage(data.stage);
-          }
-          playSuccessFanfare();
-          showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
-        } else {
-          playSuccessFanfare();
-          showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+    try {
+      // Query server to find basket & stage across ALL live sessions
+      const res = await fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}`);
+      const data = await res.json();
+
+      if (data.success && data.found) {
+        let stageNum = 1;
+        if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED') stageNum = 2;
+        else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID') stageNum = 3;
+        else if (data.stage === 'DISPATCHED') stageNum = 4;
+
+        if (data.live_id && data.live_id !== selectedLiveId) {
+          setSelectedLiveId(data.live_id);
+          localStorage.setItem('selectedLiveId', data.live_id);
+          setCurrentRevision(0);
+          currentRevisionRef.current = 0;
+          await fetchInvoices(data.live_id, 0);
+          await fetchStock(data.live_id);
         }
-      })
-      .catch(() => {
+
+        if (data.invoice) {
+          handleUpdateInvoice(data.invoice);
+        }
+
+        setCurrentMasterStage(stageNum);
+        playSuccessFanfare();
+        showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
+      } else {
         playSuccessFanfare();
         showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
-      });
-  }, [selectedLiveId, showToast]);
+      }
+    } catch {
+      playSuccessFanfare();
+      showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+    }
+  }, [selectedLiveId, showToast, handleUpdateInvoice]);
 
   // Cross-Live Backlog Alert & Modal State
   const [isBacklogModalOpen, setIsBacklogModalOpen] = useState(false);
@@ -1219,6 +1239,43 @@ export default function App() {
     };
   }, [searchQuery, totalFilteredBaskets, invoices, currentMasterStage]);
 
+  // Cross-Live search when query yields 0 results in current session
+  useEffect(() => {
+    const q = searchQuery.trim().replace(/^#/, '');
+    if (!q || totalFilteredBaskets > 0 || otherStageMatch) {
+      setCrossLiveMatch(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      fetch(`/api/find_basket?basket=${encodeURIComponent(q)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.found && data.invoice) {
+            let stageNum = 1;
+            if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED') stageNum = 2;
+            else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID') stageNum = 3;
+            else if (data.stage === 'DISPATCHED') stageNum = 4;
+
+            setCrossLiveMatch({
+              live_id: data.live_id,
+              live_title: data.live_title,
+              stage_num: stageNum,
+              stage_name: data.stage_name,
+              basket_no: data.basket_no,
+              customer_name: data.customer_name,
+              invoice: data.invoice
+            });
+          } else {
+            setCrossLiveMatch(null);
+          }
+        })
+        .catch(() => setCrossLiveMatch(null));
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, totalFilteredBaskets, otherStageMatch]);
+
   // If customer is viewing public order link (?order=123 or ?id=123)
   if (publicOrderId) {
     return (
@@ -1394,6 +1451,42 @@ export default function App() {
                 className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-black px-4 py-2 rounded-xl text-xs shadow-lg active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <span>⚡ ចុចទីនេះដើម្បីបើកមើលផ្ទាំង «{otherStageMatch.stageName}» ភ្លាមៗ</span>
+              </button>
+            </div>
+          )}
+
+          {/* Smart Cross-Live Session Search Result Alert */}
+          {crossLiveMatch && !otherStageMatch && (
+            <div className="bg-gradient-to-r from-blue-950/90 via-slate-900 to-indigo-950/90 border-2 border-cyan-400 p-3.5 rounded-2xl shadow-2xl text-center flex flex-col items-center gap-2 animate-pulse">
+              <div className="text-cyan-300 font-black text-xs sm:text-sm flex items-center gap-1.5">
+                <span>🔎 រកឃើញកន្ត្រក #{crossLiveMatch.basket_no} ({crossLiveMatch.customer_name})!</span>
+              </div>
+              <div className="text-[11px] text-slate-300">
+                កន្ត្រកនេះស្ថិតក្នុង <strong>Live Session ផ្សេង</strong> ផ្នែក <strong>«{crossLiveMatch.stage_name}»</strong>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (crossLiveMatch.live_id !== selectedLiveId) {
+                    setSelectedLiveId(crossLiveMatch.live_id);
+                    localStorage.setItem('selectedLiveId', crossLiveMatch.live_id);
+                    setCurrentRevision(0);
+                    currentRevisionRef.current = 0;
+                    await fetchInvoices(crossLiveMatch.live_id, 0);
+                    await fetchStock(crossLiveMatch.live_id);
+                  }
+                  if (crossLiveMatch.invoice) {
+                    handleUpdateInvoice(crossLiveMatch.invoice);
+                  }
+                  setCurrentMasterStage(crossLiveMatch.stage_num);
+                  setActiveSubFilter('ALL');
+                  setCrossLiveMatch(null);
+                  playSuccessFanfare();
+                  showToast(`⚡ បានប្តូរទៅកាន់ Live Session & ផ្នែក «${crossLiveMatch.stage_name}»!`, 'success');
+                }}
+                className="bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black px-4 py-2 rounded-xl text-xs shadow-lg active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>⚡ ចុចទីនេះដើម្បីប្តូរទៅ Live នោះ & បើកកន្ត្រកភ្លាមៗ</span>
               </button>
             </div>
           )}

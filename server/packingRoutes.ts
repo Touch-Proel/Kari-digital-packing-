@@ -1804,6 +1804,59 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
   });
 });
 
+// GET /api/find_basket - Global Search for any basket/invoice across ALL live sessions!
+router.get('/find_basket', (req: Request, res: Response) => {
+  const rawBasket = String(req.query.basket || req.query.query || '').trim().replace(/^#/, '');
+  if (!rawBasket) {
+    return res.status(400).json({ success: false, error: 'Basket query is required' });
+  }
+
+  const numBasket = parseInt(rawBasket, 10);
+
+  // 1. Search by exact basket_no or invoice_id
+  let matched = invoices.find(i => 
+    (!isNaN(numBasket) && (i.basket_no === numBasket || i.invoice_id === numBasket)) ||
+    String(i.basket_no) === rawBasket ||
+    String(i.invoice_id) === rawBasket
+  );
+
+  // 2. If not found by exact ID, search by customer phone or name or tracking code
+  if (!matched) {
+    matched = invoices.find(i => 
+      (i.phone_number && i.phone_number.includes(rawBasket)) ||
+      (i.facebook_name && i.facebook_name.toLowerCase().includes(rawBasket.toLowerCase()))
+    );
+  }
+
+  if (!matched) {
+    return res.json({
+      success: true,
+      found: false,
+      message: `រកមិនឃើញកន្ត្រក #${rawBasket} ក្នុងប្រព័ន្ធឡើយ`
+    });
+  }
+
+  const stage = matched.packing_stage || 'WAITING_PRINT';
+  let stageName = 'មិនទាន់រើស';
+  if (stage === 'WAITING_PAYMENT') stageName = 'រង់ចាំបង់ប្រាក់';
+  else if (stage === 'QC_VERIFY') stageName = 'បង់រួច - QC';
+  else if (stage === 'DISPATCHED') stageName = 'ចេញដឹកហើយ';
+
+  res.json({
+    success: true,
+    found: true,
+    basket_no: matched.basket_no || matched.invoice_id,
+    invoice_id: matched.invoice_id,
+    live_id: matched.live_id,
+    customer_name: matched.facebook_name,
+    customer_phone: matched.phone_number,
+    total_amount: matched.total_amount,
+    stage: stage,
+    stage_name: stageName,
+    invoice: matched
+  });
+});
+
 // POST /api/set_active_live_id
 router.post('/set_active_live_id', (req: Request, res: Response) => {
   const { live_id } = req.body;
