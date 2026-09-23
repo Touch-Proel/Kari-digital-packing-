@@ -292,12 +292,10 @@ router.post('/public/order/:id/update_info', (req: Request, res: Response) => {
 // POST /api/auth/verify_pin
 router.post('/auth/verify_pin', (req: Request, res: Response) => {
   const { pin } = req.body;
-  const targetPin = (settings as any).admin_pin || '1688';
+  const currentSavedPin = String((settings as any).admin_pin || '1688').trim();
   const cleanPin = String(pin || '').trim();
 
-  const isMatch = cleanPin === String(targetPin).trim() || cleanPin === '1688' || cleanPin === '8888';
-
-  if (!cleanPin || !isMatch) {
+  if (!cleanPin || cleanPin !== currentSavedPin) {
     return res.status(401).json({
       success: false,
       message: 'លេខកូដ PIN មិនត្រឹមត្រូវឡើយ!'
@@ -314,16 +312,14 @@ router.post('/auth/verify_pin', (req: Request, res: Response) => {
 // POST /api/auth/change_pin
 router.post('/auth/change_pin', (req: Request, res: Response) => {
   const { current_pin, new_pin } = req.body;
-  const targetPin = String((settings as any).admin_pin || '1688').trim();
+  const currentSavedPin = String((settings as any).admin_pin || '1688').trim();
   const cleanCurrent = String(current_pin || '').trim();
   const cleanNew = String(new_pin || '').trim();
 
-  const isMatch = cleanCurrent === targetPin || cleanCurrent === '1688' || cleanCurrent === '8888';
-
-  if (!cleanCurrent || !isMatch) {
+  if (!cleanCurrent || cleanCurrent !== currentSavedPin) {
     return res.status(401).json({
       success: false,
-      message: 'លេខកូដ PIN ចាស់មិនត្រឹមត្រូវ! (PIN លំនាំដើម៖ 1688)'
+      message: 'លេខកូដ PIN ចាស់មិនត្រឹមត្រូវ!'
     });
   }
 

@@ -311,7 +311,7 @@ export function SystemSettingsModal({
               {showPinSection && (
                 <div className="mt-2.5 p-3 bg-slate-950 border border-amber-500/30 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-slate-400">PIN លំនាំដើម៖ <strong className="text-amber-300 font-mono">1688</strong> (ឬ 8888)</span>
+                    <span className="text-[10px] text-slate-400">PIN លំនាំដើម ៖ <strong className="text-amber-300 font-mono">1688</strong></span>
                     <button
                       type="button"
                       onClick={() => setShowPinText(!showPinText)}
