@@ -193,6 +193,64 @@ router.post('/update_product_stock_price', (req: Request, res: Response) => {
 // 🌐 Public Customer Order Portal Endpoints (No Auth Required)
 // -------------------------------------------------------------
 
+// GET /api/find_basket?basket=2712
+router.get('/find_basket', (req: Request, res: Response) => {
+  const basketQuery = String(req.query.basket || req.query.q || req.query.invoice_id || req.query.open_basket || '').trim().replace(/^#/, '');
+  const targetLive = req.query.live ? String(req.query.live).trim() : '';
+
+  if (!basketQuery) {
+    return res.status(400).json({ success: false, error: 'Basket query is required' });
+  }
+
+  // 1. Check in invoices by basket_no or invoice_id with live priority
+  let match = invoices.find(inv => {
+    const isLiveMatch = targetLive ? inv.live_id === targetLive : true;
+    const isNoMatch = String(inv.basket_no) === basketQuery || String(inv.invoice_id) === basketQuery;
+    return isLiveMatch && isNoMatch;
+  });
+
+  // 2. If not found in target live, search across ALL lives
+  if (!match) {
+    match = invoices.find(inv => String(inv.basket_no) === basketQuery || String(inv.invoice_id) === basketQuery);
+  }
+
+  if (!match) {
+    return res.status(404).json({
+      success: false,
+      found: false,
+      message: `រកមិនឃើញកន្ត្រក #${basketQuery} ក្នុងប្រព័ន្ធឡើយ!`
+    });
+  }
+
+  // Determine stage (1: Unpicked, 2: Staged/Waiting Payment, 3: QC/Paid, 4: Dispatched)
+  let stage = 1;
+  let stageName = 'មិនទាន់រើស';
+  if (match.status === 'Dispatched' || match.status === 'Packed' || match.packing_stage === 'DISPATCHED') {
+    stage = 4;
+    stageName = 'ចេញរួចហើយ';
+  } else if (match.status === 'Paid' || match.payment_status === 'Paid' || Boolean(match.paid_at)) {
+    stage = 3;
+    stageName = 'បង្កក-QC';
+  } else if (match.packing_stage === 'STAGED') {
+    stage = 2;
+    stageName = 'រង់ចាំបង់';
+  } else {
+    stage = 1;
+    stageName = 'មិនទាន់រើស';
+  }
+
+  return res.json({
+    success: true,
+    found: true,
+    invoice: match,
+    basket_no: match.basket_no,
+    invoice_id: match.invoice_id,
+    live_id: match.live_id,
+    stage,
+    stage_name: stageName
+  });
+});
+
 // GET /api/public/order/:id
 router.get('/public/order/:id', (req: Request, res: Response) => {
   const invId = parseInt(req.params.id, 10);

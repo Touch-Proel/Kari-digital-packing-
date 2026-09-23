@@ -130,18 +130,37 @@ export default function App() {
       const cleanBasket = scanBasket.trim().replace(/^#/, '');
       setSearchQuery(cleanBasket);
       setActiveSubFilter('ALL');
-      if (scanLive) {
-        setSelectedLiveId(scanLive);
-        localStorage.setItem('selectedLiveId', scanLive);
-      }
-      playSuccessFanfare();
-      showToast(`⚡ ស្កេនបានជោគជ័យ! បើកផ្ទៀងផ្ទាត់កន្ត្រក #${cleanBasket} ភ្លាមៗ`, 'success');
-      
+
+      // Call API to locate the exact stage and live session of this basket
+      fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}${scanLive ? `&live=${encodeURIComponent(scanLive)}` : ''}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.found) {
+            if (data.live_id && data.live_id !== selectedLiveId) {
+              setSelectedLiveId(data.live_id);
+              localStorage.setItem('selectedLiveId', data.live_id);
+              fetchInvoices(data.live_id);
+            }
+            if (data.stage) {
+              setCurrentMasterStage(data.stage);
+            }
+            playSuccessFanfare();
+            showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
+          } else {
+            playSuccessFanfare();
+            showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+          }
+        })
+        .catch(() => {
+          playSuccessFanfare();
+          showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
+        });
+
       // Clean URL parameter without reloading page
       const newUrl = window.location.pathname;
       window.history.replaceState({}, '', newUrl);
     }
-  }, [showToast]);
+  }, [showToast, selectedLiveId]);
 
   useEffect(() => {
     const validScale = Number.isFinite(fontScale) && fontScale >= 0.7 && fontScale <= 1.8 ? fontScale : 1;
@@ -1114,6 +1133,48 @@ export default function App() {
   const totalFilteredBaskets = filtered.length;
   const visibleBaskets = filtered.slice(0, displayedLimit);
 
+  // Find if matching basket exists in another stage tab or another live session
+  const otherStageMatch = useMemo(() => {
+    if (!searchQuery.trim() || totalFilteredBaskets > 0) return null;
+    const q = searchQuery.trim().toLowerCase();
+
+    // Look across all loaded invoices for current live
+    const found = invoices.find(i =>
+      String(i.basket_no) === q ||
+      String(i.invoice_id) === q ||
+      i.facebook_name.toLowerCase().includes(q) ||
+      i.phone_number.includes(q)
+    );
+
+    if (!found) return null;
+
+    let targetStage = 1;
+    let stageName = 'មិនទាន់រើស';
+    if (found.status === 'Dispatched' || found.status === 'Packed' || found.packing_stage === 'DISPATCHED') {
+      targetStage = 4;
+      stageName = 'ចេញរួចហើយ';
+    } else if (found.status === 'Paid' || found.payment_status === 'Paid' || Boolean(found.paid_at)) {
+      targetStage = 3;
+      stageName = 'បង្កក-QC';
+    } else if (found.packing_stage === 'STAGED') {
+      targetStage = 2;
+      stageName = 'រង់ចាំបង់';
+    } else {
+      targetStage = 1;
+      stageName = 'មិនទាន់រើស';
+    }
+
+    if (targetStage === currentMasterStage) return null;
+
+    return {
+      invoice: found,
+      stage: targetStage,
+      stageName,
+      basketNo: found.basket_no || found.invoice_id,
+      customerName: found.facebook_name
+    };
+  }, [searchQuery, totalFilteredBaskets, invoices, currentMasterStage]);
+
   // If customer is viewing public order link (?order=123 or ?id=123)
   if (publicOrderId) {
     return (
@@ -1268,12 +1329,42 @@ export default function App() {
 
         {/* 6. Baskets Feed */}
         <div className="flex flex-col gap-3 mt-1">
+          {/* Smart cross-stage jump alert if search query is found in another stage */}
+          {otherStageMatch && (
+            <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border-2 border-amber-400 p-3.5 rounded-2xl shadow-2xl text-center flex flex-col items-center gap-2 animate-pulse">
+              <div className="text-amber-300 font-black text-xs sm:text-sm flex items-center gap-1.5">
+                <span>🔎 រកឃើញកន្ត្រក #{otherStageMatch.basketNo} ({otherStageMatch.customerName})!</span>
+              </div>
+              <div className="text-[11px] text-slate-300">
+                កន្ត្រកនេះកំពុងស្ថិតក្នុងផ្នែក <strong>«{otherStageMatch.stageName}»</strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentMasterStage(otherStageMatch.stage);
+                  setActiveSubFilter('ALL');
+                  playSuccessFanfare();
+                  showToast(`⚡ បានប្តូរទៅកាន់ផ្ទាំង «${otherStageMatch.stageName}» ភ្លាមៗ!`, 'success');
+                }}
+                className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-black px-4 py-2 rounded-xl text-xs shadow-lg active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>⚡ ចុចទីនេះដើម្បីបើកមើលផ្ទាំង «{otherStageMatch.stageName}» ភ្លាមៗ</span>
+              </button>
+            </div>
+          )}
+
           {visibleBaskets.length === 0 ? (
             <div className="text-center py-16 px-4 bg-slate-900/40 rounded-2xl border border-slate-800">
-              <div className="text-3xl mb-2">🎉</div>
-              <div className="text-sm font-bold text-slate-400">គ្មានកន្ត្រកក្នុងផ្នែកនេះឡើយ។</div>
+              <div className="text-3xl mb-2">{otherStageMatch ? '💡' : '🎉'}</div>
+              <div className="text-sm font-bold text-slate-400">
+                {otherStageMatch
+                  ? `កន្ត្រក #${otherStageMatch.basketNo} ស្ថិតក្នុងផ្ទាំង «${otherStageMatch.stageName}»`
+                  : 'គ្មានកន្ត្រកក្នុងផ្នែកនេះឡើយ។'}
+              </div>
               <div className="text-xs text-slate-500 mt-1">
-                សូមជ្រើសរើស Tab ផ្សេង ឬសាកល្បងបញ្ចូល Comment ក្នុងផ្ទាំង Live Comment។
+                {otherStageMatch
+                  ? 'សូមចុចប៊ូតុងពណ៌លឿងខាងលើដើម្បីប្តូរទៅកាន់ផ្នែកនោះភ្លាមៗ'
+                  : 'សូមជ្រើសរើស Tab ផ្សេង ឬសាកល្បងបញ្ចូល Comment ក្នុងផ្ទាំង Live Comment។'}
               </div>
             </div>
           ) : (
