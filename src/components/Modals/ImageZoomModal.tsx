@@ -7,6 +7,8 @@ export interface ZoomModalItem {
   imageUrl?: string;
   price?: number;
   stockQty?: number;
+  quantity?: number;
+  comment?: string;
   isChecked?: boolean;
 }
 
@@ -18,6 +20,8 @@ interface ImageZoomModalProps {
   imageUrl?: string;
   price?: number;
   stockQty?: number;
+  quantity?: number;
+  comment?: string;
   items?: ZoomModalItem[];
   initialIndex?: number;
   invoiceId?: number;
@@ -35,6 +39,8 @@ export function ImageZoomModal({
   imageUrl: singleImageUrl,
   price: singlePrice,
   stockQty: singleStockQty,
+  quantity: singleQuantity,
+  comment: singleComment,
   items: propItems,
   initialIndex = 0,
   invoiceId,
@@ -66,10 +72,12 @@ export function ImageZoomModal({
         name: singleName || `កូដ ${singleCode}`,
         imageUrl: singleImageUrl,
         price: singlePrice,
-        stockQty: singleStockQty
+        stockQty: singleStockQty,
+        quantity: singleQuantity || 1,
+        comment: singleComment
       }
     ];
-  }, [propItems, singleCode, singleName, singleImageUrl, singlePrice, singleStockQty]);
+  }, [propItems, singleCode, singleName, singleImageUrl, singlePrice, singleStockQty, singleQuantity, singleComment]);
 
   // Sync index when modal opens or initialIndex changes
   useEffect(() => {
@@ -97,7 +105,9 @@ export function ImageZoomModal({
     name: singleName,
     imageUrl: singleImageUrl,
     price: singlePrice,
-    stockQty: singleStockQty
+    stockQty: singleStockQty,
+    quantity: singleQuantity || 1,
+    comment: singleComment
   };
 
   const currentImageUrl = (currentItem.imageUrl && currentItem.imageUrl.trim() !== '')
@@ -316,17 +326,25 @@ export function ImageZoomModal({
 
         {/* Top Floating Action Bar */}
         <div className="absolute top-3 inset-x-3 z-30 flex items-center justify-between pointer-events-none">
-          {/* Item Counter / Carousel Badge */}
-          {hasMultiple ? (
-            <div className="pointer-events-auto bg-black/75 backdrop-blur-md border border-cyan-500/50 text-cyan-300 px-3 py-1 rounded-full text-xs font-black shadow-lg flex items-center gap-1.5 font-mono">
-              <span>📸</span>
-              <span>{currentIndex + 1} / {activeItems.length}</span>
+          {/* Item Counter / Carousel Badge + Quantity */}
+          <div className="pointer-events-auto flex items-center gap-1.5">
+            {hasMultiple ? (
+              <div className="bg-black/80 backdrop-blur-md border border-cyan-500/50 text-cyan-300 px-3 py-1 rounded-full text-xs font-black shadow-lg flex items-center gap-1.5 font-mono">
+                <span>📸</span>
+                <span>{currentIndex + 1} / {activeItems.length}</span>
+              </div>
+            ) : (
+              <div className="bg-black/80 backdrop-blur-md border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full text-[11px] font-bold shadow">
+                🔍 ចុច ២ ដងដើម្បីពង្រីក
+              </div>
+            )}
+
+            {/* Prominent Floating Quantity Badge */}
+            <div className="bg-amber-400 text-slate-950 px-2.5 py-1 rounded-full text-xs font-black shadow-[0_0_12px_rgba(251,191,36,0.6)] flex items-center gap-1 font-mono ring-1 ring-amber-200 animate-pulse">
+              <span>🛍️</span>
+              <span>x{currentItem.quantity || 1}</span>
             </div>
-          ) : (
-            <div className="pointer-events-auto bg-black/75 backdrop-blur-md border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full text-[11px] font-bold shadow">
-              🔍 ចុច ២ ដងដើម្បីពង្រីក
-            </div>
-          )}
+          </div>
 
           {/* Right Action Tools */}
           <div className="pointer-events-auto flex items-center gap-2">
@@ -474,6 +492,11 @@ export function ImageZoomModal({
                     {item.code}
                   </span>
 
+                  {/* Quantity Badge on Thumbnail */}
+                  <span className="absolute top-0.5 left-0.5 bg-amber-400 text-slate-950 font-black text-[9px] px-1 rounded-md font-mono shadow leading-tight">
+                    x{item.quantity || 1}
+                  </span>
+
                   {/* Check Indicator */}
                   {item.isChecked && (
                     <span className="absolute top-0.5 right-0.5 w-3.5 h-3.5 bg-emerald-500 text-slate-950 rounded-full flex items-center justify-center text-[8px] font-black shadow">
@@ -487,15 +510,32 @@ export function ImageZoomModal({
         )}
 
         {/* Product Details & Action Bar */}
-        <div className="p-3.5 bg-[#121E38] flex flex-col gap-2.5 border-t border-slate-700">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2 overflow-hidden flex-1">
-              <span className="bg-cyan-500 text-slate-950 font-mono font-black px-2.5 py-0.5 rounded-lg text-sm shadow flex-shrink-0">
-                [{currentItem.code}]
-              </span>
-              <span className="font-extrabold text-white text-sm truncate">
-                {currentItem.name || `កូដ ${currentItem.code}`}
-              </span>
+        <div className="p-3.5 bg-[#121E38] flex flex-col gap-2 border-t border-slate-700">
+          <div className="flex justify-between items-start gap-2">
+            <div className="flex flex-col gap-1 overflow-hidden flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="bg-cyan-500 text-slate-950 font-mono font-black px-2.5 py-0.5 rounded-lg text-sm shadow flex-shrink-0">
+                  [{currentItem.code}]
+                </span>
+
+                {/* Big Prominent Ordered Quantity Badge */}
+                <span className="bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 font-mono font-black px-2.5 py-0.5 rounded-lg text-sm shadow-[0_0_12px_rgba(251,191,36,0.5)] flex items-center gap-1 flex-shrink-0">
+                  <span className="text-xs opacity-80">ចំនួន:</span>
+                  <span className="text-base font-black">x{currentItem.quantity || 1}</span>
+                </span>
+
+                <span className="font-extrabold text-white text-sm truncate">
+                  {currentItem.name || `កូដ ${currentItem.code}`}
+                </span>
+              </div>
+
+              {/* Customer Comment / Note */}
+              {currentItem.comment && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-200 bg-amber-950/70 border border-amber-500/40 px-2 py-0.5 rounded-lg font-mono mt-0.5">
+                  <span className="text-amber-400 font-bold">💬 ខមិន:</span>
+                  <span className="font-bold truncate text-white">{currentItem.comment}</span>
+                </div>
+              )}
             </div>
 
             {/* Quick Check Action Button */}
@@ -503,7 +543,7 @@ export function ImageZoomModal({
               <button
                 type="button"
                 onClick={handleQuickCheck}
-                className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer ${
+                className={`px-3 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer flex-shrink-0 ${
                   currentItem.isChecked
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white ring-2 ring-emerald-400/40'
                     : 'bg-slate-800 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/50'

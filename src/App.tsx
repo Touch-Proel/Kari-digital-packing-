@@ -146,7 +146,7 @@ export default function App() {
   const [zoomImageUrl, setZoomImageUrl] = useState<string | undefined>(undefined);
   const [zoomPrice, setZoomPrice] = useState<number | undefined>(undefined);
   const [zoomStockQty, setZoomStockQty] = useState<number | undefined>(undefined);
-  const [zoomItems, setZoomItems] = useState<{ code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[]>([]);
+  const [zoomItems, setZoomItems] = useState<{ code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; quantity?: number; comment?: string; isChecked?: boolean }[]>([]);
   const [zoomInitialIndex, setZoomInitialIndex] = useState<number>(0);
   const [zoomInvoiceId, setZoomInvoiceId] = useState<number | undefined>(undefined);
 
@@ -260,7 +260,7 @@ export default function App() {
     img?: string,
     pr?: number,
     sq?: number,
-    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[],
+    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; quantity?: number; comment?: string; isChecked?: boolean }[],
     index?: number,
     invoiceId?: number
   ) => {
@@ -269,7 +269,7 @@ export default function App() {
     setZoomImageUrl(img);
     setZoomPrice(pr);
     setZoomStockQty(sq);
-    setZoomItems(items || [{ code: c, name: n, imageUrl: img, price: pr, stockQty: sq }]);
+    setZoomItems(items || [{ code: c, name: n, imageUrl: img, price: pr, stockQty: sq, quantity: 1 }]);
     setZoomInitialIndex(index !== undefined ? index : 0);
     setZoomInvoiceId(invoiceId);
     setIsZoomModalOpen(true);

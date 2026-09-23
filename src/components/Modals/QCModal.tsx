@@ -15,7 +15,7 @@ interface QCModalProps {
     imageUrl?: string,
     price?: number,
     stockQty?: number,
-    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[],
+    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; quantity?: number; comment?: string; isChecked?: boolean }[],
     index?: number,
     invoiceId?: number
   ) => void;
@@ -139,6 +139,8 @@ export function QCModal({
                           imageUrl: img,
                           price: item.price !== undefined ? item.price : p?.price,
                           stockQty: p?.stock_qty,
+                          quantity: item.quantity || 1,
+                          comment: item.item_comment || undefined,
                           isChecked: !!verifiedMap[item.product_code]
                         };
                       });

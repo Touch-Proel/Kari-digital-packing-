@@ -53,7 +53,7 @@ interface BasketCardProps {
     imageUrl?: string,
     price?: number,
     stockQty?: number,
-    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[],
+    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; quantity?: number; comment?: string; isChecked?: boolean }[],
     index?: number,
     invoiceId?: number
   ) => void;
@@ -1412,12 +1412,22 @@ function BasketCardComponent({
                             ? p.price
                             : (it.price || 0);
                           const isItChecked = checkedState[`${invoice.invoice_id}_${it.product_code}`] ?? (invoice.checked_items || []).includes(it.product_code);
+                          
+                          const itMatchingComment = invoice.comments?.find(c => {
+                            const converted = convertKhmerNumeralsToGlobal(c || '');
+                            const codeRegex = new RegExp(`(^|\\D)${it.product_code}(\\D|$)`, 'i');
+                            return codeRegex.test(converted);
+                          });
+                          const itNoteText = it.item_comment || itMatchingComment || '';
+
                           return {
                             code: it.product_code,
                             name: it.product_name || p?.name || `កូដ ${it.product_code}`,
                             imageUrl: itImg,
                             price: itPrice,
                             stockQty: p?.stock_qty,
+                            quantity: it.quantity || 1,
+                            comment: itNoteText || undefined,
                             isChecked: isItChecked
                           };
                         });
