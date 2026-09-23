@@ -47,7 +47,16 @@ interface BasketCardProps {
   onOpenReceiptModal: (inv: Invoice) => void;
   onOpenVipModal?: (inv: Invoice) => void;
   onOpenKHQRModal?: (inv: Invoice) => void;
-  onOpenZoomModal: (code: string, name: string, imageUrl?: string, price?: number, stockQty?: number) => void;
+  onOpenZoomModal: (
+    code: string,
+    name: string,
+    imageUrl?: string,
+    price?: number,
+    stockQty?: number,
+    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[],
+    index?: number,
+    invoiceId?: number
+  ) => void;
   onDataChanged: () => void;
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
   onOptimisticZoneUpdate?: (invoiceId: number, newZone: 'PP' | 'PROVINCE', serverTotal?: number, serverShipping?: number) => void;
@@ -1394,12 +1403,29 @@ function BasketCardComponent({
                       }`}
                       onClick={e => {
                         e.stopPropagation();
+                        const allBasketZoomItems = (invoice.items || []).map(it => {
+                          const p = productMap ? productMap[it.product_code.toUpperCase()] : undefined;
+                          const img = (it.image_url && it.image_url.trim() !== '') ? it.image_url : p?.image_url;
+                          const pr = it.price !== undefined ? it.price : p?.price;
+                          const isItChecked = checkedState[`${invoice.invoice_id}_${it.product_code}`] ?? (invoice.checked_items || []).includes(it.product_code);
+                          return {
+                            code: it.product_code,
+                            name: it.product_name || `កូដ ${it.product_code}`,
+                            imageUrl: img,
+                            price: pr,
+                            stockQty: p?.stock_qty,
+                            isChecked: isItChecked
+                          };
+                        });
                         onOpenZoomModal(
                           activeTypedCode || item.product_code,
                           item.product_name,
                           displayImage,
                           displayPrice,
-                          activeProd?.stock_qty
+                          activeProd?.stock_qty,
+                          allBasketZoomItems,
+                          idx,
+                          invoice.invoice_id
                         );
                       }}
                       title="ចុចដើម្បីមើលរូបធំ ឬថតរូបទំនិញនេះ (80x80)"

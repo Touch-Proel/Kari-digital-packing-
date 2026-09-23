@@ -146,6 +146,9 @@ export default function App() {
   const [zoomImageUrl, setZoomImageUrl] = useState<string | undefined>(undefined);
   const [zoomPrice, setZoomPrice] = useState<number | undefined>(undefined);
   const [zoomStockQty, setZoomStockQty] = useState<number | undefined>(undefined);
+  const [zoomItems, setZoomItems] = useState<{ code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[]>([]);
+  const [zoomInitialIndex, setZoomInitialIndex] = useState<number>(0);
+  const [zoomInvoiceId, setZoomInvoiceId] = useState<number | undefined>(undefined);
 
   // Cross-Live Backlog Alert & Modal State
   const [isBacklogModalOpen, setIsBacklogModalOpen] = useState(false);
@@ -251,12 +254,24 @@ export default function App() {
     setIsQCModalOpen(true);
   }, []);
 
-  const handleOpenZoomModal = useCallback((c: string, n: string, img?: string, pr?: number, sq?: number) => {
+  const handleOpenZoomModal = useCallback((
+    c: string,
+    n: string,
+    img?: string,
+    pr?: number,
+    sq?: number,
+    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[],
+    index?: number,
+    invoiceId?: number
+  ) => {
     setZoomCode(c);
     setZoomName(n);
     setZoomImageUrl(img);
     setZoomPrice(pr);
     setZoomStockQty(sq);
+    setZoomItems(items || [{ code: c, name: n, imageUrl: img, price: pr, stockQty: sq }]);
+    setZoomInitialIndex(index !== undefined ? index : 0);
+    setZoomInvoiceId(invoiceId);
     setIsZoomModalOpen(true);
   }, []);
 
@@ -1324,7 +1339,11 @@ export default function App() {
         imageUrl={zoomImageUrl}
         price={zoomPrice}
         stockQty={zoomStockQty}
+        items={zoomItems}
+        initialIndex={zoomInitialIndex}
+        invoiceId={zoomInvoiceId}
         activeLiveId={selectedLiveId}
+        onToggleItemCheck={handleToggleItemCheck}
         onPhotoUploaded={() => {
           fetchStock();
           fetchInvoices();

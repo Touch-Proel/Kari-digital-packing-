@@ -9,7 +9,16 @@ interface QCModalProps {
   invoice: Invoice | null;
   packerName: string;
   productMap?: Record<string, Product>;
-  onOpenZoomModal?: (code: string, name: string, imageUrl?: string, price?: number, stockQty?: number) => void;
+  onOpenZoomModal?: (
+    code: string,
+    name: string,
+    imageUrl?: string,
+    price?: number,
+    stockQty?: number,
+    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; isChecked?: boolean }[],
+    index?: number,
+    invoiceId?: number
+  ) => void;
   onDispatchSuccess: (invoiceId: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
@@ -119,9 +128,30 @@ export function QCModal({
                 <div
                   className="w-16 h-16 min-w-16 min-h-16 rounded-xl bg-slate-950 border-2 border-slate-700 hover:border-cyan-400 flex-shrink-0 flex items-center justify-center overflow-hidden relative cursor-pointer group shadow-sm transition-all"
                   onClick={e => {
-                    if (displayImage && onOpenZoomModal) {
+                    if (displayImage && onOpenZoomModal && invoice) {
                       e.stopPropagation();
-                      onOpenZoomModal(it.product_code, it.product_name, displayImage, it.price, prod?.stock_qty);
+                      const allQcZoomItems = (invoice.items || []).map(item => {
+                        const p = productMap ? productMap[item.product_code.toUpperCase()] : undefined;
+                        const img = (item.image_url && item.image_url.trim() !== '') ? item.image_url : p?.image_url;
+                        return {
+                          code: item.product_code,
+                          name: item.product_name || `កូដ ${item.product_code}`,
+                          imageUrl: img,
+                          price: item.price !== undefined ? item.price : p?.price,
+                          stockQty: p?.stock_qty,
+                          isChecked: !!verifiedMap[item.product_code]
+                        };
+                      });
+                      onOpenZoomModal(
+                        it.product_code,
+                        it.product_name,
+                        displayImage,
+                        it.price,
+                        prod?.stock_qty,
+                        allQcZoomItems,
+                        idx,
+                        invoice.invoice_id
+                      );
                     }
                   }}
                   title={displayImage ? 'ចុចដើម្បីពង្រីកមើលរូបធំ' : undefined}
