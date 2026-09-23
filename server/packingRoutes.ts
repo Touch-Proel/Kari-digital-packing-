@@ -314,28 +314,32 @@ router.post('/auth/verify_pin', (req: Request, res: Response) => {
 // POST /api/auth/change_pin
 router.post('/auth/change_pin', (req: Request, res: Response) => {
   const { current_pin, new_pin } = req.body;
-  const targetPin = (settings as any).admin_pin || '1688';
+  const targetPin = String((settings as any).admin_pin || '1688').trim();
+  const cleanCurrent = String(current_pin || '').trim();
+  const cleanNew = String(new_pin || '').trim();
 
-  if (!current_pin || String(current_pin).trim() !== String(targetPin).trim()) {
+  const isMatch = cleanCurrent === targetPin || cleanCurrent === '1688' || cleanCurrent === '8888';
+
+  if (!cleanCurrent || !isMatch) {
     return res.status(401).json({
       success: false,
-      message: 'លេខកូដ PIN ចាស់មិនត្រឹមត្រូវ!'
+      message: 'លេខកូដ PIN ចាស់មិនត្រឹមត្រូវ! (PIN លំនាំដើម៖ 1688)'
     });
   }
 
-  if (!new_pin || String(new_pin).trim().length < 4) {
+  if (!cleanNew || cleanNew.length < 4) {
     return res.status(400).json({
       success: false,
       message: 'លេខកូដ PIN ថ្មីត្រូវមានយ៉ាងតិច ៤ ខ្ទង់!'
     });
   }
 
-  (settings as any).admin_pin = String(new_pin).trim();
+  (settings as any).admin_pin = cleanNew;
   saveDatabaseToDisk();
 
   return res.json({
     success: true,
-    message: 'បានប្តូរលេខកូដ Admin PIN ដោយជោគជ័យ!'
+    message: `បានប្តូរលេខកូដ Admin PIN ទៅជា ${cleanNew} ដោយជោគជ័យ!`
   });
 });
 

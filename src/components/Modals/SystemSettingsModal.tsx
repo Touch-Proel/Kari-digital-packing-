@@ -52,6 +52,7 @@ export function SystemSettingsModal({
   // Admin PIN Change State
   const [currentPinInput, setCurrentPinInput] = useState('');
   const [newPinInput, setNewPinInput] = useState('');
+  const [showPinText, setShowPinText] = useState(false);
   const [isChangingPin, setIsChangingPin] = useState(false);
   const [pinFeedback, setPinFeedback] = useState<string | null>(null);
   const [showPinSection, setShowPinSection] = useState(false);
@@ -309,12 +310,24 @@ export function SystemSettingsModal({
 
               {showPinSection && (
                 <div className="mt-2.5 p-3 bg-slate-950 border border-amber-500/30 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400">PIN លំនាំដើម៖ <strong className="text-amber-300 font-mono">1688</strong> (ឬ 8888)</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPinText(!showPinText)}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer font-bold"
+                    >
+                      <span>{showPinText ? '👁️ លាក់លេខ' : '👁️ បង្ហាញលេខ'}</span>
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[10.5px] text-slate-400 mb-1">PIN ចាស់ (បច្ចុប្បន្ន) ៖</label>
                       <input
-                        type="password"
-                        maxLength={8}
+                        type={showPinText ? "text" : "password"}
+                        inputMode="numeric"
+                        maxLength={12}
                         value={currentPinInput}
                         onChange={e => setCurrentPinInput(e.target.value)}
                         placeholder="ឧ. 1688"
@@ -324,8 +337,9 @@ export function SystemSettingsModal({
                     <div>
                       <label className="block text-[10.5px] text-slate-400 mb-1">PIN ថ្មី (យ៉ាងតិច ៤ ខ្ទង់) ៖</label>
                       <input
-                        type="password"
-                        maxLength={8}
+                        type={showPinText ? "text" : "password"}
+                        inputMode="numeric"
+                        maxLength={12}
                         value={newPinInput}
                         onChange={e => setNewPinInput(e.target.value)}
                         placeholder="PIN ថ្មី..."
@@ -335,7 +349,13 @@ export function SystemSettingsModal({
                   </div>
 
                   <div className="flex items-center justify-between pt-1">
-                    <span className="text-[10px] text-slate-500">PIN លំនាំដើម ៖ 1688</span>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPinInput('1688')}
+                      className="text-[10px] text-amber-400/80 hover:text-amber-300 underline cursor-pointer"
+                    >
+                      + ដាក់ PIN ចាស់ "1688"
+                    </button>
                     <button
                       type="button"
                       disabled={isChangingPin || !currentPinInput || !newPinInput}
