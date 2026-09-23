@@ -1467,14 +1467,7 @@ export default function App() {
           fetchInvoices();
         }}
         onShowToast={showToast}
-        onOpenZoomModal={(code, name, image, price, stockQty) => {
-          setZoomCode(code);
-          setZoomName(name || '');
-          setZoomImageUrl(image);
-          setZoomPrice(price);
-          setZoomStockQty(stockQty);
-          setIsZoomModalOpen(true);
-        }}
+        onOpenZoomModal={handleOpenZoomModal}
       />
 
       {/* Create New Live Session with Stock Isolation Modal */}

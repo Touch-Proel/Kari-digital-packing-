@@ -28,6 +28,7 @@ interface ImageZoomModalProps {
   activeLiveId?: string;
   onToggleItemCheck?: (invoiceId: number, code: string) => void;
   onPhotoUploaded?: () => void;
+  onStockUpdated?: () => void;
   onShowToast?: (msg: string, type?: 'success' | 'error') => void;
 }
 
@@ -47,6 +48,7 @@ export function ImageZoomModal({
   activeLiveId,
   onToggleItemCheck,
   onPhotoUploaded,
+  onStockUpdated,
   onShowToast
 }: ImageZoomModalProps) {
   const [uploading, setUploading] = useState<boolean>(false);
@@ -57,36 +59,51 @@ export function ImageZoomModal({
   const [touchStartY, setTouchStartY] = useState<number | null>(null);
   const [dragOffsetY, setDragOffsetY] = useState<number>(0);
 
+  // Stock Quick Edit State
+  const [editingPrice, setEditingPrice] = useState<boolean>(false);
+  const [editPriceVal, setEditPriceVal] = useState<string>('');
+  const [editingQty, setEditingQty] = useState<boolean>(false);
+  const [editQtyVal, setEditQtyVal] = useState<string>('');
+  const [savingStock, setSavingStock] = useState<boolean>(false);
+
+  // Local copy of items for instant reactive updates when editing price/stock
+  const [localItems, setLocalItems] = useState<ZoomModalItem[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastTapTimeRef = useRef<number>(0);
   const thumbnailScrollRef = useRef<HTMLDivElement>(null);
 
   // Normalize items array
-  const activeItems: ZoomModalItem[] = React.useMemo(() => {
+  useEffect(() => {
     if (propItems && propItems.length > 0) {
-      return propItems;
+      setLocalItems(propItems);
+    } else {
+      setLocalItems([
+        {
+          code: singleCode,
+          name: singleName || `កូដ ${singleCode}`,
+          imageUrl: singleImageUrl,
+          price: singlePrice,
+          stockQty: singleStockQty,
+          quantity: singleQuantity || 1,
+          comment: singleComment
+        }
+      ]);
     }
-    return [
-      {
-        code: singleCode,
-        name: singleName || `កូដ ${singleCode}`,
-        imageUrl: singleImageUrl,
-        price: singlePrice,
-        stockQty: singleStockQty,
-        quantity: singleQuantity || 1,
-        comment: singleComment
-      }
-    ];
   }, [propItems, singleCode, singleName, singleImageUrl, singlePrice, singleStockQty, singleQuantity, singleComment]);
+
+  const activeItems = localItems.length > 0 ? localItems : (propItems || []);
 
   // Sync index when modal opens or initialIndex changes
   useEffect(() => {
     if (isOpen) {
-      const validIndex = Math.max(0, Math.min(initialIndex, activeItems.length - 1));
+      const validIndex = Math.max(0, Math.min(initialIndex, (activeItems.length || 1) - 1));
       setCurrentIndex(validIndex);
       setIsDoubleZoomed(false);
       setPanOffset({ x: 0, y: 0 });
       setDragOffsetY(0);
+      setEditingPrice(false);
+      setEditingQty(false);
     }
   }, [isOpen, initialIndex, activeItems.length]);
 
@@ -98,6 +115,8 @@ export function ImageZoomModal({
         activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
       }
     }
+    setEditingPrice(false);
+    setEditingQty(false);
   }, [currentIndex]);
 
   const currentItem: ZoomModalItem = activeItems[currentIndex] || {
@@ -129,6 +148,56 @@ export function ImageZoomModal({
     playPureTone(750, 0.03);
     setCurrentIndex(prev => (prev < activeItems.length - 1 ? prev + 1 : 0));
   }, [activeItems.length]);
+
+  // Save quick price or stock update directly
+  const handleSaveStockPrice = async (newPrice?: number, newQty?: number) => {
+    const updatedPrice = newPrice !== undefined ? newPrice : (currentItem.price ?? 0);
+    const updatedQty = newQty !== undefined ? newQty : (currentItem.stockQty ?? 0);
+
+    setSavingStock(true);
+    try {
+      const res = await fetch('/api/update_product_stock_price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: currentItem.code,
+          name: currentItem.name || `កូដ ${currentItem.code}`,
+          stock_qty: updatedQty,
+          price: updatedPrice,
+          image_file: currentItem.imageUrl || '',
+          live_id: activeLiveId
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        // Update local items array
+        setLocalItems(prev =>
+          prev.map((it, idx) =>
+            idx === currentIndex
+              ? { ...it, price: updatedPrice, stockQty: updatedQty }
+              : it
+          )
+        );
+        setEditingPrice(false);
+        setEditingQty(false);
+        onShowToast?.(`💾 បានរក្សាទុក [${currentItem.code}]៖ $${updatedPrice.toFixed(2)} (សល់ ${updatedQty})`, 'success');
+        onStockUpdated?.();
+      } else {
+        onShowToast?.('មិនអាចកែប្រែបានទេ', 'error');
+      }
+    } catch (err) {
+      onShowToast?.('⚠️ បញ្ហាបណ្តាញ WiFi', 'error');
+    } finally {
+      setSavingStock(false);
+    }
+  };
+
+  const handleAdjustStockDelta = (delta: number) => {
+    const currentQ = currentItem.stockQty ?? 0;
+    const newQ = Math.max(0, currentQ + delta);
+    handleSaveStockPrice(undefined, newQ);
+  };
 
   // Keyboard Navigation
   useEffect(() => {
@@ -326,26 +395,36 @@ export function ImageZoomModal({
 
         {/* Top Floating Action Bar */}
         <div className="absolute top-3 inset-x-3 z-30 flex items-center justify-between pointer-events-none">
-          {/* Left Island: Index Counter + Quantity */}
+          {/* Left Island: Index Counter + Quantity/Stock Mode */}
           <div className="pointer-events-auto flex items-center gap-1.5 bg-black/60 backdrop-blur-xl p-1 rounded-2xl border border-white/10 shadow-2xl">
-            {hasMultiple && (
-              <div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-400/40 text-cyan-300 px-2.5 py-1 rounded-xl text-xs font-black font-mono flex items-center gap-1.5 shadow-sm">
-                <span className="text-[11px] opacity-80">📸</span>
-                <span>{currentIndex + 1}<span className="opacity-50 text-[10px]">/</span>{activeItems.length}</span>
+            {/* Mode & Index Badge */}
+            <div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-400/40 text-cyan-300 px-2.5 py-1 rounded-xl text-xs font-black font-mono flex items-center gap-1.5 shadow-sm">
+              <span className="text-[11px] opacity-80">{invoiceId ? '📸' : '📦'}</span>
+              <span>
+                {currentIndex + 1}
+                <span className="opacity-50 text-[10px]">/</span>
+                {activeItems.length}
+              </span>
+            </div>
+
+            {/* In Basket Mode: show customer qty. In Stock Mode: show total stock badge */}
+            {invoiceId ? (
+              <div
+                className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono flex items-center gap-1 shadow-md transition-all ${
+                  (currentItem.quantity || 1) > 1
+                    ? 'bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 text-slate-950 ring-1 ring-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.6)] animate-pulse'
+                    : 'bg-slate-800/90 text-amber-300 border border-amber-500/30'
+                }`}
+              >
+                <span className="text-[11px]">🛍️</span>
+                <span>x{currentItem.quantity || 1}</span>
+              </div>
+            ) : (
+              <div className="px-2.5 py-1 rounded-xl text-xs font-black font-mono flex items-center gap-1 shadow-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                <span className="text-[11px]">📦</span>
+                <span>សល់ {currentItem.stockQty ?? 0}</span>
               </div>
             )}
-
-            {/* Prominent High-End Quantity Badge */}
-            <div
-              className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono flex items-center gap-1 shadow-md transition-all ${
-                (currentItem.quantity || 1) > 1
-                  ? 'bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 text-slate-950 ring-1 ring-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.6)] animate-pulse'
-                  : 'bg-slate-800/90 text-amber-300 border border-amber-500/30'
-              }`}
-            >
-              <span className="text-[11px]">🛍️</span>
-              <span>x{currentItem.quantity || 1}</span>
-            </div>
           </div>
 
           {/* Right Action Tools Island */}
@@ -574,8 +653,8 @@ export function ImageZoomModal({
               )}
             </div>
 
-            {/* Quick Check Action Button - High Polish */}
-            {invoiceId && onToggleItemCheck && (
+            {/* Quick Check Action Button for Basket Mode OR Quick Price Edit for Stock Mode */}
+            {invoiceId && onToggleItemCheck ? (
               <button
                 type="button"
                 onClick={handleQuickCheck}
@@ -587,40 +666,149 @@ export function ImageZoomModal({
               >
                 <span>{currentItem.isChecked ? '✓ ផ្ទៀងរួច' : '☑ ផ្ទៀងត្រូវ'}</span>
               </button>
+            ) : (
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {/* Quick Photo Replace in Stock Audit */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="bg-slate-800/90 hover:bg-slate-700 text-amber-300 border border-amber-500/40 px-2.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 shadow"
+                  title="ប្តូររូបភាពកូដនេះ"
+                >
+                  <span>📷</span>
+                  <span className="hidden sm:inline text-[11px]">{uploading ? '...' : 'ប្តូររូប'}</span>
+                </button>
+
+                {/* Quick Edit Price Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditPriceVal((currentItem.price ?? 0).toString());
+                    setEditingPrice(prev => !prev);
+                  }}
+                  className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-3 py-2 rounded-xl text-xs font-black shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                >
+                  <span>✏️</span>
+                  <span>កែតម្លៃ</span>
+                </button>
+              </div>
             )}
           </div>
 
-          {/* Pricing & Stock Stats Strip */}
-          <div className="flex justify-between items-center text-xs pt-2 border-t border-white/10">
-            <div className="flex items-center gap-3 flex-wrap">
-              {currentItem.price !== undefined && (
-                <div className="flex items-center gap-1.5 font-mono">
-                  <span className="text-amber-400 font-black text-sm">
-                    ${currentItem.price.toFixed(2)}
-                  </span>
-                  {(currentItem.quantity || 1) > 1 && (
-                    <span className="text-amber-300/80 text-[11px] bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/30">
-                      សរុប: ${(currentItem.price * (currentItem.quantity || 1)).toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {currentItem.stockQty !== undefined && (
-                <span
-                  className={`font-mono font-bold text-xs px-2 py-0.5 rounded-lg border ${
-                    currentItem.stockQty <= 0
-                      ? 'text-rose-400 bg-rose-950/40 border-rose-500/30'
-                      : 'text-emerald-300 bg-emerald-950/40 border-emerald-500/30'
-                  }`}
+          {/* Pricing & Stock Stats Strip / Inline Price & Stock Adjusters */}
+          <div className="flex justify-between items-center text-xs pt-2 border-t border-white/10 gap-2 flex-wrap">
+            {/* Inline Price Editor Form */}
+            {editingPrice ? (
+              <div className="flex items-center gap-1.5 bg-slate-950/90 p-1.5 rounded-xl border border-cyan-400/80 shadow-lg animate-fadeIn">
+                <span className="text-amber-400 font-mono font-black text-sm pl-1">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  autoFocus
+                  value={editPriceVal}
+                  onChange={e => setEditPriceVal(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const num = parseFloat(editPriceVal);
+                      if (!isNaN(num)) handleSaveStockPrice(num, undefined);
+                    } else if (e.key === 'Escape') {
+                      setEditingPrice(false);
+                    }
+                  }}
+                  className="w-20 bg-slate-900 text-amber-300 font-mono font-black text-sm px-2 py-0.5 rounded border border-slate-700 outline-none focus:border-cyan-400"
+                  placeholder="0.00"
+                />
+                <button
+                  type="button"
+                  disabled={savingStock}
+                  onClick={() => {
+                    const num = parseFloat(editPriceVal);
+                    if (!isNaN(num)) handleSaveStockPrice(num, undefined);
+                  }}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-2.5 py-1 rounded-lg text-xs shadow cursor-pointer active:scale-95"
                 >
-                  {currentItem.stockQty <= 0 ? '🔴 អស់ស្តុក' : `🟢 ស្តុកនៅសល់: ${currentItem.stockQty} ដើម`}
-                </span>
-              )}
-            </div>
+                  {savingStock ? '...' : '✓ រក្សាទុក'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingPrice(false)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-2 py-1 rounded-lg text-xs cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 flex-wrap">
+                {currentItem.price !== undefined && (
+                  <div
+                    onClick={() => {
+                      if (!invoiceId) {
+                        setEditPriceVal((currentItem.price ?? 0).toString());
+                        setEditingPrice(true);
+                      }
+                    }}
+                    className={`flex items-center gap-1.5 font-mono ${!invoiceId ? 'cursor-pointer hover:underline' : ''}`}
+                    title={!invoiceId ? 'ចុចដើម្បីកែប្រែតម្លៃ' : undefined}
+                  >
+                    <span className="text-amber-400 font-black text-sm">
+                      ${currentItem.price.toFixed(2)}
+                    </span>
+                    {(currentItem.quantity || 1) > 1 && invoiceId && (
+                      <span className="text-amber-300/80 text-[11px] bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/30">
+                        សរុប: ${(currentItem.price * (currentItem.quantity || 1)).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                )}
 
-            <span className="text-[10.5px] text-cyan-300/70 font-mono flex items-center gap-1">
-              <span>👈 អូសឆ្វេងស្តាំ 👉</span>
+                {/* Stock Quantity Badge with Direct Adjusters in Stock Mode */}
+                {!invoiceId ? (
+                  <div className="flex items-center gap-1 bg-slate-950/80 p-0.5 px-1 rounded-xl border border-slate-700/80 shadow-sm">
+                    <button
+                      type="button"
+                      disabled={savingStock}
+                      onClick={() => handleAdjustStockDelta(-1)}
+                      className="w-6 h-6 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-black text-xs flex items-center justify-center cursor-pointer active:scale-90"
+                      title="ដកចំនួនស្តុក (-1)"
+                    >
+                      -
+                    </button>
+                    <span
+                      className={`font-mono font-bold text-xs px-2 ${
+                        (currentItem.stockQty ?? 0) <= 0 ? 'text-rose-400' : 'text-emerald-300'
+                      }`}
+                    >
+                      {(currentItem.stockQty ?? 0) <= 0 ? '🔴 អស់' : `🟢 សល់ ${currentItem.stockQty ?? 0}`}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={savingStock}
+                      onClick={() => handleAdjustStockDelta(1)}
+                      className="w-6 h-6 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 font-black text-xs flex items-center justify-center cursor-pointer active:scale-90"
+                      title="ថែមចំនួនស្តុក (+1)"
+                    >
+                      +
+                    </button>
+                  </div>
+                ) : (
+                  currentItem.stockQty !== undefined && (
+                    <span
+                      className={`font-mono font-bold text-xs px-2 py-0.5 rounded-lg border ${
+                        currentItem.stockQty <= 0
+                          ? 'text-rose-400 bg-rose-950/40 border-rose-500/30'
+                          : 'text-emerald-300 bg-emerald-950/40 border-emerald-500/30'
+                      }`}
+                    >
+                      {currentItem.stockQty <= 0 ? '🔴 អស់ស្តុក' : `🟢 ស្តុកនៅសល់: ${currentItem.stockQty} ដើម`}
+                    </span>
+                  )
+                )}
+              </div>
+            )}
+
+            <span className="text-[10.5px] text-cyan-300/70 font-mono flex items-center gap-1 ml-auto">
+              <span>👈 អូស Slide ឆ្វេង-ស្តាំ 👉</span>
             </span>
           </div>
         </div>

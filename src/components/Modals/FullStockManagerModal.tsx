@@ -17,7 +17,10 @@ interface FullStockManagerModalProps {
     name?: string,
     imageUrl?: string,
     price?: number,
-    stockQty?: number
+    stockQty?: number,
+    items?: { code: string; name: string; imageUrl?: string; price?: number; stockQty?: number; quantity?: number; comment?: string; isChecked?: boolean }[],
+    index?: number,
+    invoiceId?: number
   ) => void;
 }
 
@@ -402,8 +405,28 @@ export function FullStockManagerModal({
                     {/* Thumbnail Image (80x80) */}
                     <div
                       className="w-[72px] h-[72px] min-w-[72px] rounded-xl overflow-hidden bg-slate-950 border border-slate-700 flex items-center justify-center cursor-pointer relative group/img flex-shrink-0"
-                      onClick={() => onOpenZoomModal(p.code, p.name, p.image_file, p.price, p.stock_qty)}
-                      title="ចុចដើម្បីមើលរូបធំ ឬថតរូបទំនិញ"
+                      onClick={() => {
+                        const allStockZoomItems = filteredProducts.map(prod => ({
+                          code: prod.code,
+                          name: prod.name || `កូដ ${prod.code}`,
+                          imageUrl: prod.image_file,
+                          price: prod.price,
+                          stockQty: prod.stock_qty,
+                          quantity: 1,
+                          comment: undefined,
+                          isChecked: false
+                        }));
+                        onOpenZoomModal(
+                          p.code,
+                          p.name,
+                          p.image_file,
+                          p.price,
+                          p.stock_qty,
+                          allStockZoomItems,
+                          idx
+                        );
+                      }}
+                      title="ចុចដើម្បីមើលរូបធំ ឬ Slide ផ្ទៀងជាមួយ Telegram"
                     >
                       {p.image_file ? (
                         <img
