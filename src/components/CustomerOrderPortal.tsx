@@ -184,13 +184,13 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
 
           <div className="flex items-center gap-2">
             <span
-              className={`px-3 py-1 rounded-full text-xs font-black font-mono shadow-md ${
+              className={`px-3 py-1 rounded-xl text-xs font-black font-mono shadow-md flex items-center gap-1 ${
                 isPaid
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
                   : 'bg-amber-500/20 text-amber-300 border border-amber-500/50 animate-pulse'
               }`}
             >
-              {isPaid ? '✓ PAID (បានបង់)' : '⏳ UNPAID (មិនទាន់បង់)'}
+              {isPaid ? '✓ PAID' : '⏳ UNPAID'}
             </span>
           </div>
         </div>

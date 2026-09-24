@@ -1063,26 +1063,27 @@ function BasketCardComponent({
 
             {isDispatched ? (
               isPaid ? (
-                <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1">
-                  <span>✅</span>
+                <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-2.5 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1">
+                  <span>✓</span>
                   <span>PAID</span>
                 </span>
               ) : (
-                <span className="bg-amber-950/90 border border-amber-400 text-amber-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(245,158,11,0.3)] flex items-center gap-1">
+                <span className="bg-amber-950/90 border border-amber-400 text-amber-300 text-xs font-black px-2.5 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(245,158,11,0.3)] flex items-center gap-1">
                   <span>💵</span>
                   <span>COD</span>
                 </span>
               )
             ) : isPaid ? (
-              <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)]">
-                PAID
+              <span className="bg-emerald-950/90 border border-emerald-400 text-emerald-300 text-xs font-black px-2.5 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)] flex items-center gap-1">
+                <span>✓</span>
+                <span>PAID</span>
               </span>
             ) : isStaged ? (
-              <span className="bg-amber-950/90 border border-amber-400 text-amber-300 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(245,158,11,0.3)]">
+              <span className="bg-amber-950/90 border border-amber-400 text-amber-300 text-xs font-black px-2.5 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_12px_rgba(245,158,11,0.3)]">
                 STAGED
               </span>
             ) : (
-              <span className="bg-[#261703] border border-amber-500/90 text-amber-400 text-xs font-black px-3 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_10px_rgba(245,158,11,0.2)]">
+              <span className="bg-[#261703] border border-amber-500/90 text-amber-400 text-xs font-black px-2.5 py-1 rounded-xl uppercase tracking-wider shadow-[0_0_10px_rgba(245,158,11,0.2)]">
                 UNPAID
               </span>
             )}
@@ -1137,7 +1138,7 @@ function BasketCardComponent({
             </button>
           </div>
 
-          {/* Right: KHQR Button + Total Price Badge */}
+          {/* Right: KHQR Button (when unpaid) + Total Price Badge */}
           <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
             {onOpenKHQRModal && !isPaid && (
               <button
@@ -1152,16 +1153,15 @@ function BasketCardComponent({
                 <span>ស្កែន</span>
               </button>
             )}
-            {isPaid && (
-              <div
-                className="bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 px-2 py-0.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-sm"
-                title={invoice.paid_at ? `បានបង់ប្រាក់នៅ ${new Date(invoice.paid_at).toLocaleTimeString('en-US', { timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: true })}` : 'បានបង់ប្រាក់រួច'}
-              >
-                <span className="text-xs">✓</span>
-                <span>បង់រួច</span>
-              </div>
-            )}
-            <div className="bg-[#031526] border-2 border-cyan-400 text-cyan-300 px-3 py-1 rounded-xl font-mono font-black text-sm sm:text-base shadow-[0_0_14px_rgba(6,182,212,0.35)] flex items-center gap-1">
+            
+            <div
+              className={`px-3 py-1 rounded-xl font-mono font-black text-sm sm:text-base flex items-center gap-1 border transition-all ${
+                isPaid
+                  ? 'bg-[#051C1A] border-emerald-400/70 text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.25)]'
+                  : 'bg-[#031526] border-cyan-400 text-cyan-300 shadow-[0_0_14px_rgba(6,182,212,0.35)]'
+              }`}
+              title={invoice.paid_at ? `បានបង់ប្រាក់នៅ ${new Date(invoice.paid_at).toLocaleTimeString('en-US', { timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: true })}` : undefined}
+            >
               <span>${invoice.total_amount.toFixed(2)}</span>
             </div>
           </div>
