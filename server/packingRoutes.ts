@@ -285,6 +285,30 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
   const shippingFee = inv.shipping_fee || 0;
   const total = inv.total_amount || (subtotal + shippingFee);
 
+  const isPaid =
+    (inv.payment_status as any) === 'Paid' ||
+    (inv.payment_status as any) === 'PAID' ||
+    (inv.status as any) === 'Paid' ||
+    (inv.status as any) === 'PAID' ||
+    Boolean((inv as any).paid_at);
+
+  const isDispatched =
+    inv.status === 'Dispatched' ||
+    (inv.status as any) === 'DISPATCHED' ||
+    inv.packing_stage === 'DISPATCHED' ||
+    Boolean((inv as any).is_dispatched);
+
+  const isPicked =
+    inv.packing_stage === 'STAGED' ||
+    inv.packing_stage === 'DISPATCHED' ||
+    inv.status === 'Paid' ||
+    (inv.status as any) === 'PAID' ||
+    inv.status === 'Packed' ||
+    inv.status === 'Dispatched' ||
+    (inv.status as any) === 'DISPATCHED' ||
+    isDispatched ||
+    Boolean((inv as any).is_picked);
+
   return res.json({
     success: true,
     data: {
@@ -294,7 +318,10 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
       phone: inv.phone_number || (inv as any).phone,
       shipping_address: inv.address || (inv as any).shipping_address || (inv as any).delivery_address,
       status: inv.status,
-      payment_status: inv.payment_status,
+      packing_stage: inv.packing_stage,
+      payment_status: isPaid ? 'PAID' : 'UNPAID',
+      is_paid: isPaid,
+      paid_at: (inv as any).paid_at || null,
       items: enrichedItems,
       subtotal,
       shipping_fee: shippingFee,
@@ -302,8 +329,8 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
       comments: inv.comments || [],
       location_zone: inv.location_zone || 'PP',
       created_at: inv.created_at || (inv as any).timestamp,
-      is_dispatched: (inv.status as any) === 'DISPATCHED' || inv.status === 'Dispatched' || (inv as any).is_dispatched,
-      is_picked: (inv.status as any) === 'STAGED' || (inv.status as any) === 'PAID' || (inv.status as any) === 'PACKED' || inv.status === 'Paid' || inv.status === 'Packed' || inv.status === 'Dispatched',
+      is_dispatched: isDispatched,
+      is_picked: isPicked,
       packer_name: (inv as any).packer_name || (inv as any).packed_by,
       bakong_khqr: (settings as any)?.bakong_account_id || settings?.bakong_id ? {
         account_id: (settings as any)?.bakong_account_id || settings.bakong_id,

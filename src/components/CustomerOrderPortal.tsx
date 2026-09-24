@@ -16,7 +16,10 @@ interface PublicOrderData {
   phone?: string;
   shipping_address?: string;
   status: string;
-  payment_status: 'PAID' | 'UNPAID';
+  payment_status: string;
+  is_paid?: boolean;
+  paid_at?: string | null;
+  packing_stage?: string;
   items: OrderItem[];
   subtotal: number;
   shipping_fee: number;
@@ -138,7 +141,26 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
     );
   }
 
-  const isPaid = order.payment_status === 'PAID';
+  const isPaid =
+    order.is_paid === true ||
+    (order.payment_status && order.payment_status.toUpperCase() === 'PAID') ||
+    (order.status && order.status.toUpperCase() === 'PAID') ||
+    order.status === 'Packed' ||
+    order.status === 'Dispatched' ||
+    Boolean(order.paid_at);
+
+  const isDispatched =
+    order.is_dispatched === true ||
+    (order.status && order.status.toUpperCase() === 'DISPATCHED') ||
+    order.packing_stage === 'DISPATCHED';
+
+  const isPicked =
+    order.is_picked === true ||
+    isDispatched ||
+    order.packing_stage === 'STAGED' ||
+    order.packing_stage === 'DISPATCHED' ||
+    isPaid;
+
   const totalItemsCount = order.items.reduce((sum, it) => sum + (it.quantity || 1), 0);
 
   return (
@@ -218,8 +240,8 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
             </div>
             <div
               className={`p-2 rounded-xl border ${
-                order.is_picked
-                  ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+                isPicked
+                  ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
                   : 'bg-slate-800/60 border-slate-700 text-slate-400'
               }`}
             >
@@ -228,8 +250,8 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
             </div>
             <div
               className={`p-2 rounded-xl border ${
-                order.is_dispatched
-                  ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-300'
+                isDispatched
+                  ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.2)]'
                   : 'bg-slate-800/60 border-slate-700 text-slate-400'
               }`}
             >
