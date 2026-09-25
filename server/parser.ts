@@ -302,6 +302,18 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
     }
   }
 
+  // 🌟 PASS 5: Pure standalone product code in comment (e.g. "46", "57", "93", "48", "A1") with default qty = 1
+  if (pairs.length === 0) {
+    const standaloneMatch = s.match(/(?<=^|[^\w])(\d{2,4}|[A-Za-z]\d{1,3})(?=[^\w]|$)/);
+    if (standaloneMatch) {
+      const bareCode = standaloneMatch[1].toUpperCase().trim();
+      if (!COMMON_GREETINGS.has(bareCode) && !seenCodes.has(bareCode) && !/^(គីឡូ|ខោ|អាវ|ឈុត|រៀល|ដុល្លារ)$/.test(bareCode)) {
+        pairs.push({ code: bareCode, qty: 1 });
+        seenCodes.add(bareCode);
+      }
+    }
+  }
+
   return pairs;
 }
 

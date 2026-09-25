@@ -250,8 +250,8 @@ export async function callGeminiSlipExtraction(
   imagePart: { inlineData: { mimeType: string; data: string } },
   textPart: { text: string }
 ): Promise<{ text: string; error?: string }> {
-  // Use high-throughput flash-lite first to avoid 503 high demand spikes, with 3.6-flash and 3.8-flash fallbacks
-  const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
+  // Use gemini-3.8-flash with gemini-3.1-flash-lite fallback for high-throughput extraction
+  const modelCandidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
   let lastErrorMessage = '';
 
   for (const model of modelCandidates) {

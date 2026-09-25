@@ -45,6 +45,7 @@ import {
   executeLiveCommentsSyncOnce,
   recordRecentOrder
 } from './liveSync';
+import { aiSmartAuditFullBasket } from './aiSmartParser';
 
 const router = Router();
 
@@ -1484,6 +1485,200 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
     invoice: inv,
     revision: newRev
   });
+});
+
+// POST /api/ai_smart_parse_basket - Use Gemini AI to audit and reconcile the entire basket against all customer comments
+router.post('/ai_smart_parse_basket', async (req: Request, res: Response) => {
+  const { invoice_id, packer_name, apply_direct } = req.body;
+  const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
+
+  const lockCheck = isInvoiceLockedByOther(cleanId, packer_name);
+  if (lockCheck.locked) {
+    return res.status(409).json({
+      success: false,
+      message: `កន្ត្រកនេះត្រូវបានចាក់សោដោយ «${lockCheck.lockedBy}»!`
+    });
+  }
+
+  const inv = invoices.find(i => i.invoice_id === cleanId || i.basket_no === cleanId);
+  if (!inv) {
+    return res.status(404).json({ success: false, message: 'រកមិនឃើញកន្ត្រកនេះឡើយ' });
+  }
+
+  // 1. Gather ALL historical and live comments for this customer
+  const allCustomerComments: string[] = [];
+  const seenComments = new Set<string>();
+
+  // Add comments from inv.comments history
+  if (Array.isArray(inv.comments)) {
+    for (const c of inv.comments) {
+      const clean = (c || '').trim();
+      if (clean && !seenComments.has(clean)) {
+        seenComments.add(clean);
+        allCustomerComments.push(clean);
+      }
+    }
+  }
+
+  // Add comments from unmatched_comments
+  if (Array.isArray(inv.unmatched_comments)) {
+    for (const c of inv.unmatched_comments) {
+      const clean = (c || '').trim();
+      if (clean && !seenComments.has(clean)) {
+        seenComments.add(clean);
+        allCustomerComments.push(clean);
+      }
+    }
+  }
+
+  // Add item notes if they were sourced from comments
+  if (Array.isArray(inv.items)) {
+    for (const it of inv.items) {
+      if (it.item_comment && !seenComments.has(it.item_comment.trim())) {
+        seenComments.add(it.item_comment.trim());
+        allCustomerComments.push(it.item_comment.trim());
+      }
+    }
+  }
+
+  if (allCustomerComments.length === 0) {
+    return res.json({
+      success: false,
+      message: 'មិនមានខមិនរបស់អតិថិជនដើម្បីឱ្យ AI ផ្ទៀងផ្ទាត់ឡើយ'
+    });
+  }
+
+  const liveId = inv.live_id || activeLiveId;
+  const liveCatalog = products.filter(p => (p.live_id || activeLiveId) === liveId && p.code && p.code.trim().length > 0);
+
+  const currentItemsSummary = (inv.items || []).map(it => ({
+    code: it.product_code,
+    quantity: it.quantity,
+    notes: it.item_comment || ''
+  }));
+
+  try {
+    const auditResult = await aiSmartAuditFullBasket(
+      allCustomerComments,
+      currentItemsSummary,
+      inv.facebook_name || 'អតិថិជន',
+      liveCatalog
+    );
+
+    // If apply_direct is true (default), reconcile and update the entire basket with authoritative AI audit result
+    if (apply_direct !== false && auditResult.verified_items && auditResult.verified_items.length > 0) {
+      const newInvoiceItems = [];
+      let itemSeq = 1;
+
+      for (const ver of auditResult.verified_items) {
+        const clean = ver.code.toUpperCase().trim();
+        if (!clean) continue;
+        const exactQty = Math.max(1, ver.quantity || 1);
+
+        let prod = liveCatalog.find(p => p.code.toUpperCase() === clean);
+        if (!prod) {
+          const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
+          const cleanName = ver.product_name && !ver.product_name.includes('[') 
+            ? ver.product_name 
+            : `កូដ ${clean}`;
+          prod = {
+            id: nextProdId,
+            live_id: liveId,
+            code: clean,
+            name: cleanName,
+            stock_qty: 100,
+            price: ver.suggested_price || 3.0,
+            cost_price: 2.0
+          };
+          products.push(prod);
+        }
+
+        const existingOld = (inv.items || []).find(it => it.product_code.toUpperCase().trim() === clean);
+
+        let bestNote = (ver.notes || '').trim();
+        // Remove self-referencing codes or bracketed tags from note
+        if (/^កូដ\s*\[?.*?\]?$/i.test(bestNote) || bestNote === clean || bestNote.toLowerCase() === `កូដ ${clean}`.toLowerCase()) {
+          bestNote = '';
+        }
+        bestNote = bestNote.replace(/\[\s*កូដ\s*[^\]]+\]/gi, '').replace(/កូដ\s*\[[^\]]+\]/gi, '').trim();
+
+        // If no clean note, only retain existingOld comment if it's a genuine color/size, not a raw code dump
+        if (!bestNote && existingOld?.item_comment) {
+          const old = existingOld.item_comment.trim();
+          if (!/^កូដ\s*\[?.*?\]?$/i.test(old) && old !== clean && !/^\d+[\s=:*\-_xX]\d+$/.test(old)) {
+            bestNote = old;
+          }
+        }
+
+        newInvoiceItems.push({
+          id: itemSeq++,
+          invoice_id: inv.invoice_id,
+          product_id: prod.id,
+          product_code: prod.code,
+          product_name: prod.name,
+          quantity: exactQty, // Exactly applies the AI audited quantity (fixes regex mistaken numbers like x10 -> x1)
+          price: prod.price || ver.suggested_price || existingOld?.price || 3.0,
+          is_packed: false,
+          item_comment: bestNote,
+          image_file: prod.image_file || existingOld?.image_file || ''
+        });
+      }
+
+      inv.items = newInvoiceItems;
+
+      // 3. Update customer contact info if discovered
+      if (auditResult.phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ' || inv.phone_number.includes('មិនទាន់មាន') || inv.phone_number.length < 8)) {
+        inv.phone_number = auditResult.phone;
+        const cust = customers.find(c => c.facebook_name.toLowerCase() === (inv.facebook_name || '').toLowerCase());
+        if (cust) cust.phone_number = auditResult.phone;
+      }
+
+      if (auditResult.address && (!inv.address || inv.address.includes('មិនទាន់មាន'))) {
+        inv.address = auditResult.address;
+        const cust = customers.find(c => c.facebook_name.toLowerCase() === (inv.facebook_name || '').toLowerCase());
+        if (cust) cust.address = auditResult.address;
+      }
+
+      if (auditResult.zone) {
+        inv.location_zone = auditResult.zone;
+        inv.location_label = auditResult.zone === 'PP' ? 'ភ្នំពេញ' : 'ខេត្ត';
+      }
+
+      // 4. Clear unmatched comments as they have been fully audited by AI
+      inv.unmatched_comments = [];
+
+      recalculateInvoice(inv);
+      const newRev = bumpDataRevision();
+      saveDatabaseToDisk();
+
+      const correctionsText = auditResult.corrections_made && auditResult.corrections_made.length > 0
+        ? ` (${auditResult.corrections_made.join(', ')})`
+        : '';
+
+      return res.json({
+        success: true,
+        message: auditResult.summary ? `✨ ${auditResult.summary}${correctionsText}` : `✨ AI បានផ្ទៀងផ្ទាត់កន្ត្រកទាំងមូល និងកែសម្រួលរួចរាល់!`,
+        parsed: auditResult,
+        invoice: inv,
+        revision: newRev
+      });
+    }
+
+    return res.json({
+      success: true,
+      parsed: auditResult,
+      invoice: inv
+    });
+  } catch (err: any) {
+    const errorMsg = err?.message || 'AI Basket Audit បរាជ័យ';
+    if (!errorMsg.includes('Quota') && !errorMsg.includes('429')) {
+      console.warn('Notice in /api/ai_smart_parse_basket:', errorMsg);
+    }
+    return res.status(400).json({
+      success: false,
+      message: errorMsg
+    });
+  }
 });
 
 // POST /api/dismiss_unmatched_comment - Dismiss an unmatched comment from the pending list without deleting it from invoice.comments history

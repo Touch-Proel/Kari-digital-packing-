@@ -3,6 +3,7 @@ import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
 import { formatLiveShortBadge } from '../utils/liveUtils';
+import { ErrorAlertModal, ErrorModalData } from './Modals/ErrorAlertModal';
 
 function renderCommentWithHighlightedCode(comment: string, code: string) {
   if (!comment) return null;
@@ -136,6 +137,8 @@ function BasketCardComponent({
   const [showAllComments, setShowAllComments] = useState(false);
   const [isSendingVip, setIsSendingVip] = useState(false);
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+  const [isAiParsing, setIsAiParsing] = useState(false);
+  const [errorModalData, setErrorModalData] = useState<ErrorModalData | null>(null);
 
   const totalCount = invoice.items.length;
   const packedCount = invoice.items.filter(
@@ -205,6 +208,13 @@ function BasketCardComponent({
   const parseQuickComment = (text: string): { code: string; qty: number } | null => {
     if (!text) return null;
     let s = text.trim();
+
+    // Skip inquiries and questions
+    if (/^(សួស្តី|hello|hi|admin|អរគុណ|ok|yes|no)/i.test(s)) return null;
+    if (/(?:ប៉ុន្មាន|សាច់|ពាក់បាន|សល់|មានអត់|សុំមើល|តម្លៃ|ថ្លៃ|គីឡូ|kg|kilo|m|ម៉ែត្រ)/i.test(s) && !/[:=/\-_*xX]\s*\d+/.test(s)) {
+      return null;
+    }
+
     const kmMap: Record<string, string> = {
       '០': '0', '១': '1', '២': '2', '៣': '3', '៤': '4',
       '៥': '5', '៦': '6', '៧': '7', '៨': '8', '៩': '9'
@@ -214,16 +224,27 @@ function BasketCardComponent({
     }
     s = s.replace(/ពីរ/g, '2').replace(/បី/g, '3').replace(/បួន/g, '4').replace(/មួយ/g, '1');
 
+    // Strip phone numbers and addresses
+    s = s.replace(/(?:\+?855|0)\d{7,9}/g, ' ');
+    s = s.replace(/(?:ផ្ទះលេខ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ភូមិ|ផ្សារ|បុរី)\s*[\u1780-\u17FFa-zA-Z0-9_\-]+/g, ' ');
+
     const m = s.match(/([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})/);
-    if (m) return { code: m[1].toUpperCase(), qty: parseInt(m[2], 10) || 1 };
+    if (m && !['KG', 'KILO', 'CM', 'M', 'PP'].includes(m[1].toUpperCase())) {
+      return { code: m[1].toUpperCase(), qty: parseInt(m[2], 10) || 1 };
+    }
 
     const mSpace = s.match(/\b([A-Za-z0-9]{1,5})\s+(\d{1,2})\b/);
-    if (mSpace && !['KG', 'KILO'].includes(mSpace[2].toUpperCase())) {
+    if (mSpace && !['KG', 'KILO', 'CM', 'M', 'PP'].includes(mSpace[1].toUpperCase())) {
       return { code: mSpace[1].toUpperCase(), qty: parseInt(mSpace[2], 10) || 1 };
     }
 
-    const mSingle = s.match(/\b([A-Za-z0-9]{1,5})\b/);
-    if (mSingle && mSingle[1].length <= 4 && !/^(hi|ok|yes|no)$/i.test(mSingle[1])) {
+    const mAction = s.match(/(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ)\s*([A-Za-z0-9]{1,5})\b/);
+    if (mAction && !['KG', 'KILO', 'CM', 'M', 'PP'].includes(mAction[1].toUpperCase())) {
+      return { code: mAction[1].toUpperCase(), qty: 1 };
+    }
+
+    const mSingle = s.match(/^\s*([A-Za-z0-9]{2,5})\s*$/);
+    if (mSingle && !/^(hi|ok|yes|no|tel|vip|set)$/i.test(mSingle[1])) {
       return { code: mSingle[1].toUpperCase(), qty: 1 };
     }
 
@@ -244,19 +265,22 @@ function BasketCardComponent({
       }
     }
 
-    // 2. Comments from customer during live stream that are not already assigned as note for an item
-    const allocatedNotes = new Set(
-      (invoice.items || [])
-        .map(it => (it.item_comment || '').trim())
-        .filter(Boolean)
+    // 2. Existing product codes in this basket
+    const existingCodes = new Set(
+      (invoice.items || []).map(it => it.product_code.toUpperCase().trim())
     );
 
+    // 3. Comments that contain genuine purchase orders not yet in items
     for (const c of invoice.comments || []) {
       const trimmed = (c || '').trim();
       if (!trimmed || seen.has(trimmed)) continue;
 
-      // If this comment was already assigned to an item note in basket, skip
-      if (allocatedNotes.has(trimmed)) continue;
+      const parsed = parseQuickComment(trimmed);
+      // Skip general questions, greetings, or inquiries without order intent
+      if (!parsed || !parsed.code) continue;
+
+      // If the code is already added in basket items, it's allocated!
+      if (existingCodes.has(parsed.code.toUpperCase())) continue;
 
       seen.add(trimmed);
       list.push(trimmed);
@@ -912,6 +936,73 @@ function BasketCardComponent({
       }
     } catch {
       onShowToast('Error dismissing comment', 'error');
+    }
+  };
+
+  // AI Smart Parse for Unmatched Comments (Extracts items, phone, address, and updates stock)
+  const handleAiSmartParse = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!checkLockGuard()) return;
+    if (isAiParsing) return;
+    setIsAiParsing(true);
+    playPureTone(880, 0.08);
+
+    try {
+      const res = await fetch('/api/ai_smart_parse_basket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: invoice.invoice_id,
+          packer_name: myPackerName,
+          apply_direct: true
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast(data.message || `✨ AI បានវិភាគ និងកាត់ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id} រួចរាល់!`, 'success');
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice, data.revision);
+        } else {
+          onDataChanged();
+        }
+      } else {
+        const errorMsg = data.message || 'AI មិនអាចទាញទិន្នន័យបានទេ';
+        playWarningBuzzer();
+        onShowToast(`⚠️ ${errorMsg}`, 'error');
+        setErrorModalData({
+          title: errorMsg.includes('Quota') || errorMsg.includes('Rate Limit')
+            ? '⚠️ AI អស់ Quota (Quota Exceeded)'
+            : errorMsg.includes('API Key')
+            ? '🔑 បញ្ហា Gemini API Key'
+            : '⚠️ បញ្ហាដំណើរការ AI Smart Audit',
+          message: errorMsg,
+          errorType: (errorMsg.includes('Quota') || errorMsg.includes('Rate Limit'))
+            ? 'quota'
+            : errorMsg.includes('API Key')
+            ? 'auth'
+            : 'general',
+          hint: (errorMsg.includes('Quota') || errorMsg.includes('Rate Limit'))
+            ? 'Gemini AI បានប្រើប្រាស់ដល់កម្រិតកំណត់ (Rate Limit / Free Tier Quota)។ សូមរង់ចាំប្រហែល 30-60 វិនាទី ឬប្តូរ API Key ថ្មី។ លោកអ្នកក៏អាចកាត់ទំនិញដោយដៃ ឬចុចកែប្រែចំនួនផ្ទាល់នៅលើកន្ត្រកបានយ៉ាងងាយស្រួល។'
+            : errorMsg.includes('API Key')
+            ? 'សូមពិនិត្យមើល GEMINI_API_KEY នៅក្នុងប្រព័ន្ធ Settings ដើម្បីធានាថា API Key មានសុពលភាព និងអាចប្រើប្រាស់បាន។'
+            : 'លោកអ្នកអាចកាត់កូដទំនិញដោយដៃ ឬពិនិត្យមើលខមិនរបស់ភ្ញៀវដោយផ្ទាល់។',
+          onRetry: () => handleAiSmartParse()
+        });
+      }
+    } catch (err: any) {
+      const netMsg = err?.message || 'ដាច់សេវាបណ្តាញ WiFi ឬ Server មិនឆ្លើយតប!';
+      playWarningBuzzer();
+      onShowToast('⚠️ ដាច់សេវាបណ្តាញ WiFi!', 'error');
+      setErrorModalData({
+        title: '📡 បញ្ហាបណ្តាញ WiFi / Network Error',
+        message: netMsg,
+        errorType: 'network',
+        hint: 'សូមពិនិត្យមើលការតភ្ជាប់អ៊ីនធឺណិត WiFi របស់អ្នក ឬ Server រួចសាកល្បងម្តងទៀត។',
+        onRetry: () => handleAiSmartParse()
+      });
+    } finally {
+      setIsAiParsing(false);
     }
   };
 
@@ -1756,55 +1847,64 @@ function BasketCardComponent({
               );
             })}
 
-            {/* Unmatched / Unallocated Comments List (Option 1: Shown only in Stage 1: មិនទាន់រើស) */}
-            {currentMasterStage === 1 && (unallocatedComments || []).map((unm, cIdx) => {
-              const detected = parseQuickComment(unm);
-              const displayUnm = convertKhmerNumeralsToGlobal(unm);
-              return (
-                <div
-                  key={cIdx}
-                  className="bg-gradient-to-r from-amber-950/30 via-[#181108]/70 to-slate-950/90 border-[1.5px] border-dashed border-amber-500/80 hover:border-amber-400 p-2.5 sm:p-3 rounded-2xl flex items-center justify-between gap-2.5 shadow-[0_0_15px_rgba(245,158,11,0.08)] transition-all"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <div
-                    className="flex items-center gap-2 overflow-hidden flex-1 min-w-0 cursor-pointer"
-                    onClick={() => {
-                      setIsAddingManualCode(true);
-                      setManualCommentSource(displayUnm);
-                      setManualCodeInput(detected?.code || displayUnm.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8));
-                      setManualQtyInput(detected?.qty || 1);
-                    }}
-                    title="ចុចដើម្បីកែប្រែកូដ ឬចំនួនដោយដៃ"
-                  >
-                    <span className="bg-amber-950/90 text-amber-400 border border-amber-500/70 px-2 py-0.5 rounded-lg text-xs font-mono font-black tracking-wider flex-shrink-0 select-none">
-                      [ N/A ]
-                    </span>
-                    <span className="text-amber-200 font-bold text-xs sm:text-sm font-mono truncate select-all">
-                      "{displayUnm}"
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={e => handleSmartCut(unm, detected?.code || '', detected?.qty || 1, e)}
-                      className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(245,158,11,0.35)] hover:shadow-[0_0_16px_rgba(245,158,11,0.5)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
-                      title={detected ? `កាត់ [${detected.code} x${detected.qty}] ចូលកន្ត្រក` : 'វាយកូដកាត់ចូលកន្ត្រក'}
-                    >
-                      <span className="text-xs sm:text-sm font-black">➕</span>
-                      <span>កាត់ចូល</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={e => handleDismissComment(unm, e)}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-all"
-                      title="បិទមិនបង្ហាញក្នុងបញ្ជី N/A (នៅតែរក្សាទុកក្នុងប្រវត្តិខមិន)"
-                    >
-                      <span className="text-xs">✕</span>
-                    </button>
-                  </div>
+            {/* Unmatched / Unallocated Comments List */}
+            {currentMasterStage === 1 && unallocatedComments && unallocatedComments.length > 0 && (
+              <div className="flex flex-col gap-2 pt-1 pb-0.5">
+                <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-amber-400">
+                  <span>⚠️</span>
+                  <span>ខមិនមិនទាន់កាត់ ({unallocatedComments.length})</span>
                 </div>
-              );
-            })}
+
+                {unallocatedComments.map((unm, cIdx) => {
+                  const detected = parseQuickComment(unm);
+                  const displayUnm = convertKhmerNumeralsToGlobal(unm);
+                  return (
+                    <div
+                      key={cIdx}
+                      className="bg-gradient-to-r from-amber-950/30 via-[#181108]/70 to-slate-950/90 border-[1.5px] border-dashed border-amber-500/80 hover:border-amber-400 p-2.5 sm:p-3 rounded-2xl flex items-center justify-between gap-2.5 shadow-[0_0_15px_rgba(245,158,11,0.08)] transition-all"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <div
+                        className="flex items-center gap-2 overflow-hidden flex-1 min-w-0 cursor-pointer"
+                        onClick={() => {
+                          setIsAddingManualCode(true);
+                          setManualCommentSource(displayUnm);
+                          setManualCodeInput(detected?.code || displayUnm.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8));
+                          setManualQtyInput(detected?.qty || 1);
+                        }}
+                        title="ចុចដើម្បីកែប្រែកូដ ឬចំនួនដោយដៃ"
+                      >
+                        <span className="bg-amber-950/90 text-amber-400 border border-amber-500/70 px-2 py-0.5 rounded-lg text-xs font-mono font-black tracking-wider flex-shrink-0 select-none">
+                          [ N/A ]
+                        </span>
+                        <span className="text-amber-200 font-bold text-xs sm:text-sm font-mono truncate select-all">
+                          "{displayUnm}"
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={e => handleSmartCut(unm, detected?.code || '', detected?.qty || 1, e)}
+                          className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(245,158,11,0.35)] hover:shadow-[0_0_16px_rgba(245,158,11,0.5)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                          title={detected ? `កាត់ [${detected.code} x${detected.qty}] ចូលកន្ត្រក` : 'វាយកូដកាត់ចូលកន្ត្រក'}
+                        >
+                          <span className="text-xs sm:text-sm font-black">➕</span>
+                          <span>កាត់ចូល</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={e => handleDismissComment(unm, e)}
+                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-all"
+                          title="បិទមិនបង្ហាញក្នុងបញ្ជី N/A (នៅតែរក្សាទុកក្នុងប្រវត្តិខមិន)"
+                        >
+                          <span className="text-xs">✕</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Manual Add Code Section */}
             {isAddingManualCode ? (
@@ -1896,9 +1996,18 @@ function BasketCardComponent({
                 </button>
                 {showAllComments && (
                   <div className="bg-[#030914] border border-slate-800 rounded-2xl p-3 flex flex-col gap-2 max-h-56 overflow-y-auto shadow-inner">
-                    <div className="text-[11px] text-slate-400 font-medium pb-1 border-b border-slate-800/60 flex items-center justify-between">
+                    <div className="text-[11px] text-slate-400 font-medium pb-1.5 border-b border-slate-800/80 flex items-center justify-between gap-2">
                       <span>ខមិនសួរ & កូដទាំងអស់ក្នុង Live នេះ ៖</span>
-                      <span className="text-[10px] text-emerald-400 font-mono">✓ មិនបាត់សូម្បីតែ១</span>
+                      <button
+                        type="button"
+                        disabled={isAiParsing}
+                        onClick={handleAiSmartParse}
+                        className="bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 disabled:opacity-60 text-white text-[11px] sm:text-xs font-black px-3 py-1 rounded-xl shadow-[0_0_12px_rgba(168,85,247,0.35)] flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer border border-purple-400/50"
+                        title="ឱ្យ AI ផ្ទៀងផ្ទាត់គ្រប់ខមិនទាំងអស់របស់ភ្ញៀវម្នាក់នេះ និងកែសម្រួលកន្ត្រកឡើងវិញ"
+                      >
+                        <span>{isAiParsing ? '⏳' : '✨'}</span>
+                        <span>{isAiParsing ? 'AI កំពុងផ្ទៀងផ្ទាត់...' : 'AI Smart Parse ផ្ទៀងផ្ទាត់កន្ត្រក'}</span>
+                      </button>
                     </div>
                     {(invoice.comments || []).map((comm, idx) => {
                       const convertedComm = convertKhmerNumeralsToGlobal(comm);
@@ -2328,6 +2437,14 @@ function BasketCardComponent({
             </div>
           )}
         </div>
+      )}
+
+      {/* Clear Pop-up Error Dialog */}
+      {errorModalData && (
+        <ErrorAlertModal
+          data={errorModalData}
+          onClose={() => setErrorModalData(null)}
+        />
       )}
     </div>
   );

@@ -395,91 +395,136 @@ function getSimulatedSampleComments() {
   ];
 }
 
-// Fetch Comments for a Post or Live Stream with full pagination
-export async function fetchFacebookComments(targetPostId: string, pageAccessToken?: string, maxLimit = 10000) {
+// Fetch Comments for a Post or Live Stream with full multi-page pagination (up to 10,000+ comments)
+export async function fetchFacebookComments(targetPostId: string, pageAccessToken?: string, maxLimit = 15000) {
   const token = pageAccessToken || activeFacebookPage?.access_token;
   const isSimulatedTarget = !targetPostId || targetPostId.startsWith('LIVE_') || targetPostId.startsWith('sim_') || targetPostId.startsWith('POST_');
 
-  if (!token || token.startsWith('simulated_') || isSimulatedTarget) {
+  if (!token || token.startsWith('simulated_') || (isSimulatedTarget && !/^\d{10,}$/.test(targetPostId))) {
     return { data: getSimulatedSampleComments(), isSimulated: true };
   }
 
   try {
     const rawTarget = targetPostId.trim();
-    const cleanId = rawTarget.includes('_') ? rawTarget.split('_').pop() : rawTarget;
+    const cleanId = rawTarget.includes('_') ? rawTarget.split('_').pop() || rawTarget : rawTarget;
     const allComments: any[] = [];
     const seenCommentIds = new Set<string>();
 
-    // Try fetching with filter=stream and live_filter=all_comments to bypass Facebook's spam/relevance filter and fetch all comments
-    const tryTargetIds = [cleanId];
-    if (rawTarget !== cleanId) {
+    // Build list of candidate Facebook Graph API IDs (e.g., Live ID, Video ID, Page_Post ID)
+    const tryTargetIds: string[] = [];
+    if (cleanId) tryTargetIds.push(cleanId);
+    if (activeFacebookPage?.id && cleanId && !cleanId.includes('_') && cleanId !== activeFacebookPage.id) {
+      tryTargetIds.push(`${activeFacebookPage.id}_${cleanId}`);
+    }
+    if (rawTarget && !tryTargetIds.includes(rawTarget)) {
       tryTargetIds.push(rawTarget);
     }
+
+    // Also resolve associated video ID if target is a Live Video object
+    try {
+      const vidMeta = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${cleanId}?fields=video{id},id&access_token=${token}`);
+      if (vidMeta?.video?.id && !tryTargetIds.includes(vidMeta.video.id)) {
+        tryTargetIds.push(vidMeta.video.id);
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    let lastErrorMessage = '';
 
     for (const targetId of tryTargetIds) {
       if (allComments.length > 0) break;
 
-      let nextUrl: string | null = `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&filter=stream&live_filter=all_comments&order=chronological&limit=100&access_token=${token}`;
-      let pageCount = 0;
-      const maxPages = Math.ceil(maxLimit / 100);
+      // Try multiple endpoint URL strategies for maximum compatibility (Live Stream vs VOD vs Standard Post)
+      const urlStrategies = [
+        // Strategy 1: Standard comments endpoint (most universal for both Live, VOD & Posts)
+        `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&order=chronological&limit=100&access_token=${token}`,
+        // Strategy 2: Stream filter for active streaming live
+        `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&filter=stream&order=chronological&limit=100&access_token=${token}`,
+        // Strategy 3: Default unfiltered query
+        `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&limit=100&access_token=${token}`
+      ];
 
-      while (nextUrl && pageCount < maxPages && allComments.length < maxLimit) {
-        pageCount++;
-        const data: any = await safeGraphApiFetch(nextUrl);
+      for (const initialUrl of urlStrategies) {
+        if (allComments.length > 0) break;
 
-        if (data.error) {
-          console.error(`Facebook Graph API error on target ${targetId} page ${pageCount}:`, data.error);
-          // If stream filter failed (e.g. standard post doesn't support live_filter), fallback to standard query
-          if (pageCount === 1 && data.error.code !== 190) {
-            const fallbackUrl = `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&filter=stream&order=chronological&limit=100&access_token=${token}`;
-            const fallbackData: any = await safeGraphApiFetch(fallbackUrl);
-            if (fallbackData?.data && Array.isArray(fallbackData.data)) {
-              for (const itm of fallbackData.data) {
-                if (itm.id && !seenCommentIds.has(itm.id)) {
-                  seenCommentIds.add(itm.id);
-                  allComments.push(itm);
-                }
-              }
-              if (fallbackData.paging?.next) {
-                nextUrl = fallbackData.paging.next;
-                continue;
-              }
+        let nextUrl: string | null = initialUrl;
+        let pageCount = 0;
+        const maxPages = Math.ceil(maxLimit / 100);
+
+        while (nextUrl && pageCount < maxPages && allComments.length < maxLimit) {
+          pageCount++;
+          const data: any = await safeGraphApiFetch(nextUrl);
+
+          if (data.error) {
+            lastErrorMessage = data.error.message || 'Facebook API Error';
+            console.warn(`[FB Graph API] Target ${targetId} Strategy Notice (page ${pageCount}): [${data.error.code}] ${data.error.message}`);
+            break; // Try next strategy for this target
+          }
+
+          const items = Array.isArray(data.data) ? data.data : [];
+          if (items.length === 0) {
+            break;
+          }
+
+          let newItemsThisPage = 0;
+          for (const itm of items) {
+            if (itm.id && !seenCommentIds.has(itm.id)) {
+              seenCommentIds.add(itm.id);
+              allComments.push(itm);
+              newItemsThisPage++;
             }
           }
-          break;
-        }
 
-        const items = data.data || [];
-        if (items.length === 0) break;
+          console.log(`[FB Sync] Target ${targetId} (Page ${pageCount}): Fetched ${items.length} comments (+${newItemsThisPage} unique, Total: ${allComments.length})`);
 
-        for (const itm of items) {
-          if (itm.id && !seenCommentIds.has(itm.id)) {
-            seenCommentIds.add(itm.id);
-            allComments.push(itm);
+          // Follow Facebook pagination
+          if (data.paging?.next) {
+            nextUrl = data.paging.next;
+          } else if (data.paging?.cursors?.after && newItemsThisPage > 0) {
+            // Build cursor URL fallback
+            const baseUrl = initialUrl.split('&after=')[0];
+            nextUrl = `${baseUrl}&after=${encodeURIComponent(data.paging.cursors.after)}`;
+          } else {
+            nextUrl = null;
           }
-        }
-        console.log(`[FB Sync] Target ${targetId} Page ${pageCount}: fetched ${items.length} comments (Total Unique: ${allComments.length})`);
-
-        if (data.paging && data.paging.next) {
-          nextUrl = data.paging.next;
-        } else {
-          nextUrl = null;
         }
       }
     }
 
-    // Sort chronologically (oldest first) so that customers who commented first get stock first
+    // Sort comments chronologically (oldest first) so first commenters get first stock allocation
     allComments.sort((a, b) => {
       const timeA = a.created_time ? new Date(a.created_time).getTime() : 0;
       const timeB = b.created_time ? new Date(b.created_time).getTime() : 0;
       return timeA - timeB;
     });
 
-    console.log(`[FB Sync Complete] Total comments retrieved for ${cleanId}: ${allComments.length}`);
-    return { data: allComments.length > 0 ? allComments : getSimulatedSampleComments(), isSimulated: allComments.length === 0 };
+    console.log(`[FB Sync Complete] Retrieved ${allComments.length} total unique comments for Live #${cleanId}.`);
+
+    if (allComments.length > 0) {
+      return {
+        data: allComments,
+        isSimulated: false
+      };
+    }
+
+    // If target was an explicit numeric Facebook Live ID, do not mask with fake demo comments
+    if (/^\d{8,}$/.test(cleanId)) {
+      return {
+        data: [],
+        isSimulated: false,
+        error: lastErrorMessage || 'មិនមានខមិននៅលើ Live វីដេអូនេះឡើយ ឬ Facebook Token មិនមានសិទ្ធិអាន'
+      };
+    }
+
+    return {
+      data: getSimulatedSampleComments(),
+      isSimulated: true,
+      error: lastErrorMessage || undefined
+    };
   } catch (err: any) {
-    console.error('Error fetching FB comments:', err);
-    return { data: getSimulatedSampleComments(), isSimulated: true, error: String(err?.message || err) };
+    console.warn('Notice fetching FB comments:', err);
+    return { data: [], isSimulated: false, error: String(err?.message || err) };
   }
 }
 
