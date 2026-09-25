@@ -279,8 +279,8 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
       }
     }
 
-    // Pattern 3: Space with dollar sign: 100 3.7$ or 100 $3.7
-    const pat3 = /^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+\$?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)(?:\s+(.+))?$/i;
+    // Pattern 3: Space with dollar sign: 100 3.7$ or 100 $3.7 or 100 $ 3.7
+    const pat3 = /^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+(?:\$\s*)?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?$/i;
     const m3 = trimmed.match(pat3);
     if (m3) {
       const code = m3[1].trim().toUpperCase();

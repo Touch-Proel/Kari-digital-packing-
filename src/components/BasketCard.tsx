@@ -227,6 +227,9 @@ function BasketCardComponent({
     // Strip phone numbers and addresses
     s = s.replace(/(?:\+?855|0)\d{7,9}/g, ' ');
     s = s.replace(/(?:ផ្ទះលេខ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ភូមិ|ផ្សារ|បុរី)\s*[\u1780-\u17FFa-zA-Z0-9_\-]+/g, ' ');
+    s = s.replace(/\d+\s*(?:kg|kilo|គីឡូ|គក|ម៉ែត្រ|m)\b/gi, ' ');
+    s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
+    s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|XL|XS|[SML])\b/gi, '$1$2 ');
 
     const NON_PRODUCT_CODES = new Set([
       'KG', 'KILO', 'CM', 'M', 'PP', 'VIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR',

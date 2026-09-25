@@ -204,36 +204,19 @@ Return ONLY valid JSON:
     } catch (err: any) {
       lastError = err;
       const errMsg = String(err?.message || err || '');
-      // Silent handling of expected quota limits across model fallbacks
       if (!errMsg.includes('429') && !errMsg.includes('RESOURCE_EXHAUSTED')) {
         console.log(`[Gemini AI] Attempt with ${modelName} notice:`, errMsg.slice(0, 120));
       }
     }
   }
 
-  // Handle errors directly without regex fallback
-  const errMsg = String(lastError?.message || lastError || '');
-  if (
-    errMsg.includes('429') ||
-    errMsg.includes('RESOURCE_EXHAUSTED') ||
-    errMsg.toLowerCase().includes('quota') ||
-    errMsg.toLowerCase().includes('rate limit') ||
-    errMsg.toLowerCase().includes('exceeded')
-  ) {
-    throw new Error('AI អស់ Quota ហើយ (Gemini Quota Exceeded / Rate Limit)! សូមរង់ចាំបន្តិច ឬពិនិត្យមើល API Key។');
+  // If Gemini API fails or quota runs out, smoothly use high-precision Cambodian rule reconciliation
+  try {
+    const fallbackResult = fallbackFullBasketAudit(allComments, currentItems, catalog);
+    return fallbackResult;
+  } catch (fbErr: any) {
+    throw new Error(`បរាជ័យក្នុងការវិភាគ៖ ${fbErr?.message || 'មិនអាចផ្ទៀងផ្ទាត់កន្ត្រកបានទេ'}`);
   }
-
-  if (
-    errMsg.includes('API_KEY_INVALID') ||
-    errMsg.includes('401') ||
-    errMsg.includes('403') ||
-    errMsg.toLowerCase().includes('api key not valid') ||
-    errMsg.toLowerCase().includes('invalid api key')
-  ) {
-    throw new Error('Gemini API Key មិនត្រឹមត្រូវ ឬអស់សុពលភាព (Invalid API Key)។');
-  }
-
-  throw new Error(`AI បរាជ័យក្នុងការវិភាគ៖ ${errMsg || 'មិនអាចទាក់ទង Gemini AI បានទេ'}`);
 }
 
 /**
@@ -300,6 +283,11 @@ export function fallbackFullBasketAudit(
     for (const { word, num } of KHMER_NUM_WORDS) {
       s = s.replace(new RegExp(word, 'g'), String(num));
     }
+
+    // Protect delimiters between multiple items: "50=2 .51=1" -> "50=2 51=1"
+    s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
+    s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|XL|XS|[SML])\b/gi, '$1$2 ');
+    s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\.{1,3}(\d{1,2})(?![=:\d])/g, '$1=$2');
 
     // Extract color or size notes if present
     let noteText = '';
