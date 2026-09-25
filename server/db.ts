@@ -496,6 +496,28 @@ export async function loadDatabaseFromDisk() {
     settings.bulk_discount_qty = 0;
     settings.bulk_discount_amount = 0;
 
+    // Purge invalid clothing size codes (e.g. XS, S, M, L, XL, 2XL, 3XL, 4XL, 5XL) mistakenly auto-created as products
+    const invalidSizes = new Set([
+      'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE'
+    ]);
+    const initialProductCount = products.length;
+    const sanitizedProducts = products.filter(p => {
+      const cleanCode = (p.code || '').toUpperCase().trim();
+      if (invalidSizes.has(cleanCode)) {
+        if (!p.image_file || p.name === `កូដ ${cleanCode}` || p.name === `កូដ [${cleanCode}]` || p.name === cleanCode) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (sanitizedProducts.length !== initialProductCount) {
+      const purgedCount = initialProductCount - sanitizedProducts.length;
+      products.length = 0;
+      products.push(...sanitizedProducts);
+      console.log(`[Stock Cleanup] Purged ${purgedCount} invalid clothing size entries (e.g. XS, S, M, L, XL, 2XL) from products stock.`);
+    }
+
     // Sanitize products, ensure live_id is assigned, and format names
     products.forEach(p => {
       if (!p.live_id) {

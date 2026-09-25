@@ -23,7 +23,7 @@ import {
   syncAllActiveInvoicesWithStock
 } from './db';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
-import { parseAndAllocateComment, convertKhmerDigitsToArabic } from './parser';
+import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES } from './parser';
 import { detectDeliveryZone } from './locationHelper';
 import { sendFacebookReply, fetchFacebookComments } from './fbAuth';
 import { generateServerKHQRPNG } from './khqrServer';
@@ -1399,10 +1399,8 @@ router.post('/set_item_qty_direct', (req: Request, res: Response) => {
 
 // POST /api/add_item_to_invoice
 router.post('/add_item_to_invoice', (req: Request, res: Response) => {
-  const { invoice_id, code, quantity, comment_text, packer_name } = req.body;
+  const { invoice_id, code, quantity, items, comment_text, packer_name } = req.body;
   const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
-  const cleanCode = String(code).trim().toUpperCase();
-  const addQty = Math.max(1, parseInt(String(quantity || 1), 10));
 
   const lockCheck = isInvoiceLockedByOther(cleanId, packer_name);
   if (lockCheck.locked) {
@@ -1418,70 +1416,117 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
   }
 
   const liveId = inv.live_id || activeLiveId;
-  let prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
-  if (!prod) {
-    const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
-    prod = {
-      id: nextProdId,
-      live_id: liveId,
-      code: cleanCode,
-      name: `កូដ [${cleanCode}]`,
-      stock_qty: 100,
-      price: 5.0,
-      cost_price: 3.0
-    };
-    products.push(prod);
+  const rawItemList: { code: string; quantity: number }[] = [];
+
+  if (Array.isArray(items) && items.length > 0) {
+    for (const it of items) {
+      const c = String(it.code || '').trim().toUpperCase();
+      const q = Math.max(1, parseInt(String(it.quantity || it.qty || 1), 10));
+      if (c) rawItemList.push({ code: c, quantity: q });
+    }
+  } else if (code) {
+    const c = String(code).trim().toUpperCase();
+    const q = Math.max(1, parseInt(String(quantity || 1), 10));
+    if (c) rawItemList.push({ code: c, quantity: q });
   }
 
-  if (prod.stock_qty < addQty) {
-    prod.stock_qty = addQty + 50; // Auto replenish for live manual allocation
+  if (rawItemList.length === 0) {
+    return res.status(400).json({ success: false, message: 'សូមបញ្ចូលកូដទំនិញ' });
   }
 
-  prod.stock_qty -= addQty;
+  const addedItemsSummary: { code: string; quantity: number; name: string }[] = [];
 
-  const existingItem = inv.items.find(it => it.product_code.toUpperCase() === cleanCode);
-  let finalQty = addQty;
-  if (existingItem) {
-    existingItem.quantity += addQty;
-    finalQty = existingItem.quantity;
-    if (comment_text) existingItem.item_comment = comment_text;
-  } else {
-    const nextItemId = inv.items.length > 0 ? Math.max(...inv.items.map(it => it.id)) + 1 : 1;
-    inv.items.push({
-      id: nextItemId,
-      invoice_id: inv.invoice_id,
-      product_id: prod.id,
-      product_code: prod.code,
-      product_name: prod.name,
-      quantity: addQty,
-      price: prod.price,
-      is_packed: false,
-      item_comment: comment_text || '',
-      image_file: prod.image_file || ''
-    });
+  for (const it of rawItemList) {
+    const cleanCode = it.code.toUpperCase().trim();
+    const addQty = it.quantity;
+
+    if (CLOTHING_SIZES_SET.has(cleanCode) || NON_PRODUCT_CODES.has(cleanCode)) {
+      const existingInCatalog = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
+      if (!existingInCatalog) {
+        return res.status(400).json({
+          success: false,
+          message: `⚠️ [${cleanCode}] នេះជា Size ខោអាវ (Clothing Size) មិនមែនកូដទំនិញទេ! សូមបញ្ចូលកូដទំនិញពិតប្រាកដ (ឧ. A01, 47, 101...)`
+        });
+      }
+    }
+
+    // Look for product in current live first
+    let prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
+    if (!prod) {
+      // Look up globally across other lives to inherit accurate name, image, price
+      const globalProd = products.find(p => p.code.toUpperCase() === cleanCode);
+      const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
+      prod = {
+        id: nextProdId,
+        live_id: liveId,
+        code: cleanCode,
+        name: globalProd?.name || `កូដ [${cleanCode}]`,
+        stock_qty: globalProd?.stock_qty ? Math.max(50, globalProd.stock_qty) : 100,
+        price: typeof globalProd?.price === 'number' && globalProd.price > 0 ? globalProd.price : 5.0,
+        cost_price: typeof globalProd?.cost_price === 'number' ? globalProd.cost_price : 3.0,
+        image_file: globalProd?.image_file || ''
+      };
+      products.push(prod);
+    }
+
+    if (prod.stock_qty < addQty) {
+      prod.stock_qty = addQty + 50; // Auto replenish for live manual allocation
+    }
+    prod.stock_qty -= addQty;
+
+    const existingItem = inv.items.find(item => item.product_code.toUpperCase() === cleanCode);
+    let finalQty = addQty;
+    if (existingItem) {
+      existingItem.quantity += addQty;
+      finalQty = existingItem.quantity;
+      if (comment_text) existingItem.item_comment = comment_text;
+      if (!existingItem.image_file && prod.image_file) {
+        existingItem.image_file = prod.image_file;
+      }
+      if ((!existingItem.price || existingItem.price <= 0) && prod.price > 0) {
+        existingItem.price = prod.price;
+      }
+    } else {
+      const nextItemId = inv.items.length > 0 ? Math.max(...inv.items.map(item => item.id)) + 1 : 1;
+      inv.items.push({
+        id: nextItemId,
+        invoice_id: inv.invoice_id,
+        product_id: prod.id,
+        product_code: prod.code,
+        product_name: prod.name,
+        quantity: addQty,
+        price: prod.price,
+        is_packed: false,
+        item_comment: comment_text || '',
+        image_file: prod.image_file || ''
+      });
+    }
+
+    addedItemsSummary.push({ code: cleanCode, quantity: finalQty, name: prod.name });
   }
 
-  // Remove comment from unmatched if provided
+  // Remove comment from unmatched if provided (matching raw or normalized text)
   if (comment_text && inv.unmatched_comments) {
     const cleanComment = String(comment_text).trim();
-    inv.unmatched_comments = inv.unmatched_comments.filter(c => c.trim() !== cleanComment);
+    const normComment = convertKhmerDigitsToArabic(cleanComment).trim();
+    inv.unmatched_comments = inv.unmatched_comments.filter(c => {
+      const trimmed = c.trim();
+      const normTrimmed = convertKhmerDigitsToArabic(trimmed).trim();
+      return trimmed !== cleanComment && normTrimmed !== normComment;
+    });
   }
 
   recalculateInvoice(inv);
   const newRev = bumpDataRevision();
   saveDatabaseToDisk();
 
+  const summaryStr = addedItemsSummary.map(it => `${it.code} x${it.quantity}`).join(', ');
+
   res.json({
     success: true,
-    message: `បានបន្ថែម [${cleanCode} x${addQty}] ចូលកន្ត្រក #${inv.basket_no || inv.invoice_id} រួចរាល់!`,
-    item: {
-      code: cleanCode,
-      product_name: prod.name,
-      quantity: finalQty,
-      price: prod.price,
-      image_file: prod.image_file || '',
-      total_amount: inv.total_amount
-    },
+    message: `បានបន្ថែម [${summaryStr}] ចូលកន្ត្រក #${inv.basket_no || inv.invoice_id} រួចរាល់!`,
+    item: addedItemsSummary[0],
+    items: addedItemsSummary,
     invoice: inv,
     revision: newRev
   });

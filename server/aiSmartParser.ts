@@ -37,9 +37,10 @@ const KHMER_NUM_WORDS: Array<{ word: string; num: number }> = [
 ];
 
 const NON_CODE_WORDS = new Set([
-  'HI', 'HELLO', 'OK', 'YES', 'NO', 'KG', 'KILO', 'CM', 'M', 'PP', 'VIP', 'ABA', 'KHQR',
+  'HI', 'HELLO', 'OK', 'YES', 'NO', 'KG', 'KILO', 'CM', 'PP', 'VIP', 'ABA', 'KHQR',
   'LIVE', 'FREE', 'SHIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR', 'ADMIN', 'BONG', 'JAE',
-  'SL', 'SLL', 'SLSL', 'ORKUN', 'AKUN', 'HOW', 'CAN', 'LIKE', 'LOVE'
+  'SL', 'SLL', 'SLSL', 'ORKUN', 'AKUN', 'HOW', 'CAN', 'LIKE', 'LOVE',
+  'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE'
 ]);
 
 const QUESTION_PHRASES = [
@@ -119,6 +120,10 @@ STRICT AUDIT INSTRUCTIONS:
    - Phone: Extract Cambodian phone numbers (e.g. 012889772, 0975544321).
    - Address: Full address string if given.
    - Zone: "PP" (Phnom Penh) or "PROVINCE" (all provinces).
+7. CLOTHING SIZES ARE NOT PRODUCT CODES:
+   - Sizes like XS, S, M, L, XL, XXL, 2XL, 3XL, 4XL, 5XL, FreeSize are apparel sizes / attributes.
+   - Put them in "notes" (e.g. notes: "size XL" or notes: "size 2XL", "សាយ L").
+   - NEVER treat clothing sizes as standalone product codes (e.g. NEVER output code "L", "XL", "M", "2XL", etc.).
 
 Return ONLY valid JSON:
 {
@@ -286,15 +291,22 @@ export function fallbackFullBasketAudit(
 
     // Protect delimiters between multiple items: "50=2 .51=1" -> "50=2 51=1"
     s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
-    s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|XL|XS|[SML])\b/gi, '$1$2 ');
-    s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\.{1,3}(\d{1,2})(?![=:\d])/g, '$1=$2');
+    s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|6XL|XXL|XXS|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1$2 ');
 
-    // Extract color or size notes if present
+    // Extract clothing size notes (e.g. "A01 XL 2" or "47 L 2" or "47 សាយ M 1")
     let noteText = '';
-    const noteMatch = rawComment.match(/(?:size|សាយ|ពណ៍|ពណ៌|ពណ៏)\s*([A-Za-z0-9\u1780-\u17FF]+)/i);
-    if (noteMatch) {
-      noteText = noteMatch[0].trim();
+    const sizeExtractMatch = rawComment.match(/\b(XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/i);
+    const colorExtractMatch = rawComment.match(/(?:ពណ៍|ពណ៌|ពណ៏)\s*([A-Za-z0-9\u1780-\u17FF]+)/i);
+    if (sizeExtractMatch) {
+      noteText = `size ${sizeExtractMatch[1].toUpperCase()}`;
     }
+    if (colorExtractMatch) {
+      noteText = noteText ? `${noteText} | ${colorExtractMatch[0].trim()}` : colorExtractMatch[0].trim();
+    }
+
+    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
+    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1=$2');
+    s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\.{1,3}(\d{1,2})(?![=:\d])/g, '$1=$2');
 
     // Track matched codes in this specific comment to avoid double-counting
     const commentMatchedCodes = new Set<string>();

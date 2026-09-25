@@ -204,15 +204,15 @@ function BasketCardComponent({
     return true;
   };
 
-  // Parse quick code from unmatched comment
-  const parseQuickComment = (text: string): { code: string; qty: number } | null => {
-    if (!text) return null;
+  // Parse all quick code/qty pairs from comment
+  const parseAllQuickPairs = (text: string): { code: string; qty: number }[] => {
+    if (!text) return [];
     let s = text.trim();
 
-    // Skip inquiries and questions
-    if (/^(សួស្តី|hello|hi|admin|អរគុណ|ok|yes|no)/i.test(s)) return null;
+    // Skip inquiries without order intent
+    if (/^(សួស្តី|hello|hi|admin|អរគុណ|ok|yes|no)/i.test(s) && !/[:=\-\/*xX]\s*\d+/.test(s)) return [];
     if (/(?:ប៉ុន្មាន|សាច់|ពាក់បាន|សល់|មានអត់|សុំមើល|តម្លៃ|ថ្លៃ|គីឡូ|kg|kilo|m|ម៉ែត្រ)/i.test(s) && !/[:=/\-_*xX]\s*\d+/.test(s)) {
-      return null;
+      return [];
     }
 
     const kmMap: Record<string, string> = {
@@ -228,36 +228,75 @@ function BasketCardComponent({
     s = s.replace(/(?:\+?855|0)\d{7,9}/g, ' ');
     s = s.replace(/(?:ផ្ទះលេខ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ភូមិ|ផ្សារ|បុរី)\s*[\u1780-\u17FFa-zA-Z0-9_\-]+/g, ' ');
     s = s.replace(/\d+\s*(?:kg|kilo|គីឡូ|គក|ម៉ែត្រ|m)\b/gi, ' ');
+    s = s.replace(/(?:\$\s*\d+(?:[\.,]\d+)?|\b\d+(?:[\.,]\d+)?\s*\$|\b\d+\s*៛|\b\d{4,}\s*(?:រៀល|៛)\b)/gi, ' ');
+
+    // Protect item separators: "50=2 .51=1" -> "50=2 51=1"
     s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
-    s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|XL|XS|[SML])\b/gi, '$1$2 ');
+    s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|6XL|XXL|XXS|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1$2 ');
+    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
+    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1=$2');
+    s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\.{1,3}(\d{1,2})(?![=:\d])/g, '$1=$2');
 
     const NON_PRODUCT_CODES = new Set([
-      'KG', 'KILO', 'CM', 'M', 'PP', 'VIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR',
-      'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL',
-      'HI', 'OK', 'YES', 'NO', 'FREE', 'SHIP', 'ABA', 'KHQR'
+      'KG', 'KILO', 'CM', 'PP', 'VIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR',
+      'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE',
+      'HI', 'OK', 'YES', 'NO', 'FREE', 'SHIP', 'ABA', 'KHQR', 'USD', 'KHR', 'ADMIN', 'BONG', 'JAE'
     ]);
 
-    const m = s.match(/([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})/);
-    if (m && !NON_PRODUCT_CODES.has(m[1].toUpperCase())) {
-      return { code: m[1].toUpperCase(), qty: parseInt(m[2], 10) || 1 };
+    const results: { code: string; qty: number }[] = [];
+    const seenCodes = new Set<string>();
+
+    // 1. Explicit CODE=QTY or CODE:QTY
+    const regexExplicit = /(?:^|[^\w])([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})(?=[^\w]|$)/g;
+    let match;
+    while ((match = regexExplicit.exec(s)) !== null) {
+      const c = match[1].toUpperCase();
+      const q = parseInt(match[2], 10) || 1;
+      if (!NON_PRODUCT_CODES.has(c) && !seenCodes.has(c)) {
+        seenCodes.add(c);
+        results.push({ code: c, qty: q });
+      }
     }
 
-    const mSpace = s.match(/\b([A-Za-z0-9]{1,5})\s+(\d{1,2})\b/);
-    if (mSpace && !NON_PRODUCT_CODES.has(mSpace[1].toUpperCase())) {
-      return { code: mSpace[1].toUpperCase(), qty: parseInt(mSpace[2], 10) || 1 };
+    // 2. Action + Code (e.g. យក 50, កាត់ 50=2)
+    const regexAction = /(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ|កូដ)\s*([A-Za-z0-9]{1,5})(?:\s*[*xX=:_\-\/,.\+«»~]?\s*(\d{1,2}))?/g;
+    while ((match = regexAction.exec(s)) !== null) {
+      const c = match[1].toUpperCase();
+      const q = match[2] ? parseInt(match[2], 10) || 1 : 1;
+      if (!NON_PRODUCT_CODES.has(c) && !seenCodes.has(c)) {
+        seenCodes.add(c);
+        results.push({ code: c, qty: q });
+      }
     }
 
-    const mAction = s.match(/(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ)\s*([A-Za-z0-9]{1,5})\b/);
-    if (mAction && !NON_PRODUCT_CODES.has(mAction[1].toUpperCase())) {
-      return { code: mAction[1].toUpperCase(), qty: 1 };
+    // 3. Space-separated Code + Qty (e.g. 50 2)
+    if (results.length === 0) {
+      const regexSpace = /\b([A-Za-z0-9]{1,5})\s+(\d{1,2})\b/g;
+      while ((match = regexSpace.exec(s)) !== null) {
+        const c = match[1].toUpperCase();
+        const q = parseInt(match[2], 10) || 1;
+        if (!NON_PRODUCT_CODES.has(c) && !seenCodes.has(c)) {
+          seenCodes.add(c);
+          results.push({ code: c, qty: q });
+        }
+      }
     }
 
-    const mSingle = s.match(/^\s*([A-Za-z0-9]{1,5})\s*$/);
-    if (mSingle && !NON_PRODUCT_CODES.has(mSingle[1].toUpperCase())) {
-      return { code: mSingle[1].toUpperCase(), qty: 1 };
+    // 4. Single standalone code (e.g. 50)
+    if (results.length === 0) {
+      const singleMatch = s.trim().match(/^([A-Za-z0-9]{1,5})$/);
+      if (singleMatch && !NON_PRODUCT_CODES.has(singleMatch[1].toUpperCase())) {
+        results.push({ code: singleMatch[1].toUpperCase(), qty: 1 });
+      }
     }
 
-    return null;
+    return results;
+  };
+
+  // Parse quick single code from unmatched comment
+  const parseQuickComment = (text: string): { code: string; qty: number } | null => {
+    const pairs = parseAllQuickPairs(text);
+    return pairs.length > 0 ? pairs[0] : null;
   };
 
   // Comments that SYSTEM could not auto-allocate OR haven't been cut into basket yet
@@ -805,14 +844,26 @@ function BasketCardComponent({
   };
 
   // Smart cut from comment
-  const handleSmartCut = async (commentText: string, autoCode: string, autoQty: number, e: React.MouseEvent) => {
+  const handleSmartCut = async (
+    commentText: string,
+    autoCode: string,
+    autoQty: number,
+    e: React.MouseEvent,
+    batchItems?: { code: string; quantity: number }[]
+  ) => {
     e.stopPropagation();
     if (!checkLockGuard()) return;
-    let finalCode = autoCode;
-    let finalQty = autoQty;
 
-    if (!finalCode) {
+    const itemsToCut: { code: string; quantity: number }[] =
+      batchItems && batchItems.length > 0
+        ? batchItems
+        : autoCode
+        ? [{ code: autoCode.toUpperCase(), quantity: autoQty || 1 }]
+        : [];
+
+    if (itemsToCut.length === 0) {
       setIsAddingManualCode(true);
+      setManualCommentSource(commentText);
       setManualCodeInput('');
       setManualQtyInput(1);
       return;
@@ -820,16 +871,18 @@ function BasketCardComponent({
 
     // Instant 0ms Optimistic UI Add & Fanfare sound!
     playSuccessFanfare();
-    const stockProd = productMap ? productMap[finalCode.toUpperCase()] : undefined;
-    onOptimisticAddItem?.(
-      invoice.invoice_id,
-      finalCode,
-      finalQty,
-      commentText,
-      stockProd?.price,
-      stockProd?.image_file,
-      stockProd?.name
-    );
+    for (const item of itemsToCut) {
+      const stockProd = productMap ? productMap[item.code.toUpperCase()] : undefined;
+      onOptimisticAddItem?.(
+        invoice.invoice_id,
+        item.code,
+        item.quantity,
+        commentText,
+        stockProd?.price,
+        stockProd?.image_file,
+        stockProd?.name
+      );
+    }
 
     try {
       const res = await fetch('/api/add_item_to_invoice', {
@@ -837,8 +890,9 @@ function BasketCardComponent({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
-          code: finalCode,
-          quantity: finalQty,
+          code: itemsToCut[0].code,
+          quantity: itemsToCut[0].quantity,
+          items: itemsToCut,
           comment_text: commentText,
           packer_name: myPackerName
         })
@@ -846,10 +900,11 @@ function BasketCardComponent({
       const data = await res.json();
       if (!data.success) {
         playWarningBuzzer();
-        onShowToast(`❌ មិនអាចកាត់បានទេ៖ ${data.message}`, 'error');
+        onShowToast(`❌ មិនអាចកាត់បានទេ៖ ${data.message || data.error}`, 'error');
         onDataChanged(); // Revert from server
       } else {
-        onShowToast(`⚡ កាត់ [${finalCode} x${finalQty}] ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id} រួចរាល់!`);
+        const itemSummary = itemsToCut.map(it => `${it.code} x${it.quantity}`).join(', ');
+        onShowToast(`⚡ កាត់ [${itemSummary}] ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id} រួចរាល់!`);
         if (data.invoice && onUpdateInvoice) {
           onUpdateInvoice(data.invoice, data.revision);
         }
@@ -1869,12 +1924,15 @@ function BasketCardComponent({
                 </div>
 
                 {unallocatedComments.map((unm, cIdx) => {
-                  const detected = parseQuickComment(unm);
+                  const detectedPairs = parseAllQuickPairs(unm);
                   const displayUnm = convertKhmerNumeralsToGlobal(unm);
+                  const firstDetected = detectedPairs.length > 0 ? detectedPairs[0] : null;
+                  const hasMulti = detectedPairs.length > 1;
+
                   return (
                     <div
                       key={cIdx}
-                      className="bg-gradient-to-r from-amber-950/30 via-[#181108]/70 to-slate-950/90 border-[1.5px] border-dashed border-amber-500/80 hover:border-amber-400 p-2.5 sm:p-3 rounded-2xl flex items-center justify-between gap-2.5 shadow-[0_0_15px_rgba(245,158,11,0.08)] transition-all"
+                      className="bg-gradient-to-r from-amber-950/30 via-[#181108]/70 to-slate-950/90 border-[1.5px] border-dashed border-amber-500/80 hover:border-amber-400 p-2.5 sm:p-3 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shadow-[0_0_15px_rgba(245,158,11,0.08)] transition-all"
                       onClick={e => e.stopPropagation()}
                     >
                       <div
@@ -1882,28 +1940,42 @@ function BasketCardComponent({
                         onClick={() => {
                           setIsAddingManualCode(true);
                           setManualCommentSource(displayUnm);
-                          setManualCodeInput(detected?.code || displayUnm.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8));
-                          setManualQtyInput(detected?.qty || 1);
+                          setManualCodeInput(firstDetected?.code || displayUnm.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8));
+                          setManualQtyInput(firstDetected?.qty || 1);
                         }}
                         title="ចុចដើម្បីកែប្រែកូដ ឬចំនួនដោយដៃ"
                       >
                         <span className="bg-amber-950/90 text-amber-400 border border-amber-500/70 px-2 py-0.5 rounded-lg text-xs font-mono font-black tracking-wider flex-shrink-0 select-none">
-                          [ N/A ]
+                          {detectedPairs.length > 0
+                            ? `[ ${detectedPairs.map(p => `${p.code}x${p.qty}`).join(', ')} ]`
+                            : '[ N/A ]'}
                         </span>
                         <span className="text-amber-200 font-bold text-xs sm:text-sm font-mono truncate select-all">
                           "{displayUnm}"
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <button
-                          type="button"
-                          onClick={e => handleSmartCut(unm, detected?.code || '', detected?.qty || 1, e)}
-                          className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(245,158,11,0.35)] hover:shadow-[0_0_16px_rgba(245,158,11,0.5)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
-                          title={detected ? `កាត់ [${detected.code} x${detected.qty}] ចូលកន្ត្រក` : 'វាយកូដកាត់ចូលកន្ត្រក'}
-                        >
-                          <span className="text-xs sm:text-sm font-black">➕</span>
-                          <span>កាត់ចូល</span>
-                        </button>
+                      <div className="flex items-center gap-1.5 flex-shrink-0 justify-end">
+                        {hasMulti ? (
+                          <button
+                            type="button"
+                            onClick={e => handleSmartCut(unm, '', 1, e, detectedPairs.map(p => ({ code: p.code, quantity: p.qty })))}
+                            className="bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.35)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                            title={`កាត់ទាំងអស់ (${detectedPairs.length} មុខ) ចូលកន្ត្រក`}
+                          >
+                            <span className="text-xs sm:text-sm font-black">⚡</span>
+                            <span>កាត់ទាំងអស់ ({detectedPairs.length} មុខ)</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={e => handleSmartCut(unm, firstDetected?.code || '', firstDetected?.qty || 1, e)}
+                            className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(245,158,11,0.35)] hover:shadow-[0_0_16px_rgba(245,158,11,0.5)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                            title={firstDetected ? `កាត់ [${firstDetected.code} x${firstDetected.qty}] ចូលកន្ត្រក` : 'វាយកូដកាត់ចូលកន្ត្រក'}
+                          >
+                            <span className="text-xs sm:text-sm font-black">➕</span>
+                            <span>{firstDetected ? `កាត់ [${firstDetected.code} x${firstDetected.qty}]` : 'កាត់ចូល'}</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={e => handleDismissComment(unm, e)}

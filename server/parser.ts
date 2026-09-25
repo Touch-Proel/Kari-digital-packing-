@@ -14,11 +14,22 @@ import { detectDeliveryZone } from './locationHelper';
 
 export { detectDeliveryZone };
 
-const COMMON_GREETINGS = new Set([
+export const CLOTHING_SIZES = [
+  'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE'
+];
+
+export const CLOTHING_SIZES_SET = new Set(CLOTHING_SIZES);
+
+export const NON_PRODUCT_CODES = new Set([
   'HI', 'HELLO', 'BONG', 'OK', 'YES', 'NO', 'PRICE', 'INBOX',
   'ADMIN', 'SL', 'SLL', 'SLSL', 'LIKE', 'LOVE', 'CAN', 'HOW', 'TWA',
-  'CHHAT', 'JAE', 'AKUN', 'ORKUN', 'SLJAE', 'SLBONG', 'GOOD'
+  'CHHAT', 'JAE', 'AKUN', 'ORKUN', 'SLJAE', 'SLBONG', 'GOOD',
+  'KG', 'KILO', 'CM', 'PP', 'VIP', 'ABA', 'KHQR', 'USD', 'KHR', 'DOLLAR', 'RIEL',
+  'FREE', 'SHIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR',
+  ...CLOTHING_SIZES
 ]);
+
+const COMMON_GREETINGS = NON_PRODUCT_CODES;
 
 const QUESTION_KEYWORDS = [
   'អត់', 'មាន', 'ប៉ុន្មាន', 'ថ្លៃ', 'តម្លៃ', 'ពាក់បាន',
@@ -173,7 +184,12 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
 
   // Handle merged qty + size format (e.g. "24=13XL" -> "24=1 3XL", "24=12XL" -> "24=1 2XL")
-  s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|XL|XS|[SML])\b/gi, '$1$2 ');
+  s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|6XL|XXL|XXS|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1$2 ');
+
+  // 🎯 Clothing sizes (XS, S, M, L, XL, XXL, 2XL, 3XL, 4XL, 5XL) between or after code and qty:
+  // e.g. "A01 XL 2" -> "A01=2", "47 L 2" -> "47=2", "47 សាយ XL 2" -> "47=2", "47 XL=2" -> "47=2"
+  s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
+  s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1=$2');
 
   // 🎯 Normalize Cambodian live selling order patterns to standard CODE=QTY format:
   // 1. Double/single dot: "47..5", "47.1" (only when isolated, not part of decimals)
@@ -212,7 +228,7 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
       continue;
     }
 
-    if (!COMMON_GREETINGS.has(rawCode) && !seenCodes.has(rawCode)) {
+    if (!NON_PRODUCT_CODES.has(rawCode) && !seenCodes.has(rawCode)) {
       pairs.push({ code: rawCode, qty });
       seenCodes.add(rawCode);
     }
@@ -228,7 +244,7 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
       continue;
     }
 
-    if (!COMMON_GREETINGS.has(rawCode) && !seenCodes.has(rawCode)) {
+    if (!NON_PRODUCT_CODES.has(rawCode) && !seenCodes.has(rawCode)) {
       pairs.push({ code: rawCode, qty });
       seenCodes.add(rawCode);
     }
@@ -647,8 +663,13 @@ export function parseAndAllocateComment(
   const soldOut: string[] = [];
 
   for (const pair of pairs) {
+    const cleanPairCode = pair.code.toUpperCase().trim();
+    if (NON_PRODUCT_CODES.has(cleanPairCode) || CLOTHING_SIZES_SET.has(cleanPairCode)) {
+      continue; // NEVER treat clothing sizes (XS, S, M, L, XL, 2XL, etc.) as product codes or create in stock!
+    }
+
     let prod = products.find(
-      p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === pair.code.toUpperCase()
+      p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanPairCode
     );
 
     if (!prod) {
@@ -658,8 +679,8 @@ export function parseAndAllocateComment(
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       prod = {
         id: nextId,
-        code: pair.code.toUpperCase(),
-        name: `កូដ ${pair.code.toUpperCase()}`,
+        code: cleanPairCode,
+        name: `កូដ ${cleanPairCode}`,
         stock_qty: 200,
         price: 0,
         cost_price: 0,
