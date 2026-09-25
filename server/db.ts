@@ -580,13 +580,22 @@ export async function loadDatabaseFromDisk() {
 
         // Clean up erroneous waist size items (e.g. 34, 35, 36) and quantity-reextracted items in active baskets
         if (inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED') {
-          const allCommentsText = (inv.comments || []).join(' ');
+          const allCommentsText = ((inv.comments || []).join(' ') + ' ' + (inv.items || []).map(it => it.item_comment || '').join(' ')).replace(/[\u200B\u200C\u200D\uFEFF]/g, ' ');
           inv.items = inv.items.filter(it => {
             const cleanC = (it.product_code || '').toUpperCase().trim();
-            if (dummyWaistCodes.has(cleanC)) {
+            const isWaistNum = parseInt(cleanC, 10);
+            if ((!isNaN(isWaistNum) && isWaistNum >= 24 && isWaistNum <= 46) || dummyWaistCodes.has(cleanC)) {
               const waistInCommentPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក|[-_\\/\\\\])\\s*${cleanC}\\b`, 'i');
-              if (waistInCommentPattern.test(allCommentsText)) {
+              const waistListPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក)\\s*[:=\\s\\-]?\\s*(?:(?:2[4-9]|3[0-9]|4[0-6])(?:\\s*[\\/+,.,និង\\-_]\\s*|\\s+))*${cleanC}\\b`, 'i');
+              if (waistInCommentPattern.test(allCommentsText) || waistListPattern.test(allCommentsText)) {
                 return false;
+              }
+              // If item's own comment starts with a different code (e.g. item code is 30, but comment is "87Size29, 30,31,32")
+              if (it.item_comment && /^[A-Za-z0-9]{2,5}\s*(?:size|សាយ|ចង្កេះ)/i.test(it.item_comment.trim())) {
+                const commentParentCode = it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase();
+                if (commentParentCode && commentParentCode !== cleanC) {
+                  return false;
+                }
               }
             }
             // If this item code was accidentally extracted from the quantity of another item (e.g. [10] from "145យក10")
@@ -600,8 +609,36 @@ export async function loadDatabaseFromDisk() {
                 }
               }
             }
+
+            // If this item code was accidentally extracted from an address (e.g. [19] from "គំរោង19", "ផ្លូវទី2", "ផ្ទះលេខ...")
+            const cleanCommentForAddress = allCommentsText;
+            const addressMatch = new RegExp(`(?:គំរោង|គម្រោង|ផ្លូវ|ផ្ទះ|បន្ទប់|ជាន់ទី)\\s*(?:លេខ|ទី)?\\s*${cleanC}\\b`, 'i');
+            if (addressMatch.test(cleanCommentForAddress)) {
+              return false;
+            }
+
             return true;
           });
+
+          // Ensure multi-size / multi-waist items have the full combined quantity
+          for (const it of inv.items) {
+            const rawComment = it.item_comment || '';
+            if (rawComment) {
+              const multiWaistRegex = new RegExp(`(?:(?<![A-Za-z0-9])${it.product_code}\\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)\\s*[:=\\s\\-]?\\s*((?:(?:2[4-9]|3[0-9]|4[0-6])\\s*(?:[:=xX]\\s*\\d{1,2})?(?:\\s*[\\/+,.,និង\\-_]\\s*|\\s+)?)+))`, 'i');
+              const m = rawComment.match(multiWaistRegex);
+              if (m && m[1]) {
+                const singleWaistRegex = /(2[4-9]|3[0-9]|4[0-6])(?:\s*[:=xX]\s*(\d{1,2}))?/gi;
+                let totalWaistQty = 0;
+                let wm: RegExpExecArray | null;
+                while ((wm = singleWaistRegex.exec(m[1])) !== null) {
+                  totalWaistQty += (wm[2] ? (parseInt(wm[2], 10) || 1) : 1);
+                }
+                if (totalWaistQty > it.quantity) {
+                  it.quantity = totalWaistQty;
+                }
+              }
+            }
+          }
         }
       }
 

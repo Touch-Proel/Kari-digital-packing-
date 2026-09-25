@@ -32,8 +32,8 @@ const SIZE_COLOR_SUFFIXES = [
 ];
 
 export const RE_PRICE_CLEANUP = /(?:\$\s*\d+(?:[\.,]\d+)?|\b\d+(?:[\.,]\d+)?\s*\$|\b\d+\s*៛|\b\d{4,}\s*(?:រៀល|៛)\b)/gi;
-export const RE_MEASUREMENTS_CLEANUP = /(?:\d*\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\s*\d*|កម្ពស់\s*\d{2,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
-export const RE_ADDRESS_NUMBERS_CLEANUP = /(?:គំរោង\s*\d+|គម្រោង\s*\d+|ផ្លូវ(?:លេខ|ទី)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|បន្ទប់(?:លេខ)?\s*\d+|ជាន់ទី\s*\d+|ផ្សារ\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d*|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d*|សង្កាត់\s*[\u1780-\u17FFa-zA-Z0-9_]+|ខណ្ឌ\s*[\u1780-\u17FFa-zA-Z0-9_]+|ភូមិ\s*[\u1780-\u17FFa-zA-Z0-9_]+)/gi;
+export const RE_MEASUREMENTS_CLEANUP = /(?:(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\s*[:=\s\-]?\s*\d{1,3}(?![A-Za-z0-9\u1780-\u17FF])|(?<!\d)\d{2,3}\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)(?!\s*[:=\-]?\s*\d)(?![A-Za-z0-9\u1780-\u17FF])|កម្ពស់\s*\d{2,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
+export const RE_ADDRESS_NUMBERS_CLEANUP = /(?:គំរោង(?:ទី)?\s*\d+|គម្រោង(?:ទី)?\s*\d+|ផ្លូវ(?:លេខ|ទី)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|បន្ទប់(?:លេខ)?\s*\d+|ជាន់ទី\s*\d+|ផ្សារ\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d*|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*(?:គំរោង|គម្រោង)?\s*\d*|សង្កាត់\s*[\u1780-\u17FFa-zA-Z0-9_]+|ខណ្ឌ\s*[\u1780-\u17FFa-zA-Z0-9_]+|ភូមិ\s*[\u1780-\u17FFa-zA-Z0-9_]+)/gi;
 
 export const RE_CAMBODIAN_PHONE = /(?:\+?855[\s.\-()]*|0)(?:1\d|3[18]|6[016-9]|7[016-9]|8[15-9]|9[0-8])(?:[\s.\-()]*\d){6,7}(?!\d)/i;
 
@@ -73,6 +73,13 @@ export function extractSizeAndColorNotes(text: string): string {
   if (!text) return '';
   const s = convertKhmerDigitsToArabic(text);
   const notes: string[] = [];
+
+  // Weight notes (e.g. "គីឡូ 65", "65 គីឡូ", "65kg")
+  const weightMatch = s.match(/(?:គីឡូ|គីឡូក្រាម|គក|kg|kilo)\s*[:=\s\-]?\s*(\d{2,3})/i) ||
+                      s.match(/(?<!\d)(\d{2,3})\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)/i);
+  if (weightMatch) {
+    notes.push(`${weightMatch[1]}kg`);
+  }
 
   // Waist / pants size (e.g. "សាយ 34", "ចង្កេះ 32", "ចង្កះ 36", "size 34", "សាយ34", "លេខ 34", "94\35", "94=1-34")
   const waistMatch = s.match(/(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|លេខ|ស្លឹក)\s*[:=\s]*(\d{2})\b/i) ||
@@ -116,6 +123,13 @@ export function extractSizeAndColorNotes(text: string): string {
 export function normalizeKhmerText(text: string): string {
   if (!text) return '';
   let s = text.trim();
+
+  // Strip invisible zero-width characters (ZWSP, ZWNJ, ZWJ, BOM) commonly inserted by Khmer mobile keyboards
+  s = s.replace(/[\u200B\u200C\u200D\uFEFF]/g, ' ');
+
+  // Separate glued code/numbers before kilo/kg (e.g. "157គីឡូ 65" -> "157 គីឡូ 65")
+  s = s.replace(/([A-Za-z0-9])(គីឡូ|គីឡូក្រាម|គក|kg|kilo)/gi, '$1 $2');
+  s = s.replace(/(គីឡូ|គីឡូក្រាម|គក|kg|kilo)([A-Za-z0-9])/gi, '$1 $2');
 
   s = s.replace(/(\d{3,4})\s*\n\s*(\d{3,6})/g, '$1$2');
   s = convertKhmerDigitsToArabic(s);
@@ -215,23 +229,44 @@ export function extractCodeQtyPairsFromComment(
   s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|6XL|XXL|XXS|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1$2 ');
 
   // 🎯 Code + Qty with Unit (e.g. "118 3អាវ", "118 3 អាវ", "យក118 3អាវ", "118 1ខោ")
-  s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]?\s*(\d{1,2})\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ក្បាល|គូ|កញ្ចប់|ពណ៌|ពណ)/gi, '$1=$2 ');
+  s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]+\s*(\d{1,2})\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ក្បាល|គូ|កញ្ចប់|ពណ៌|ពណ)/gi, '$1=$2 ');
 
-  // 🎯 Pants / Waist Sizes (e.g. "94=2 ចង្កេះ34", "94 ចង្កះ36", "94=1-34", "94\35", "94/35", "51 សាយ 34 2", "51 size 34 យក 2", "51 ចង្កេះ 32=1", "47 សាយ 34")
-  // 1. Code + Qty + Dash/Space + Waist: "94=1-34", "94=2-34", "94=1 34", "94=2-size34"
+  // 🎯 Pants / Waist Sizes (e.g. "87Size29, 30,31,32", "87 Size 29 30 31 32", "94=2 ចង្កេះ34", "94 ចង្កះ36", "94=1-34", "51 សាយ 34 2")
+  // 1. Code + Multi-Waist List of Pants Sizes:
+  // e.g. "87Size29, 30,31,32" -> Code 87, sizes: 29, 30, 31, 32 -> "87=4 " (so 30, 31, 32 are NEVER extracted as separate product codes!)
+  // "87 Size 29 30 31 32" -> "87=4 ", "87 សាយ 29, 30, 31" -> "87=3 ", "87 ចង្កេះ 29 30" -> "87=2 "
+  const multiWaistRegex = /(?<![A-Za-z0-9])([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)\s*[:=\s\-]?\s*((?:(?:2[4-9]|3[0-9]|4[0-6])\s*(?:[:=xX]\s*\d{1,2})?(?:\s*[\/+,.,និង\-_]\s*|\s+)?)+)/gi;
+  const singleWaistRegex = /(2[4-9]|3[0-9]|4[0-6])(?:\s*[:=xX]\s*(\d{1,2}))?/gi;
+
+  s = s.replace(multiWaistRegex, (fullMatch, code, listPart) => {
+    let wm: RegExpExecArray | null;
+    let totalQty = 0;
+    let count = 0;
+    while ((wm = singleWaistRegex.exec(listPart)) !== null) {
+      count++;
+      const qty = wm[2] ? (parseInt(wm[2], 10) || 1) : 1;
+      totalQty += qty;
+    }
+    if (count > 0 && totalQty > 0) {
+      return `${code}=${totalQty} `;
+    }
+    return fullMatch;
+  });
+
+  // 2. Code + Qty + Dash/Space + Waist: "94=1-34", "94=2-34", "94=1 34", "94=2-size34"
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=]\s*(\d{1,2})\s*[-_\s]\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)?\s*(?:2[4-9]|3[0-9]|4[0-6])\b/gi, '$1=$2');
 
-  // 2. Code + Explicit Waist Keyword + Waist + Qty: "51 សាយ 34 2", "51 size 34 យក 2", "51 ចង្កេះ 32=1", "94 ចង្កះ 36 2"
+  // 3. Code + Explicit Waist Keyword + Waist + Qty: "51 សាយ 34 2", "51 size 34 យក 2", "51 ចង្កេះ 32=1", "94 ចង្កះ 36 2"
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)\s*[:=\s]*\s*(?:2[4-9]|3[0-9]|4[0-6])\s*(?:យក|កាត់|ថែម|ដាក់|កក់)?\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
 
-  // 3. Code + Qty + Explicit Waist Keyword + Waist: "94=2 ចង្កេះ34", "94=2 ចង្កះ34", "51=2 សាយ 34", "51 2 size 34"
+  // 4. Code + Qty + Explicit Waist Keyword + Waist: "94=2 ចង្កេះ34", "94=2 ចង្កះ34", "51=2 សាយ 34", "51 2 size 34"
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)\s*[:=\s]*(?:2[4-9]|3[0-9]|4[0-6])\b/gi, '$1=$2');
 
-  // 4. Code + Slash/Backslash/Dash + Waist: "94\35", "94/35", "94-35", "94\34", "94/34" -> Code 94, waist 35, qty 1
+  // 5. Code + Slash/Backslash/Dash + Waist: "94\35", "94/35", "94-35", "94\34", "94/34" -> Code 94, waist 35, qty 1
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[\/\\]\s*(2[4-9]|3[0-9]|4[0-6])(?!\d)/gi, '$1=1');
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*-\s*(2[4-9]|3[0-9]|4[0-6])(?!\d)/gi, '$1=1');
 
-  // 5. Code + Explicit Waist Keyword without explicit qty: "94 ចង្កះ36", "94 ចង្កេះ36", "47 សាយ 34", "51 size 32" -> Code 94, waist 36, qty 1
+  // 6. Code + Explicit Waist Keyword without explicit qty: "94 ចង្កះ36", "94 ចង្កេះ36", "47 សាយ 34", "51 size 32" -> Code 94, waist 36, qty 1
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)\s*[:=\s]*(?:2[4-9]|3[0-9]|4[0-6])(?!\d)/gi, '$1=1');
 
   // 🎯 Code + Multi-Size or Clothing Size with Quantity:
