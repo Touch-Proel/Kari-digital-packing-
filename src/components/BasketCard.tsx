@@ -61,6 +61,15 @@ interface BasketCardProps {
   ) => void;
   onDataChanged: () => void;
   onOptimisticItemUpdate?: (invoiceId: number, code: string, targetQty: number) => void;
+  onOptimisticEditItem?: (
+    invoiceId: number,
+    oldCode: string,
+    newCode: string,
+    newQty?: number,
+    newPrice?: number,
+    newImage?: string,
+    newName?: string
+  ) => void;
   onOptimisticZoneUpdate?: (invoiceId: number, newZone: 'PP' | 'PROVINCE', serverTotal?: number, serverShipping?: number) => void;
   onOptimisticAddItem?: (
     invoiceId: number,
@@ -92,6 +101,7 @@ function BasketCardComponent({
   onOpenZoomModal,
   onDataChanged,
   onOptimisticItemUpdate,
+  onOptimisticEditItem,
   onOptimisticZoneUpdate,
   onOptimisticAddItem,
   onUpdateInvoice,
@@ -683,6 +693,23 @@ function BasketCardComponent({
 
     const stockProd = productMap ? productMap[targetCode] : undefined;
     const finalPrice = stockProd?.price ?? editingCodeItem.price;
+    const oldCode = editingCodeItem.oldCode;
+    const newQty = editingCodeItem.qty;
+
+    // Instant 0ms Optimistic UI update & Fanfare!
+    playSuccessFanfare();
+    if (onOptimisticEditItem) {
+      onOptimisticEditItem(
+        invoice.invoice_id,
+        oldCode,
+        targetCode,
+        newQty,
+        finalPrice,
+        stockProd?.image_file,
+        stockProd?.name
+      );
+    }
+    setEditingCodeItem(null);
 
     setIsSavingCode(true);
     try {
@@ -691,29 +718,27 @@ function BasketCardComponent({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
-          old_code: editingCodeItem.oldCode,
+          old_code: oldCode,
           new_code: targetCode,
-          new_qty: editingCodeItem.qty,
+          new_qty: newQty,
           new_price: finalPrice,
           packer_name: myPackerName
         })
       });
       const data = await res.json();
       if (data.success) {
-        playSuccessFanfare();
         onShowToast(data.message || `✅ បានកែប្រែកូដ [${targetCode}] (តម្លៃ $${finalPrice.toFixed(2)}) រួចរាល់!`, 'success');
-        setEditingCodeItem(null);
         if (data.invoice && onUpdateInvoice) {
           onUpdateInvoice(data.invoice, data.revision);
-        } else {
-          onDataChanged();
         }
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចកែប្រែកូដបានទេ'}`, 'error');
+        onDataChanged();
       }
     } catch (err) {
       onShowToast('⚠️ មានបញ្ហាបណ្តាញ WiFi!', 'error');
+      onDataChanged();
     } finally {
       setIsSavingCode(false);
     }
@@ -730,6 +755,21 @@ function BasketCardComponent({
     const finalQty = newQty && newQty > 0 ? newQty : item.quantity;
     const stockProd = productMap ? productMap[targetCode] : undefined;
     const finalPrice = stockProd?.price ?? item.price;
+    const oldCode = item.product_code;
+
+    // Instant 0ms Optimistic UI update & Fanfare!
+    playSuccessFanfare();
+    if (onOptimisticEditItem) {
+      onOptimisticEditItem(
+        invoice.invoice_id,
+        oldCode,
+        targetCode,
+        finalQty,
+        finalPrice,
+        stockProd?.image_file,
+        stockProd?.name
+      );
+    }
 
     setIsSavingCode(true);
     try {
@@ -738,7 +778,7 @@ function BasketCardComponent({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           invoice_id: invoice.invoice_id,
-          old_code: item.product_code,
+          old_code: oldCode,
           new_code: targetCode,
           new_qty: finalQty,
           new_price: finalPrice,
@@ -747,19 +787,18 @@ function BasketCardComponent({
       });
       const data = await res.json();
       if (data.success) {
-        playSuccessFanfare();
         onShowToast(data.message || `✅ បានប្តូរទៅកូដ [${targetCode}] រួចរាល់!`, 'success');
         if (data.invoice && onUpdateInvoice) {
           onUpdateInvoice(data.invoice, data.revision);
-        } else {
-          onDataChanged();
         }
       } else {
         playWarningBuzzer();
         onShowToast(`⚠️ ${data.message || 'មិនអាចប្តូរកូដបានទេ'}`, 'error');
+        onDataChanged();
       }
     } catch (err) {
       onShowToast('⚠️ មានបញ្ហាបណ្តាញ WiFi!', 'error');
+      onDataChanged();
     } finally {
       setIsSavingCode(false);
     }
@@ -1480,7 +1519,7 @@ function BasketCardComponent({
               );
 
               return (
-                <div key={idx} className="flex flex-col">
+                <div key={`${item.product_code}_${item.id || idx}`} className="flex flex-col transition-all duration-150">
                   {/* Outer Item Card matching Capture.PNG */}
                   <div
                     onClick={() => {

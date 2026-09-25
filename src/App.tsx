@@ -64,6 +64,7 @@ export default function App() {
   const currentRevisionRef = useRef<number>(0);
   const pendingMutationsRef = useRef<Map<number, {
     timestamp: number;
+    minRevision?: number;
     items?: OrderItem[];
     unmatched_comments?: string[];
     total_amount?: number;
@@ -498,6 +499,72 @@ export default function App() {
 
       pendingMutationsRef.current.set(invoiceId, {
         timestamp: Date.now(),
+        minRevision: currentRevisionRef.current + 1,
+        items: updatedItems,
+        total_amount: total
+      });
+
+      return prev.map(item => item.invoice_id === invoiceId ? {
+        ...item,
+        items: updatedItems,
+        total_amount: total,
+        updated_at: new Date().toISOString()
+      } : item);
+    });
+  }, []);
+
+  // Immediate Optimistic Item Code / Price / Qty Editing for 0ms Smoothness
+  const handleOptimisticEditItem = useCallback((
+    invoiceId: number,
+    oldCode: string,
+    newCode: string,
+    newQty?: number,
+    newPrice?: number,
+    newImage?: string,
+    newName?: string
+  ) => {
+    const cleanOld = oldCode.toUpperCase().trim();
+    const cleanNew = newCode.toUpperCase().trim();
+
+    // Preserve checked state if code changes
+    if (cleanOld !== cleanNew) {
+      setCheckedState(prev => {
+        const oldKey = `${invoiceId}_${cleanOld}`;
+        if (prev[oldKey]) {
+          const next = { ...prev, [`${invoiceId}_${cleanNew}`]: true };
+          delete next[oldKey];
+          localStorage.setItem('checkedItemsState', JSON.stringify(next));
+          return next;
+        }
+        return prev;
+      });
+    }
+
+    setInvoices(prev => {
+      const inv = prev.find(i => i.invoice_id === invoiceId);
+      if (!inv) return prev;
+      let updatedItems = [...(inv.items || [])];
+      const idx = updatedItems.findIndex(it => it.product_code.toUpperCase() === cleanOld);
+      if (idx !== -1) {
+        const item = updatedItems[idx];
+        const qty = newQty !== undefined && newQty > 0 ? newQty : item.quantity;
+        const price = newPrice !== undefined ? newPrice : item.price;
+        updatedItems[idx] = {
+          ...item,
+          product_code: cleanNew,
+          product_name: newName || (cleanOld === cleanNew ? item.product_name : `កូដ [${cleanNew}]`),
+          quantity: qty,
+          price: price,
+          image_file: newImage !== undefined ? newImage : item.image_file
+        };
+      }
+      const subtotal = updatedItems.reduce((s, it) => s + (it.price * it.quantity), 0);
+      const ship = inv.is_free_ship ? 0 : (inv.shipping_fee || (inv.location_zone === 'PROVINCE' ? 2.0 : 1.25));
+      const total = subtotal + ship;
+
+      pendingMutationsRef.current.set(invoiceId, {
+        timestamp: Date.now(),
+        minRevision: currentRevisionRef.current + 1,
         items: updatedItems,
         total_amount: total
       });
@@ -594,6 +661,7 @@ export default function App() {
       // Lock optimistic state for this invoice so background polls cannot overwrite it!
       pendingMutationsRef.current.set(invoiceId, {
         timestamp: Date.now(),
+        minRevision: currentRevisionRef.current + 1,
         items: updatedItems,
         unmatched_comments: updatedUnmatched,
         total_amount: totalAmount
@@ -611,13 +679,22 @@ export default function App() {
 
   // Sync single updated invoice directly without full refetch & update server revision
   const handleUpdateInvoice = useCallback((updatedInv: Invoice, serverRev?: number) => {
-    // Clear pending mutation lock for this invoice
-    pendingMutationsRef.current.delete(updatedInv.invoice_id);
-
-    if (typeof serverRev === 'number' && serverRev > currentRevisionRef.current) {
-      currentRevisionRef.current = serverRev;
-      setCurrentRevision(serverRev);
+    const rev = typeof serverRev === 'number' ? serverRev : currentRevisionRef.current;
+    if (rev > currentRevisionRef.current) {
+      currentRevisionRef.current = rev;
+      setCurrentRevision(rev);
     }
+
+    // Keep pending lock for 3000ms grace period so in-flight polls CANNOT overwrite it!
+    pendingMutationsRef.current.set(updatedInv.invoice_id, {
+      timestamp: Date.now(),
+      minRevision: rev,
+      items: updatedInv.items,
+      unmatched_comments: updatedInv.unmatched_comments,
+      total_amount: updatedInv.total_amount,
+      location_zone: updatedInv.location_zone,
+      shipping_fee: updatedInv.shipping_fee
+    });
 
     setInvoices(prev => {
       const idx = prev.findIndex(inv => inv.invoice_id === updatedInv.invoice_id);
@@ -660,13 +737,24 @@ export default function App() {
       if (json && json.changed === false) {
         return; // No change
       }
+
+      // CRITICAL: Drop any stale poll response that was generated before a client-side mutation!
+      if (typeof json.revision === 'number' && json.revision < currentRevisionRef.current) {
+        return;
+      }
+
       if (json.data) {
         const now = Date.now();
+        if (typeof json.revision === 'number' && json.revision > currentRevisionRef.current) {
+          currentRevisionRef.current = json.revision;
+          setCurrentRevision(json.revision);
+        }
+
         setInvoices(prev => {
           return json.data.map((serverInv: Invoice) => {
             const pending = pendingMutationsRef.current.get(serverInv.invoice_id);
             if (pending) {
-              if (now - pending.timestamp < 5000) {
+              if (now - pending.timestamp < 3000 || (pending.minRevision && json.revision && json.revision < pending.minRevision)) {
                 // An optimistic mutation is in-flight: preserve user changes to prevent jumping/flicker
                 const local = prev.find(p => p.invoice_id === serverInv.invoice_id);
                 if (local) {
@@ -686,11 +774,6 @@ export default function App() {
             return serverInv;
           });
         });
-
-        if (json.revision) {
-          currentRevisionRef.current = Math.max(currentRevisionRef.current, json.revision);
-          setCurrentRevision(currentRevisionRef.current);
-        }
       }
     } catch (e) {
       networkFailureCountRef.current += 1;
@@ -1542,6 +1625,7 @@ export default function App() {
                 onOpenZoomModal={handleOpenZoomModal}
                 onDataChanged={handleDataChanged}
                 onOptimisticItemUpdate={handleOptimisticItemUpdate}
+                onOptimisticEditItem={handleOptimisticEditItem}
                 onOptimisticZoneUpdate={handleOptimisticZoneUpdate}
                 onOptimisticAddItem={handleOptimisticAddItem}
                 onUpdateInvoice={handleUpdateInvoice}
