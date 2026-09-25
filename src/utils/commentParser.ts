@@ -75,23 +75,18 @@ export function extractSizeAndColorNotes(text: string): string {
   const s = convertKhmerDigitsToArabic(text);
   const notes: string[] = [];
 
-  // Weight notes (e.g. "គីឡូ 65", "65 គីឡូ", "65kg", "គឺឡូ68", "គីឡ50", "គឺទូ56", "gk65", "គ65", "124kg40", "kg40", "77 gk65")
+  // Weight notes (e.g. "គីឡូ 65", "65 គីឡូ", "65kg", "30=80", "12=55", "20=35")
   const weightMatch = s.match(/(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ|kg|kilo|gk)\s*[:=\s\-_/]?\s*(\d{2,3})/i) ||
                       s.match(/(?<!\d)(\d{2,3})\s*(?:kg|kilo|gk|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ)/i) ||
-                      s.match(/(?:\d{1,4})?គ\s*(\d{2})\b/i);
+                      s.match(/(?:\d{1,4})?គ\s*(\d{2})\b/i) ||
+                      s.match(/(?<!\d)[A-Za-z0-9]{1,5}\s*[:=]\s*(4[7-9]|[5-9][0-9]|1[0-2][0-9])\b/i);
   if (weightMatch) {
     notes.push(`${weightMatch[1]}kg`);
   }
 
-  // Chest / Bust size (e.g. "ទ្រូង 38", "ទ្រូង40", "ដើមទ្រូង 36")
-  const chestMatch = s.match(/(?:ដើមទ្រូង|ទ្រូង)\s*[:=\s\-]?\s*(\d{2,3})/i);
-  if (chestMatch) {
-    notes.push(`ទ្រូង ${chestMatch[1]}`);
-  }
-
-  // Waist / pants size (e.g. "សាយ 34", "ចង្កេះ 32", "ចង្កះ 36", "size 34", "សាយ34", "លេខ 34", "94\35", "94=1-34")
+  // Waist / pants size (e.g. "សាយ 34", "ចង្កេះ 32", "ចង្កះ 36", "size 34", "សាយ34", "លេខ 34", "94\35", "94=1-34", "94=34")
   const waistMatch = s.match(/(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|លេខ|ស្លឹក)\s*[:=\s]*(\d{2})\b/i) ||
-                     s.match(/(?<!\d)[A-Za-z0-9]{1,5}\s*(?:=|\/|\\|-)\s*(?:\d{1,2}\s*[-_]\s*)?(2[4-9]|3[0-9]|4[0-6])\b/i);
+                     s.match(/(?<!\d)[A-Za-z0-9]{1,5}\s*(?:=|\/|\\|-|\s)\s*(?:\d{1,2}\s*[-_]\s*)?(2[4-9]|3[0-9]|4[0-6])\b/i);
   if (waistMatch) {
     notes.push(`size ${waistMatch[1]}`);
   }
@@ -211,6 +206,19 @@ export function normalizeKhmerText(text: string): string {
 export interface ExtractedItemPair {
   code: string;
   qty: number;
+}
+
+function sanitizeRetailQuantity(code: string, rawQty: number, commentContext: string): number {
+  if (rawQty <= 20) {
+    return rawQty;
+  }
+  // Allow wholesale quantity if there is an explicit unit word attached (e.g. "50 អាវ", "100 អាវ", "50 ខោ", "100 ឈុត", "50 កំប៉ុង", "100 កេស", "50 ឡូ")
+  const hasExplicitWholesaleUnit = new RegExp(`(?:${rawQty})\\s*(?:អាវ|ខោ|ឈុត|ឆុត|កំប៉ុង|កញ្ចប់|ដប|គូ|កេស|ដើម|ប្រអប់|ក្បាល|បន្ទះ|ថង់|ដុំ|ឡូ|កែវ)`, 'i').test(commentContext);
+  if (hasExplicitWholesaleUnit) {
+    return rawQty;
+  }
+  // Otherwise, in retail live streams, any naked number > 20 is either a waist size (24-46) or weight in kg (35-130) -> default qty = 1!
+  return 1;
 }
 
 export function extractCodeQtyPairsFromComment(
@@ -410,13 +418,14 @@ export function extractCodeQtyPairsFromComment(
   const catalogCodeSet = new Set(sortedCatalog.map(p => p.code.toUpperCase()));
 
   // 🌟 PASS 1: Extract all explicit patterns like CODE=QTY anywhere in the comment text!
-  // e.g. "50=2 .51=1", "47=2", "47:1", "47=2លាយពណ៌", "បាត់ដំបង ។ 47=2ពណ៌", "47=2 46=1"
-  const explicitGlobalRegex = /(?:(?<=^|[^\w])([A-Za-z0-9]{1,5})\s*[:=]\s*(\d{1,2})(?!\d))/gi;
+  // e.g. "50=2 .51=1", "47=2", "47:1", "47=2លាយពណ៌", "30=80", "94=34"
+  const explicitGlobalRegex = /(?:(?<=^|[^\w])([A-Za-z0-9]{1,5})\s*[:=]\s*(\d{1,3})(?!\d))/gi;
   let match: RegExpExecArray | null;
 
   while ((match = explicitGlobalRegex.exec(s)) !== null) {
     const rawCode = match[1].toUpperCase().trim();
-    const qty = parseInt(match[2], 10) || 1;
+    let qty = parseInt(match[2], 10) || 1;
+    qty = sanitizeRetailQuantity(rawCode, qty, text);
 
     // In Strict Mode, only accept codes in catalog; in Auto Mode, accept any valid alphanumeric code
     if (strictCatalog && !catalogCodeSet.has(rawCode)) {
@@ -431,11 +440,12 @@ export function extractCodeQtyPairsFromComment(
     }
   }
 
-  // 🌟 PASS 2: Loose code + qty separated by space (e.g. "47 2", "47 1 ខ្មៅ")
-  const looseCodeQtyRegex = /(?<=^|[^\w])(\d{2,4}|[A-Za-z]\d{1,3})\s+(\d{1,2})(?!\d)/g;
+  // 🌟 PASS 2: Loose code + qty separated by space (e.g. "47 2", "47 1 ខ្មៅ", "30 80")
+  const looseCodeQtyRegex = /(?<=^|[^\w])(\d{2,4}|[A-Za-z]\d{1,3})\s+(\d{1,3})(?!\d)/g;
   while ((match = looseCodeQtyRegex.exec(s)) !== null) {
     const rawCode = match[1].toUpperCase().trim();
-    const qty = parseInt(match[2], 10) || 1;
+    let qty = parseInt(match[2], 10) || 1;
+    qty = sanitizeRetailQuantity(rawCode, qty, text);
 
     if (strictCatalog && !catalogCodeSet.has(rawCode)) {
       continue;
@@ -498,7 +508,7 @@ export function extractCodeQtyPairsFromComment(
       }
 
       if (multiTotalQty > 0) {
-        pairs.push({ code: pCode, qty: multiTotalQty });
+        pairs.push({ code: pCode, qty: sanitizeRetailQuantity(pCode, multiTotalQty, text) });
         seenCodes.add(pCode);
         seg = seg.replace(codeMatch[0], ' ');
         continue;
@@ -509,13 +519,14 @@ export function extractCodeQtyPairsFromComment(
         `(?<!\\d)(${esc})(?!\\d)` +
         `(?:[\\s_-]*(${validSuffixes}))?` +
         `(?:\\s*[:=xX*\\-_.,+«»~]|\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)|[\\s\\S]*?(?:យក|កាត់|ថែម|ដាក់|កក់|បូក))` +
-        `\\s*(\\d{1,2})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ))?`,
+        `\\s*(\\d{1,3})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ))?`,
         'i'
       );
 
       const matchWithQty = seg.match(reWithQty);
       if (matchWithQty && matchWithQty[3]) {
         let rawQty = parseInt(matchWithQty[3], 10) || 1;
+        rawQty = sanitizeRetailQuantity(pCode, rawQty, text);
         pairs.push({ code: pCode, qty: rawQty });
         seenCodes.add(pCode);
         seg = seg.replace(matchWithQty[0], ' ');

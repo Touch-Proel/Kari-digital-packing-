@@ -332,6 +332,31 @@ const testCases: TestCase[] = [
     name: 'Typo verb យម before code (យម106)',
     comment: 'យម106',
     expectedCodes: [{ code: '106', qty: 1 }]
+  },
+  {
+    name: 'QTY Guard for shorthand weight (30=80)',
+    comment: '30=80',
+    expectedCodes: [{ code: '30', qty: 1 }]
+  },
+  {
+    name: 'QTY Guard for shorthand waist size (94=34)',
+    comment: '94=34',
+    expectedCodes: [{ code: '94', qty: 1 }]
+  },
+  {
+    name: 'QTY Guard for max retail boundary <= 20 (58=20)',
+    comment: '58=20',
+    expectedCodes: [{ code: '58', qty: 20 }]
+  },
+  {
+    name: 'QTY Guard for explicit wholesale unit word (58=50 អាវ)',
+    comment: '58=50 អាវ',
+    expectedCodes: [{ code: '58', qty: 50 }]
+  },
+  {
+    name: 'QTY Guard clamp for bare naked number > 20 (12=55)',
+    comment: '12=55',
+    expectedCodes: [{ code: '12', qty: 1 }]
   }
 ];
 
