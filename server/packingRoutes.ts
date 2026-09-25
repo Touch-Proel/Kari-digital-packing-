@@ -1595,19 +1595,22 @@ router.post('/ai_smart_parse_basket', async (req: Request, res: Response) => {
 
         const existingOld = (inv.items || []).find(it => it.product_code.toUpperCase().trim() === clean);
 
-        let bestNote = (ver.notes || '').trim();
-        // Remove self-referencing codes or bracketed tags from note
-        if (/^កូដ\s*\[?.*?\]?$/i.test(bestNote) || bestNote === clean || bestNote.toLowerCase() === `កូដ ${clean}`.toLowerCase()) {
-          bestNote = '';
-        }
-        bestNote = bestNote.replace(/\[\s*កូដ\s*[^\]]+\]/gi, '').replace(/កូដ\s*\[[^\]]+\]/gi, '').trim();
+        // ALWAYS preserve the exact original customer comment for this item
+        let bestNote = '';
+        const matchingOriginals = allCustomerComments.filter(c => {
+          const norm = convertKhmerDigitsToArabic(c || '').toUpperCase();
+          const regex = new RegExp(`(?:^|[^A-Z0-9])${clean}(?:[^A-Z0-9]|$)`, 'i');
+          return regex.test(norm) || norm.includes(clean);
+        });
 
-        // If no clean note, only retain existingOld comment if it's a genuine color/size, not a raw code dump
-        if (!bestNote && existingOld?.item_comment) {
-          const old = existingOld.item_comment.trim();
-          if (!/^កូដ\s*\[?.*?\]?$/i.test(old) && old !== clean && !/^\d+[\s=:*\-_xX]\d+$/.test(old)) {
-            bestNote = old;
-          }
+        if (matchingOriginals.length > 0) {
+          bestNote = matchingOriginals.join(' | ');
+        } else if (existingOld?.item_comment && existingOld.item_comment.trim()) {
+          bestNote = existingOld.item_comment.trim();
+        } else if (allCustomerComments.length === 1) {
+          bestNote = allCustomerComments[0];
+        } else if (ver.notes) {
+          bestNote = ver.notes.trim();
         }
 
         newInvoiceItems.push({

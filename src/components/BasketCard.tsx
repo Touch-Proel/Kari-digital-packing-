@@ -228,23 +228,29 @@ function BasketCardComponent({
     s = s.replace(/(?:\+?855|0)\d{7,9}/g, ' ');
     s = s.replace(/(?:ផ្ទះលេខ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ភូមិ|ផ្សារ|បុរី)\s*[\u1780-\u17FFa-zA-Z0-9_\-]+/g, ' ');
 
+    const NON_PRODUCT_CODES = new Set([
+      'KG', 'KILO', 'CM', 'M', 'PP', 'VIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR',
+      'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL',
+      'HI', 'OK', 'YES', 'NO', 'FREE', 'SHIP', 'ABA', 'KHQR'
+    ]);
+
     const m = s.match(/([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})/);
-    if (m && !['KG', 'KILO', 'CM', 'M', 'PP'].includes(m[1].toUpperCase())) {
+    if (m && !NON_PRODUCT_CODES.has(m[1].toUpperCase())) {
       return { code: m[1].toUpperCase(), qty: parseInt(m[2], 10) || 1 };
     }
 
     const mSpace = s.match(/\b([A-Za-z0-9]{1,5})\s+(\d{1,2})\b/);
-    if (mSpace && !['KG', 'KILO', 'CM', 'M', 'PP'].includes(mSpace[1].toUpperCase())) {
+    if (mSpace && !NON_PRODUCT_CODES.has(mSpace[1].toUpperCase())) {
       return { code: mSpace[1].toUpperCase(), qty: parseInt(mSpace[2], 10) || 1 };
     }
 
     const mAction = s.match(/(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ)\s*([A-Za-z0-9]{1,5})\b/);
-    if (mAction && !['KG', 'KILO', 'CM', 'M', 'PP'].includes(mAction[1].toUpperCase())) {
+    if (mAction && !NON_PRODUCT_CODES.has(mAction[1].toUpperCase())) {
       return { code: mAction[1].toUpperCase(), qty: 1 };
     }
 
-    const mSingle = s.match(/^\s*([A-Za-z0-9]{2,5})\s*$/);
-    if (mSingle && !/^(hi|ok|yes|no|tel|vip|set)$/i.test(mSingle[1])) {
+    const mSingle = s.match(/^\s*([A-Za-z0-9]{1,5})\s*$/);
+    if (mSingle && !NON_PRODUCT_CODES.has(mSingle[1].toUpperCase())) {
       return { code: mSingle[1].toUpperCase(), qty: 1 };
     }
 
@@ -1474,7 +1480,11 @@ function BasketCardComponent({
                 const codeRegex = new RegExp(`(^|\\D)${item.product_code}(\\D|$)`, 'i');
                 return codeRegex.test(converted);
               });
-              const rawNoteText = item.item_comment || matchingComment || (invoice.comments && invoice.comments[0]) || '';
+              let rawNoteText = item.item_comment || matchingComment || (invoice.comments && invoice.comments[0]) || '';
+              // If item.item_comment is just a size/tag but matchingComment contains the full original comment, keep the full original!
+              if (matchingComment && (!item.item_comment || item.item_comment.length < matchingComment.length)) {
+                rawNoteText = matchingComment;
+              }
               const noteText = convertKhmerNumeralsToGlobal(rawNoteText);
 
               // Smart Code Mismatch Detection
