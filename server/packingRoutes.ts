@@ -23,7 +23,7 @@ import {
   syncAllActiveInvoicesWithStock
 } from './db';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
-import { parseAndAllocateComment } from './parser';
+import { parseAndAllocateComment, convertKhmerDigitsToArabic } from './parser';
 import { detectDeliveryZone } from './locationHelper';
 import { sendFacebookReply, fetchFacebookComments } from './fbAuth';
 import { generateServerKHQRPNG } from './khqrServer';

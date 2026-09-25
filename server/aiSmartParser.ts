@@ -55,8 +55,8 @@ const QUESTION_PHRASES = [
 export async function aiSmartAuditFullBasket(
   allComments: string[],
   currentItems: Array<{ code: string; quantity: number; notes?: string }>,
-  customerName: string,
-  catalog: Product[]
+  customerName: string = 'អតិថិជន',
+  catalog: Product[] = []
 ): Promise<BasketAuditResult> {
   if (!allComments || allComments.length === 0) {
     return {
