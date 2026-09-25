@@ -11,23 +11,42 @@ import {
 } from './db';
 import { DeliveryZone, Invoice, OrderItem, CustomerComment } from './types';
 import { detectDeliveryZone } from './locationHelper';
+import {
+  CLOTHING_SIZES,
+  CLOTHING_SIZES_SET,
+  COMMON_WAIST_SIZES,
+  NON_PRODUCT_CODES,
+  KHMER_DIGITS_MAP,
+  RE_PRICE_CLEANUP,
+  RE_MEASUREMENTS_CLEANUP,
+  RE_ADDRESS_NUMBERS_CLEANUP,
+  RE_CAMBODIAN_PHONE,
+  convertKhmerDigitsToArabic,
+  extractPhoneNumber,
+  extractSizeAndColorNotes,
+  normalizeKhmerText,
+  extractCodeQtyPairsFromComment,
+  ExtractedItemPair
+} from '../src/utils/commentParser';
 
-export { detectDeliveryZone };
-
-export const CLOTHING_SIZES = [
-  'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE'
-];
-
-export const CLOTHING_SIZES_SET = new Set(CLOTHING_SIZES);
-
-export const NON_PRODUCT_CODES = new Set([
-  'HI', 'HELLO', 'BONG', 'OK', 'YES', 'NO', 'PRICE', 'INBOX',
-  'ADMIN', 'SL', 'SLL', 'SLSL', 'LIKE', 'LOVE', 'CAN', 'HOW', 'TWA',
-  'CHHAT', 'JAE', 'AKUN', 'ORKUN', 'SLJAE', 'SLBONG', 'GOOD',
-  'KG', 'KILO', 'CM', 'PP', 'VIP', 'ABA', 'KHQR', 'USD', 'KHR', 'DOLLAR', 'RIEL',
-  'FREE', 'SHIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR',
-  ...CLOTHING_SIZES
-]);
+export {
+  detectDeliveryZone,
+  CLOTHING_SIZES,
+  CLOTHING_SIZES_SET,
+  COMMON_WAIST_SIZES,
+  NON_PRODUCT_CODES,
+  KHMER_DIGITS_MAP,
+  RE_PRICE_CLEANUP,
+  RE_MEASUREMENTS_CLEANUP,
+  RE_ADDRESS_NUMBERS_CLEANUP,
+  RE_CAMBODIAN_PHONE,
+  convertKhmerDigitsToArabic,
+  extractPhoneNumber,
+  extractSizeAndColorNotes,
+  normalizeKhmerText,
+  extractCodeQtyPairsFromComment
+};
+export type { ExtractedItemPair };
 
 const COMMON_GREETINGS = NON_PRODUCT_CODES;
 
@@ -42,108 +61,7 @@ const QUESTION_KEYWORDS = [
   'ពាក់បានអត់', 'គីឡូពាក់បាន', 'មានពណ៌អី', 'មានសាយអី', 'មានsize'
 ];
 
-const KHMER_DIGITS_MAP: Record<string, string> = {
-  '០': '0', '១': '1', '២': '2', '៣': '3', '៤': '4',
-  '៥': '5', '៦': '6', '៧': '7', '៨': '8', '៩': '9'
-};
-
 const ACTION_WORDS = ['យក', 'យល', 'ចង់បាន', 'កាត់', 'សុំ', 'ថែម', 'ដាក់', 'កក់', 'បូក', 'សុំយក'];
-
-const SIZE_COLOR_SUFFIXES = [
-  'XXL', 'XXS', '4XL', '3XL', '2XL', 'XL', 'XS', 'M', 'L', 'S',
-  'ស', 'ខ្មៅ', 'ក្រហម', 'ខៀវ', 'លឿង', 'ផ្កាឈូក', 'ស្វាយ', 'បៃតង', 'ត្នោត', 'ប្រផេះ', 'ទឹកដោះគោ', 'សូកូឡា', 'កាហ្វេ', 'ឈាមជ្រូក'
-];
-
-const RE_PRICE_CLEANUP = /(?:\$\s*\d+(?:[\.,]\d+)?|\b\d+(?:[\.,]\d+)?\s*\$|\b\d+\s*៛|\b\d{4,}\s*(?:រៀល|៛)\b)/gi;
-const RE_MEASUREMENTS_CLEANUP = /(?:\d*\s*(?:kg|kilo|គីឡូ|គីឡូក្រាម|គក)\s*\d*|កម្ពស់\s*\d{2,3}|ចង្កេះ\s*[:=\s]*\d{2}|(?:សាយ|size)\s*[:=\s]*\d{2}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
-const RE_ADDRESS_NUMBERS_CLEANUP = /(?:ផ្លូវ(?:លេខ)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*\d+|ផ្សារ\s*\d+|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d+)/gi;
-
-const KHMER_BOUND_AFTER = '(?=[^\\u1780-\\u17FFa-zA-Z0-9]|$)';
-const KHMER_BOUND_BEFORE = '(?<=[^\\u1780-\\u17FFa-zA-Z0-9]|^)';
-
-export function convertKhmerDigitsToArabic(text: string): string {
-  if (!text) return '';
-  return text.replace(/[០-៩]/g, ch => KHMER_DIGITS_MAP[ch] || ch);
-}
-
-export function normalizeKhmerText(text: string): string {
-  if (!text) return '';
-  let s = text.trim();
-
-  s = s.replace(/(\d{3,4})\s*\n\s*(\d{3,6})/g, '$1$2');
-  s = convertKhmerDigitsToArabic(s);
-
-  s = s.replace(/ឆុត/g, 'ឈុត')
-       .replace(/កូត|ខូត|កូក|គូដ/g, 'កូដ')
-       .replace(/យល/g, 'យក');
-
-  // Replace Khmer word numbers when paired with action verbs or code
-  const KHMER_WORD_NUMS = [
-    { word: 'មួយឡូ', num: 12 },
-    { word: 'កន្លះឡូ', num: 6 },
-    { word: 'ដប់', num: 10 },
-    { word: 'ប្រាំបួន', num: 9 },
-    { word: 'ប្រាំបី', num: 8 },
-    { word: 'ប្រាំពីរ', num: 7 },
-    { word: 'ប្រាំមួយ', num: 6 },
-    { word: 'ប្រាំ', num: 5 },
-    { word: 'បួន', num: 4 },
-    { word: 'បី', num: 3 },
-    { word: 'ពីរ', num: 2 },
-    { word: 'មួយ', num: 1 },
-    { word: 'មូយ', num: 1 }
-  ];
-
-  for (const { word, num } of KHMER_WORD_NUMS) {
-    // Pattern 1: Action + Code + NumberWord (e.g. "យក 47 ពីរ", "កាត់ 47 មួយអាវ")
-    s = s.replace(
-      new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់|បូក|សុំ)\\s*([A-Za-z0-9]{1,5})\\s*${word}(?:\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ក្បាល|គូ|កញ្ចប់|ពណ៌|ពណ))?`, 'gi'),
-      `$1=${num} `
-    );
-    // Pattern 2: Code + Action + NumberWord (e.g. "47 យក ពីរ", "47 កាត់ មួយ")
-    s = s.replace(
-      new RegExp(`([A-Za-z0-9]{1,5})\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ)\\s*${word}(?:\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ក្បាល|គូ|កញ្ចប់|ពណ៌|ពណ))?`, 'gi'),
-      `$1=${num} `
-    );
-    // Pattern 3: Action + NumberWord + Code (e.g. "យក ពីរ 47", "កាត់ មួយ 100")
-    s = s.replace(
-      new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ)\\s*${word}\\s*(?:អាវ|ខោ|ឈុត)?\\s*([A-Za-z0-9]{1,5})`, 'gi'),
-      `$1=${num} `
-    );
-  }
-
-  s = s.replace(/\*{3,}/g, ' ');
-  return s;
-}
-
-const RE_CAMBODIAN_PHONE = /(?:\+?855[\s.\-()]*|0)(?:1\d|3[18]|6[016-9]|7[016-9]|8[15-9]|9[0-8])(?:[\s.\-()]*\d){6,7}(?!\d)/i;
-
-export function extractPhoneNumber(text: string): { phone: string | null; cleanText: string } {
-  if (!text) return { phone: null, cleanText: text };
-
-  const normalized = convertKhmerDigitsToArabic(text);
-  const match = normalized.match(RE_CAMBODIAN_PHONE);
-
-  if (match) {
-    const matchedStr = match[0];
-    const matchIndex = match.index ?? normalized.indexOf(matchedStr);
-    const matchLength = matchedStr.length;
-
-    let digits = matchedStr.replace(/\D/g, '');
-    if (digits.startsWith('855')) {
-      digits = '0' + digits.slice(3);
-    }
-
-    if ((digits.length === 8 || digits.length === 9 || digits.length === 10) && digits.startsWith('0')) {
-      const cleanText = (text.substring(0, matchIndex) + ' ' + text.substring(matchIndex + matchLength))
-        .replace(/\s+/g, ' ')
-        .trim();
-      return { phone: digits, cleanText };
-    }
-  }
-
-  return { phone: null, cleanText: text };
-}
 
 export function isQuestionComment(text: string): boolean {
   if (!text) return false;
@@ -162,180 +80,14 @@ export function isQuestionComment(text: string): boolean {
   return false;
 }
 
-export interface ExtractedItemPair {
-  code: string;
-  qty: number;
-}
-
 export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedItemPair[] {
   if (!text) return [];
   if (isQuestionComment(text)) return [];
 
-  let s = normalizeKhmerText(text);
-
-  const { cleanText: textWithoutPhone } = extractPhoneNumber(s);
-  s = textWithoutPhone;
-
-  s = s.replace(RE_MEASUREMENTS_CLEANUP, ' ');
-  s = s.replace(RE_PRICE_CLEANUP, ' ');
-  s = s.replace(RE_ADDRESS_NUMBERS_CLEANUP, ' ');
-
-  // 🎯 Protect item separators between distinct items: "50=2 .51=1" or "50=2/51=1" or "50=2, 51=1" -> "50=2 51=1"
-  s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
-
-  // Handle merged qty + size format (e.g. "24=13XL" -> "24=1 3XL", "24=12XL" -> "24=1 2XL")
-  s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|6XL|XXL|XXS|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1$2 ');
-
-  // 🎯 Clothing sizes (XS, S, M, L, XL, XXL, 2XL, 3XL, 4XL, 5XL) between or after code and qty:
-  // e.g. "A01 XL 2" -> "A01=2", "47 L 2" -> "47=2", "47 សាយ XL 2" -> "47=2", "47 XL=2" -> "47=2"
-  s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
-  s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1=$2');
-
-  // 🎯 Normalize Cambodian live selling order patterns to standard CODE=QTY format:
-  // 1. Double/single dot: "47..5", "47.1" (only when isolated, not part of decimals)
-  s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\.{1,3}(\d{1,2})(?![=:\d])/g, '$1=$2');
-  // 2. Slashes: "47/2", "47//2"
-  s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\/+(\d{1,2})(?![=:\d])/g, '$1=$2');
-  // 3. Action words: "47 យក 2", "47យក3", "47 យក ២ពណ៌" -> "47=2"
-  s = s.replace(/(?<!\d)(\d{1,4}|[A-Za-z]\d{1,3})\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(\d{1,2})(?!\d)/gi, '$1=$2');
-  // 4. Action prefix: "ថែម 47=1", "ថែម47=1", "យក 47=2" -> "47=1", "47=2"
-  s = s.replace(/(?:ថែម|កាត់|កក់|ដាក់|យក)\s*(\d{1,4}|[A-Za-z]\d{1,3})\s*[:=]\s*(\d{1,2})/gi, '$1=$2');
-  // 5. Code prefix: "កូដ 47 1", "កូដ47=2", "code 47 1" -> "47=1", "47=2"
-  s = s.replace(/(?:កូដ|code)\s*(\d{1,4}|[A-Za-z]\d{1,3})\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
-  // 6. Action word before: "យក 47 2", "កាត់ 47 1" -> "47=2", "47=1"
-  s = s.replace(/(?:ថែម|កាត់|កក់|ដាក់|យក)\s*(\d{1,4}|[A-Za-z]\d{1,3})\s+(\d{1,2})(?!\d)/gi, '$1=$2');
-
-  const pairs: ExtractedItemPair[] = [];
-  const seenCodes = new Set<string>();
-
   const targetLive = liveId || activeLiveId;
-  const sortedCatalog = products
-    .filter(p => (p.live_id || activeLiveId) === targetLive && p.code && p.code.trim().length > 0)
-    .sort((a, b) => b.code.length - a.code.length);
-  const catalogCodeSet = new Set(sortedCatalog.map(p => p.code.toUpperCase()));
+  const targetProducts = products.filter(p => (p.live_id || activeLiveId) === targetLive);
 
-  // 🌟 PASS 1: Extract all explicit patterns like CODE=QTY anywhere in the comment text!
-  // e.g. "50=2 .51=1", "47=2", "47:1", "47=2លាយពណ៌", "បាត់ដំបង ។ 47=2ពណ៌", "47=2 46=1"
-  const explicitGlobalRegex = /(?:(?<=^|[^\w])([A-Za-z0-9]{1,5})\s*[:=]\s*(\d{1,2})(?!\d))/gi;
-  let match: RegExpExecArray | null;
-
-  while ((match = explicitGlobalRegex.exec(s)) !== null) {
-    const rawCode = match[1].toUpperCase().trim();
-    const qty = parseInt(match[2], 10) || 1;
-
-    // In Strict Mode, only accept codes in catalog; in Auto Mode, accept any valid alphanumeric code
-    if (settings.parser_strict_catalog && !catalogCodeSet.has(rawCode)) {
-      continue;
-    }
-
-    if (!NON_PRODUCT_CODES.has(rawCode) && !seenCodes.has(rawCode)) {
-      pairs.push({ code: rawCode, qty });
-      seenCodes.add(rawCode);
-    }
-  }
-
-  // 🌟 PASS 2: Loose code + qty separated by space (e.g. "47 2", "47 1 ខ្មៅ")
-  const looseCodeQtyRegex = /(?<=^|[^\w])(\d{2,4}|[A-Za-z]\d{1,3})\s+(\d{1,2})(?!\d)/g;
-  while ((match = looseCodeQtyRegex.exec(s)) !== null) {
-    const rawCode = match[1].toUpperCase().trim();
-    const qty = parseInt(match[2], 10) || 1;
-
-    if (settings.parser_strict_catalog && !catalogCodeSet.has(rawCode)) {
-      continue;
-    }
-
-    if (!NON_PRODUCT_CODES.has(rawCode) && !seenCodes.has(rawCode)) {
-      pairs.push({ code: rawCode, qty });
-      seenCodes.add(rawCode);
-    }
-  }
-
-  // 🌟 PASS 3: Known Catalog matching for multiple codes or standalone codes (e.g. "100 101 102", "51សាយL")
-  const multiVariantRegex = /\b(XXL|XXS|4XL|3XL|2XL|XL|XS|[SML])\s*(\d{1,2})?\b/gi;
-  const validSuffixes = SIZE_COLOR_SUFFIXES.join('|');
-
-  const segments = s.split(/[\n;+,]+|\s+និង\s+|\s{2,}/i);
-
-  for (let seg of segments) {
-    seg = seg.trim();
-    if (!seg) continue;
-
-    for (const prod of sortedCatalog) {
-      const pCode = prod.code.toUpperCase().trim();
-      if (COMMON_GREETINGS.has(pCode) || seenCodes.has(pCode)) continue;
-
-      const esc = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const isSingleDigit = /^\d$/.test(pCode);
-
-      // Single digit codes (1-9) MUST have explicit "កូដ" prefix or be part of code definition
-      if (isSingleDigit) {
-        const falseQtyPattern = new RegExp(`(?:យក|កាត់|ថែម|ដាក់|កក់)?\\s*${esc}\\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ពណ៌|ពណ)`, 'i');
-        if (falseQtyPattern.test(seg) && !new RegExp(`(?:កូដ|កូដលេខ|CODE)\\s*${esc}\\b`, 'i').test(seg)) {
-          continue;
-        }
-      }
-
-      const codePattern = isSingleDigit
-        ? `(?:កូដ|កូដលេខ|CODE)\\s*(${esc})(?!\\d)`
-        : `(?<![A-Za-z0-9])(${esc})(?![A-Za-z0-9])`;
-
-      const codeMatch = seg.match(new RegExp(codePattern, 'i'));
-      if (!codeMatch) continue;
-
-      // Check for multi-size variant quantities
-      let varMatch: RegExpExecArray | null;
-      let multiTotalQty = 0;
-      const textAfterCode = seg.substring(codeMatch.index! + codeMatch[0].length);
-
-      while ((varMatch = multiVariantRegex.exec(textAfterCode)) !== null) {
-        const q = varMatch[2] ? (parseInt(varMatch[2], 10) || 1) : 1;
-        multiTotalQty += q;
-      }
-
-      if (multiTotalQty > 0) {
-        pairs.push({ code: pCode, qty: multiTotalQty });
-        seenCodes.add(pCode);
-        seg = seg.replace(codeMatch[0], ' ');
-        continue;
-      }
-
-      const reWithQty = new RegExp(
-        `(?:(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\\s*)?` +
-        `(?<!\\d)(${esc})(?!\\d)` +
-        `(?:[\\s_-]*(${validSuffixes}))?` +
-        `(?:\\s*[:=xX*\\-_.,+«»~]|\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)|[\\s\\S]*?(?:យក|កាត់|ថែម|ដាក់|កក់|បូក))` +
-        `\\s*(\\d{1,2})(?:\\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ))?`,
-        'i'
-      );
-
-      const matchWithQty = seg.match(reWithQty);
-      if (matchWithQty && matchWithQty[3]) {
-        let rawQty = parseInt(matchWithQty[3], 10) || 1;
-        pairs.push({ code: pCode, qty: rawQty });
-        seenCodes.add(pCode);
-        seg = seg.replace(matchWithQty[0], ' ');
-        continue;
-      }
-
-      pairs.push({ code: pCode, qty: 1 });
-      seenCodes.add(pCode);
-      seg = seg.replace(codeMatch[0], ' ');
-    }
-  }
-
-  // 🌟 PASS 4: Pure standalone product code in comment (e.g. "46", "57", "93", "48", "A1") with default qty = 1
-  if (pairs.length === 0) {
-    const standaloneMatch = s.match(/(?<=^|[^\w])(\d{2,4}|[A-Za-z]\d{1,3})(?=[^\w]|$)/);
-    if (standaloneMatch) {
-      const bareCode = standaloneMatch[1].toUpperCase().trim();
-      if (!COMMON_GREETINGS.has(bareCode) && !seenCodes.has(bareCode) && !/^(គីឡូ|ខោ|អាវ|ឈុត|រៀល|ដុល្លារ)$/.test(bareCode)) {
-        pairs.push({ code: bareCode, qty: 1 });
-        seenCodes.add(bareCode);
-      }
-    }
-  }
-
-  return pairs;
+  return extractCodeQtyPairsFromComment(text, targetProducts, settings.parser_strict_catalog);
 }
 
 export interface ParseCommentResult {

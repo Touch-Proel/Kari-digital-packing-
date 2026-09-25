@@ -1152,7 +1152,25 @@ export default function App() {
     }
 
     if (activeSubFilter === 'AMOUNT_DESC') {
-      filtered = [...filtered].sort((a, b) => b.total_amount - a.total_amount);
+      filtered = [...filtered].sort((a, b) => {
+        const qtyA = (a.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+        const qtyB = (b.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+        const amtA = Number(a.total_amount || 0);
+        const amtB = Number(b.total_amount || 0);
+
+        // 1. 🎯 Primary: Sort by highest item quantity (ច្រើនមុខ/ច្រើនចំនួនមុន e.g. 107 -> 74 -> 58 -> ... -> 1)
+        if (qtyB !== qtyA) {
+          return qtyB - qtyA;
+        }
+
+        // 2. 💰 Secondary: If total quantities are equal, sort by highest total amount (តម្លៃ/លុយច្រើនមុន)
+        if (Math.abs(amtB - amtA) > 0.001) {
+          return amtB - amtA;
+        }
+
+        // 3. 🔢 Tertiary: Stable tie-breaker by basket number descending
+        return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+      });
     } else {
       filtered = [...filtered].sort((a, b) => {
         const timeA = new Date(a.created_at || 0).getTime();

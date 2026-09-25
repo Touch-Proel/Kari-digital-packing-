@@ -500,13 +500,28 @@ export async function loadDatabaseFromDisk() {
     const invalidSizes = new Set([
       'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE'
     ]);
+
+    const dummyQuantityCodes = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    const dummyWaistCodes = new Set(['24', '25', '26', '27', '28', '29', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46']);
+
     const initialProductCount = products.length;
+    const purgedProductCodes = new Set<string>();
+
     const sanitizedProducts = products.filter(p => {
       const cleanCode = (p.code || '').toUpperCase().trim();
-      if (invalidSizes.has(cleanCode)) {
-        if (!p.image_file || p.name === `កូដ ${cleanCode}` || p.name === `កូដ [${cleanCode}]` || p.name === cleanCode) {
-          return false;
-        }
+      const isAutoDummy = !p.image_file && (p.price === 0 || p.name === `កូដ ${cleanCode}` || p.name === `កូដ [${cleanCode}]` || p.name === cleanCode || p.name === '=5.00');
+
+      if (invalidSizes.has(cleanCode) && isAutoDummy) {
+        purgedProductCodes.add(cleanCode);
+        return false;
+      }
+      if (dummyQuantityCodes.has(cleanCode) && isAutoDummy && p.price === 0) {
+        purgedProductCodes.add(cleanCode);
+        return false;
+      }
+      if (dummyWaistCodes.has(cleanCode) && isAutoDummy && p.price === 0) {
+        purgedProductCodes.add(cleanCode);
+        return false;
       }
       return true;
     });
@@ -515,7 +530,16 @@ export async function loadDatabaseFromDisk() {
       const purgedCount = initialProductCount - sanitizedProducts.length;
       products.length = 0;
       products.push(...sanitizedProducts);
-      console.log(`[Stock Cleanup] Purged ${purgedCount} invalid clothing size entries (e.g. XS, S, M, L, XL, 2XL) from products stock.`);
+      console.log(`[Stock Cleanup] Purged ${purgedCount} invalid clothing size and dummy quantity entries (e.g. 1..9, 34, XL) from products stock.`);
+    }
+
+    // Clean up purged dummy items from invoices
+    if (purgedProductCodes.size > 0) {
+      invoices.forEach(inv => {
+        if (inv.items && Array.isArray(inv.items)) {
+          inv.items = inv.items.filter(it => !purgedProductCodes.has((it.product_code || '').toUpperCase().trim()));
+        }
+      });
     }
 
     // Sanitize products, ensure live_id is assigned, and format names
@@ -553,6 +577,32 @@ export async function loadDatabaseFromDisk() {
             it.product_name = it.product_name.replace(/^ទំនិញកូដ\s*/, 'កូដ ');
           }
         });
+
+        // Clean up erroneous waist size items (e.g. 34, 35, 36) and quantity-reextracted items in active baskets
+        if (inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED') {
+          const allCommentsText = (inv.comments || []).join(' ');
+          inv.items = inv.items.filter(it => {
+            const cleanC = (it.product_code || '').toUpperCase().trim();
+            if (dummyWaistCodes.has(cleanC)) {
+              const waistInCommentPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក|[-_\\/\\\\])\\s*${cleanC}\\b`, 'i');
+              if (waistInCommentPattern.test(allCommentsText)) {
+                return false;
+              }
+            }
+            // If this item code was accidentally extracted from the quantity of another item (e.g. [10] from "145យក10")
+            const isQtyNum = parseInt(cleanC, 10);
+            if (!isNaN(isQtyNum) && isQtyNum >= 1 && isQtyNum <= 20) {
+              const falseQtyFromAction = new RegExp(`[A-Za-z0-9]{2,5}\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|=)\\s*${cleanC}\\b`, 'i');
+              if (falseQtyFromAction.test(allCommentsText)) {
+                const parentItem = inv.items.find(other => other.quantity === isQtyNum && other.product_code !== it.product_code);
+                if (parentItem) {
+                  return false;
+                }
+              }
+            }
+            return true;
+          });
+        }
       }
 
       // Populate / preserve payment_status

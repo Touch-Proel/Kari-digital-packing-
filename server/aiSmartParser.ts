@@ -40,6 +40,7 @@ const NON_CODE_WORDS = new Set([
   'HI', 'HELLO', 'OK', 'YES', 'NO', 'KG', 'KILO', 'CM', 'PP', 'VIP', 'ABA', 'KHQR',
   'LIVE', 'FREE', 'SHIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR', 'ADMIN', 'BONG', 'JAE',
   'SL', 'SLL', 'SLSL', 'ORKUN', 'AKUN', 'HOW', 'CAN', 'LIKE', 'LOVE',
+  'សាយ', 'ចង្កេះ', 'លេខ', 'ពណ៌', 'ពណ៍', 'អាវ', 'ខោ', 'ឈុត',
   'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE'
 ]);
 
@@ -112,7 +113,7 @@ STRICT AUDIT INSTRUCTIONS:
    - DO NOT multiply or accumulate duplicate counts from the same single comment.
 3. Multi-Item Extraction: Extract all distinct product codes ordered across all comments. Unlisted live codes are valid product codes.
 4. Clean Notes:
-   - "notes" MUST ONLY be actual color, size, or customer special instructions (e.g. "size L", "ពណ៍ខ្មៅ").
+   - "notes" MUST ONLY be actual color, size, or customer special instructions (e.g. "size L", "size 34", "ចង្កេះ 32", "ពណ៍ខ្មៅ").
    - NEVER write "កូដ [xxx]" or repeat the product code in the notes. Leave "notes" as "" (empty string) if no color/size was requested.
 5. Inquiries vs Orders:
    - Comments like "ខោពាក់បានត្រឹមប៉ុន្មានគីឡូ?", "សួស្តី", "សុំមើលកូដ 5", "តម្លៃប៉ុន្មាន" are questions, NOT orders. Do not extract numbers from questions.
@@ -120,10 +121,13 @@ STRICT AUDIT INSTRUCTIONS:
    - Phone: Extract Cambodian phone numbers (e.g. 012889772, 0975544321).
    - Address: Full address string if given.
    - Zone: "PP" (Phnom Penh) or "PROVINCE" (all provinces).
-7. CLOTHING SIZES ARE NOT PRODUCT CODES:
-   - Sizes like XS, S, M, L, XL, XXL, 2XL, 3XL, 4XL, 5XL, FreeSize are apparel sizes / attributes.
-   - Put them in "notes" (e.g. notes: "size XL" or notes: "size 2XL", "សាយ L").
-   - NEVER treat clothing sizes as standalone product codes (e.g. NEVER output code "L", "XL", "M", "2XL", etc.).
+7. CLOTHING SIZES & PANTS/WAIST SIZES ARE NOT PRODUCT CODES:
+   - Letter sizes (XS, S, M, L, XL, XXL, 2XL, 3XL, 4XL, 5XL, FreeSize) and pants waist sizes (24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 40, etc., written as "សាយ 34", "size 34", "ចង្កេះ 32", "លេខ 34") are SIZES / ATTRIBUTES.
+   - Put them in "notes" (e.g. notes: "size 34", notes: "size XL", notes: "ចង្កេះ 32", "សាយ L").
+   - NEVER treat clothing/waist sizes as standalone product codes (e.g. NEVER output code "34", "32", "L", "XL", "M", "2XL", etc. unless confirmed as explicit product codes by catalog).
+8. ACTION PHRASES WITHOUT PRODUCT CODE:
+   - Comments like "យក 2", "យក2", "កាត់ 1", "ថែម 2", "ដាក់ 1", "កក់ 1", "យកមួយ", "យក 2 អាវ" specify QUANTITY ONLY without a product code.
+   - NEVER create a product code "2" or "1" from these comments. If no product code was specified, do not add an item.
 
 Return ONLY valid JSON:
 {
@@ -268,6 +272,16 @@ export function fallbackFullBasketAudit(
 
     let s = convertKhmerDigitsToArabic(rawComment.trim());
 
+    // 0. GUARD: Skip pure action + quantity ONLY comments (e.g. "យក 2", "យក2", "កាត់ 1", "ថែម 2", "ដាក់ 1", "កក់ 1", "យកមួយ", "យក 1 អាវ")
+    if (/^(?:យក|កាត់|ថែម|ដាក់|កក់|បូក|សុំ|សុំយក)\s*\d{1,2}(?:\s*(?:អាវ|ខោ|ឈុត|កំប៉ុង|ក្បាល|គូ|កញ្ចប់|ពណ៌|ពណ))?$/i.test(s.trim())) {
+      continue;
+    }
+
+    // 0. GUARD: Skip pure waist / size comments without code (e.g. "សាយ 34", "size 34", "ចង្កេះ 34", "សាយ 34 យក 1", "ចង្កេះ 32 យក 2")
+    if (/^(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*)?(?:សាយ|size|ចង្កេះ|លេខ|ស្លឹក)\s*[:=\s]*\d{2}(?:\s*(?:យក|កាត់|ថែម|ដាក់|កក់)?\s*\d{1,2})?(?:\s*(?:អាវ|ខោ|ឈុត|ពណ៌|ពណ))?$/i.test(s.trim())) {
+      continue;
+    }
+
     // 1. Skip pure inquiry / question comments with no order intent
     const isQuestion = QUESTION_PHRASES.some(q => s.includes(q)) &&
       !/(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=/\-_*xX]\s*\d{1,2}/.test(s) &&
@@ -293,25 +307,43 @@ export function fallbackFullBasketAudit(
     s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
     s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|6XL|XXL|XXS|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1$2 ');
 
-    // Extract clothing size notes (e.g. "A01 XL 2" or "47 L 2" or "47 សាយ M 1")
+    // Extract clothing size / waist notes (e.g. "51 សាយ 34 2" or "47 L 2" or "47 ចង្កេះ 32")
     let noteText = '';
+    const waistExtractMatch = rawComment.match(/(?:សាយ|size|ចង្កេះ|លេខ|ស្លឹក)\s*[:=\s]*(\d{2})\b/i);
     const sizeExtractMatch = rawComment.match(/\b(XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/i);
     const colorExtractMatch = rawComment.match(/(?:ពណ៍|ពណ៌|ពណ៏)\s*([A-Za-z0-9\u1780-\u17FF]+)/i);
-    if (sizeExtractMatch) {
+
+    if (waistExtractMatch) {
+      noteText = `size ${waistExtractMatch[1]}`;
+    } else if (sizeExtractMatch) {
       noteText = `size ${sizeExtractMatch[1].toUpperCase()}`;
+    } else if (/សាយ\s*អិល|សាយអិល/i.test(rawComment)) {
+      noteText = 'size L';
+    } else if (/សាយ\s*អ៊ិចអិល|សាយអ៊ិចអិល/i.test(rawComment)) {
+      noteText = 'size XL';
     }
+
     if (colorExtractMatch) {
       noteText = noteText ? `${noteText} | ${colorExtractMatch[0].trim()}` : colorExtractMatch[0].trim();
     }
+
+    // Normalize pants waist patterns
+    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ចង្កេះ|លេខ)?\s*(?:2[4-9]|3[0-9]|4[0-6])\s*(?:យក|កាត់|ថែម|ដាក់|កក់)?\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
+    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ចង្កេះ|លេខ)\s*[:=\s]*(?:2[4-9]|3[0-9]|4[0-6])\b/gi, '$1=$2');
+    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ចង្កេះ|លេខ)\s*[:=\s]*(?:2[4-9]|3[0-9]|4[0-6])(?!\d)/gi, '$1=1');
 
     s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
     s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1=$2');
     s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\.{1,3}(\d{1,2})(?![=:\d])/g, '$1=$2');
 
+    // Remove standalone size/waist remnants so they aren't parsed as codes
+    s = s.replace(/(?:សាយ|size|ចង្កេះ|លេខ|ស្លឹក)\s*[:=\s]*(?:2[4-9]|3[0-9]|4[0-6])\b/gi, ' ');
+    s = s.replace(/\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|FREESIZE)\b/gi, ' ');
+
     // Track matched codes in this specific comment to avoid double-counting
     const commentMatchedCodes = new Set<string>();
 
-    // Pattern A: Standard explicit pairs (e.g. "85=2 82=2", "47:2", "34 យក 1", "កូដ 10 2")
+    // Pattern A: Standard explicit pairs (e.g. "85=2 82=2", "47:2", "51 យក 1", "កូដ 10 2")
     const pairRegex = /(?:(?<=[^\w]|^)([A-Za-z0-9]{1,5})\s*[:=/\-_*xX]\s*(\d{1,2})(?=[^\w]|$))|(?:(?:កូដ|code)\s*([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម)?\s*(\d{1,2})(?=[^\w]|$))|(?:([A-Za-z0-9]{1,5})\s*(?:យក|កាត់|ថែម)\s*(\d{1,2})(?=[^\w]|$))/gi;
 
     let match;
@@ -344,6 +376,12 @@ export function fallbackFullBasketAudit(
       const actionSingleRegex = /(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ)\s*(?:កូដ|code)?\s*([A-Za-z0-9]{1,5})(?=[^\w]|$)/gi;
       while ((match = actionSingleRegex.exec(s)) !== null) {
         const code = match[1].toUpperCase().trim();
+        const isSingleDigit = /^\d$/.test(code);
+        // Single digit (1-9) after action verb without "កូដ" is a quantity (e.g. "យក 2"), not a code!
+        if (isSingleDigit && !s.includes('កូដ') && !s.includes('code') && !catalogMap.has(code)) {
+          continue;
+        }
+
         if (code && !NON_CODE_WORDS.has(code) && code.length <= 5 && !commentMatchedCodes.has(code)) {
           commentMatchedCodes.add(code);
           const prev = itemsMap.get(code) || { qty: 0, notes: noteText };

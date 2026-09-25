@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
+import { extractCodeQtyPairsFromComment } from '../utils/commentParser';
 import { formatLiveShortBadge } from '../utils/liveUtils';
 import { ErrorAlertModal, ErrorModalData } from './Modals/ErrorAlertModal';
 
@@ -204,93 +205,14 @@ function BasketCardComponent({
     return true;
   };
 
+  const catalogList = useMemo(() => {
+    if (!productMap) return [];
+    return Object.values(productMap).map(p => ({ code: p.code, live_id: p.live_id }));
+  }, [productMap]);
+
   // Parse all quick code/qty pairs from comment
   const parseAllQuickPairs = (text: string): { code: string; qty: number }[] => {
-    if (!text) return [];
-    let s = text.trim();
-
-    // Skip inquiries without order intent
-    if (/^(សួស្តី|hello|hi|admin|អរគុណ|ok|yes|no)/i.test(s) && !/[:=\-\/*xX]\s*\d+/.test(s)) return [];
-    if (/(?:ប៉ុន្មាន|សាច់|ពាក់បាន|សល់|មានអត់|សុំមើល|តម្លៃ|ថ្លៃ|គីឡូ|kg|kilo|m|ម៉ែត្រ)/i.test(s) && !/[:=/\-_*xX]\s*\d+/.test(s)) {
-      return [];
-    }
-
-    const kmMap: Record<string, string> = {
-      '០': '0', '១': '1', '២': '2', '៣': '3', '៤': '4',
-      '៥': '5', '៦': '6', '៧': '7', '៨': '8', '៩': '9'
-    };
-    for (const [k, v] of Object.entries(kmMap)) {
-      s = s.split(k).join(v);
-    }
-    s = s.replace(/ពីរ/g, '2').replace(/បី/g, '3').replace(/បួន/g, '4').replace(/មួយ/g, '1');
-
-    // Strip phone numbers and addresses
-    s = s.replace(/(?:\+?855|0)\d{7,9}/g, ' ');
-    s = s.replace(/(?:ផ្ទះលេខ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ភូមិ|ផ្សារ|បុរី)\s*[\u1780-\u17FFa-zA-Z0-9_\-]+/g, ' ');
-    s = s.replace(/\d+\s*(?:kg|kilo|គីឡូ|គក|ម៉ែត្រ|m)\b/gi, ' ');
-    s = s.replace(/(?:\$\s*\d+(?:[\.,]\d+)?|\b\d+(?:[\.,]\d+)?\s*\$|\b\d+\s*៛|\b\d{4,}\s*(?:រៀល|៛)\b)/gi, ' ');
-
-    // Protect item separators: "50=2 .51=1" -> "50=2 51=1"
-    s = s.replace(/([:=]\s*\d{1,2})\s*[\/.,;]+\s*([A-Za-z0-9])/g, '$1 $2');
-    s = s.replace(/([:=])\s*(\d)(?:3XL|2XL|4XL|5XL|6XL|XXL|XXS|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1$2 ');
-    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\s*[:=\s]\s*(\d{1,2})(?!\d)/gi, '$1=$2');
-    s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{1,4})\s*[:=\s]\s*(\d{1,2})\s*(?:សាយ|size|ពណ៌|ពណ៍)?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, '$1=$2');
-    s = s.replace(/(?<![=:\d])(\d{1,4}|[A-Za-z]\d{1,3})\.{1,3}(\d{1,2})(?![=:\d])/g, '$1=$2');
-
-    const NON_PRODUCT_CODES = new Set([
-      'KG', 'KILO', 'CM', 'PP', 'VIP', 'SET', 'TEL', 'PHONE', 'SIZE', 'COLOR',
-      'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE',
-      'HI', 'OK', 'YES', 'NO', 'FREE', 'SHIP', 'ABA', 'KHQR', 'USD', 'KHR', 'ADMIN', 'BONG', 'JAE'
-    ]);
-
-    const results: { code: string; qty: number }[] = [];
-    const seenCodes = new Set<string>();
-
-    // 1. Explicit CODE=QTY or CODE:QTY
-    const regexExplicit = /(?:^|[^\w])([A-Za-z0-9]{1,5})\s*[*xX=:_\-\/,.\+«»~]\s*(\d{1,2})(?=[^\w]|$)/g;
-    let match;
-    while ((match = regexExplicit.exec(s)) !== null) {
-      const c = match[1].toUpperCase();
-      const q = parseInt(match[2], 10) || 1;
-      if (!NON_PRODUCT_CODES.has(c) && !seenCodes.has(c)) {
-        seenCodes.add(c);
-        results.push({ code: c, qty: q });
-      }
-    }
-
-    // 2. Action + Code (e.g. យក 50, កាត់ 50=2)
-    const regexAction = /(?:យក|កាត់|ថែម|ដាក់|កក់|សុំ|កូដ)\s*([A-Za-z0-9]{1,5})(?:\s*[*xX=:_\-\/,.\+«»~]?\s*(\d{1,2}))?/g;
-    while ((match = regexAction.exec(s)) !== null) {
-      const c = match[1].toUpperCase();
-      const q = match[2] ? parseInt(match[2], 10) || 1 : 1;
-      if (!NON_PRODUCT_CODES.has(c) && !seenCodes.has(c)) {
-        seenCodes.add(c);
-        results.push({ code: c, qty: q });
-      }
-    }
-
-    // 3. Space-separated Code + Qty (e.g. 50 2)
-    if (results.length === 0) {
-      const regexSpace = /\b([A-Za-z0-9]{1,5})\s+(\d{1,2})\b/g;
-      while ((match = regexSpace.exec(s)) !== null) {
-        const c = match[1].toUpperCase();
-        const q = parseInt(match[2], 10) || 1;
-        if (!NON_PRODUCT_CODES.has(c) && !seenCodes.has(c)) {
-          seenCodes.add(c);
-          results.push({ code: c, qty: q });
-        }
-      }
-    }
-
-    // 4. Single standalone code (e.g. 50)
-    if (results.length === 0) {
-      const singleMatch = s.trim().match(/^([A-Za-z0-9]{1,5})$/);
-      if (singleMatch && !NON_PRODUCT_CODES.has(singleMatch[1].toUpperCase())) {
-        results.push({ code: singleMatch[1].toUpperCase(), qty: 1 });
-      }
-    }
-
-    return results;
+    return extractCodeQtyPairsFromComment(text, catalogList, false);
   };
 
   // Parse quick single code from unmatched comment
@@ -1917,8 +1839,8 @@ function BasketCardComponent({
 
             {/* Unmatched / Unallocated Comments List */}
             {currentMasterStage === 1 && unallocatedComments && unallocatedComments.length > 0 && (
-              <div className="flex flex-col gap-2 pt-1 pb-0.5">
-                <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-amber-400">
+              <div className="flex flex-col gap-1.5 pt-0.5">
+                <div className="flex items-center gap-1.5 px-0.5 text-[11px] font-bold text-amber-400">
                   <span>⚠️</span>
                   <span>ខមិនមិនទាន់កាត់ ({unallocatedComments.length})</span>
                 </div>
@@ -1932,7 +1854,7 @@ function BasketCardComponent({
                   return (
                     <div
                       key={cIdx}
-                      className="bg-gradient-to-r from-amber-950/30 via-[#181108]/70 to-slate-950/90 border-[1.5px] border-dashed border-amber-500/80 hover:border-amber-400 p-2.5 sm:p-3 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shadow-[0_0_15px_rgba(245,158,11,0.08)] transition-all"
+                      className="bg-[#120B04]/90 hover:bg-[#1A1006] border border-amber-500/50 hover:border-amber-400/80 px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-2 shadow-sm transition-all"
                       onClick={e => e.stopPropagation()}
                     >
                       <div
@@ -1945,44 +1867,44 @@ function BasketCardComponent({
                         }}
                         title="ចុចដើម្បីកែប្រែកូដ ឬចំនួនដោយដៃ"
                       >
-                        <span className="bg-amber-950/90 text-amber-400 border border-amber-500/70 px-2 py-0.5 rounded-lg text-xs font-mono font-black tracking-wider flex-shrink-0 select-none">
+                        <span className="bg-amber-950/90 text-amber-300 border border-amber-500/60 px-1.5 py-0.5 rounded text-[11px] font-mono font-black tracking-wider flex-shrink-0 select-none">
                           {detectedPairs.length > 0
                             ? `[ ${detectedPairs.map(p => `${p.code}x${p.qty}`).join(', ')} ]`
                             : '[ N/A ]'}
                         </span>
-                        <span className="text-amber-200 font-bold text-xs sm:text-sm font-mono truncate select-all">
+                        <span className="text-amber-200/90 font-medium text-xs font-mono truncate select-all">
                           "{displayUnm}"
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-shrink-0 justify-end">
+                      <div className="flex items-center gap-1 flex-shrink-0">
                         {hasMulti ? (
                           <button
                             type="button"
                             onClick={e => handleSmartCut(unm, '', 1, e, detectedPairs.map(p => ({ code: p.code, quantity: p.qty })))}
-                            className="bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.35)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                             title={`កាត់ទាំងអស់ (${detectedPairs.length} មុខ) ចូលកន្ត្រក`}
                           >
-                            <span className="text-xs sm:text-sm font-black">⚡</span>
-                            <span>កាត់ទាំងអស់ ({detectedPairs.length} មុខ)</span>
+                            <span className="text-xs font-black">⚡</span>
+                            <span>កាត់ទាំងអស់ ({detectedPairs.length})</span>
                           </button>
                         ) : (
                           <button
                             type="button"
                             onClick={e => handleSmartCut(unm, firstDetected?.code || '', firstDetected?.qty || 1, e)}
-                            className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1 shadow-[0_0_12px_rgba(245,158,11,0.35)] hover:shadow-[0_0_16px_rgba(245,158,11,0.5)] active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                            className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 shadow-sm active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                             title={firstDetected ? `កាត់ [${firstDetected.code} x${firstDetected.qty}] ចូលកន្ត្រក` : 'វាយកូដកាត់ចូលកន្ត្រក'}
                           >
-                            <span className="text-xs sm:text-sm font-black">➕</span>
+                            <span className="text-xs font-black">➕</span>
                             <span>{firstDetected ? `កាត់ [${firstDetected.code} x${firstDetected.qty}]` : 'កាត់ចូល'}</span>
                           </button>
                         )}
                         <button
                           type="button"
                           onClick={e => handleDismissComment(unm, e)}
-                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-all"
+                          className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded transition-all text-xs"
                           title="បិទមិនបង្ហាញក្នុងបញ្ជី N/A (នៅតែរក្សាទុកក្នុងប្រវត្តិខមិន)"
                         >
-                          <span className="text-xs">✕</span>
+                          ✕
                         </button>
                       </div>
                     </div>

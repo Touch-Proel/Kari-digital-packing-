@@ -321,40 +321,43 @@ export function WorkflowTabs({
           </button>
 
           <button
-            onClick={() => onSetSubFilter('AMOUNT_DESC')}
+            onClick={() => onSetSubFilter(activeSubFilter === 'AMOUNT_DESC' ? 'ALL' : 'AMOUNT_DESC')}
             className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'AMOUNT_DESC'
                 ? 'bg-gradient-to-r from-amber-600/40 to-amber-950 border-amber-500 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
                 : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
             }`}
+            title="តម្រៀបកន្ត្រកទំនិញច្រើនមុខ/ច្រើនចំនួនមុន (Most items & highest amount first)"
           >
             💰 ច្រើនមុន
           </button>
 
           <button
-            onClick={() => onSetSubFilter('PP')}
+            onClick={() => onSetSubFilter(activeSubFilter === 'PP' ? 'ALL' : 'PP')}
             className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'PP'
                 ? 'bg-gradient-to-r from-emerald-600/40 to-emerald-950 border-emerald-500 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
                 : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
             }`}
+            title="ចម្រាញ់តែកន្ត្រកភ្នំពេញ (PP Only)"
           >
             🏙️ ភ្នំពេញ
           </button>
 
           <button
-            onClick={() => onSetSubFilter('PROVINCE')}
+            onClick={() => onSetSubFilter(activeSubFilter === 'PROVINCE' ? 'ALL' : 'PROVINCE')}
             className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'PROVINCE'
                 ? 'bg-gradient-to-r from-purple-600/40 to-purple-950 border-purple-500 text-purple-200 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
                 : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
             }`}
+            title="ចម្រាញ់តែកន្ត្រកខេត្ត (Province Only)"
           >
             🏞️ ខេត្ត
           </button>
 
           <button
-            onClick={() => onSetSubFilter('EMPTY')}
+            onClick={() => onSetSubFilter(activeSubFilter === 'EMPTY' ? 'ALL' : 'EMPTY')}
             className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
               activeSubFilter === 'EMPTY'
                 ? 'bg-gradient-to-r from-rose-600/40 to-rose-950 border-rose-500 text-rose-200 shadow-[0_0_12px_rgba(244,63,94,0.4)]'
