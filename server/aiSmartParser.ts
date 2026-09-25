@@ -294,7 +294,7 @@ export function fallbackFullBasketAudit(
     // 2. Strip out phone numbers and addresses so their digits are NEVER confused as product codes or quantities
     s = s.replace(/(?:\+?855|0)\d{7,9}/g, ' ');
     s = s.replace(/(?:ផ្ទះលេខ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ភូមិ|ផ្សារ|បុរី)\s*[\u1780-\u17FFa-zA-Z0-9_\-]+/g, ' ');
-    s = s.replace(/\d+\s*(?:kg|kilo|គីឡូ|គក|ម៉ែត្រ|m)\b/gi, ' ');
+    s = s.replace(/(?:(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក)\s*[:=\s\-_/]?\s*\d{1,3}|\d+\s*(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|ម៉ែត្រ|m))\b/gi, ' ');
 
     s = s.replace(/ឆុត/g, 'ឈុត').replace(/កូត|ខូត|កូក|គូដ/g, 'កូដ').replace(/យល/g, 'យក');
 

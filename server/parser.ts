@@ -65,10 +65,27 @@ const ACTION_WORDS = ['យក', 'យល', 'ចង់បាន', 'កាត់', 
 
 export function isQuestionComment(text: string): boolean {
   if (!text) return false;
-  const norm = convertKhmerDigitsToArabic(text);
+  let norm = convertKhmerDigitsToArabic(text);
+  norm = norm.replace(RE_PRICE_CLEANUP, ' ');
 
-  // If comment has explicit order syntax like "47=2", "47:1", "47/2", it is an order, not a pure question
-  if (/(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=]\s*\d{1,2}/.test(norm)) return false;
+  // Conversational inquiries, checks, and status questions
+  if (/(?:មិញ)?\s*(?:ខ្ញុំ|ញុម)?\s*បានអត់|បានអីវ៉ាន់អត់|បានលោតសារ|លោតសារបាន|លោតសាចឹង|អត់លោតសារ|អត់ឮសំឡេង|អត់សូវឮ|ឮតិច|ឮតិចៗ|កុងកុំឮងមើល|កុងកុឮងមើល/i.test(norm)) {
+    return true;
+  }
+  if (/(?:លើខ្លួន|នៅលើខ្លួន|លើកខ្លួន)\s*(?:មួយឈុត|មួយឆុត)?\s*(?:ប៉ុន្មាន|លក់ម៉េច|ម៉េច|ម៉ាន|មាណ|លក់អត់|មានលក់|អស់នៅ|អស់ហើយ|សុំមើល)/i.test(norm)) {
+    return true;
+  }
+  if (/(?:ម៉ាន|មាណ|ប៉ុន្មាន|ប៉ុន្នាន)\s*(?:គីឡូ|kg|kilo)|ពាក់បាន|ពាក់ដល់|ស្លៀកបាន|ស្លៀកដល់|មានសាយអីខ្លះ/i.test(norm)) {
+    return true;
+  }
+
+  // If comment has explicit order syntax like "47=2", "47:1", "47/2", "យក36", "ថែម 54", it is an order, not a pure question
+  if (
+    /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=]\s*\d{1,2}/.test(norm) ||
+    /(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(?:លេខ)?(?:កូដ|កូត|code)?\s*[A-Za-z0-9]{1,5}/i.test(norm)
+  ) {
+    return false;
+  }
 
   const lower = norm.toLowerCase();
   for (const kw of QUESTION_KEYWORDS) {
@@ -420,6 +437,34 @@ export function parseAndAllocateComment(
       continue; // NEVER treat clothing sizes (XS, S, M, L, XL, 2XL, etc.) as product codes or create in stock!
     }
 
+    // Guard: Accidental extraction of waist numbers (e.g. 29, 30, 31, 32 from "87Size29, 30,31,32")
+    const isWaistNum = parseInt(cleanPairCode, 10);
+    if (!isNaN(isWaistNum) && isWaistNum >= 24 && isWaistNum <= 46) {
+      const waistPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក)\\s*[:=\\s\\-]?\\s*(?:\\d{1,2}\\s*[,/+\\-\\s]*)*${cleanPairCode}\\b`, 'i');
+      if (waistPattern.test(rawText)) {
+        continue;
+      }
+    }
+
+    // Guard: Accidental extraction of weight / kilo numbers (e.g. 68 from "73=1គឺឡូ68")
+    const kiloPattern = new RegExp(`(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|kg|kilo)\\s*[:=\\s\\-_/]?\\s*${cleanPairCode}\\b`, 'i');
+    const kiloAfterPattern = new RegExp(`\\b${cleanPairCode}\\s*(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គក)\\b`, 'i');
+    if (kiloPattern.test(rawText) || kiloAfterPattern.test(rawText)) {
+      continue;
+    }
+
+    // Guard: Accidental extraction of chest / bust numbers (e.g. 38 from "ទ្រូង 38")
+    const chestPattern = new RegExp(`(?:ដើមទ្រូង|ទ្រូង)\\s*[:=\\s\\-]?\\s*${cleanPairCode}\\b`, 'i');
+    if (chestPattern.test(rawText)) {
+      continue;
+    }
+
+    // Guard: Accidental extraction of address / building numbers (e.g. 19 from "គំរោង19")
+    const addressPattern = new RegExp(`(?:គំរោង|គម្រោង|ផ្លូវ|ផ្ទះ|បន្ទប់|ជាន់ទី)\\s*(?:លេខ|ទី)?\\s*${cleanPairCode}\\b`, 'i');
+    if (addressPattern.test(rawText)) {
+      continue;
+    }
+
     let prod = products.find(
       p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanPairCode
     );
@@ -452,6 +497,8 @@ export function parseAndAllocateComment(
     const qtyToTake = Math.min(pair.qty, prod.stock_qty);
     prod.stock_qty -= qtyToTake;
 
+    const detectedNote = extractSizeAndColorNotes(rawText);
+
     const existingItem = inv.items.find(
       it => it.product_code.toUpperCase() === prod.code.toUpperCase()
     );
@@ -459,6 +506,10 @@ export function parseAndAllocateComment(
     if (existingItem) {
       existingItem.quantity += qtyToTake;
       existingItem.is_packed = false;
+
+      if (detectedNote && !existingItem.note) {
+        existingItem.note = detectedNote;
+      }
 
       if (rawText && existingItem.item_comment !== rawText) {
         if (!existingItem.item_comment) {
@@ -479,7 +530,8 @@ export function parseAndAllocateComment(
         price: prod.price,
         is_packed: false,
         item_comment: rawText,
-        image_file: prod.image_file || ''
+        image_file: prod.image_file || '',
+        note: detectedNote || undefined
       });
     }
 

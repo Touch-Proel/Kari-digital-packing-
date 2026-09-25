@@ -20,6 +20,7 @@ export interface OrderItem {
   is_packed: boolean;
   item_comment?: string;
   image_file?: string;
+  note?: string;
 }
 
 export type PackingStage = 'UNPICKED' | 'STAGED' | 'DISPATCHED';

@@ -617,6 +617,32 @@ export async function loadDatabaseFromDisk() {
               return false;
             }
 
+            // If this item code was accidentally extracted from customer weight / kilo notes (e.g. [68] from "73=1គឺឡូ68" or "76=1 គីឡូ 75" or "157គីឡូ 65")
+            const kiloPattern = new RegExp(`(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|kg|kilo)\\s*[:=\\s\\-_/]?\\s*${cleanC}\\b`, 'i');
+            const kiloAfterPattern = new RegExp(`\\b${cleanC}\\s*(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គក)\\b`, 'i');
+            if (kiloPattern.test(allCommentsText) || kiloAfterPattern.test(allCommentsText)) {
+              const otherItemsWithThisWeight = inv.items.filter(other => other.product_code !== cleanC && (
+                (other.item_comment && (kiloPattern.test(other.item_comment) || kiloAfterPattern.test(other.item_comment)))
+              ));
+              const ownCommentParentCode = it.item_comment ? it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase() : null;
+
+              if (otherItemsWithThisWeight.length > 0 || (ownCommentParentCode && ownCommentParentCode !== cleanC)) {
+                return false;
+              }
+            }
+
+            // If this item code was accidentally extracted from customer chest/bust notes (e.g. [38] from "73 ទ្រូង 38")
+            const chestPattern = new RegExp(`(?:ដើមទ្រូង|ទ្រូង)\\s*[:=\\s\\-]?\\s*${cleanC}\\b`, 'i');
+            if (chestPattern.test(allCommentsText)) {
+              const otherItemsWithThisChest = inv.items.filter(other => other.product_code !== cleanC && (
+                (other.item_comment && chestPattern.test(other.item_comment))
+              ));
+              const ownCommentParentCode = it.item_comment ? it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase() : null;
+              if (otherItemsWithThisChest.length > 0 || (ownCommentParentCode && ownCommentParentCode !== cleanC)) {
+                return false;
+              }
+            }
+
             return true;
           });
 
