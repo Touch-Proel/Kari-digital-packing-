@@ -587,13 +587,9 @@ export async function sendFacebookReply(
 
     const cleaned = raw.replace(/^c_/, '');
     if (isValidCid(cleaned)) {
-      candidateCommentIds.push(cleaned);
-      if (cleaned.includes('_')) {
-        const parts = cleaned.split('_');
-        const suffix = parts[parts.length - 1];
-        if (suffix && isValidCid(suffix)) {
-          candidateCommentIds.push(suffix);
-        }
+      const targetCid = cleaned.includes('_') ? cleaned.split('_').pop() || cleaned : cleaned;
+      if (isValidCid(targetCid)) {
+        candidateCommentIds.push(targetCid);
       }
     }
   }
@@ -695,98 +691,86 @@ export async function sendFacebookReply(
     for (let i = 0; i < commentIdCandidates.length; i++) {
       if (isDelivered) break;
 
-      const rawCid = commentIdCandidates[i];
-      const cleanCid = String(rawCid || '').trim();
-      const targetCid = cleanCid.includes('_') ? cleanCid.split('_').pop() || cleanCid : cleanCid;
+      const testCid = String(commentIdCandidates[i] || '').trim();
+      if (!isValidCid(testCid)) continue;
 
-      // Prepare IDs to test: exact compound ID first, then numeric suffix
-      const cidsToTest = [cleanCid];
-      if (cleanCid !== targetCid && isValidCid(targetCid)) {
-        cidsToTest.push(targetCid);
+      // Polite delay between requests to prevent triggering Meta API rate limits
+      if (i > 0) {
+        await safeDelay(150);
       }
 
-      for (const testCid of cidsToTest) {
-        if (isDelivered) break;
-        if (!isValidCid(testCid)) continue;
+      try {
+        console.log(`   ↳ Dispatching POST /v21.0/me/messages with recipient.comment_id: ${testCid}...`);
+        let msgData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipient: { comment_id: testCid },
+            message: { text: messageText }
+          })
+        });
 
-        // Polite delay between requests to prevent triggering Meta API rate limits
-        if (i > 0) {
-          await safeDelay(150);
+        // Secondary fallback: test direct /{comment_id}/private_replies endpoint
+        if (!msgData.message_id && !msgData.recipient_id && msgData.error?.code !== 10900) {
+          try {
+            const prData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${testCid}/private_replies`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: messageText,
+                access_token: activeToken
+              })
+            });
+            if (prData.id || prData.recipient_id) {
+              msgData = { message_id: prData.id || prData.recipient_id, ...prData };
+            }
+          } catch {}
         }
 
-        try {
-          console.log(`   ↳ Dispatching POST /v21.0/me/messages with recipient.comment_id: ${testCid}...`);
-          let msgData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${activeToken}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              recipient: { comment_id: testCid },
-              message: { text: messageText }
-            })
-          });
-
-          // Secondary fallback: test direct /{comment_id}/private_replies endpoint
-          if (!msgData.message_id && !msgData.recipient_id && msgData.error?.code !== 10900) {
-            try {
-              const prData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${testCid}/private_replies`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  message: messageText,
-                  access_token: activeToken
-                })
-              });
-              if (prData.id || prData.recipient_id) {
-                msgData = { message_id: prData.id || prData.recipient_id, ...prData };
-              }
-            } catch {}
+        if (msgData.message_id || msgData.recipient_id) {
+          console.log(`🎉 [META OFFICIAL PRIVATE REPLY SUCCESS]: Delivered via recipient.comment_id (${testCid})!`);
+          isDelivered = true;
+          const targetRecipient = msgData.recipient_id || cleanUid;
+          if (targetRecipient && (imageUrl || imageBuffer)) {
+            await sendImageAttachment(targetRecipient, false);
           }
+          attemptLogs.push(`✅ វិធីទី ១ (Private Reply តាមខមិន) ជោគជ័យ ៖ បានផ្ញើតាម Comment ID #${testCid} ចូល Messenger រួចផុតពីកំហិត ២៤ ម៉ោង`);
+          console.log(`=======================================================\n`);
+          return {
+            success: true,
+            method: 'PRIVATE_REPLY',
+            methodTitle: 'Private Reply (តាម Comment ID)',
+            detail: `បានផ្ញើ Private Reply តាម Comment #${testCid} ចូល Messenger ស្របតាមគោលការណ៍ Meta!`,
+            attemptLogs
+          };
+        } else if (msgData.error) {
+          const mErr = msgData.error.message || `Error code ${msgData.error.code}`;
+          const code = msgData.error.code;
+          const subCode = msgData.error.error_subcode;
+          console.log(`   ↳ Comment ID ${testCid} response: [${code}/${subCode || ''}] ${mErr}`);
+          lastApiError = mErr;
 
-          if (msgData.message_id || msgData.recipient_id) {
-            console.log(`🎉 [META OFFICIAL PRIVATE REPLY SUCCESS]: Delivered via recipient.comment_id (${testCid})!`);
-            isDelivered = true;
-            const targetRecipient = msgData.recipient_id || cleanUid;
-            if (targetRecipient && (imageUrl || imageBuffer)) {
-              await sendImageAttachment(targetRecipient, false);
-            }
-            attemptLogs.push(`✅ វិធីទី ១ (Private Reply តាមខមិន) ជោគជ័យ ៖ បានផ្ញើតាម Comment ID #${testCid} ចូល Messenger រួចផុតពីកំហិត ២៤ ម៉ោង`);
-            console.log(`=======================================================\n`);
-            return {
-              success: true,
-              method: 'PRIVATE_REPLY',
-              methodTitle: 'Private Reply (តាម Comment ID)',
-              detail: `បានផ្ញើ Private Reply តាម Comment #${testCid} ចូល Messenger ស្របតាមគោលការណ៍ Meta!`,
-              attemptLogs
-            };
-          } else if (msgData.error) {
-            const mErr = msgData.error.message || `Error code ${msgData.error.code}`;
-            const code = msgData.error.code;
-            const subCode = msgData.error.error_subcode;
-            console.log(`   ↳ Comment ID ${testCid} response: [${code}/${subCode || ''}] ${mErr}`);
-            lastApiError = mErr;
-
-            let reasonKh = mErr;
-            if (code === 10900 || mErr.toLowerCase().includes('already has a private reply')) {
-              reasonKh = `ខមិន #${testCid} ត្រូវបានឆ្លើយតប Private Reply ម្តងរួចហើយ (Meta អនុញ្ញាតត្រឹម ១ ដងក្នុង ១ ខមិន)`;
-            } else if (mErr.toLowerCase().includes('7 days') || mErr.toLowerCase().includes('seven days')) {
-              reasonKh = `ខមិន #${testCid} ផុតកំណត់លើស ៧ ថ្ងៃ (Meta មិនអនុញ្ញាត Private Reply លើស ៧ ថ្ងៃឡើយ)`;
-            } else if (code === 100 || subCode === 33 || mErr.toLowerCase().includes('does not exist')) {
-              reasonKh = `រកមិនឃើញខមិន #${testCid} ឬខមិននេះត្រូវបានលុបចេញពី Facebook`;
-            }
-            privateReplyFailReason = reasonKh;
-            attemptLogs.push(`⚠️ វិធីទី ១ (Private Reply តាម Comment #${testCid}) ៖ ${reasonKh}`);
-
-            // Meta Rate Limit circuit breaker: halt immediately to protect Page health
-            if ([4, 17, 32, 613].includes(msgData.error.code)) {
-              console.warn(`[META POLICY]: Rate limit warning (code ${msgData.error.code}). Halting automated attempts to keep Page safe.`);
-              attemptLogs.push(`⚠️ Meta API Rate Limit: កំពុងកំណត់ចំនួនហៅ Graph API - បានប្តូរទៅជម្រើសផ្ញើផ្ទាល់ដោយសុវត្ថិភាព`);
-              break;
-            }
+          let reasonKh = mErr;
+          if (code === 10900 || mErr.toLowerCase().includes('already has a private reply')) {
+            reasonKh = `ខមិន #${testCid} ត្រូវបានឆ្លើយតប Private Reply ម្តងរួចហើយ (Meta អនុញ្ញាតត្រឹម ១ ដងក្នុង ១ ខមិន)`;
+          } else if (mErr.toLowerCase().includes('7 days') || mErr.toLowerCase().includes('seven days')) {
+            reasonKh = `ខមិន #${testCid} ផុតកំណត់លើស ៧ ថ្ងៃ (Meta មិនអនុញ្ញាត Private Reply លើស ៧ ថ្ងៃឡើយ)`;
+          } else if (code === 100 || subCode === 33 || mErr.toLowerCase().includes('does not exist')) {
+            reasonKh = `រកមិនឃើញខមិន #${testCid} ឬខមិននេះត្រូវបានលុបចេញពី Facebook`;
           }
-        } catch (cidErr: any) {
-          console.warn(`   ↳ Comment ID ${testCid} error:`, cidErr?.message);
-          lastApiError = cidErr?.message || 'Private reply network error';
+          privateReplyFailReason = reasonKh;
+          attemptLogs.push(`⚠️ វិធីទី ១ (Private Reply តាម Comment #${testCid}) ៖ ${reasonKh}`);
+
+          // Meta Rate Limit circuit breaker: halt immediately to protect Page health
+          if ([4, 17, 32, 613].includes(msgData.error.code)) {
+            console.warn(`[META POLICY]: Rate limit warning (code ${msgData.error.code}). Halting automated attempts to keep Page safe.`);
+            attemptLogs.push(`⚠️ Meta API Rate Limit: កំពុងកំណត់ចំនួនហៅ Graph API - បានប្តូរទៅជម្រើសផ្ញើផ្ទាល់ដោយសុវត្ថិភាព`);
+            break;
+          }
         }
+      } catch (cidErr: any) {
+        console.warn(`   ↳ Comment ID ${testCid} error:`, cidErr?.message);
+        lastApiError = cidErr?.message || 'Private reply network error';
       }
     }
   } else {

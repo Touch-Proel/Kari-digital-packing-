@@ -949,13 +949,17 @@ router.post(['/send_vip_invoice', '/notify_customer_packed', '/api/send_vip_invo
     } catch {}
   }
 
-  // Also query rawComments for this invoice or customer
+  // Also query rawComments for this invoice or customer (restrict to current live stream session to avoid fetching old comments)
+  const targetLiveId = inv.live_id || activeLiveId;
   const cleanCustomerName = customerName.toLowerCase().trim();
   const matchingRawComments = rawComments
     .slice()
     .reverse()
     .filter(c => {
       if (!c.comment_id || c.comment_id.startsWith('sys_') || c.comment_id.startsWith('manual_')) return false;
+      // Filter out comments from other live stream sessions to prevent pollution of old candidates
+      if (c.live_id && targetLiveId && c.live_id !== targetLiveId) return false;
+
       if (c.invoice_id === cleanId) return true;
       if (inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' && c.facebook_user_id === inv.facebook_user_id) return true;
       const cName = (c.facebook_name || '').toLowerCase().trim();
