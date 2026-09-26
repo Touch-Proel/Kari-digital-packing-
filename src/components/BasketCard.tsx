@@ -1109,18 +1109,18 @@ function BasketCardComponent({
         onClick={() => setIsOpen(!isOpen)}
         className="p-3.5 sm:p-4 cursor-pointer select-none flex flex-col gap-2.5"
       >
-        {/* Top Header Row: #BasketNo, Avatar, Customer Name, Live Tag, UNPAID badge, Collapse triangle */}
+        {/* Top Header Row: Basket #, Avatar, Customer Name on Left | Status Pill & Collapse on Right */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
             {/* Basket Number */}
-            <span className="text-xl sm:text-2xl font-black font-mono text-cyan-400 tracking-tight flex-shrink-0 bg-cyan-950/50 border border-cyan-500/40 px-2 py-0.5 rounded-xl shadow-inner">
+            <span className="text-lg sm:text-2xl font-black font-mono text-cyan-400 tracking-tight flex-shrink-0 bg-cyan-950/60 border border-cyan-500/40 px-2 py-0.5 rounded-xl shadow-inner">
               #{invoice.basket_no || invoice.invoice_id}
             </span>
 
             {/* Customer Avatar Circle */}
             <div 
               title={invoice.facebook_name || 'អតិថិជន'}
-              className="w-10 h-10 rounded-full border-2 border-cyan-400/80 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-lg relative ring-2 ring-cyan-500/20"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 border-cyan-400/80 overflow-hidden bg-[#071324] flex-shrink-0 flex items-center justify-center shadow-md relative ring-2 ring-cyan-500/20"
             >
               {invoice.picture_url || invoice.facebook_user_id ? (
                 <img
@@ -1142,37 +1142,11 @@ function BasketCardComponent({
               </span>
             </div>
 
-            {/* Customer Name & Live Timestamp */}
-            <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-white font-black text-sm sm:text-base leading-tight truncate drop-shadow-sm">
-                  {invoice.facebook_name || 'អតិថិជន'}
-                </span>
-                {isDelayedLiveOrder && (
-                  <span className="bg-gradient-to-r from-amber-500 to-rose-600 text-slate-950 font-black text-[9px] sm:text-[9.5px] px-2 py-0.5 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap animate-pulse">
-                    <span>🚨 ភ្ញៀវវេលុយយឺត (ចេញថ្ងៃនេះ)</span>
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5 min-w-0">
-                <span className="text-[10.5px] text-amber-400 font-semibold flex items-center gap-0.5 whitespace-nowrap">
-                  <span>📹</span>
-                  <span>{formatLiveDate(invoice.created_at)}</span>
-                </span>
-                {invoice.live_id && (
-                  <span
-                    className={`${
-                      isDelayedLiveOrder
-                        ? 'bg-amber-950 border border-amber-400 text-amber-300 font-black shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                        : 'bg-purple-950/90 border border-purple-400/60 text-purple-200 font-bold'
-                    } text-[9.5px] font-mono px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-sm whitespace-nowrap`}
-                    title={`វគ្គ Live: ${invoice.live_id}`}
-                  >
-                    {isDelayedLiveOrder && <span>🚨 ឡាយមុន ៖</span>}
-                    <span>{formatLiveShortBadge(invoice.live_id)}</span>
-                  </span>
-                )}
-              </div>
+            {/* Customer Name */}
+            <div className="min-w-0 flex-1">
+              <span className="text-white font-black text-sm sm:text-base leading-tight truncate block drop-shadow-sm">
+                {invoice.facebook_name || 'អតិថិជន'}
+              </span>
             </div>
           </div>
 
@@ -1227,6 +1201,33 @@ function BasketCardComponent({
               {isOpen ? '▲' : '▼'}
             </button>
           </div>
+        </div>
+
+        {/* Metadata Bar: Live session timestamp, Live badge, and Delayed Alert Banner */}
+        <div className="flex items-center gap-2 flex-wrap text-xs -mt-1 min-w-0">
+          <span className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 whitespace-nowrap">
+            <span>📹</span>
+            <span>{formatLiveDate(invoice.created_at)}</span>
+          </span>
+
+          {invoice.live_id && (
+            <span
+              className={`${
+                isDelayedLiveOrder
+                  ? 'bg-amber-950/90 border border-amber-400 text-amber-300 font-black'
+                  : 'bg-purple-950/90 border border-purple-400/60 text-purple-200 font-bold'
+              } text-[9.5px] font-mono px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-sm whitespace-nowrap`}
+              title={`វគ្គ Live: ${invoice.live_id}`}
+            >
+              <span>{formatLiveShortBadge(invoice.live_id)}</span>
+            </span>
+          )}
+
+          {isDelayedLiveOrder && (
+            <span className="bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500 text-slate-950 font-black text-[9.5px] px-2 py-0.5 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap animate-pulse">
+              <span>🚨 ភ្ញៀវវេលុយយឺត (ចេញថ្ងៃនេះ)</span>
+            </span>
+          )}
         </div>
 
         {/* Sub Header Row: Location Zone buttons (Left) + Total Price (Right) */}
