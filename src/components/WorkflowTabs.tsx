@@ -12,6 +12,7 @@ interface WorkflowTabsProps {
   isAllLiveQc?: boolean;
   onToggleAllLiveQc?: () => void;
   allLivePaidCount?: number;
+  delayedPaidCount?: number;
   isAllLiveDispatched?: boolean;
   onToggleAllLiveDispatched?: () => void;
   allLiveDispatchedStats?: {
@@ -24,8 +25,8 @@ interface WorkflowTabsProps {
   };
   dispatchedTimeFilter?: 'ALL' | 'TODAY' | 'PP' | 'PROVINCE';
   onSetDispatchedTimeFilter?: (flt: 'ALL' | 'TODAY' | 'PP' | 'PROVINCE') => void;
-  activeSubFilter: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY';
-  onSetSubFilter: (flt: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY') => void;
+  activeSubFilter: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY' | 'DELAYED_FIRST';
+  onSetSubFilter: (flt: 'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY' | 'DELAYED_FIRST') => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   totalFilteredBaskets: number;
@@ -41,10 +42,11 @@ export function WorkflowTabs({
   waitingCount,
   paidQcCount,
   dispatchedCount,
-  isAllLiveQc = false,
+  isAllLiveQc = true,
   onToggleAllLiveQc,
   allLivePaidCount = 0,
-  isAllLiveDispatched = false,
+  delayedPaidCount = 0,
+  isAllLiveDispatched = true,
   onToggleAllLiveDispatched,
   allLiveDispatchedStats,
   dispatchedTimeFilter = 'ALL',
@@ -56,363 +58,400 @@ export function WorkflowTabs({
   totalFilteredBaskets,
   onOpenScanner
 }: WorkflowTabsProps) {
+  const qcDisplayCount = isAllLiveQc ? allLivePaidCount : paidQcCount;
+  const dispatchedDisplayCount = isAllLiveDispatched
+    ? (allLiveDispatchedStats?.total ?? dispatchedCount)
+    : dispatchedCount;
+
   return (
-    <div className="flex flex-col gap-2.5">
-      {/* 🚀 TIER 1: 4-STAGE WORKFLOW TABS */}
-      <div className="grid grid-cols-4 gap-1.5 bg-[#0B1325]/95 p-1.5 rounded-2xl border-[1.5px] border-sky-400/25 shadow-xl">
-        {/* Tab 1: Unpicked */}
+    <div className="flex flex-col gap-2">
+      {/* 🧭 ROW 1: THE 4 CORE WORKFLOW STAGES (១ ជួរគត់ ស្រឡះភ្នែក និងលឿនបំផុត) */}
+      <div className="grid grid-cols-4 gap-1.5 p-1 bg-[#070D1B]/95 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-md">
+        {/* Stage 1: 🛒 មិនទាន់រើស */}
         <button
+          type="button"
           onClick={() => onSwitchStage(1)}
-          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+          className={`py-2 px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border cursor-pointer ${
             currentStage === 1
-              ? 'bg-gradient-to-b from-sky-500/30 to-slate-900 border-[#00F0FF] shadow-[0_0_18px_rgba(0,240,255,0.35)] text-white'
-              : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
+              ? 'bg-gradient-to-b from-sky-600/40 via-sky-950/60 to-[#0A1226] border-sky-400 text-white shadow-[0_0_16px_rgba(56,189,248,0.4)]'
+              : 'bg-[#050A14] border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-800'
           }`}
         >
-          <span className="text-[10.5px] sm:text-[12px] font-extrabold whitespace-nowrap">🛒 មិនទាន់រើស</span>
+          <div className="flex items-center gap-1">
+            <span className="text-xs">🛒</span>
+            <span className="text-[11px] sm:text-xs font-black truncate">មិនទាន់រើស</span>
+          </div>
           <span
-            className={`font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 ${
-              currentStage === 1 ? 'text-[#00F0FF] drop-shadow-[0_0_8px_rgba(0,240,255,0.8)]' : 'text-slate-300'
+            className={`font-mono text-sm sm:text-base font-black leading-tight ${
+              currentStage === 1 ? 'text-sky-300' : 'text-slate-300'
             }`}
           >
             {unpickedCount}
           </span>
         </button>
 
-        {/* Tab 2: Pending Payment */}
+        {/* Stage 2: ⏳ រង់ចាំបង់ */}
         <button
+          type="button"
           onClick={() => onSwitchStage(2)}
-          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+          className={`py-2 px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border cursor-pointer ${
             currentStage === 2
-              ? 'bg-gradient-to-b from-amber-500/30 to-slate-900 border-[#F59E0B] shadow-[0_0_18px_rgba(245,158,11,0.35)] text-white'
-              : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
+              ? 'bg-gradient-to-b from-amber-600/40 via-amber-950/60 to-[#140E05] border-amber-400 text-white shadow-[0_0_16px_rgba(245,158,11,0.4)]'
+              : 'bg-[#050A14] border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-800'
           }`}
         >
-          <span className="text-[10.5px] sm:text-[12px] font-extrabold whitespace-nowrap">⏳ រង់ចាំបង់</span>
+          <div className="flex items-center gap-1">
+            <span className="text-xs">⏳</span>
+            <span className="text-[11px] sm:text-xs font-black truncate">រង់ចាំបង់</span>
+          </div>
           <span
-            className={`font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 ${
-              currentStage === 2 ? 'text-[#F59E0B] drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]' : 'text-slate-300'
+            className={`font-mono text-sm sm:text-base font-black leading-tight ${
+              currentStage === 2 ? 'text-amber-300' : 'text-slate-300'
             }`}
           >
             {waitingCount}
           </span>
         </button>
 
-        {/* Tab 3: Paid-QC */}
+        {/* Stage 3: 🔍 វេចខ្ចប់ QC */}
         <button
+          type="button"
           onClick={() => onSwitchStage(3)}
-          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+          className={`py-2 px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border cursor-pointer relative overflow-visible ${
             currentStage === 3
-              ? 'bg-gradient-to-b from-emerald-500/35 to-slate-900 border-[#10B981] shadow-[0_0_20px_rgba(16,185,129,0.45)] text-white'
-              : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
+              ? 'bg-gradient-to-b from-emerald-600/40 via-emerald-950/60 to-[#05140E] border-emerald-400 text-white shadow-[0_0_16px_rgba(16,185,129,0.4)]'
+              : 'bg-[#050A14] border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-800'
           }`}
         >
-          <span className="text-[10px] sm:text-[12px] font-extrabold whitespace-nowrap flex items-center gap-1">
-            <span>🔍 បង់រួច-QC</span>
-            {isAllLiveQc && (
-              <span className="bg-emerald-400 text-slate-950 text-[8.5px] font-black px-1 rounded-full uppercase">
-                All
+          <div className="flex items-center gap-1">
+            <span className="text-xs">🔍</span>
+            <span className="text-[11px] sm:text-xs font-black truncate">វេចខ្ចប់ QC</span>
+            {delayedPaidCount > 0 && (
+              <span className="bg-rose-500 text-white text-[8px] font-black px-1 rounded-full animate-pulse whitespace-nowrap shadow-sm">
+                +{delayedPaidCount}
               </span>
             )}
-          </span>
-          <span className="font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 text-[#10B981] drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]">
-            {isAllLiveQc ? allLivePaidCount : paidQcCount}
-          </span>
+          </div>
+          <div className="flex items-center gap-1 leading-tight">
+            <span
+              className={`font-mono text-sm sm:text-base font-black ${
+                currentStage === 3 ? 'text-emerald-300' : 'text-slate-300'
+              }`}
+            >
+              {qcDisplayCount}
+            </span>
+          </div>
         </button>
 
-        {/* Tab 4: Dispatched */}
+        {/* Stage 4: 🚚 ចេញដឹក */}
         <button
+          type="button"
           onClick={() => onSwitchStage(4)}
-          className={`py-2 px-1 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border ${
+          className={`py-2 px-1 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95 border cursor-pointer ${
             currentStage === 4
-              ? 'bg-gradient-to-b from-indigo-500/35 to-slate-900 border-indigo-400 shadow-[0_0_20px_rgba(129,140,248,0.45)] text-white'
-              : 'bg-[#070D1B] border-white/5 text-slate-400 hover:border-slate-700'
+              ? 'bg-gradient-to-b from-indigo-600/40 via-indigo-950/60 to-[#0A0D1F] border-indigo-400 text-white shadow-[0_0_16px_rgba(129,140,248,0.4)]'
+              : 'bg-[#050A14] border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-800'
           }`}
         >
-          <span className="text-[10px] sm:text-[12px] font-extrabold whitespace-nowrap flex items-center gap-1">
-            <span>🚚 ចេញដឹកហើយ</span>
-            {isAllLiveDispatched && (
-              <span className="bg-indigo-400 text-slate-950 text-[8.5px] font-black px-1 rounded-full uppercase">
-                All
-              </span>
-            )}
-          </span>
-          <span className="font-mono text-lg sm:text-2xl font-black leading-tight mt-0.5 text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]">
-            {isAllLiveDispatched ? (allLiveDispatchedStats?.total ?? dispatchedCount) : dispatchedCount}
+          <div className="flex items-center gap-1">
+            <span className="text-xs">🚚</span>
+            <span className="text-[11px] sm:text-xs font-black truncate">ចេញដឹក</span>
+          </div>
+          <span
+            className={`font-mono text-sm sm:text-base font-black leading-tight ${
+              currentStage === 4 ? 'text-indigo-300' : 'text-slate-300'
+            }`}
+          >
+            {dispatchedDisplayCount}
           </span>
         </button>
       </div>
 
-      {/* 🌟 STAGE 3 SPECIAL MODE: LIVE vs ALL-LIVE TOGGLE */}
-      {currentStage === 3 && (
-        <div className="p-1 bg-[#06101E]/95 rounded-2xl border border-emerald-500/40 shadow-[0_4px_20px_rgba(0,0,0,0.3)] backdrop-blur-md">
-          <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#030812] rounded-xl border border-emerald-950/80">
-            <button
-              type="button"
-              onClick={() => isAllLiveQc && onToggleAllLiveQc?.()}
-              className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 active:scale-98 ${
-                !isAllLiveQc
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] border border-emerald-400/60 ring-1 ring-emerald-300/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <span className="text-sm">🎥</span>
-              <span className="whitespace-nowrap tracking-wide">Live បច្ចុប្បន្ន</span>
-              <span className={`font-mono text-xs px-2 py-0.5 rounded-full font-black ${
-                !isAllLiveQc
-                  ? 'bg-emerald-950/90 text-emerald-200 border border-emerald-400/50 shadow-inner'
-                  : 'bg-slate-800/90 text-slate-400 border border-slate-700'
-              }`}>
-                {paidQcCount}
-              </span>
-            </button>
+      {/* ⚡ ROW 2: CONTEXTUAL SUB-FILTERS (ត្រឹម ១ ជួរតូចល្មម មិនស្អេកស្កះ) */}
 
-            <button
-              type="button"
-              onClick={() => !isAllLiveQc && onToggleAllLiveQc?.()}
-              className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 active:scale-98 ${
-                isAllLiveQc
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 shadow-[0_0_18px_rgba(20,184,166,0.5)] border border-teal-200 ring-1 ring-teal-200 font-extrabold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <span className="text-sm">🌐</span>
-              <span className="whitespace-nowrap tracking-wide">គ្រប់ឡាយ All Live</span>
-              <span className={`font-mono text-xs px-2 py-0.5 rounded-full font-black ${
-                isAllLiveQc
-                  ? 'bg-slate-950 text-emerald-300 border border-emerald-400/60 shadow-inner'
-                  : 'bg-slate-800/90 text-slate-400 border border-slate-700'
-              }`}>
-                {allLivePaidCount}
-              </span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 🚚 STAGE 4 SPECIAL MODE: LIVE vs ALL-LIVE DISPATCHED TOGGLE & DAILY STATS */}
-      {currentStage === 4 && (
-        <div className="flex flex-col gap-2 p-1.5 bg-[#080E21]/95 rounded-2xl border border-indigo-500/40 shadow-[0_4px_20px_rgba(0,0,0,0.3)] backdrop-blur-md">
-          <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#030614] rounded-xl border border-indigo-950/80">
-            <button
-              type="button"
-              onClick={() => isAllLiveDispatched && onToggleAllLiveDispatched?.()}
-              className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 active:scale-98 ${
-                !isAllLiveDispatched
-                  ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-[0_0_15px_rgba(99,102,241,0.4)] border border-indigo-400/60 ring-1 ring-indigo-300/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <span className="text-sm">🎥</span>
-              <span className="whitespace-nowrap tracking-wide">Live បច្ចុប្បន្ន</span>
-              <span className={`font-mono text-xs px-2 py-0.5 rounded-full font-black ${
-                !isAllLiveDispatched
-                  ? 'bg-indigo-950/90 text-indigo-200 border border-indigo-400/50 shadow-inner'
-                  : 'bg-slate-800/90 text-slate-400 border border-slate-700'
-              }`}>
-                {dispatchedCount}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => !isAllLiveDispatched && onToggleAllLiveDispatched?.()}
-              className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 active:scale-98 ${
-                isAllLiveDispatched
-                  ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-slate-950 shadow-[0_0_18px_rgba(129,140,248,0.5)] border border-indigo-200 ring-1 ring-indigo-200 font-extrabold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <span className="text-sm">🌐</span>
-              <span className="whitespace-nowrap tracking-wide">គ្រប់ឡាយ All Live</span>
-              <span className={`font-mono text-xs px-2 py-0.5 rounded-full font-black ${
-                isAllLiveDispatched
-                  ? 'bg-slate-950 text-indigo-300 border border-indigo-400/60 shadow-inner'
-                  : 'bg-slate-800/90 text-slate-400 border border-slate-700'
-              }`}>
-                {allLiveDispatchedStats?.total || 0}
-              </span>
-            </button>
-          </div>
-
-          {/* 📊 Daily Output Summary Strip (ដឹងថ្ងៃនឹងគ្រប់ឡាយចេញបានប៉ុន្មាន) */}
-          {isAllLiveDispatched && allLiveDispatchedStats && (
-            <div className="grid grid-cols-4 gap-1.5 pt-1.5 border-t border-indigo-500/30 text-center">
-              {/* 1. Today Filter */}
-              <button
-                type="button"
-                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'TODAY' ? 'ALL' : 'TODAY')}
-                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
-                  dispatchedTimeFilter === 'TODAY'
-                    ? 'bg-amber-500/35 border-amber-400 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.5)] ring-1 ring-amber-300'
-                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
-                }`}
-              >
-                <span className="text-[9.5px] font-black text-amber-300">📅 ចេញថ្ងៃនេះ</span>
-                <span className="text-sm font-black text-amber-300 font-mono">
-                  {allLiveDispatchedStats.today} <span className="text-[9px] font-normal">កញ្ចប់</span>
-                </span>
-              </button>
-
-              {/* 2. PP Filter */}
-              <button
-                type="button"
-                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'PP' ? 'ALL' : 'PP')}
-                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
-                  dispatchedTimeFilter === 'PP'
-                    ? 'bg-emerald-600/40 border-emerald-400 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.5)] ring-1 ring-emerald-300'
-                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
-                }`}
-              >
-                <span className="text-[9.5px] font-bold text-emerald-300">🏙️ ភ្នំពេញ</span>
-                <span className="text-sm font-black text-emerald-400 font-mono">
-                  {allLiveDispatchedStats.pp} <span className="text-[9px] font-normal text-slate-300">កញ្ចប់</span>
-                </span>
-              </button>
-
-              {/* 3. Province Filter */}
-              <button
-                type="button"
-                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'PROVINCE' ? 'ALL' : 'PROVINCE')}
-                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
-                  dispatchedTimeFilter === 'PROVINCE'
-                    ? 'bg-purple-600/40 border-purple-400 text-purple-100 shadow-[0_0_12px_rgba(168,85,247,0.5)] ring-1 ring-purple-300'
-                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
-                }`}
-              >
-                <span className="text-[9.5px] font-bold text-purple-300">🏞️ ខេត្ត</span>
-                <span className="text-sm font-black text-purple-300 font-mono">
-                  {allLiveDispatchedStats.province} <span className="text-[9px] font-normal text-slate-300">កញ្ចប់</span>
-                </span>
-              </button>
-
-              {/* 4. All Filter */}
-              <button
-                type="button"
-                onClick={() => onSetDispatchedTimeFilter?.('ALL')}
-                className={`rounded-xl py-1.5 px-1 border transition-all text-center flex flex-col items-center justify-center active:scale-95 ${
-                  dispatchedTimeFilter === 'ALL'
-                    ? 'bg-indigo-600/40 border-indigo-400 text-white shadow-[0_0_12px_rgba(99,102,241,0.5)] ring-1 ring-indigo-300'
-                    : 'bg-indigo-900/40 border-indigo-400/20 text-slate-300 hover:border-indigo-400/50 hover:bg-indigo-900/60'
-                }`}
-              >
-                <span className="text-[9.5px] font-bold text-sky-300">📦 សរុបទាំងអស់</span>
-                <span className="text-sm font-black text-sky-300 font-mono">
-                  {allLiveDispatchedStats.total} <span className="text-[9px] font-normal text-slate-300">កញ្ចប់</span>
-                </span>
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 🎯 TIER 2: SUB-FILTERS (For Tab 1: មិនទាន់រើស & Tab 2: រង់ចាំបង់) */}
+      {/* === SUB-FILTERS FOR STAGE 1 & 2 === */}
       {(currentStage === 1 || currentStage === 2) && (
-        <div className="grid grid-cols-5 gap-1.5 bg-[#0B1325]/95 p-1.5 rounded-2xl border-[1.5px] border-sky-400/20 shadow-md">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-0.5">
           <button
+            type="button"
             onClick={() => onSetSubFilter('ALL')}
-            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
               activeSubFilter === 'ALL'
-                ? 'bg-gradient-to-r from-sky-600/40 to-blue-900 border-sky-400 text-white shadow-[0_0_12px_rgba(56,189,248,0.4)]'
-                : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
+                ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
             }`}
           >
             🌐 ទាំងអស់
           </button>
 
           <button
+            type="button"
             onClick={() => onSetSubFilter(activeSubFilter === 'AMOUNT_DESC' ? 'ALL' : 'AMOUNT_DESC')}
-            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
               activeSubFilter === 'AMOUNT_DESC'
-                ? 'bg-gradient-to-r from-amber-600/40 to-amber-950 border-amber-500 text-amber-200 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
-                : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
+                ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
             }`}
-            title="តម្រៀបកន្ត្រកទំនិញច្រើនមុខ/ច្រើនចំនួនមុន (Most items & highest amount first)"
           >
             💰 ច្រើនមុន
           </button>
 
           <button
+            type="button"
             onClick={() => onSetSubFilter(activeSubFilter === 'PP' ? 'ALL' : 'PP')}
-            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
               activeSubFilter === 'PP'
-                ? 'bg-gradient-to-r from-emerald-600/40 to-emerald-950 border-emerald-500 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
-                : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
+                ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
+                : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
             }`}
-            title="ចម្រាញ់តែកន្ត្រកភ្នំពេញ (PP Only)"
           >
             🏙️ ភ្នំពេញ
           </button>
 
           <button
+            type="button"
             onClick={() => onSetSubFilter(activeSubFilter === 'PROVINCE' ? 'ALL' : 'PROVINCE')}
-            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
+            className={`py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
               activeSubFilter === 'PROVINCE'
-                ? 'bg-gradient-to-r from-purple-600/40 to-purple-950 border-purple-500 text-purple-200 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
-                : 'bg-[#070D1B] border-white/5 text-slate-400 hover:text-white'
+                ? 'bg-purple-500/20 border-purple-400 text-purple-200'
+                : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
             }`}
-            title="ចម្រាញ់តែកន្ត្រកខេត្ត (Province Only)"
           >
-            🏞️ ខេត្ត
+            🏕️ ខេត្ត
           </button>
 
-          <button
-            onClick={() => onSetSubFilter(activeSubFilter === 'EMPTY' ? 'ALL' : 'EMPTY')}
-            className={`py-2 px-1 rounded-xl text-[10.5px] sm:text-[11px] font-black whitespace-nowrap flex items-center justify-center gap-1 transition-all active:scale-95 border ${
-              activeSubFilter === 'EMPTY'
-                ? 'bg-gradient-to-r from-rose-600/40 to-rose-950 border-rose-500 text-rose-200 shadow-[0_0_12px_rgba(244,63,94,0.4)]'
-                : emptyBasketsCount > 0
-                  ? 'bg-rose-950/20 border-rose-800/40 text-rose-300/80 hover:text-rose-200 hover:border-rose-600'
-                  : 'bg-[#070D1B] border-white/5 text-slate-500 hover:text-slate-300'
-            }`}
-            title="កន្ត្រកដែលដកកូដចេញអស់ ($0.00 / 0 មុខ)"
-          >
-            <span>🗑️ ទទេ</span>
-            {emptyBasketsCount > 0 && (
-              <span className={`text-[9px] font-mono px-1 py-0.2 rounded-full font-black ${
-                activeSubFilter === 'EMPTY' ? 'bg-rose-500 text-white' : 'bg-rose-900/80 text-rose-200 border border-rose-700/60'
-              }`}>
-                {emptyBasketsCount}
-              </span>
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* 🧹 EMPTY BASKETS BULK CLEANUP BANNER */}
-      {activeSubFilter === 'EMPTY' && (
-        <div className="flex items-center justify-between p-2.5 bg-[#1a080c]/90 border border-rose-500/40 rounded-2xl shadow-lg animate-fadeIn">
-          <div className="flex items-center gap-2">
-            <span className="text-base">🗑️</span>
-            <div className="flex flex-col">
-              <span className="text-xs font-black text-rose-200">
-                កន្ត្រកទទេគ្មានទំនិញ ({totalFilteredBaskets} កន្ត្រក)
-              </span>
-              <span className="text-[10px] text-slate-400">
-                កន្ត្រកដែលដកកូដអស់ ($0.00) ឬមិនទាន់បានដាក់ទំនិញ
-              </span>
-            </div>
-          </div>
-          {onCleanEmptyBaskets && totalFilteredBaskets > 0 && (
+          {emptyBasketsCount > 0 && (
             <button
               type="button"
-              onClick={onCleanEmptyBaskets}
-              className="px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 active:scale-95 transition-all border border-rose-400/50 cursor-pointer"
+              onClick={() => onSetSubFilter(activeSubFilter === 'EMPTY' ? 'ALL' : 'EMPTY')}
+              className={`py-1 px-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ml-auto ${
+                activeSubFilter === 'EMPTY'
+                  ? 'bg-rose-500/30 border-rose-400 text-rose-200'
+                  : 'bg-rose-950/30 border-rose-900/50 text-rose-300 hover:border-rose-700'
+              }`}
             >
-              <span>🧹 សម្អាតទាំងអស់ ({totalFilteredBaskets})</span>
+              🗑️ ទទេ ({emptyBasketsCount})
             </button>
           )}
         </div>
       )}
 
-      {/* 🔍 SEARCH HUD */}
+      {/* === SUB-FILTERS FOR STAGE 3 (QC) === */}
+      {currentStage === 3 && (
+        <div className="flex flex-col gap-1.5">
+          {/* Quick Scope & Location Filters in 1 single horizontal bar */}
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-0.5">
+            {/* Minimal Scope Toggle: All Live vs This Live */}
+            <div className="flex items-center bg-[#050A14] p-0.5 rounded-lg border border-slate-800 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => !isAllLiveQc && onToggleAllLiveQc?.()}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                  isAllLiveQc
+                    ? 'bg-emerald-500 text-slate-950 font-black shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                🌐 គ្រប់ឡាយ ({allLivePaidCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => isAllLiveQc && onToggleAllLiveQc?.()}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                  !isAllLiveQc
+                    ? 'bg-emerald-600 text-white font-black shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                🎥 Live នេះ ({paidQcCount})
+              </button>
+            </div>
+
+            {/* Quick Filters */}
+            <button
+              type="button"
+              onClick={() => onSetSubFilter('ALL')}
+              className={`py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+                activeSubFilter === 'ALL'
+                  ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                  : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              ទាំងអស់
+            </button>
+
+            {delayedPaidCount > 0 && (
+              <button
+                type="button"
+                onClick={() => onSetSubFilter(activeSubFilter === 'DELAYED_FIRST' ? 'ALL' : 'DELAYED_FIRST')}
+                className={`py-1 px-2.5 rounded-lg text-xs font-black whitespace-nowrap transition-all active:scale-95 border cursor-pointer flex items-center gap-1 ${
+                  activeSubFilter === 'DELAYED_FIRST'
+                    ? 'bg-gradient-to-r from-amber-600 to-rose-600 border-amber-300 text-white shadow-md'
+                    : 'bg-amber-950/50 border-amber-500/60 text-amber-300 hover:border-amber-400 animate-pulse'
+                }`}
+              >
+                <span>🚨 យឺតមុន ({delayedPaidCount})</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => onSetSubFilter(activeSubFilter === 'PP' ? 'ALL' : 'PP')}
+              className={`py-1 px-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+                activeSubFilter === 'PP'
+                  ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                  : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🏙️ ភ្នំពេញ
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onSetSubFilter(activeSubFilter === 'PROVINCE' ? 'ALL' : 'PROVINCE')}
+              className={`py-1 px-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+                activeSubFilter === 'PROVINCE'
+                  ? 'bg-purple-500/25 border-purple-400 text-purple-200'
+                  : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🏕️ ខេត្ត
+            </button>
+          </div>
+
+          {/* Slim 1-line Delayed Orders Alert Banner (only when delayed orders exist and not currently viewing delayed) */}
+          {delayedPaidCount > 0 && activeSubFilter !== 'DELAYED_FIRST' && (
+            <div
+              onClick={() => onSetSubFilter('DELAYED_FIRST')}
+              className="flex items-center justify-between px-2.5 py-1.5 bg-gradient-to-r from-amber-950/80 via-[#261404] to-amber-950/80 border border-amber-500/60 rounded-xl cursor-pointer hover:border-amber-400 transition-all text-xs"
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-sm">🚨</span>
+                <span className="text-amber-200 font-bold truncate">
+                  មាន <strong className="text-white underline">{delayedPaidCount} កញ្ចប់</strong> ភ្ញៀវវេលុយយឺត (ឡាយចាស់) ត្រូវចេញថ្ងៃនេះ!
+                </span>
+              </div>
+              <span className="text-[11px] font-black text-amber-300 hover:text-white flex-shrink-0 ml-2">
+                មើលឥឡូវ →
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* === SUB-FILTERS FOR STAGE 4 (DISPATCHED) === */}
+      {currentStage === 4 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-0.5">
+          {/* Scope Toggle */}
+          <div className="flex items-center bg-[#050A14] p-0.5 rounded-lg border border-slate-800 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => !isAllLiveDispatched && onToggleAllLiveDispatched?.()}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                isAllLiveDispatched
+                  ? 'bg-indigo-500 text-slate-950 font-black shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🌐 គ្រប់ឡាយ
+            </button>
+            <button
+              type="button"
+              onClick={() => isAllLiveDispatched && onToggleAllLiveDispatched?.()}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                !isAllLiveDispatched
+                  ? 'bg-indigo-600 text-white font-black shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🎥 Live នេះ ({dispatchedCount})
+            </button>
+          </div>
+
+          {/* Quick Filters */}
+          {allLiveDispatchedStats && (
+            <>
+              <button
+                type="button"
+                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'TODAY' ? 'ALL' : 'TODAY')}
+                className={`py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+                  dispatchedTimeFilter === 'TODAY'
+                    ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                    : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                📅 ចេញថ្ងៃនេះ ({allLiveDispatchedStats.today})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'PP' ? 'ALL' : 'PP')}
+                className={`py-1 px-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+                  dispatchedTimeFilter === 'PP'
+                    ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                    : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                🏙️ ភ្នំពេញ ({allLiveDispatchedStats.pp})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onSetDispatchedTimeFilter?.(dispatchedTimeFilter === 'PROVINCE' ? 'ALL' : 'PROVINCE')}
+                className={`py-1 px-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+                  dispatchedTimeFilter === 'PROVINCE'
+                    ? 'bg-purple-500/25 border-purple-400 text-purple-200'
+                    : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                🏕️ ខេត្ត ({allLiveDispatchedStats.province})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onSetDispatchedTimeFilter?.('ALL')}
+                className={`py-1 px-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+                  dispatchedTimeFilter === 'ALL'
+                    ? 'bg-indigo-500/25 border-indigo-400 text-indigo-200'
+                    : 'bg-[#080E1C] border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ទាំងអស់ ({allLiveDispatchedStats.total})
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 🧹 EMPTY BASKETS BULK CLEANUP BANNER */}
+      {(currentStage === 1 || currentStage === 2) && activeSubFilter === 'EMPTY' && (
+        <div className="flex items-center justify-between p-2 bg-[#1a080c]/90 border border-rose-500/40 rounded-xl shadow-md">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-base">🗑️</span>
+            <span className="text-xs font-bold text-rose-200 truncate">
+              កន្ត្រកទទេគ្មានទំនិញ ({totalFilteredBaskets} កន្ត្រក)
+            </span>
+          </div>
+          {onCleanEmptyBaskets && totalFilteredBaskets > 0 && (
+            <button
+              type="button"
+              onClick={onCleanEmptyBaskets}
+              className="px-2.5 py-1 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white rounded-lg text-xs font-black shadow-sm flex items-center gap-1 active:scale-95 transition-all border border-rose-400/50 cursor-pointer flex-shrink-0"
+            >
+              <span>🧹 សម្អាត ({totalFilteredBaskets})</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 🔍 ROW 3: SEARCH BAR & SCANNER & BASKET COUNT */}
       <div className="flex gap-1.5 items-center">
         <input
           type="text"
           value={searchQuery}
           onChange={e => onSearchChange(e.target.value)}
           placeholder="🔍 ស្វែងរកកូដ, ឈ្មោះ, លេខ, កន្ត្រក #..."
-          className="flex-1 bg-slate-900/90 border-[1.5px] border-slate-700 text-white px-3 py-2 rounded-xl text-xs outline-none focus:border-cyan-400 transition-all placeholder:text-slate-500 font-medium"
+          className="flex-1 bg-slate-900/90 border border-slate-700 text-white px-3 py-1.5 sm:py-2 rounded-xl text-xs outline-none focus:border-cyan-400 transition-all placeholder:text-slate-500 font-medium"
         />
 
         {/* 📷 In-App Camera Scanner Button */}
@@ -420,7 +459,7 @@ export function WorkflowTabs({
           <button
             type="button"
             onClick={onOpenScanner}
-            className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-2.5 sm:px-3 py-2 rounded-xl font-black text-xs whitespace-nowrap shadow-md active:scale-95 transition-all flex items-center gap-1 border border-cyan-400/50 cursor-pointer flex-shrink-0"
+            className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-2.5 py-1.5 sm:py-2 rounded-xl font-black text-xs whitespace-nowrap shadow-sm active:scale-95 transition-all flex items-center gap-1 border border-cyan-400/50 cursor-pointer flex-shrink-0"
             title="ស្កេនកាមេរ៉ា (QR & Barcode)"
           >
             <span>📷</span>
@@ -428,7 +467,7 @@ export function WorkflowTabs({
           </button>
         )}
 
-        <div className="bg-slate-900 border-[1.5px] border-cyan-400/80 text-cyan-400 px-2.5 py-2 rounded-xl font-black text-xs whitespace-nowrap font-mono shadow-sm flex-shrink-0">
+        <div className="bg-slate-900 border border-slate-700 text-slate-300 px-2.5 py-1.5 sm:py-2 rounded-xl font-bold text-xs whitespace-nowrap font-mono shadow-sm flex-shrink-0">
           📦 {totalFilteredBaskets}
         </div>
       </div>

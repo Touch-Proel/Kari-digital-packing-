@@ -81,8 +81,8 @@ export default function App() {
   const [networkOnline, setNetworkOnline] = useState<boolean>(true);
 
   // Workflow & UI Filters
-  const [currentMasterStage, setCurrentMasterStage] = useState<number>(1); // 1: Unpicked, 2: Staged, 3: Paid/QC
-  const [activeSubFilter, setActiveSubFilter] = useState<'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY'>('ALL');
+  const [currentMasterStage, setCurrentMasterStage] = useState<number>(1); // 1: Unpicked, 2: Staged, 3: Paid/QC, 4: Dispatched
+  const [activeSubFilter, setActiveSubFilter] = useState<'ALL' | 'AMOUNT_DESC' | 'PP' | 'PROVINCE' | 'EMPTY' | 'DELAYED_FIRST'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [displayedLimit, setDisplayedLimit] = useState<number>(25);
 
@@ -1164,6 +1164,12 @@ export default function App() {
     setDispatchedCount(totalDispatched);
   }, [totalDispatched]);
 
+  // Delayed payment orders from past live sessions waiting in QC
+  const delayedPaidCount = useMemo(() => {
+    if (!selectedLiveId) return 0;
+    return allLivePaidInvoices.filter(i => i.live_id && i.live_id !== selectedLiveId).length;
+  }, [allLivePaidInvoices, selectedLiveId]);
+
   const sourceInvoices =
     (currentMasterStage === 3 && isAllLiveQc)
       ? allLivePaidInvoices
@@ -1276,24 +1282,41 @@ export default function App() {
         return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
       });
     }
-  } else {
-    // ⚡ Rock-Solid Stable Sorting for Stages 2, 3, 4:
-    // In All Live QC mode, oldest orders come first to prevent delay!
-    filtered = [...filtered].sort((a, b) => {
-      if (currentMasterStage === 4) {
-        const dispA = new Date((a as any).dispatched_at || a.created_at || 0).getTime();
-        const dispB = new Date((b as any).dispatched_at || b.created_at || 0).getTime();
-        if (dispB !== dispA) return dispB - dispA;
-        return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
-      }
+  } else if (currentMasterStage === 3) {
+    // 🔍 Stage 3 (QC & Packaging): Sub-filters & Priority Aging Sort
+    if (activeSubFilter === 'DELAYED_FIRST') {
+      filtered = filtered.filter(i => selectedLiveId && i.live_id && i.live_id !== selectedLiveId);
+    } else if (activeSubFilter === 'PP') {
+      filtered = filtered.filter(i => i.location_zone === 'PP');
+    } else if (activeSubFilter === 'PROVINCE') {
+      filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
+    }
 
+    // Sort: In All Live QC, delayed orders (from older live sessions) are surfaced FIRST, followed by oldest orders
+    filtered = [...filtered].sort((a, b) => {
+      if (isAllLiveQc && selectedLiveId) {
+        const isDelayedA = Boolean(a.live_id && a.live_id !== selectedLiveId);
+        const isDelayedB = Boolean(b.live_id && b.live_id !== selectedLiveId);
+        if (isDelayedA && !isDelayedB) return -1;
+        if (!isDelayedA && isDelayedB) return 1;
+      }
       const timeA = new Date(a.created_at || 0).getTime();
       const timeB = new Date(b.created_at || 0).getTime();
-      if (isAllLiveQc && currentMasterStage === 3) {
-        if (timeA !== timeB) return timeA - timeB;
-      } else {
-        if (timeB !== timeA) return timeB - timeA;
-      }
+      if (timeA !== timeB) return timeA - timeB; // Oldest first to clear aging backlog
+      return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+    });
+  } else {
+    // 🚚 Stage 4 (Dispatched): Sub-filter and newest dispatched first
+    if (activeSubFilter === 'PP') {
+      filtered = filtered.filter(i => i.location_zone === 'PP');
+    } else if (activeSubFilter === 'PROVINCE') {
+      filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
+    }
+
+    filtered = [...filtered].sort((a, b) => {
+      const dispA = new Date((a as any).dispatched_at || a.created_at || 0).getTime();
+      const dispB = new Date((b as any).dispatched_at || b.created_at || 0).getTime();
+      if (dispB !== dispA) return dispB - dispA;
       return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
     });
   }
@@ -1510,6 +1533,27 @@ export default function App() {
             setCurrentMasterStage(stage);
             setDisplayedLimit(25);
             playPureTone(650, 0.04);
+            if (stage === 3) {
+              if (!isAllLiveQc) {
+                setIsAllLiveQc(true);
+              }
+              fetchAllLivePaidInvoices();
+              if (activeSubFilter === 'AMOUNT_DESC' || activeSubFilter === 'EMPTY') {
+                setActiveSubFilter('ALL');
+              }
+            } else if (stage === 4) {
+              if (!isAllLiveDispatched) {
+                setIsAllLiveDispatched(true);
+              }
+              fetchAllLiveDispatchedInvoices();
+              if (activeSubFilter === 'AMOUNT_DESC' || activeSubFilter === 'EMPTY' || activeSubFilter === 'DELAYED_FIRST') {
+                setActiveSubFilter('ALL');
+              }
+            } else {
+              if (activeSubFilter === 'DELAYED_FIRST') {
+                setActiveSubFilter('ALL');
+              }
+            }
           }}
           unpickedCount={unpickedCount}
           emptyBasketsCount={emptyBasketsCount}
@@ -1525,6 +1569,7 @@ export default function App() {
             fetchAllLivePaidInvoices();
           }}
           allLivePaidCount={allLivePaidCount}
+          delayedPaidCount={delayedPaidCount}
           isAllLiveDispatched={isAllLiveDispatched}
           onToggleAllLiveDispatched={() => {
             setIsAllLiveDispatched(prev => !prev);

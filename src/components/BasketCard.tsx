@@ -186,8 +186,13 @@ function BasketCardComponent({
     }
   };
 
+  // Check if this basket is from an older live session during QC or Dispatched stage (ភ្ញៀវវេលុយយឺត)
+  const isDelayedLiveOrder = Boolean(activeLiveId && invoice.live_id && invoice.live_id !== activeLiveId && (currentMasterStage === 3 || currentMasterStage === 4));
+
   // Border and glow accent based on status
-  const cardBorderClass = isDispatched
+  const cardBorderClass = isDelayedLiveOrder && currentMasterStage === 3
+    ? 'border-2 border-amber-400 shadow-[0_0_24px_rgba(245,158,11,0.35)] ring-1 ring-amber-400/50'
+    : isDispatched
     ? (isPaid
         ? 'border-l-[4px] border-l-indigo-400 border-t border-r border-b border-indigo-950/60 shadow-[0_0_18px_rgba(99,102,241,0.15)]'
         : 'border-l-[4px] border-l-amber-500 border-t border-r border-b border-amber-950/60 shadow-[0_0_18px_rgba(245,158,11,0.15)]')
@@ -1139,10 +1144,15 @@ function BasketCardComponent({
 
             {/* Customer Name & Live Timestamp */}
             <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-white font-black text-sm sm:text-base leading-tight truncate drop-shadow-sm">
                   {invoice.facebook_name || 'អតិថិជន'}
                 </span>
+                {isDelayedLiveOrder && (
+                  <span className="bg-gradient-to-r from-amber-500 to-rose-600 text-slate-950 font-black text-[9px] sm:text-[9.5px] px-2 py-0.5 rounded-full shadow-md flex items-center gap-1 whitespace-nowrap animate-pulse">
+                    <span>🚨 ភ្ញៀវវេលុយយឺត (ចេញថ្ងៃនេះ)</span>
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5 min-w-0">
                 <span className="text-[10.5px] text-amber-400 font-semibold flex items-center gap-0.5 whitespace-nowrap">
@@ -1151,9 +1161,14 @@ function BasketCardComponent({
                 </span>
                 {invoice.live_id && (
                   <span
-                    className="bg-purple-950/90 border border-purple-400/60 text-purple-200 text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-sm whitespace-nowrap"
+                    className={`${
+                      isDelayedLiveOrder
+                        ? 'bg-amber-950 border border-amber-400 text-amber-300 font-black shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+                        : 'bg-purple-950/90 border border-purple-400/60 text-purple-200 font-bold'
+                    } text-[9.5px] font-mono px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-sm whitespace-nowrap`}
                     title={`វគ្គ Live: ${invoice.live_id}`}
                   >
+                    {isDelayedLiveOrder && <span>🚨 ឡាយមុន ៖</span>}
                     <span>{formatLiveShortBadge(invoice.live_id)}</span>
                   </span>
                 )}
