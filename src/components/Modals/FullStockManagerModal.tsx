@@ -55,6 +55,9 @@ export function FullStockManagerModal({
   const [deletingCode, setDeletingCode] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [removeFromBasketsToo, setRemoveFromBasketsToo] = useState(true);
+  const [confirmWipeStock, setConfirmWipeStock] = useState(false);
+  const [wipingStock, setWipingStock] = useState(false);
+  const [uploadingCode, setUploadingCode] = useState<string | null>(null);
 
   const outCount = useMemo(() => products.filter(p => p.stock_qty <= 0).length, [products]);
   const lowCount = useMemo(() => products.filter(p => p.stock_qty > 0 && p.stock_qty <= 5).length, [products]);
@@ -166,6 +169,111 @@ export function FullStockManagerModal({
       onShowToast('⚠️ ដាច់សេវា WiFi!', 'error');
     } finally {
       setDeletingCode(null);
+    }
+  };
+
+  // Wipe all stock for the current live session
+  const handleWipeStock = async () => {
+    setWipingStock(true);
+    try {
+      const res = await fetch('/api/clear_live_stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          live_id: activeLiveId,
+          remove_from_baskets: removeFromBasketsToo
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playPureTone(400, 0.1);
+        onShowToast(data.message || 'បានសម្អាតស្តុកទាំងអស់ក្នុង Live នេះរួចរាល់!');
+        onStockUpdated();
+        setConfirmWipeStock(false);
+      } else {
+        playWarningBuzzer();
+        onShowToast(data.error || 'បរាជ័យក្នុងការសម្អាតស្តុក', 'error');
+      }
+    } catch {
+      playWarningBuzzer();
+      onShowToast('⚠️ បញ្ហាតភ្ជាប់បណ្តាញ WiFi!', 'error');
+    } finally {
+      setWipingStock(false);
+    }
+  };
+
+  // Direct 1-tap photo change from stock list card
+  const handleDirectImageUpload = async (p: Product, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (e.target) e.target.value = '';
+
+    setUploadingCode(p.code);
+    onShowToast(`⏳ កំពុងបង្ហោះរូបភាព [${p.code}]...`);
+    try {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = async () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const maxDim = 800;
+            let w = img.width;
+            let h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
+            }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              const compressedBase64 = canvas.toDataURL('image/jpeg', 0.88);
+              const cleanCode = (p.code || 'item').replace(/^\[|\]$/g, '');
+              const targetLive = activeLiveId || p.live_id;
+              const uploadRes = await fetch('/api/upload_product_image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  product_id: p.id,
+                  code: cleanCode,
+                  image_data: compressedBase64,
+                  live_id: targetLive
+                })
+              });
+              const uploadData = await uploadRes.json();
+              if (uploadData.success && uploadData.image_url) {
+                p.image_file = `${uploadData.image_url}?t=${Date.now()}`;
+                onShowToast(`📸 បានប្តូររូបភាព [${p.code}] ជោគជ័យ!`);
+                playSuccessFanfare();
+                onStockUpdated();
+              } else {
+                onShowToast(uploadData.error || 'បរាជ័យក្នុងការ Upload រូបភាព', 'error');
+                playWarningBuzzer();
+              }
+            }
+          } catch (err: any) {
+            onShowToast('⚠️ បរាជ័យក្នុងការ Upload រូបភាព', 'error');
+          } finally {
+            setUploadingCode(null);
+          }
+        };
+        img.onerror = () => {
+          setUploadingCode(null);
+          onShowToast('រូបភាពមិនត្រឹមត្រូវ', 'error');
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setUploadingCode(null);
+      onShowToast('បរាជ័យក្នុងការអានរូបភាព', 'error');
     }
   };
 
@@ -283,6 +391,19 @@ export function FullStockManagerModal({
               <span>📋</span>
               <span className="hidden sm:inline">Paste</span>
             </button>
+
+            {/* Clear All Stock for this Live */}
+            {products.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setConfirmWipeStock(true)}
+                className="bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-600/60 px-3 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm flex-shrink-0"
+                title="សម្អាតស្តុកទាំងអស់ក្នុង Live នេះឱ្យទទេស្អាត (0 មុខ)"
+              >
+                <span>🗑️</span>
+                <span className="hidden sm:inline">សម្អាតស្តុក Live នេះ</span>
+              </button>
+            )}
           </div>
 
           {/* Row 2: Filter Tabs & Sort Control */}
@@ -403,43 +524,66 @@ export function FullStockManagerModal({
                     }`}
                   >
                     {/* Thumbnail Image (80x80) */}
-                    <div
-                      className="w-[72px] h-[72px] min-w-[72px] rounded-xl overflow-hidden bg-slate-950 border border-slate-700 flex items-center justify-center cursor-pointer relative group/img flex-shrink-0"
-                      onClick={() => {
-                        const allStockZoomItems = filteredProducts.map(prod => ({
-                          code: prod.code,
-                          name: prod.name || `កូដ ${prod.code}`,
-                          imageUrl: prod.image_file,
-                          price: prod.price,
-                          stockQty: prod.stock_qty,
-                          quantity: 1,
-                          comment: undefined,
-                          isChecked: false
-                        }));
-                        onOpenZoomModal(
-                          p.code,
-                          p.name,
-                          p.image_file,
-                          p.price,
-                          p.stock_qty,
-                          allStockZoomItems,
-                          idx
-                        );
-                      }}
-                      title="ចុចដើម្បីមើលរូបធំ ឬ Slide ផ្ទៀងជាមួយ Telegram"
-                    >
-                      {p.image_file ? (
-                        <img
-                          src={p.image_file}
-                          alt={p.code}
-                          className="w-full h-full object-cover group-hover/img:scale-105 transition-transform"
+                    {/* Left Thumbnail with Zoom Trigger & Direct Photo Upload */}
+                    <div className="relative flex-shrink-0">
+                      <div
+                        className="w-[72px] h-[72px] min-w-[72px] rounded-xl overflow-hidden bg-slate-950 border border-slate-700 flex items-center justify-center cursor-pointer relative group/img shadow-sm"
+                        onClick={() => {
+                          const allStockZoomItems = filteredProducts.map(prod => ({
+                            code: prod.code,
+                            name: prod.name || `កូដ ${prod.code}`,
+                            imageUrl: prod.image_file,
+                            price: prod.price,
+                            stockQty: prod.stock_qty,
+                            quantity: 1,
+                            comment: undefined,
+                            isChecked: false
+                          }));
+                          onOpenZoomModal(
+                            p.code,
+                            p.name,
+                            p.image_file,
+                            p.price,
+                            p.stock_qty,
+                            allStockZoomItems,
+                            idx
+                          );
+                        }}
+                        title="ចុចដើម្បីមើលរូបធំ ឬ Slide ផ្ទៀងជាមួយ Telegram"
+                      >
+                        {p.image_file ? (
+                          <img
+                            src={p.image_file.includes('?') ? p.image_file : `${p.image_file}?t=${p.id || p.code}`}
+                            alt={p.code}
+                            className="w-full h-full object-cover group-hover/img:scale-105 transition-transform"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-500">
+                            <span className="text-xl">📷</span>
+                            <span className="text-[9px] text-cyan-400 font-bold">+រូប</span>
+                          </div>
+                        )}
+                        {uploadingCode === p.code && (
+                          <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-[10px] text-cyan-300 font-bold">
+                            ⏳ ផ្ទុក...
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Direct 1-Tap Photo Upload Button */}
+                      <label
+                        className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-cyan-600 hover:bg-cyan-500 border border-white text-white flex items-center justify-center text-[11px] cursor-pointer shadow-md active:scale-90 transition-all z-10"
+                        title="ប្តូររូបភាពភ្លាមៗពីទូរស័ព្ទ/PC"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        📸
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => handleDirectImageUpload(p, e)}
                         />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center text-slate-500">
-                          <span className="text-xl">📷</span>
-                          <span className="text-[9px] text-cyan-400 font-bold">+រូប</span>
-                        </div>
-                      )}
+                      </label>
                     </div>
 
                     {/* Middle Info: Code, Name, Price & Stock Status */}

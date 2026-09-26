@@ -129,41 +129,86 @@ router.get('/products', (req: Request, res: Response) => {
 });
 
 // POST /api/update_product_stock_price
-router.post('/update_product_stock_price', (req: Request, res: Response) => {
-  const { code, stock_qty, add_qty, price, name, cost_price, image_file, new_code, live_id } = req.body;
-  if (!code) {
-    return res.status(400).json({ success: false, error: 'Code is required' });
+router.post('/update_product_stock_price', async (req: Request, res: Response) => {
+  const { product_id, code, stock_qty, add_qty, price, name, cost_price, image_file, new_code, live_id } = req.body;
+  if (!code && !product_id) {
+    return res.status(400).json({ success: false, error: 'Code or product_id is required' });
   }
 
-  const targetLive = live_id || activeLiveId;
-  const cleanCode = String(code).trim().toUpperCase();
-  let prod = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
+  const targetLive = (live_id && String(live_id).trim()) || activeLiveId;
+  const cleanCode = String(code || '').trim().toUpperCase();
+  const rawCode = cleanCode.replace(/^\[|\]$/g, '').trim();
+
+  let prod = products.find(p => {
+    if (product_id && p.id === Number(product_id)) return true;
+    if ((p.live_id || activeLiveId) !== targetLive) return false;
+    const pCode = (p.code || '').trim().toUpperCase();
+    const pRaw = pCode.replace(/^\[|\]$/g, '').trim();
+    return pCode === cleanCode || pRaw === rawCode;
+  });
+
+  // Helper to process and persist image
+  const processImage = async (imgData: string, itemCode: string): Promise<string> => {
+    if (!imgData || typeof imgData !== 'string') return '';
+    const trimmed = imgData.trim();
+    if (!trimmed.startsWith('data:image/')) {
+      return trimmed;
+    }
+    try {
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+      const matches = trimmed.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      const fileBuffer = matches ? Buffer.from(matches[2], 'base64') : Buffer.from(trimmed.split(',')[1] || trimmed, 'base64');
+      const safeCode = (itemCode || 'item').replace(/[^A-Za-z0-9_-]/g, '');
+      const safeLiveTag = targetLive.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8);
+      const filename = `${safeCode}_${safeLiveTag}_${Date.now()}.jpg`;
+      const filePath = path.join(uploadDir, filename);
+
+      const processedBuffer = await sharp(fileBuffer)
+        .rotate()
+        .resize(500, 500, { fit: 'cover', position: 'center' })
+        .jpeg({ quality: 90, mozjpeg: true })
+        .toBuffer();
+
+      fs.writeFileSync(filePath, processedBuffer);
+      return `/uploads/${filename}`;
+    } catch (err) {
+      console.error('Sharp image processing error in update_product_stock_price:', err);
+      return trimmed;
+    }
+  };
+
+  let resolvedImage = image_file;
+  if (image_file && typeof image_file === 'string' && image_file.startsWith('data:image/')) {
+    resolvedImage = await processImage(image_file, rawCode || cleanCode);
+  }
 
   if (!prod) {
     prod = {
       id: products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1,
       live_id: targetLive,
-      code: cleanCode,
-      name: name?.trim() || `កូដ ${cleanCode}`,
+      code: rawCode || cleanCode,
+      name: name?.trim() || `កូដ ${rawCode || cleanCode}`,
       stock_qty: Number(stock_qty || 50),
       price: Number(price || 5.0),
       cost_price: Number(cost_price || 3.0),
-      image_file: image_file || ''
+      image_file: resolvedImage || ''
     };
     products.push(prod);
   } else {
     prod.live_id = targetLive;
     if (name) prod.name = name.trim();
     if (cost_price !== undefined) prod.cost_price = Number(cost_price);
-    if (image_file !== undefined) {
-      prod.image_file = image_file || '';
+    if (resolvedImage !== undefined) {
+      prod.image_file = resolvedImage || '';
     }
 
     // If user changed the code itself
     if (new_code && String(new_code).trim().toUpperCase() !== cleanCode) {
-      const cleanNewCode = String(new_code).trim().toUpperCase();
+      const cleanNewCode = String(new_code).trim().toUpperCase().replace(/^\[|\]$/g, '');
       const existingNew = products.find(
-        p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanNewCode && p.id !== prod?.id
+        p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase().replace(/^\[|\]$/g, '') === cleanNewCode && p.id !== prod?.id
       );
       if (existingNew) {
         return res.status(400).json({ success: false, error: `កូដ [${cleanNewCode}] មានរួចហើយក្នុងស្តុក Live នេះ!` });
@@ -267,10 +312,10 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
   // Enrich items with product data (images, names, prices)
   const enrichedItems = (inv.items || []).map(it => {
     const prod = products.find(p => {
-      const pCode = p.code.toUpperCase().trim();
-      const itCode = it.product_code.toUpperCase().trim();
+      const pCode = p.code.toUpperCase().trim().replace(/^\[|\]$/g, '');
+      const itCode = it.product_code.toUpperCase().trim().replace(/^\[|\]$/g, '');
       return pCode === itCode && (p.live_id || activeLiveId) === (inv.live_id || activeLiveId);
-    }) || products.find(p => p.code.toUpperCase().trim() === it.product_code.toUpperCase().trim());
+    });
 
     return {
       product_code: it.product_code,
@@ -500,8 +545,9 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'No image data provided' });
     }
 
-    const targetLive = live_id || activeLiveId;
-    const cleanCode = code ? String(code).trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') : 'item';
+    const targetLive = (live_id && String(live_id).trim()) || activeLiveId;
+    const cleanCode = code ? String(code).trim().toUpperCase().replace(/^\[|\]$/g, '') : 'item';
+    const safeCode = cleanCode.replace(/[^A-Za-z0-9_-]/g, '') || 'item';
     const uploadDir = path.join(process.cwd(), 'public', 'uploads');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
@@ -509,12 +555,10 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
 
     // Check if image_data is a base64 data URL
     let fileBuffer: Buffer;
-    let ext = 'jpg';
 
     if (image_data.startsWith('data:image/')) {
       const matches = image_data.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
       if (matches) {
-        ext = matches[1].replace('jpeg', 'jpg');
         fileBuffer = Buffer.from(matches[2], 'base64');
       } else {
         fileBuffer = Buffer.from(image_data.split(',')[1] || image_data, 'base64');
@@ -522,28 +566,26 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
     } else {
       // If it's an external web URL, save directly on product
       if (image_data.startsWith('http://') || image_data.startsWith('https://')) {
-        if (code) {
-          const targetProd = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === String(code).trim().toUpperCase());
+        if (code || req.body.product_id) {
+          const targetProd = products.find(p => {
+            if (req.body.product_id && p.id === Number(req.body.product_id)) return true;
+            if ((p.live_id || activeLiveId) !== targetLive) return false;
+            const pCode = (p.code || '').trim().toUpperCase().replace(/^\[|\]$/g, '');
+            return pCode === cleanCode;
+          });
           if (targetProd) {
-            targetProd.image_file = image_data;
+            targetProd.image_file = image_data.trim();
             bumpDataRevision();
             saveDatabaseToDisk();
           }
         }
-        return res.json({ success: true, image_url: image_data });
+        return res.json({ success: true, image_url: image_data.trim() });
       }
       return res.status(400).json({ success: false, error: 'Invalid image format' });
     }
 
-    // Format Date YYYYMMDD (e.g. 20260914)
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const dateStr = `${yyyy}${mm}${dd}`;
     const safeLiveTag = targetLive.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8);
-
-    const filename = `${cleanCode}_${safeLiveTag}_${dateStr}_${Date.now().toString(36)}.jpg`;
+    const filename = `${safeCode}_${safeLiveTag}_${Date.now()}.jpg`;
     const filePath = path.join(uploadDir, filename);
 
     // Process image to 500x500 Square HD Center Crop using Sharp
@@ -560,14 +602,19 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
 
     const publicUrl = `/uploads/${filename}`;
 
-    // Automatically update product if code provided
-    if (code) {
-      const targetProd = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === String(code).trim().toUpperCase());
+    // Automatically update product if code or product_id provided
+    if (code || req.body.product_id) {
+      const targetProd = products.find(p => {
+        if (req.body.product_id && p.id === Number(req.body.product_id)) return true;
+        if ((p.live_id || activeLiveId) !== targetLive) return false;
+        const pCode = (p.code || '').trim().toUpperCase().replace(/^\[|\]$/g, '');
+        return pCode === cleanCode;
+      });
       if (targetProd) {
         targetProd.image_file = publicUrl;
       }
       // Cascade to all active baskets in this target live session
-      syncAllActiveInvoicesWithStock(targetLive);
+      syncAllActiveInvoicesWithStock(targetProd?.live_id || targetLive);
       bumpDataRevision();
       saveDatabaseToDisk();
     }
@@ -1455,20 +1502,25 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
     }
 
     // Look for product in current live first
-    let prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
+    const rawCleanCode = cleanCode.replace(/^\[|\]$/g, '');
+    let prod = products.find(p => {
+      if ((p.live_id || activeLiveId) !== liveId) return false;
+      const pCode = (p.code || '').trim().toUpperCase().replace(/^\[|\]$/g, '');
+      return pCode === rawCleanCode;
+    });
+
     if (!prod) {
-      // Look up globally across other lives to inherit accurate name, image, price
-      const globalProd = products.find(p => p.code.toUpperCase() === cleanCode);
+      // Create new clean product for this live session ONLY (never leak/inherit from other lives)
       const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       prod = {
         id: nextProdId,
         live_id: liveId,
-        code: cleanCode,
-        name: globalProd?.name || `កូដ [${cleanCode}]`,
-        stock_qty: globalProd?.stock_qty ? Math.max(50, globalProd.stock_qty) : 100,
-        price: typeof globalProd?.price === 'number' && globalProd.price > 0 ? globalProd.price : 5.0,
-        cost_price: typeof globalProd?.cost_price === 'number' ? globalProd.cost_price : 3.0,
-        image_file: globalProd?.image_file || ''
+        code: rawCleanCode,
+        name: `កូដ [${rawCleanCode}]`,
+        stock_qty: 100,
+        price: 5.0,
+        cost_price: 3.0,
+        image_file: ''
       };
       products.push(prod);
     }
@@ -2262,22 +2314,69 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
   });
 });
 
-// GET /api/parser/settings - Get regex parser configuration
+// POST /api/clear_live_stock - Wipe all products for a specific live session
+router.post('/clear_live_stock', (req: Request, res: Response) => {
+  const { live_id, remove_from_baskets } = req.body;
+  const targetLive = (live_id && String(live_id).trim()) || activeLiveId;
+  if (!targetLive) {
+    return res.status(400).json({ success: false, error: 'Live ID is required' });
+  }
+
+  let deletedCount = 0;
+  for (let i = products.length - 1; i >= 0; i--) {
+    if ((products[i].live_id || activeLiveId) === targetLive) {
+      products.splice(i, 1);
+      deletedCount++;
+    }
+  }
+
+  let clearedBasketsCount = 0;
+  if (remove_from_baskets) {
+    invoices.forEach(inv => {
+      if ((inv.live_id || activeLiveId) === targetLive && inv.status !== 'Dispatched') {
+        if (inv.items && inv.items.length > 0) {
+          inv.items = [];
+          recalculateInvoice(inv);
+          clearedBasketsCount++;
+        }
+      }
+    });
+  }
+
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  res.json({
+    success: true,
+    deleted_count: deletedCount,
+    cleared_baskets_count: clearedBasketsCount,
+    message: `🗑️ បានសម្អាតស្តុក Live #${targetLive.slice(-8)} អស់ ${deletedCount} មុខទំនិញជោគជ័យ!`
+  });
+});
+
 router.get('/parser/settings', (_req: Request, res: Response) => {
   res.json({
     parser_strict_catalog: !!settings.parser_strict_catalog,
-    parser_allow_standalone: settings.parser_allow_standalone !== false
+    parser_allow_standalone: settings.parser_allow_standalone !== false,
+    auto_private_reply_enabled: !!settings.auto_private_reply_enabled,
+    auto_private_reply_template: settings.auto_private_reply_template || ''
   });
 });
 
 // POST /api/parser/settings - Update regex parser configuration
 router.post('/parser/settings', (req: Request, res: Response) => {
-  const { parser_strict_catalog, parser_allow_standalone } = req.body;
+  const { parser_strict_catalog, parser_allow_standalone, auto_private_reply_enabled, auto_private_reply_template } = req.body;
   if (parser_strict_catalog !== undefined) {
     settings.parser_strict_catalog = !!parser_strict_catalog;
   }
   if (parser_allow_standalone !== undefined) {
     settings.parser_allow_standalone = !!parser_allow_standalone;
+  }
+  if (auto_private_reply_enabled !== undefined) {
+    settings.auto_private_reply_enabled = !!auto_private_reply_enabled;
+  }
+  if (auto_private_reply_template !== undefined) {
+    settings.auto_private_reply_template = String(auto_private_reply_template);
   }
   bumpDataRevision();
   saveDatabaseToDisk();
@@ -2285,7 +2384,9 @@ router.post('/parser/settings', (req: Request, res: Response) => {
     success: true,
     settings: {
       parser_strict_catalog: settings.parser_strict_catalog,
-      parser_allow_standalone: settings.parser_allow_standalone
+      parser_allow_standalone: settings.parser_allow_standalone,
+      auto_private_reply_enabled: settings.auto_private_reply_enabled,
+      auto_private_reply_template: settings.auto_private_reply_template
     }
   });
 });

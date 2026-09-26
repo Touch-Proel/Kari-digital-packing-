@@ -67,9 +67,11 @@ export function StockModal({
   };
 
   // Compress image on client side using Canvas before uploading
+  // Compress image on client side using Canvas before uploading
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (e.target) e.target.value = '';
 
     setUploading(true);
     try {
@@ -77,48 +79,61 @@ export function StockModal({
       reader.onload = (event) => {
         const img = new Image();
         img.onload = async () => {
-          const canvas = document.createElement('canvas');
-          const maxDim = 800;
-          let w = img.width;
-          let h = img.height;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) {
-              h = Math.round((h * maxDim) / w);
-              w = maxDim;
-            } else {
-              w = Math.round((w * maxDim) / h);
-              h = maxDim;
+          try {
+            const canvas = document.createElement('canvas');
+            const maxDim = 800;
+            let w = img.width;
+            let h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
             }
-          }
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, w, h);
-            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
-            setImageFile(compressedBase64);
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              const compressedBase64 = canvas.toDataURL('image/jpeg', 0.88);
+              setImageFile(compressedBase64);
 
-            // If updating existing product, upload to server immediately
-            const cleanCode = code.trim().toUpperCase() || product?.code || 'item';
-            try {
+              // Upload to server immediately to get persistent URL on disk
+              const cleanCode = (code.trim().toUpperCase() || product?.code || 'item').replace(/^\[|\]$/g, '');
+              const targetLive = activeLiveId || product?.live_id;
               const uploadRes = await fetch('/api/upload_product_image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                  product_id: product?.id,
                   code: cleanCode,
                   image_data: compressedBase64,
-                  live_id: activeLiveId
+                  live_id: targetLive
                 })
               });
               const uploadData = await uploadRes.json();
               if (uploadData.success && uploadData.image_url) {
-                setImageFile(uploadData.image_url);
+                const freshUrl = `${uploadData.image_url}?t=${Date.now()}`;
+                setImageFile(freshUrl);
+                setUrlInput(freshUrl);
+                onShowToast('📸 បានបង្ហោះរូបភាពទំនិញជោគជ័យ!');
+                playPureTone(880, 0.06);
+              } else {
+                onShowToast(uploadData.error || 'បរាជ័យក្នុងការរក្សាទុករូបភាព', 'error');
               }
-            } catch (err) {}
+            }
+          } catch (err: any) {
+            onShowToast('⚠️ បរាជ័យក្នុងការ Upload រូបភាព', 'error');
+          } finally {
+            setUploading(false);
           }
+        };
+        img.onerror = () => {
           setUploading(false);
-          playPureTone(880, 0.06);
-          onShowToast('📸 បានជ្រើសរើសរូបភាពជោគជ័យ!');
+          onShowToast('រូបភាពមិនត្រឹមត្រូវ', 'error');
         };
         img.src = event.target?.result as string;
       };
@@ -132,7 +147,7 @@ export function StockModal({
   // Submit product edits or creation
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const cleanCode = code.trim().toUpperCase();
+    const cleanCode = code.trim().toUpperCase().replace(/^\[|\]$/g, '');
     if (!cleanCode) {
       onShowToast('⚠️ សូមបញ្ចូលកូដទំនិញជាមុនសិន!', 'error');
       playWarningBuzzer();
@@ -141,17 +156,19 @@ export function StockModal({
 
     setSaving(true);
     try {
+      const targetLive = activeLiveId || product?.live_id;
       const res = await fetch('/api/update_product_stock_price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          product_id: product?.id,
           code: isNew ? cleanCode : (product?.code || cleanCode),
           new_code: isNew ? undefined : cleanCode,
           name: name.trim() || `កូដ ${cleanCode}`,
           stock_qty: stockQty,
           price: price,
           image_file: imageFile,
-          live_id: activeLiveId
+          live_id: targetLive
         })
       });
       const data = await res.json();

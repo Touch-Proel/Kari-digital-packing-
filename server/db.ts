@@ -107,7 +107,9 @@ export const settings: AppSettings = {
   gemini_api_key: process.env.GEMINI_API_KEY || '',
   admin_pin: '1688',
   parser_strict_catalog: false,
-  parser_allow_standalone: true
+  parser_allow_standalone: true,
+  auto_private_reply_enabled: false,
+  auto_private_reply_template: 'ជម្រាបសួរ [Name]! អរគុណសម្រាប់ការកុម្ម៉ង់ទំនិញក្នុង Live។ ប្រព័ន្ធបានកត់ត្រាការកក់របស់បងរួចរាល់ហើយ។ សូមបងផ្ញើលេខទូរស័ព្ទ និងទីតាំង ដើម្បីខាងប្អូនរៀបចំវេចខ្ចប់ជូនបង។ អរគុណ!'
 };
 
 // Initial Products Catalog
@@ -683,50 +685,10 @@ export async function loadDatabaseFromDisk() {
     // Remove any leftover 0-item empty baskets from previous question comments
     cleanupEmptyZeroItemInvoices();
 
-    // Normalize all existing product image filenames to [CODE]_[YYYYMMDD].jpg
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-    const now = new Date();
-    const defaultDateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-
-    products.forEach(p => {
-      if (p.image_file && p.image_file.startsWith('/uploads/')) {
-        const oldFilename = path.basename(p.image_file);
-        if (oldFilename.startsWith('tg_') || oldFilename.startsWith('prod_')) {
-          const safeCode = p.code ? p.code.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
-          const newFilename = `${safeCode}_${defaultDateStr}.jpg`;
-          const oldPath = path.join(uploadDir, oldFilename);
-          const newPath = path.join(uploadDir, newFilename);
-
-          if (fs.existsSync(oldPath)) {
-            try {
-              fs.renameSync(oldPath, newPath);
-            } catch (e) {
-              // ignore
-            }
-          }
-          p.image_file = `/uploads/${newFilename}`;
-        }
-      }
-    });
-
-    invoices.forEach(inv => {
-      if (inv.items && Array.isArray(inv.items)) {
-        inv.items.forEach(it => {
-          if (it.image_file && it.image_file.startsWith('/uploads/')) {
-            const oldFilename = path.basename(it.image_file);
-            if (oldFilename.startsWith('tg_') || oldFilename.startsWith('prod_')) {
-              const safeCode = it.product_code ? it.product_code.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
-              it.image_file = `/uploads/${safeCode}_${defaultDateStr}.jpg`;
-            }
-          }
-        });
-      }
-    });
-
     // Natural sort products by code (1, 2, 3... 10... 100... A1, B1...)
     products.sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
 
-    // Automatically sync all active (non-dispatched) basket prices & photos with stock catalog
+    // Automatically sync all active (non-dispatched) basket prices & photos strictly within their own live sessions
     syncAllActiveInvoicesWithStock();
 
     // Persist normalized data to disk and SQLite

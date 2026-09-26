@@ -48,6 +48,10 @@ export function SystemSettingsModal({
 }: SystemSettingsModalProps) {
   const [strictCatalogMode, setStrictCatalogMode] = useState(false);
   const [loadingStrict, setLoadingStrict] = useState(false);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [autoReplyTemplate, setAutoReplyTemplate] = useState('');
+  const [savingAutoReply, setSavingAutoReply] = useState(false);
+  const [autoReplyFeedback, setAutoReplyFeedback] = useState<string | null>(null);
 
   // Admin PIN Change State
   const [currentPinInput, setCurrentPinInput] = useState('');
@@ -73,8 +77,16 @@ export function SystemSettingsModal({
     fetch('/api/parser/settings')
       .then(res => res.json())
       .then(data => {
-        if (data && typeof data.parser_strict_catalog === 'boolean') {
-          setStrictCatalogMode(data.parser_strict_catalog);
+        if (data) {
+          if (typeof data.parser_strict_catalog === 'boolean') {
+            setStrictCatalogMode(data.parser_strict_catalog);
+          }
+          if (typeof data.auto_private_reply_enabled === 'boolean') {
+            setAutoReplyEnabled(data.auto_private_reply_enabled);
+          }
+          if (typeof data.auto_private_reply_template === 'string') {
+            setAutoReplyTemplate(data.auto_private_reply_template);
+          }
         }
       })
       .catch(() => {});
@@ -229,6 +241,33 @@ export function SystemSettingsModal({
       // silent
     } finally {
       setLoadingStrict(false);
+    }
+  };
+
+  const handleSaveAutoReply = async () => {
+    setSavingAutoReply(true);
+    setAutoReplyFeedback(null);
+    try {
+      const res = await fetch('/api/parser/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auto_private_reply_enabled: autoReplyEnabled,
+          auto_private_reply_template: autoReplyTemplate
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAutoReplyFeedback('✅ បានរក្សាទុកការកំណត់ Auto Private Reply ជោគជ័យ!');
+        playPureTone(880, 0.1);
+      } else {
+        setAutoReplyFeedback('❌ បរាជ័យក្នុងការរក្សាទុក');
+      }
+    } catch {
+      setAutoReplyFeedback('❌ មានបញ្ហាតភ្ជាប់');
+    } finally {
+      setSavingAutoReply(false);
+      setTimeout(() => setAutoReplyFeedback(null), 3500);
     }
   };
 
@@ -708,6 +747,55 @@ export function SystemSettingsModal({
                   </ul>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Section: Auto Private Reply in Live */}
+          <div className="bg-[#0A1526] border border-cyan-500/30 rounded-2xl p-4 flex flex-col gap-3 shadow-lg">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-cyan-300 text-sm flex items-center gap-1.5">
+                <span>🤖</span> ផ្ញើ Private Reply ស្វ័យប្រវត្តក្នុង Live (Auto 1-Tap/1-Msg per Customer)
+              </span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoReplyEnabled}
+                  onChange={e => setAutoReplyEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-950 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500 border border-slate-700"></div>
+              </label>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              នៅពេលអតិថិជនខមិនកុម្ម៉ង់ត្រូវកូដក្នុង Live ប្រព័ន្ធនឹងផ្ញើសារចូល Messenger ស្វ័យប្រវត្តចំនួន **១ ដងគត់ក្នុង ១ Live** សម្រាប់អតិថិជនម្នាក់ៗ ដើម្បីសុវត្ថិភាពនិងការពារ Spam។
+            </p>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] text-slate-300 font-bold flex items-center justify-between">
+                <span>💬 ខ្លឹមសារសារ (Template) [Name] ជំនួសដោយឈ្មោះអតិថិជន ៖</span>
+              </label>
+              <textarea
+                value={autoReplyTemplate}
+                onChange={e => setAutoReplyTemplate(e.target.value)}
+                rows={3}
+                className="w-full bg-slate-950 text-slate-100 border border-[#1C2B4B] focus:border-cyan-400 p-2.5 rounded-xl text-xs outline-none leading-relaxed"
+                placeholder="វាយបញ្ចូលខ្លឹមសារសារ..."
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[10.5px] font-medium text-emerald-400">
+                {autoReplyFeedback || (autoReplyEnabled ? '🟢 កំពុងបើកដំណើរការ Auto Reply' : '⚪ កំពុងបិទ')}
+              </span>
+              <button
+                type="button"
+                disabled={savingAutoReply}
+                onClick={handleSaveAutoReply}
+                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-4 py-1.5 rounded-xl text-xs active:scale-95 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              >
+                {savingAutoReply ? 'កំពុងរក្សាទុក...' : '💾 រក្សាទុកការកំណត់ Auto Reply'}
+              </button>
             </div>
           </div>
 

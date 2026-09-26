@@ -9,6 +9,7 @@ import {
   activeLiveId,
   settings
 } from './db';
+import { sendFacebookReply } from './fbAuth';
 import { DeliveryZone, Invoice, OrderItem, CustomerComment } from './types';
 import { detectDeliveryZone } from './locationHelper';
 import {
@@ -124,6 +125,7 @@ export interface ParseCommentResult {
 }
 
 const processedCommentKeys = new Set<string>();
+export const sentPrivateRepliesByLive = new Map<string, Set<string>>();
 
 export function parseAndAllocateComment(
   fbUserId: string,
@@ -559,6 +561,27 @@ export function parseAndAllocateComment(
   }
 
   if (allocated.length > 0) {
+    if (settings.auto_private_reply_enabled && savedCommentId) {
+      const custKey = fbUserId && fbUserId !== 'FB_USER_ID_STREAM' ? fbUserId : cleanFbName.toLowerCase();
+      if (!sentPrivateRepliesByLive.has(liveId)) {
+        sentPrivateRepliesByLive.set(liveId, new Set());
+      }
+      const liveSet = sentPrivateRepliesByLive.get(liveId)!;
+      if (!liveSet.has(custKey)) {
+        liveSet.add(custKey);
+        const template = settings.auto_private_reply_template || 'ជម្រាបសួរ [Name]! អរគុណសម្រាប់ការកុម្ម៉ង់ទំនិញក្នុង Live។ ប្រព័ន្ធបានកត់ត្រាការកក់របស់បងរួចរាល់ហើយ។ សូមបងផ្ញើលេខទូរស័ព្ទ និងទីតាំង ដើម្បីខាងប្អូនរៀបចំវេចខ្ចប់ជូនបង។ អរគុណ!';
+        const msg = template.replace(/\[Name\]/gi, cleanFbName);
+
+        sendFacebookReply(savedCommentId, fbUserId && fbUserId !== 'FB_USER_ID_STREAM' ? fbUserId : null, msg)
+          .then(res => {
+            console.log(`[Auto Private Reply] Sent to ${cleanFbName} (Live: ${liveId}): success=${res.success}`);
+          })
+          .catch(err => {
+            console.error(`[Auto Private Reply] Error sending to ${cleanFbName}:`, err);
+          });
+      }
+    }
+
     const summary = allocated.map(a => `[${a.code}x${a.quantity}]`).join(' ');
     return {
       status: 'SUCCESS',

@@ -59,6 +59,10 @@ export default function App() {
   const [selectedLiveId, setSelectedLiveId] = useState<string>(() => {
     return localStorage.getItem('selectedLiveId') || '1626350178950100';
   });
+  const selectedLiveIdRef = useRef<string>(selectedLiveId);
+  useEffect(() => {
+    selectedLiveIdRef.current = selectedLiveId;
+  }, [selectedLiveId]);
   const [activePage, setActivePage] = useState<FacebookPage | null>(null);
   const [currentRevision, setCurrentRevision] = useState<number>(0);
   const currentRevisionRef = useRef<number>(0);
@@ -715,7 +719,7 @@ export default function App() {
     isFetchingInvoicesRef.current = true;
 
     try {
-      const targetLive = overrideLiveId !== undefined ? overrideLiveId : selectedLiveId;
+      const targetLive = overrideLiveId !== undefined ? overrideLiveId : selectedLiveIdRef.current;
       const targetRev = overrideRev !== undefined ? overrideRev : currentRevisionRef.current;
       const res = await fetch(`/api/invoices?live_id=${encodeURIComponent(targetLive)}&rev=${targetRev}&t=${Date.now()}`);
       if (!res.ok) {
@@ -740,6 +744,11 @@ export default function App() {
 
       // CRITICAL: Drop any stale poll response that was generated before a client-side mutation!
       if (typeof json.revision === 'number' && json.revision < currentRevisionRef.current) {
+        return;
+      }
+
+      // Guard: If response is for another session and user switched session, discard
+      if (overrideLiveId === undefined && targetLive !== selectedLiveIdRef.current) {
         return;
       }
 
@@ -790,15 +799,16 @@ export default function App() {
     return products.filter(p => (p.stock_qty ?? 0) > 0).length;
   }, [products]);
 
-  // Data Fetching: Products and Stock (filtered by liveId)
+  // Data Fetching: Products and Stock (filtered strictly by liveId)
   const fetchStock = async (liveId?: string) => {
     try {
-      const targetLive = liveId || selectedLiveId;
-      const url = targetLive ? `/api/obs_data?live_id=${encodeURIComponent(targetLive)}` : '/api/obs_data';
+      const targetLive = liveId || selectedLiveIdRef.current;
+      const url = targetLive ? `/api/obs_data?live_id=${encodeURIComponent(targetLive)}&t=${Date.now()}` : `/api/obs_data?t=${Date.now()}`;
       const res = await fetch(url);
       if (res.ok) {
         const json = await res.json();
-        if (json.products) {
+        // Guard: only apply products if this response belongs to the currently active live session!
+        if (json.products && (!targetLive || targetLive === selectedLiveIdRef.current)) {
           setProducts(json.products);
         }
       }
@@ -834,6 +844,7 @@ export default function App() {
         }
 
         if (chosenId && chosenId !== selectedLiveId) {
+          selectedLiveIdRef.current = chosenId;
           setSelectedLiveId(chosenId);
           localStorage.setItem('selectedLiveId', chosenId);
           fetchInvoices(chosenId, 0);
@@ -844,9 +855,12 @@ export default function App() {
   };
 
   const handleSelectLiveSession = (id: string) => {
+    selectedLiveIdRef.current = id;
     setSelectedLiveId(id);
     localStorage.setItem('selectedLiveId', id);
     setCurrentRevision(0);
+    currentRevisionRef.current = 0;
+    setProducts([]); // Clear old session's products immediately
     fetchInvoices(id, 0);
     fetchStock(id);
     fetchBacklogCount(id);
@@ -966,7 +980,7 @@ export default function App() {
     fetchStock();
     fetchLiveSessions();
     fetchPackerStats();
-    fetchBacklogCount(selectedLiveId);
+    fetchBacklogCount(selectedLiveIdRef.current);
     fetchAllLivePaidInvoices();
     fetchAllLiveDispatchedInvoices();
 
@@ -978,10 +992,10 @@ export default function App() {
       })
       .catch(() => {});
 
-    const invTimer = setInterval(fetchInvoices, 2000);
-    const stockTimer = setInterval(fetchStock, 6000);
+    const invTimer = setInterval(() => fetchInvoices(), 2000);
+    const stockTimer = setInterval(() => fetchStock(), 6000);
     const packerTimer = setInterval(fetchPackerStats, 6000);
-    const backlogTimer = setInterval(() => fetchBacklogCount(selectedLiveId), 6000);
+    const backlogTimer = setInterval(() => fetchBacklogCount(selectedLiveIdRef.current), 6000);
     const allLiveQcTimer = setInterval(fetchAllLivePaidInvoices, 5000);
     const allLiveDispatchedTimer = setInterval(fetchAllLiveDispatchedInvoices, 5000);
 
@@ -1670,6 +1684,7 @@ export default function App() {
         invoice={qcInvoice}
         packerName={packerName}
         productMap={productMap}
+        activeLiveId={selectedLiveId}
         onOpenZoomModal={(c, n, img, pr, sq) => {
           setZoomCode(c);
           setZoomName(n);
@@ -1703,8 +1718,8 @@ export default function App() {
         isAddingNew={isAddingNewStock}
         activeLiveId={selectedLiveId}
         onStockUpdated={() => {
-          fetchStock();
-          fetchInvoices();
+          fetchStock(selectedLiveIdRef.current);
+          fetchInvoices(selectedLiveIdRef.current);
         }}
         onShowToast={showToast}
         onOpenSync={handleOpenStockSync}
@@ -1776,8 +1791,8 @@ export default function App() {
         activeLiveId={selectedLiveId}
         onToggleItemCheck={handleToggleItemCheck}
         onPhotoUploaded={() => {
-          fetchStock();
-          fetchInvoices();
+          fetchStock(selectedLiveIdRef.current);
+          fetchInvoices(selectedLiveIdRef.current);
         }}
         onShowToast={showToast}
       />
@@ -1920,8 +1935,8 @@ export default function App() {
         }}
         onOpenStockSync={handleOpenStockSync}
         onStockUpdated={() => {
-          fetchStock();
-          fetchInvoices();
+          fetchStock(selectedLiveIdRef.current);
+          fetchInvoices(selectedLiveIdRef.current);
         }}
         onShowToast={showToast}
         onOpenZoomModal={handleOpenZoomModal}

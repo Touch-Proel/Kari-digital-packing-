@@ -305,6 +305,7 @@ export function ImageZoomModal({
   const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (e.target) e.target.value = '';
 
     setUploading(true);
     try {
@@ -343,9 +344,13 @@ export function ImageZoomModal({
                 })
               });
               const data = await res.json();
-              if (data.success) {
+              if (data.success && data.image_url) {
+                const freshUrl = `${data.image_url}?t=${Date.now()}`;
+                setLocalItems(prev => prev.map((item, idx) => idx === currentIndex ? { ...item, imageUrl: freshUrl } : item));
                 onShowToast?.(`📸 បានបញ្ចូលរូបភាពសម្រាប់ [${currentItem.code}] ជោគជ័យ!`);
                 onPhotoUploaded?.();
+              } else {
+                onShowToast?.(data.error || 'បរាជ័យក្នុងការ Upload រូបភាព', 'error');
               }
             } catch (err) {
               onShowToast?.('បរាជ័យក្នុងការ Upload រូបភាព', 'error');

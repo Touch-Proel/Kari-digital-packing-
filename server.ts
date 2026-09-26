@@ -54,8 +54,8 @@ app.get('/uploads/:filename', (req: Request, res: Response) => {
   for (const dir of possibleDirs) {
     const fullPath = path.join(dir, filename);
     if (fs.existsSync(fullPath)) {
-      // Long-term immutable caching (images have timestamp/date in filename)
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      // Fast image serving with fresh revalidation so manual updates reflect instantly
+      res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
       const ext = path.extname(filename).toLowerCase();
       if (ext === '.png') res.setHeader('Content-Type', 'image/png');
       else if (ext === '.webp') res.setHeader('Content-Type', 'image/webp');
@@ -71,8 +71,7 @@ app.get('/uploads/:filename', (req: Request, res: Response) => {
 });
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads'), {
-  maxAge: '30d',
-  immutable: true
+  maxAge: '1h'
 }));
 
 // -------------------------------------------------------------

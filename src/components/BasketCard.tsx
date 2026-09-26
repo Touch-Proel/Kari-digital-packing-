@@ -1481,16 +1481,18 @@ function BasketCardComponent({
                 : item.product_code.toUpperCase();
               const activeProd = productMap ? productMap[activeTypedCode] : prod;
 
-              const isCurrentLiveOrder = !activeLiveId || invoice.live_id === activeLiveId;
+              const isCurrentLiveOrder = Boolean(activeLiveId && invoice.live_id === activeLiveId);
 
               // Session-Isolated Image with real-time quick edit preview
-              const displayImage = (isCurrentLiveOrder && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' && activeProd?.image_file && activeProd.image_file.trim() !== '')
-                ? activeProd.image_file
-                : (item.image_file && item.image_file.trim() !== '' ? item.image_file : (activeProd?.image_file || ''));
+              const displayImage = isCurrentLiveOrder
+                ? ((invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' && activeProd?.image_file && activeProd.image_file.trim() !== '')
+                    ? activeProd.image_file
+                    : (item.image_file && item.image_file.trim() !== '' ? item.image_file : (activeProd?.image_file || '')))
+                : (item.image_file && item.image_file.trim() !== '' ? item.image_file : '');
 
               const displayPrice = isEditingThisCode && typeof activeProd?.price === 'number'
                 ? activeProd.price
-                : (typeof activeProd?.price === 'number' && activeProd.price > 0 && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED'
+                : (isCurrentLiveOrder && typeof activeProd?.price === 'number' && activeProd.price > 0 && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED'
                   ? activeProd.price
                   : (item.price || 0));
 
@@ -1544,10 +1546,12 @@ function BasketCardComponent({
                         e.stopPropagation();
                         const allBasketZoomItems = (invoice.items || []).map(it => {
                           const p = productMap ? (productMap[it.product_code.toUpperCase()] || productMap[it.product_code]) : undefined;
-                          const itImg = (isCurrentLiveOrder && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' && p?.image_file && p.image_file.trim() !== '')
-                            ? p.image_file
-                            : (it.image_file && it.image_file.trim() !== '' ? it.image_file : (p?.image_file || (it as any).image_url || (p as any)?.image_url || ''));
-                          const itPrice = typeof p?.price === 'number' && p.price > 0 && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED'
+                          const itImg = isCurrentLiveOrder
+                            ? ((invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED' && p?.image_file && p.image_file.trim() !== '')
+                                ? p.image_file
+                                : (it.image_file && it.image_file.trim() !== '' ? it.image_file : (p?.image_file || '')))
+                            : (it.image_file && it.image_file.trim() !== '' ? it.image_file : '');
+                          const itPrice = isCurrentLiveOrder && typeof p?.price === 'number' && p.price > 0 && invoice.status !== 'Dispatched' && invoice.packing_stage !== 'DISPATCHED'
                             ? p.price
                             : (it.price || 0);
                           const isItChecked = checkedState[`${invoice.invoice_id}_${it.product_code}`] ?? ((invoice as any).checked_items || []).includes(it.product_code);

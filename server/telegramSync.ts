@@ -312,10 +312,8 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
     const m5 = trimmed.match(pat5);
     if (m5) {
       const code = m5[1].trim().toUpperCase();
-      // Look up if product exists to keep its price, else default to 0 or 5
-      const existing = products.find(p => p.code.toUpperCase() === code);
-      const price = existing?.price || 5.0;
-      items.push({ code, price, name: existing?.name || `កូដ ${code}` });
+      const price = 5.0;
+      items.push({ code, price, name: `កូដ ${code}` });
       continue;
     }
   }

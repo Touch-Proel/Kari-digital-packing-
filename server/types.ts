@@ -122,6 +122,8 @@ export interface AppSettings {
   admin_pin?: string;
   parser_strict_catalog?: boolean;
   parser_allow_standalone?: boolean;
+  auto_private_reply_enabled?: boolean;
+  auto_private_reply_template?: string;
 }
 
 export interface FacebookPage {

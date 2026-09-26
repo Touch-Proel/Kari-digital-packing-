@@ -9,6 +9,7 @@ interface QCModalProps {
   invoice: Invoice | null;
   packerName: string;
   productMap?: Record<string, Product>;
+  activeLiveId?: string;
   onOpenZoomModal?: (
     code: string,
     name: string,
@@ -29,6 +30,7 @@ export function QCModal({
   invoice,
   packerName,
   productMap,
+  activeLiveId,
   onOpenZoomModal,
   onDispatchSuccess,
   onShowToast
@@ -111,8 +113,9 @@ export function QCModal({
           {(invoice.items || []).map((it, idx) => {
             const isVerified = verifiedMap[it.product_code] ?? true;
             const codeUpper = (it.product_code || '').trim().toUpperCase();
-            const prod = productMap ? productMap[codeUpper] : undefined;
-            const displayImage = it.image_file && it.image_file.trim() !== '' ? it.image_file : prod?.image_file;
+            const isSameLive = Boolean(!activeLiveId || !invoice.live_id || invoice.live_id === activeLiveId);
+            const prod = (isSameLive && productMap) ? productMap[codeUpper] : undefined;
+            const displayImage = it.image_file && it.image_file.trim() !== '' ? it.image_file : (isSameLive ? prod?.image_file : '');
 
             return (
               <div
@@ -131,13 +134,13 @@ export function QCModal({
                     if (displayImage && onOpenZoomModal && invoice) {
                       e.stopPropagation();
                       const allQcZoomItems = (invoice.items || []).map(item => {
-                        const p = productMap ? (productMap[item.product_code.toUpperCase()] || productMap[item.product_code]) : undefined;
-                        const img = (item.image_file && item.image_file.trim() !== '') ? item.image_file : (p?.image_file || (item as any).image_url || (p as any)?.image_url || '');
+                        const p = (isSameLive && productMap) ? (productMap[item.product_code.toUpperCase()] || productMap[item.product_code]) : undefined;
+                        const img = (item.image_file && item.image_file.trim() !== '') ? item.image_file : (isSameLive ? (p?.image_file || '') : '');
                         return {
                           code: item.product_code,
                           name: item.product_name || p?.name || `កូដ ${item.product_code}`,
                           imageUrl: img,
-                          price: item.price !== undefined ? item.price : p?.price,
+                          price: item.price !== undefined ? item.price : (isSameLive ? p?.price : 0),
                           stockQty: p?.stock_qty,
                           quantity: item.quantity || 1,
                           comment: item.item_comment || undefined,
