@@ -507,7 +507,7 @@ export function StockModal({
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-400 font-bold">$</span>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 value={price}
                 onChange={e => setPrice(Math.max(0, parseFloat(e.target.value) || 0))}

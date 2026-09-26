@@ -709,7 +709,7 @@ export function ImageZoomModal({
                 <span className="text-amber-400 font-mono font-black text-sm pl-1">$</span>
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   autoFocus
                   value={editPriceVal}
                   onChange={e => setEditPriceVal(e.target.value)}

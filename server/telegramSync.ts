@@ -803,6 +803,8 @@ export function startTelegramAutoSync(intervalSec = 10, targetLiveId?: string) {
   tgAutoSyncState.enabled = true;
   if (targetLiveId) {
     tgAutoSyncState.targetLiveId = targetLiveId;
+  } else if (!tgAutoSyncState.targetLiveId) {
+    tgAutoSyncState.targetLiveId = activeLiveId;
   }
 
   if (tgAutoSyncTimer) {
