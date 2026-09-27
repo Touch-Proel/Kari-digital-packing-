@@ -139,6 +139,18 @@ function BasketCardComponent({
   const [manualCodeInput, setManualCodeInput] = useState('');
   const [manualQtyInput, setManualQtyInput] = useState(1);
   const [manualCommentSource, setManualCommentSource] = useState('');
+  const [manualNoteInput, setManualNoteInput] = useState('');
+
+  // Check if entered manual code matches any existing live comment by customer
+  const matchedCustomerComment = useMemo(() => {
+    if (!manualCodeInput.trim()) return null;
+    const clean = convertKhmerNumeralsToGlobal(manualCodeInput).trim().toUpperCase();
+    return invoice.comments?.find(c => {
+      const converted = convertKhmerNumeralsToGlobal(c || '');
+      const codeRegex = new RegExp(`(^|\\D)${clean}(\\D|$)`, 'i');
+      return codeRegex.test(converted);
+    }) || null;
+  }, [manualCodeInput, invoice.comments]);
 
   // Contact Inline Editing
   const [editingPhone, setEditingPhone] = useState(false);
@@ -898,11 +910,13 @@ function BasketCardComponent({
     playSuccessFanfare();
     const stockProd = productMap ? productMap[cleanCode] : undefined;
     const addQty = manualQtyInput || 1;
+    const finalComment = manualCommentSource || matchedCustomerComment || (manualNoteInput.trim() ? `[ចំណាំ] ${manualNoteInput.trim()}` : '');
+
     onOptimisticAddItem?.(
       invoice.invoice_id,
       cleanCode,
       addQty,
-      manualCommentSource || undefined,
+      finalComment || undefined,
       stockProd?.price,
       stockProd?.image_file,
       stockProd?.name
@@ -910,8 +924,8 @@ function BasketCardComponent({
     setIsAddingManualCode(false);
     setManualCodeInput('');
     setManualQtyInput(1);
-    const commentSource = manualCommentSource;
     setManualCommentSource('');
+    setManualNoteInput('');
 
     try {
       const res = await fetch('/api/add_item_to_invoice', {
@@ -921,7 +935,7 @@ function BasketCardComponent({
           invoice_id: invoice.invoice_id,
           code: cleanCode,
           quantity: addQty,
-          comment_text: commentSource || undefined,
+          comment_text: finalComment || undefined,
           packer_name: myPackerName
         })
       });
@@ -1517,19 +1531,25 @@ function BasketCardComponent({
                 const codeRegex = new RegExp(`(^|\\D)${item.product_code}(\\D|$)`, 'i');
                 return codeRegex.test(converted);
               });
-              let rawNoteText = item.item_comment || matchingComment || (invoice.comments && invoice.comments[0]) || '';
+              // Never fallback to an arbitrary invoice.comments[0] belonging to another code!
+              let rawNoteText = item.item_comment || matchingComment || '';
               // If item.item_comment is just a size/tag but matchingComment contains the full original comment, keep the full original!
               if (matchingComment && (!item.item_comment || item.item_comment.length < matchingComment.length)) {
                 rawNoteText = matchingComment;
               }
               const noteText = convertKhmerNumeralsToGlobal(rawNoteText);
+              const isManualNote = Boolean(
+                item.item_comment &&
+                (item.item_comment.startsWith('[ចំណាំ]') || !matchingComment)
+              );
 
-              // Smart Code Mismatch Detection
+              // Smart Code Mismatch Detection ONLY for live comments, never for intentional manual notes!
               const isCodeInNote = Boolean(
                 noteText && new RegExp(`(^|\\D)${item.product_code}(\\D|$)`, 'i').test(noteText)
               );
-              const detectedInNote = noteText ? parseQuickComment(noteText) : null;
+              const detectedInNote = (!isManualNote && noteText) ? parseQuickComment(noteText) : null;
               const hasMismatchCode = Boolean(
+                !isManualNote &&
                 noteText &&
                 !isCodeInNote &&
                 detectedInNote?.code &&
@@ -1708,37 +1728,47 @@ function BasketCardComponent({
                         })()}
                       </div>
 
-                      {/* Row 2: Customer Comment Text as Clean Subtitle (No bulky border or background frame) */}
+                      {/* Row 2: Customer Comment Text as Clean Subtitle OR Manual Note Badge */}
                       {noteText && (
-                        <div className={`text-xs mt-1 break-words whitespace-normal leading-snug flex flex-col gap-1 ${
-                          hasMismatchCode
-                            ? 'bg-rose-950/60 border border-rose-500/70 text-rose-100 px-2 py-1 rounded-lg shadow-[0_0_12px_rgba(244,63,94,0.2)]'
-                            : 'text-amber-200/85 font-medium pl-0.5'
-                        }`}>
-                          <div className="flex items-start gap-1">
-                            <span className="text-[11px] opacity-70 flex-shrink-0 select-none">💬</span>
-                            <span>{renderCommentWithHighlightedCode(noteText, activeTypedCode || item.product_code)}</span>
+                        isManualNote ? (
+                          <div className="text-xs mt-1 break-words whitespace-normal leading-snug flex items-center gap-1.5 text-cyan-200/90 bg-cyan-950/40 border border-cyan-800/60 px-2 py-0.5 rounded-lg w-fit">
+                            <span className="text-[11px] select-none">📝</span>
+                            <span className="font-semibold">{noteText.replace(/^\[ចំណាំ\]\s*/i, '')}</span>
+                            <span className="text-[9px] bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 px-1 rounded font-bold uppercase tracking-wider">
+                              ដោយដៃ
+                            </span>
                           </div>
-
-                          {/* Instant 1-Click Code Correction when Mismatch Detected */}
-                          {hasMismatchCode && detectedInNote && (
-                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-rose-500/40 text-[11px] font-bold text-rose-200">
-                              <span className="flex items-center gap-1 min-w-0 truncate">
-                                <span className="text-amber-300 flex-shrink-0">⚠️</span>
-                                <span className="truncate">ខមិនកូដ [{detectedInNote.code}] មិនមែន [{item.product_code}]</span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => handleQuickSwitchCode(item, detectedInNote.code, detectedInNote.qty, e)}
-                                disabled={isSavingCode}
-                                className="bg-rose-500 hover:bg-rose-400 active:scale-95 text-slate-950 px-2 py-0.5 rounded-md font-black text-[10px] shadow transition-all cursor-pointer flex-shrink-0"
-                                title={`ចុចដើម្បីប្តូរកូដទំនិញនេះទៅ [${detectedInNote.code}] ភ្លាមៗ`}
-                              >
-                                👉 ប្តូរទៅ [{detectedInNote.code}] ភ្លាម
-                              </button>
+                        ) : (
+                          <div className={`text-xs mt-1 break-words whitespace-normal leading-snug flex flex-col gap-1 ${
+                            hasMismatchCode
+                              ? 'bg-rose-950/60 border border-rose-500/70 text-rose-100 px-2 py-1 rounded-lg shadow-[0_0_12px_rgba(244,63,94,0.2)]'
+                              : 'text-amber-200/85 font-medium pl-0.5'
+                          }`}>
+                            <div className="flex items-start gap-1">
+                              <span className="text-[11px] opacity-70 flex-shrink-0 select-none">💬</span>
+                              <span>{renderCommentWithHighlightedCode(noteText, activeTypedCode || item.product_code)}</span>
                             </div>
-                          )}
-                        </div>
+
+                            {/* Instant 1-Click Code Correction when Mismatch Detected */}
+                            {hasMismatchCode && detectedInNote && (
+                              <div className="flex items-center justify-between gap-2 pt-1 border-t border-rose-500/40 text-[11px] font-bold text-rose-200">
+                                <span className="flex items-center gap-1 min-w-0 truncate">
+                                  <span className="text-amber-300 flex-shrink-0">⚠️</span>
+                                  <span className="truncate">ខមិនកូដ [{detectedInNote.code}] មិនមែន [{item.product_code}]</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleQuickSwitchCode(item, detectedInNote.code, detectedInNote.qty, e)}
+                                  disabled={isSavingCode}
+                                  className="bg-rose-500 hover:bg-rose-400 active:scale-95 text-slate-950 px-2 py-0.5 rounded-md font-black text-[10px] shadow transition-all cursor-pointer flex-shrink-0"
+                                  title={`ចុចដើម្បីប្តូរកូដទំនិញនេះទៅ [${detectedInNote.code}] ភ្លាមៗ`}
+                                >
+                                  👉 ប្តូរទៅ [{detectedInNote.code}] ភ្លាម
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )
                       )}
 
                       {/* Row 3: Price */}
@@ -2021,11 +2051,57 @@ function BasketCardComponent({
                     type="button"
                     disabled={isSubmittingManualAdd}
                     onClick={executeManualAddCode}
-                    className="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-50 text-white font-black text-xs px-3.5 py-2 rounded-xl active:scale-95 shadow transition-all whitespace-nowrap"
+                    className="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-50 text-white font-black text-xs px-3.5 py-2 rounded-xl active:scale-95 shadow transition-all whitespace-nowrap cursor-pointer"
                   >
                     {isSubmittingManualAdd ? '⏳ កំពុងកាត់...' : '➕ កាត់ចូល'}
                   </button>
                 </div>
+
+                {/* Intelligent Feedback: Show Matched Comment OR Manual Note Box */}
+                {manualCodeInput.trim() && !manualCommentSource && (
+                  matchedCustomerComment ? (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/50 border border-emerald-500/50 text-emerald-200 text-xs animate-fadeIn">
+                      <span className="text-sm flex-shrink-0">💬</span>
+                      <span className="font-semibold truncate">ត្រូវនឹងខមិនភ្ញៀវ៖ "{matchedCustomerComment}"</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-[#09152B] border border-amber-500/50 animate-fadeIn">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-amber-300">
+                        <span className="flex items-center gap-1">
+                          <span>📝</span>
+                          <span>គ្មានខមិនកូដ [{manualCodeInput}] ក្នុង Live — ដាក់ចំណាំដោយដៃ ៖</span>
+                        </span>
+                        <span className="text-[10px] text-amber-400/80">(Manual Note)</span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ឧ. ឆាតតាមផេក, ខលកុម្ម៉ង់ថែម, ភ្ញៀវប្តូរម៉ូត..."
+                        value={manualNoteInput}
+                        onChange={e => setManualNoteInput(e.target.value)}
+                        className="bg-slate-950 border border-amber-500/50 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 outline-none focus:border-amber-400 font-medium"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') executeManualAddCode();
+                        }}
+                      />
+                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                        {['💬 ឆាតមកផេក', '📞 ខលមកថែម', '🔄 ភ្ញៀវប្តូរម៉ូត', '🎁 ថែមជូន'].map(chip => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => setManualNoteInput(chip)}
+                            className={`px-2 py-0.5 rounded-md text-[10.5px] font-bold border transition-all active:scale-95 cursor-pointer ${
+                              manualNoteInput === chip
+                                ? 'bg-amber-500 text-slate-950 border-amber-300 font-black'
+                                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white hover:border-amber-400'
+                            }`}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                )}
               </div>
             ) : (
               /* Button matching Capture.PNG: + ថែមកូដទំនិញថ្មីដោយដៃចូលកន្ត្រក #... */
