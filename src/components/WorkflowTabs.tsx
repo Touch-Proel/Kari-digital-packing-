@@ -220,19 +220,21 @@ export function WorkflowTabs({
             🏕️ ខេត្ត
           </button>
 
-          {emptyBasketsCount > 0 && (
-            <button
-              type="button"
-              onClick={() => onSetSubFilter(activeSubFilter === 'EMPTY' ? 'ALL' : 'EMPTY')}
-              className={`py-1 px-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ml-auto ${
-                activeSubFilter === 'EMPTY'
-                  ? 'bg-rose-500/30 border-rose-400 text-rose-200'
-                  : 'bg-rose-950/30 border-rose-900/50 text-rose-300 hover:border-rose-700'
-              }`}
-            >
-              🗑️ ទទេ ({emptyBasketsCount})
-            </button>
-          )}
+          {/* 🗑️ Empty Baskets Filter Button (Always visible so staff can view kept empty baskets) */}
+          <button
+            type="button"
+            onClick={() => onSetSubFilter(activeSubFilter === 'EMPTY' ? 'ALL' : 'EMPTY')}
+            className={`py-1 px-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all active:scale-95 border cursor-pointer ${
+              activeSubFilter === 'EMPTY'
+                ? 'bg-rose-500/30 border-rose-400 text-rose-200 shadow-sm font-black'
+                : emptyBasketsCount > 0
+                  ? 'bg-rose-950/25 border-rose-800/50 text-rose-300 hover:border-rose-600'
+                  : 'bg-[#080E1C] border-slate-800 text-slate-500 hover:text-slate-300'
+            }`}
+            title="កន្ត្រកដែលដកកូដចេញអស់ ($0.00 / 0 មុខ)"
+          >
+            <span>🗑️ ទទេ ({emptyBasketsCount})</span>
+          </button>
         </div>
       )}
 
@@ -423,26 +425,7 @@ export function WorkflowTabs({
         </div>
       )}
 
-      {/* 🧹 EMPTY BASKETS BULK CLEANUP BANNER */}
-      {(currentStage === 1 || currentStage === 2) && activeSubFilter === 'EMPTY' && (
-        <div className="flex items-center justify-between p-2 bg-[#1a080c]/90 border border-rose-500/40 rounded-xl shadow-md">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-base">🗑️</span>
-            <span className="text-xs font-bold text-rose-200 truncate">
-              កន្ត្រកទទេគ្មានទំនិញ ({totalFilteredBaskets} កន្ត្រក)
-            </span>
-          </div>
-          {onCleanEmptyBaskets && totalFilteredBaskets > 0 && (
-            <button
-              type="button"
-              onClick={onCleanEmptyBaskets}
-              className="px-2.5 py-1 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white rounded-lg text-xs font-black shadow-sm flex items-center gap-1 active:scale-95 transition-all border border-rose-400/50 cursor-pointer flex-shrink-0"
-            >
-              <span>🧹 សម្អាត ({totalFilteredBaskets})</span>
-            </button>
-          )}
-        </div>
-      )}
+
 
       {/* 🔍 ROW 3: SEARCH BAR & SCANNER & BASKET COUNT */}
       <div className="flex gap-1.5 items-center">
