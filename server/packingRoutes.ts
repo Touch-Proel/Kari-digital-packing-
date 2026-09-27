@@ -373,7 +373,7 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
       shipping_fee: shippingFee,
       total_amount: total,
       comments: inv.comments || [],
-      location_zone: inv.location_zone || 'PP',
+      location_zone: inv.location_zone === 'PP' ? 'PP' : 'PROVINCE',
       created_at: inv.created_at || (inv as any).timestamp,
       is_dispatched: isDispatched,
       is_picked: isPicked,
@@ -645,6 +645,37 @@ router.post('/update_invoice_zone', (req: Request, res: Response) => {
   inv.is_free_ship = false;
   inv.shipping_fee = 2.0;
   recalculateInvoice(inv);
+
+  // VIP Customer Memory: Permanently lock customer zone so tomorrow/future lives remember this choice!
+  const cleanName = (inv.facebook_name || '').trim().toLowerCase();
+  const targetUserId = inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' ? inv.facebook_user_id : undefined;
+
+  let cust = targetUserId
+    ? customers.find(c => c.facebook_user_id === targetUserId)
+    : customers.find(c => c.facebook_name.toLowerCase() === cleanName);
+
+  if (cust) {
+    cust.location_zone = inv.location_zone;
+    cust.location_label = inv.location_label;
+    cust.is_zone_locked = true;
+    cust.last_interaction_at = new Date().toISOString();
+  } else if (cleanName) {
+    const nextCustId = customers.length > 0 ? Math.max(...customers.map(c => c.customer_id)) + 1 : 1;
+    customers.push({
+      customer_id: nextCustId,
+      facebook_user_id: targetUserId || `GEN_${Date.now()}`,
+      facebook_name: inv.facebook_name,
+      phone_number: inv.phone_number,
+      address: inv.address,
+      location_zone: inv.location_zone,
+      location_label: inv.location_label,
+      is_zone_locked: true,
+      is_vip: false,
+      is_blacklist: false,
+      last_interaction_at: new Date().toISOString()
+    });
+  }
+
   bumpDataRevision();
 
   res.json({

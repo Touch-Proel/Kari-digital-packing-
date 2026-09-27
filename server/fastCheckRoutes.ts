@@ -637,12 +637,12 @@ router.get('/dispatched_all_lives', (_req: Request, res: Response) => {
         todayCount++;
         todayAmount += inv.total_amount || 0;
         if (inv.location_zone === 'PP') todayPpCount++;
-        else if (inv.location_zone === 'PROVINCE') todayProvinceCount++;
+        else todayProvinceCount++;
       }
 
       if (inv.location_zone === 'PP') {
         ppCount++;
-      } else if (inv.location_zone === 'PROVINCE') {
+      } else {
         provinceCount++;
       }
     }

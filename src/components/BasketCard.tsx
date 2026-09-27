@@ -113,11 +113,11 @@ function BasketCardComponent({
 
   // Optimistic Zone State for Instant Smooth Switching
   const [currentZone, setCurrentZone] = useState<'PP' | 'PROVINCE'>(
-    invoice.location_zone === 'PROVINCE' ? 'PROVINCE' : 'PP'
+    invoice.location_zone === 'PP' ? 'PP' : 'PROVINCE'
   );
 
   useEffect(() => {
-    setCurrentZone(invoice.location_zone === 'PROVINCE' ? 'PROVINCE' : 'PP');
+    setCurrentZone(invoice.location_zone === 'PP' ? 'PP' : 'PROVINCE');
   }, [invoice.location_zone]);
 
   // Stepper & Item Delete States

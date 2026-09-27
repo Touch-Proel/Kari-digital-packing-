@@ -87,6 +87,9 @@ export interface Customer {
   picture_url?: string;
   phone_number?: string;
   address?: string;
+  location_zone?: DeliveryZone;
+  location_label?: string;
+  is_zone_locked?: boolean;
   is_vip: boolean;
   is_blacklist: boolean;
   last_interaction_at?: string;

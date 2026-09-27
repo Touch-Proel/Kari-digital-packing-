@@ -1238,7 +1238,7 @@ export default function App() {
           return inv.location_zone === 'PP';
         }
         if (dispatchedTimeFilter === 'PROVINCE') {
-          return inv.location_zone === 'PROVINCE';
+          return inv.location_zone !== 'PP';
         }
       }
       return true;
@@ -1251,7 +1251,7 @@ export default function App() {
     if (activeSubFilter === 'PP') {
       filtered = filtered.filter(i => i.location_zone === 'PP');
     } else if (activeSubFilter === 'PROVINCE') {
-      filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
+      filtered = filtered.filter(i => i.location_zone !== 'PP');
     }
 
     if (activeSubFilter === 'AMOUNT_DESC') {
@@ -1289,7 +1289,7 @@ export default function App() {
     } else if (activeSubFilter === 'PP') {
       filtered = filtered.filter(i => i.location_zone === 'PP');
     } else if (activeSubFilter === 'PROVINCE') {
-      filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
+      filtered = filtered.filter(i => i.location_zone !== 'PP');
     }
 
     // Sort: In All Live QC, delayed orders (from older live sessions) are surfaced FIRST, followed by oldest orders
@@ -1310,7 +1310,7 @@ export default function App() {
     if (activeSubFilter === 'PP') {
       filtered = filtered.filter(i => i.location_zone === 'PP');
     } else if (activeSubFilter === 'PROVINCE') {
-      filtered = filtered.filter(i => i.location_zone === 'PROVINCE');
+      filtered = filtered.filter(i => i.location_zone !== 'PP');
     }
 
     filtered = [...filtered].sort((a, b) => {

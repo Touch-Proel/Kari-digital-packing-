@@ -207,6 +207,12 @@ function initTables(db: Database) {
     ['live_id', 'TEXT']
   ]);
 
+  ensureColumns('customers', [
+    ['location_zone', 'TEXT'],
+    ['location_label', 'TEXT'],
+    ['is_zone_locked', 'INTEGER DEFAULT 0']
+  ]);
+
   // Migration: Drop UNIQUE constraint on products.code if it exists from older schema
   try {
     const prodTableInfo = db.exec("SELECT sql FROM sqlite_master WHERE tbl_name = 'products' AND type = 'table';");
@@ -322,9 +328,20 @@ export async function persistToSqlite(data: {
 
       // 3. Customers
       db.run('DELETE FROM customers;');
-      const stmtCust = db.prepare('INSERT INTO customers (customer_id, facebook_user_id, facebook_name, phone_number, address, is_vip, is_blacklist) VALUES (?, ?, ?, ?, ?, ?, ?);');
+      const stmtCust = db.prepare('INSERT INTO customers (customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
       for (const c of data.customers) {
-        stmtCust.run([c.customer_id, c.facebook_user_id, c.facebook_name, c.phone_number || '', c.address || '', c.is_vip ? 1 : 0, c.is_blacklist ? 1 : 0]);
+        stmtCust.run([
+          c.customer_id,
+          c.facebook_user_id,
+          c.facebook_name,
+          c.phone_number || '',
+          c.address || '',
+          c.location_zone || 'PROVINCE',
+          c.location_label || (c.location_zone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត'),
+          c.is_zone_locked ? 1 : 0,
+          c.is_vip ? 1 : 0,
+          c.is_blacklist ? 1 : 0
+        ]);
       }
       stmtCust.free();
 
@@ -382,8 +399,8 @@ export async function persistToSqlite(data: {
           inv.facebook_name || 'អតិថិជន Live',
           inv.phone_number || '',
           inv.address || '',
-          inv.location_zone || 'PP',
-          inv.location_label || '🏙️ ភ្នំពេញ',
+          inv.location_zone === 'PP' ? 'PP' : 'PROVINCE',
+          inv.location_zone === 'PP' ? (inv.location_label || '🏙️ ភ្នំពេញ') : (inv.location_label || '🏞️ តាមខេត្ត'),
           inv.total_amount || 0,
           inv.shipping_fee || 2.0,
           inv.is_free_ship ? 1 : 0,
@@ -542,7 +559,7 @@ export async function loadFromSqlite(): Promise<{
     }
 
     // 3. Customers
-    const custRows = db.exec('SELECT customer_id, facebook_user_id, facebook_name, phone_number, address, is_vip, is_blacklist FROM customers ORDER BY customer_id ASC;');
+    const custRows = db.exec('SELECT customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist FROM customers ORDER BY customer_id ASC;');
     if (custRows.length > 0 && custRows[0].values) {
       result.customers = custRows[0].values.map((r: any) => ({
         customer_id: Number(r[0]),
@@ -550,8 +567,11 @@ export async function loadFromSqlite(): Promise<{
         facebook_name: String(r[2]),
         phone_number: String(r[3] || ''),
         address: String(r[4] || ''),
-        is_vip: Boolean(r[5]),
-        is_blacklist: Boolean(r[6])
+        location_zone: r[5] === 'PP' ? 'PP' : 'PROVINCE',
+        location_label: r[6] || (r[5] === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត'),
+        is_zone_locked: Boolean(r[7]),
+        is_vip: Boolean(r[8]),
+        is_blacklist: Boolean(r[9])
       }));
     }
 
@@ -589,8 +609,8 @@ export async function loadFromSqlite(): Promise<{
           facebook_name: String(rowObj.facebook_name || ''),
           phone_number: String(rowObj.phone_number || ''),
           address: String(rowObj.address || ''),
-          location_zone: rowObj.location_zone || 'PP',
-          location_label: rowObj.location_label || '🏙️ ភ្នំពេញ',
+          location_zone: rowObj.location_zone === 'PP' ? 'PP' : 'PROVINCE',
+          location_label: rowObj.location_zone === 'PP' ? (rowObj.location_label || '🏙️ ភ្នំពេញ') : (rowObj.location_label || '🏞️ តាមខេត្ត'),
           total_amount: Number(rowObj.total_amount || 0),
           shipping_fee: Number(rowObj.shipping_fee || 2.0),
           is_free_ship: Boolean(rowObj.is_free_ship),

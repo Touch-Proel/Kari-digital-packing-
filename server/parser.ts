@@ -361,15 +361,29 @@ export function parseAndAllocateComment(
 
     let resolvedPhone = phone || (canAutofillFromSavedCust ? cust?.phone_number : undefined) || 'គ្មានលេខ';
     let resolvedAddress = '⚠️ មិនទាន់មានអាសយដ្ឋាន';
-    let resolvedZone: DeliveryZone = 'UNKNOWN';
-    let resolvedLabel = '❓ មិនទាន់ដឹង';
+    let resolvedZone: DeliveryZone = 'PROVINCE';
+    let resolvedLabel = '🏞️ តាមខេត្ត';
 
     const custHasSavedAddr = canAutofillFromSavedCust && cust?.address && !cust.address.includes('មិនទាន់មាន') && cust.address !== '⚠️ មិនទាន់មានអាសយដ្ឋាន';
 
     if (hasExplicitLocation) {
-      resolvedAddress = detectedLocation || label;
-      resolvedZone = zone;
-      resolvedLabel = label;
+      // If customer has a locked PROVINCE preference, do not override it with generic PP words
+      if (cust?.is_zone_locked && cust.location_zone === 'PROVINCE' && zone === 'PP' && detectedLocation === 'ភ្នំពេញ') {
+        resolvedZone = 'PROVINCE';
+        resolvedLabel = cust.location_label || '🏞️ តាមខេត្ត';
+        resolvedAddress = custHasSavedAddr ? cust!.address! : '🏞️ តាមខេត្ត';
+      } else {
+        resolvedAddress = detectedLocation || label;
+        resolvedZone = zone;
+        resolvedLabel = label;
+      }
+    } else if (cust?.is_zone_locked && cust.location_zone) {
+      // VIP Memory: Staff previously locked this customer's zone, preserve it!
+      resolvedZone = cust.location_zone === 'PP' ? 'PP' : 'PROVINCE';
+      resolvedLabel = cust.location_label || (resolvedZone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត');
+      if (custHasSavedAddr) {
+        resolvedAddress = cust!.address!;
+      }
     } else if (custHasSavedAddr) {
       resolvedAddress = cust!.address!;
       const custZoneRes = detectDeliveryZone(resolvedAddress);
@@ -411,15 +425,23 @@ export function parseAndAllocateComment(
     if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) inv.phone_number = phone;
     
     if (hasExplicitLocation) {
-      inv.location_zone = zone;
-      inv.location_label = label;
-      if (detectedLocation) {
-        if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
-          inv.address = detectedLocation;
+      // If customer has a locked PROVINCE preference, do not override with generic PP words
+      if (cust?.is_zone_locked && cust.location_zone === 'PROVINCE' && zone === 'PP' && detectedLocation === 'ភ្នំពេញ') {
+        // Keep existing PROVINCE zone
+      } else {
+        inv.location_zone = zone;
+        inv.location_label = label;
+        if (detectedLocation) {
+          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
+            inv.address = detectedLocation;
+          }
+        } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
+          inv.address = label;
         }
-      } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
-        inv.address = label;
       }
+    } else if (cust?.is_zone_locked && cust.location_zone && (!inv.location_zone || inv.location_zone === 'UNKNOWN')) {
+      inv.location_zone = cust.location_zone;
+      inv.location_label = cust.location_label || (cust.location_zone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត');
     } else if (isVerifiedIdCustomer && (!inv.address || inv.address.includes('មិនទាន់មាន')) && cust?.address && !cust.address.includes('មិនទាន់មាន')) {
       inv.address = cust.address;
       const custZoneRes = detectDeliveryZone(cust.address);
