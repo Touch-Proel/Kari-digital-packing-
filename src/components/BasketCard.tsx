@@ -84,6 +84,7 @@ interface BasketCardProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onUndispatch?: (inv: Invoice) => void;
   onDeleteBasket?: (invId: number) => void;
+  onScanPingCustomer?: (inv: Invoice) => void;
 }
 
 function BasketCardComponent({
@@ -107,7 +108,8 @@ function BasketCardComponent({
   onUpdateInvoice,
   onShowToast,
   onUndispatch,
-  onDeleteBasket
+  onDeleteBasket,
+  onScanPingCustomer
 }: BasketCardProps) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -1418,6 +1420,20 @@ function BasketCardComponent({
                 <span className="text-amber-400 text-[11px]">✏️</span>
               </button>
             )}
+
+            {/* Quick Ping Messenger (#1 Meta Business Suite) */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onScanPingCustomer) onScanPingCustomer(invoice);
+              }}
+              className="bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-300 hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+              title="ផ្ញើសារ Ping ទៅកាន់ Messenger ភ្ញៀវ ដើម្បីឱ្យ Chat របស់គាត់លោតឡើងលេខ ១ លើគេបង្អស់ក្នុង Meta Business Suite"
+            >
+              <span className="text-sm">⚡</span>
+              <span>Ping Messenger (#1 Meta)</span>
+            </button>
 
             {/* Public Customer Order Link (Direct Photo & Order View) */}
             <button

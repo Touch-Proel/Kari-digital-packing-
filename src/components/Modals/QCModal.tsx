@@ -22,6 +22,7 @@ interface QCModalProps {
   ) => void;
   onDispatchSuccess: (invoiceId: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
+  onScanPingCustomer?: (inv: Invoice) => void;
 }
 
 export function QCModal({
@@ -33,7 +34,8 @@ export function QCModal({
   activeLiveId,
   onOpenZoomModal,
   onDispatchSuccess,
-  onShowToast
+  onShowToast,
+  onScanPingCustomer
 }: QCModalProps) {
   const [verifiedMap, setVerifiedMap] = useState<Record<string, boolean>>({});
 
@@ -105,6 +107,24 @@ export function QCModal({
             className="w-8 h-8 rounded-lg bg-slate-800 text-white font-bold flex items-center justify-center hover:bg-slate-700"
           >
             ✕
+          </button>
+        </div>
+
+        {/* Quick Action: Messenger Ping (Bumps Chat to #1 in Meta Business Suite) */}
+        <div className="px-3.5 pt-3 pb-0 flex items-center justify-between gap-2 bg-[#081226] border-b border-slate-800">
+          <div className="flex items-center gap-1.5 text-xs text-amber-300">
+            <span className="text-sm">⚡</span>
+            <span className="font-bold">Ping ឱ្យឆាតភ្ញៀវលោតលេខ #1 ក្នុង Meta</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (onScanPingCustomer) onScanPingCustomer(invoice);
+            }}
+            className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow-md active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+            title="ផ្ញើសារ Ping ទៅកាន់ Messenger ភ្ញៀវ ដើម្បីឱ្យ Chat របស់គាត់លោតឡើងលេខ ១ លើគេបង្អស់ក្នុង Meta Business Suite"
+          >
+            <span>⚡ Ping ភ្ញៀវឥឡូវ</span>
           </button>
         </div>
 

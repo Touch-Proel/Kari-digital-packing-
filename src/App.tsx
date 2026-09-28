@@ -32,7 +32,7 @@ import { BacklogModal } from './components/Modals/BacklogModal';
 import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
 import { CustomerOrderPortal } from './components/CustomerOrderPortal';
 import { AdminPinModal } from './components/Modals/AdminPinModal';
-import { CameraScannerModal } from './components/Modals/CameraScannerModal';
+import { CameraScannerModal, parseScannedText } from './components/Modals/CameraScannerModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -112,6 +112,23 @@ export default function App() {
       setToastMessage(null);
     }, 2200);
   }, []);
+
+  // ⚡ Last Pinged Customer State (Direct Meta Business Suite Link)
+  const [lastPingedCustomer, setLastPingedCustomer] = useState<{
+    basket_no: string | number;
+    customer_name: string;
+    meta_inbox_url?: string;
+    delivery_method?: string;
+    timestamp: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!lastPingedCustomer) return;
+    const t = setTimeout(() => {
+      setLastPingedCustomer(null);
+    }, 20000);
+    return () => clearTimeout(t);
+  }, [lastPingedCustomer]);
 
   const [checkedState, setCheckedState] = useState<Record<string, boolean>>(() => {
     try {
@@ -956,15 +973,15 @@ export default function App() {
     } catch (e) {}
   };
 
-  // 📷 In-App Camera Scanner Handler (Cross-Live Session Auto-Switch)
+  // 📷 In-App Camera Scanner Handler (Cross-Live Session Auto-Switch & Messenger Auto-Bump #1)
   const handleCameraScanSuccess = useCallback(async (scannedVal: string, scannedLiveId?: string) => {
     const cleanBasket = scannedVal.trim().replace(/^#/, '');
     setSearchQuery(cleanBasket);
     setActiveSubFilter('ALL');
 
     try {
-      // Query server to find basket & stage across ALL live sessions (prioritizing scannedLiveId if present)
-      const queryUrl = `/api/find_basket?basket=${encodeURIComponent(cleanBasket)}${scannedLiveId ? `&live=${encodeURIComponent(scannedLiveId)}` : ''}`;
+      // Query server to find basket & stage across ALL live sessions + trigger auto_ping to Messenger
+      const queryUrl = `/api/find_basket?basket=${encodeURIComponent(cleanBasket)}${scannedLiveId ? `&live=${encodeURIComponent(scannedLiveId)}` : ''}&auto_ping=1`;
       const res = await fetch(queryUrl);
       const data = await res.json();
 
@@ -1013,7 +1030,29 @@ export default function App() {
 
         playSuccessFanfare();
         const liveLabel = targetLive ? ` (Live #${targetLive.replace('LIVE_', '')})` : '';
-        showToast(`⚡ ស្កេនឃើញកន្ត្រក #${cleanBasket}${liveLabel} ក្នុងផ្នែក «${data.stage_name || 'ត្រួតពិនិត្យ'}»!`, 'success');
+
+        // If Messenger Ping succeeded, notify staff that conversation is bumped to #1 in Meta Business Suite!
+        if (data.ping_result && data.ping_result.pinged) {
+          setLastPingedCustomer({
+            basket_no: cleanBasket,
+            customer_name: data.customer_name,
+            meta_inbox_url: data.meta_inbox_url || data.ping_result.meta_inbox_url,
+            delivery_method: data.ping_result.delivery_title || 'Messenger',
+            timestamp: Date.now()
+          });
+          showToast(`⚡ ស្កេន #${cleanBasket}${liveLabel} ➔ បាន Ping ភ្ញៀវ (${data.customer_name}) លើ Messenger! (ឆាតលោតលើគេក្នុង Meta)`, 'success');
+        } else {
+          if (data.meta_inbox_url) {
+            setLastPingedCustomer({
+              basket_no: cleanBasket,
+              customer_name: data.customer_name,
+              meta_inbox_url: data.meta_inbox_url,
+              delivery_method: 'Inbox Direct',
+              timestamp: Date.now()
+            });
+          }
+          showToast(`⚡ ស្កេនឃើញកន្ត្រក #${cleanBasket}${liveLabel} ក្នុងផ្នែក «${data.stage_name || 'ត្រួតពិនិត្យ'}»!`, 'success');
+        }
       } else {
         playSuccessFanfare();
         showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
@@ -1023,6 +1062,38 @@ export default function App() {
       showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
     }
   }, [showToast, handleUpdateInvoice]);
+
+  // ⚡ Manual Ping Messenger for an Invoice (Bumps conversation to #1 in Meta Business Suite)
+  const handleManualScanPing = useCallback(async (inv: Invoice) => {
+    try {
+      showToast(`⏳ កំពុងផ្ញើសារ Ping ទៅកាន់ Messenger (${inv.facebook_name})...`);
+      const res = await fetch('/api/scan_ping_messenger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id: inv.invoice_id,
+          basket_no: inv.basket_no,
+          live_id: inv.live_id
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.pinged) {
+        playSuccessFanfare();
+        showToast(`⚡ បាន Ping ទៅ Messenger ភ្ញៀវ (${inv.facebook_name}) រួចរាល់! ឆាតបានលោតឡើងលេខ ១ ក្នុង Meta Business Suite`, 'success');
+        setLastPingedCustomer({
+          basket_no: inv.basket_no || inv.invoice_id,
+          customer_name: inv.facebook_name,
+          meta_inbox_url: data.meta_inbox_url,
+          delivery_method: data.delivery_title || 'Messenger',
+          timestamp: Date.now()
+        });
+      } else {
+        showToast(data.message || data.error || 'មិនទាន់អាចផ្ញើ Ping បានទេ', 'error');
+      }
+    } catch (err: any) {
+      showToast('⚠️ មានបញ្ហាតភ្ជាប់', 'error');
+    }
+  }, [showToast]);
 
   // Initial loads and polling
   useEffect(() => {
@@ -1105,25 +1176,30 @@ export default function App() {
 
       if (e.key === 'Enter') {
         if (buffer.length >= 1) {
-          const scanned = buffer.trim().toUpperCase();
-          showToast(`🔍 ស្កេនឃើញ ៖ [${scanned}]`);
+          const rawScanned = buffer.trim();
+          const parsed = parseScannedText(rawScanned);
 
-          // If numeric or starts with INV, search invoice
-          if (/^\d+$/.test(scanned) || scanned.startsWith('#')) {
-            setSearchQuery(scanned.replace(/\D/g, ''));
-          } else {
-            // Find in current baskets and check it
-            let matched = false;
-            invoices.forEach(inv => {
-              inv.items.forEach(it => {
-                if (it.product_code.toUpperCase() === scanned) {
-                  handleToggleItemCheck(inv.invoice_id, it.product_code);
-                  matched = true;
-                }
-              });
-            });
-            if (matched) playSuccessFanfare();
+          // If scanned a basket QR URL, #ID, or numeric basket ID via barcode gun
+          if (parsed && (rawScanned.includes('?') || rawScanned.startsWith('http') || rawScanned.startsWith('#') || /^\d+$/.test(rawScanned))) {
+            showToast(`🔍 ស្កេនកន្ត្រក ៖ #${parsed.basket}`);
+            handleCameraScanSuccess(parsed.basket, parsed.liveId);
+            buffer = '';
+            return;
           }
+
+          // Otherwise handle product code check
+          const scanned = rawScanned.toUpperCase();
+          showToast(`🔍 ស្កេនឃើញកូដ ៖ [${scanned}]`);
+          let matched = false;
+          invoices.forEach(inv => {
+            inv.items.forEach(it => {
+              if (it.product_code.toUpperCase() === scanned) {
+                handleToggleItemCheck(inv.invoice_id, it.product_code);
+                matched = true;
+              }
+            });
+          });
+          if (matched) playSuccessFanfare();
           buffer = '';
         }
       } else if (e.key.length === 1) {
@@ -1133,7 +1209,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [invoices]);
+  }, [invoices, handleCameraScanSuccess]);
 
   // Check if a basket is completely empty ($0.00 / 0 items)
   const isBasketEmpty = (inv: Invoice | null | undefined): boolean => {
@@ -1787,6 +1863,7 @@ export default function App() {
                 onShowToast={showToast}
                 onUndispatch={handleUndispatch}
                 onDeleteBasket={handleDeleteBasket}
+                onScanPingCustomer={handleManualScanPing}
               />
             ))
           )}
@@ -1841,7 +1918,44 @@ export default function App() {
           setBacklogRefreshTrigger(prev => prev + 1);
         }}
         onShowToast={showToast}
+        onScanPingCustomer={handleManualScanPing}
       />
+
+      {/* ⚡ Floating Notification: Last Pinged Customer (Direct Meta Business Suite Link) */}
+      {lastPingedCustomer && (
+        <div className="fixed bottom-5 right-5 z-[99999] bg-[#07132B]/95 border-2 border-amber-400 rounded-2xl shadow-[0_8px_30px_rgba(245,158,11,0.4)] p-3.5 flex items-center gap-3 backdrop-blur-md animate-fade-in max-w-[92vw] sm:max-w-[420px]">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400 flex items-center justify-center text-xl flex-shrink-0 animate-pulse">
+            ⚡
+          </div>
+          <div className="flex flex-col text-left min-w-0 flex-1">
+            <div className="text-xs font-black text-amber-300 flex items-center gap-1.5 truncate">
+              <span>ឆាតលោតលេខ #1 ក្នុង Meta Business Suite</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping flex-shrink-0"></span>
+            </div>
+            <div className="text-[11.5px] text-slate-200 truncate mt-0.5">
+              កន្ត្រក #{lastPingedCustomer.basket_no} ៖ <span className="font-bold text-white">{lastPingedCustomer.customer_name}</span>
+            </div>
+          </div>
+          {lastPingedCustomer.meta_inbox_url && (
+            <a
+              href={lastPingedCustomer.meta_inbox_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all flex-shrink-0 cursor-pointer"
+            >
+              <span>💬 ឆាត Meta</span>
+              <span className="text-xs">↗</span>
+            </a>
+          )}
+          <button
+            onClick={() => setLastPingedCustomer(null)}
+            className="text-slate-400 hover:text-white text-sm p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer flex-shrink-0"
+            title="បិទ"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <DispatchModal
         isOpen={isDispatchModalOpen}

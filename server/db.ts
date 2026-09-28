@@ -122,7 +122,9 @@ export const settings: AppSettings = {
   parser_strict_catalog: false,
   parser_allow_standalone: true,
   auto_private_reply_enabled: false,
-  auto_private_reply_template: 'ជម្រាបសួរ [Name]! អរគុណសម្រាប់ការកុម្ម៉ង់ទំនិញក្នុង Live។ ប្រព័ន្ធបានកត់ត្រាការកក់របស់បងរួចរាល់ហើយ។ សូមបងផ្ញើលេខទូរស័ព្ទ និងទីតាំង ដើម្បីខាងប្អូនរៀបចំវេចខ្ចប់ជូនបង។ អរគុណ!'
+  auto_private_reply_template: 'ជម្រាបសួរ [Name]! អរគុណសម្រាប់ការកុម្ម៉ង់ទំនិញក្នុង Live។ ប្រព័ន្ធបានកត់ត្រាការកក់របស់បងរួចរាល់ហើយ។ សូមបងផ្ញើលេខទូរស័ព្ទ និងទីតាំង ដើម្បីខាងប្អូនរៀបចំវេចខ្ចប់ជូនបង។ អរគុណ!',
+  scan_ping_messenger_enabled: true,
+  scan_ping_messenger_template: '📦 [សួស្តីបង [Name]] បុគ្គលិកផ្នែករៀបចំ និងវេចខ្ចប់កំពុងផ្ទៀងផ្ទាត់កន្ត្រក #[Basket] ជូនបង! បុគ្គលិកអាចនឹងផ្ញើរូបភាព ឬបញ្ជាក់ទំនិញក្នុងឆាតនេះ។ សូមបងរង់ចាំបន្តិចណា៎! 🙏✨'
 };
 
 // Initial Products Catalog

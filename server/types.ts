@@ -130,6 +130,8 @@ export interface AppSettings {
   parser_allow_standalone?: boolean;
   auto_private_reply_enabled?: boolean;
   auto_private_reply_template?: string;
+  scan_ping_messenger_enabled?: boolean;
+  scan_ping_messenger_template?: string;
 }
 
 export interface FacebookPage {

@@ -53,6 +53,12 @@ export function SystemSettingsModal({
   const [savingAutoReply, setSavingAutoReply] = useState(false);
   const [autoReplyFeedback, setAutoReplyFeedback] = useState<string | null>(null);
 
+  // Scan Ping Messenger Automation States
+  const [scanPingEnabled, setScanPingEnabled] = useState(true);
+  const [scanPingTemplate, setScanPingTemplate] = useState('');
+  const [savingScanPing, setSavingScanPing] = useState(false);
+  const [scanPingFeedback, setScanPingFeedback] = useState<string | null>(null);
+
   // Admin PIN Change State
   const [currentPinInput, setCurrentPinInput] = useState('');
   const [newPinInput, setNewPinInput] = useState('');
@@ -86,6 +92,12 @@ export function SystemSettingsModal({
           }
           if (typeof data.auto_private_reply_template === 'string') {
             setAutoReplyTemplate(data.auto_private_reply_template);
+          }
+          if (typeof data.scan_ping_messenger_enabled === 'boolean') {
+            setScanPingEnabled(data.scan_ping_messenger_enabled);
+          }
+          if (typeof data.scan_ping_messenger_template === 'string') {
+            setScanPingTemplate(data.scan_ping_messenger_template);
           }
         }
       })
@@ -268,6 +280,33 @@ export function SystemSettingsModal({
     } finally {
       setSavingAutoReply(false);
       setTimeout(() => setAutoReplyFeedback(null), 3500);
+    }
+  };
+
+  const handleSaveScanPing = async () => {
+    setSavingScanPing(true);
+    setScanPingFeedback(null);
+    try {
+      const res = await fetch('/api/parser/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scan_ping_messenger_enabled: scanPingEnabled,
+          scan_ping_messenger_template: scanPingTemplate
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScanPingFeedback('✅ បានរក្សាទុកការកំណត់ Scan-to-Ping Messenger ជោគជ័យ!');
+        playPureTone(880, 0.1);
+      } else {
+        setScanPingFeedback('❌ បរាជ័យក្នុងការរក្សាទុក');
+      }
+    } catch {
+      setScanPingFeedback('❌ មានបញ្ហាតភ្ជាប់');
+    } finally {
+      setSavingScanPing(false);
+      setTimeout(() => setScanPingFeedback(null), 3500);
     }
   };
 
@@ -795,6 +834,55 @@ export function SystemSettingsModal({
                 className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-4 py-1.5 rounded-xl text-xs active:scale-95 transition-all cursor-pointer shadow-md disabled:opacity-50"
               >
                 {savingAutoReply ? 'កំពុងរក្សាទុក...' : '💾 រក្សាទុកការកំណត់ Auto Reply'}
+              </button>
+            </div>
+          </div>
+
+          {/* Section: Scan-to-Ping Messenger Automation (Bumps Chat to #1 in Meta Business Suite) */}
+          <div className="bg-[#0A1526] border border-amber-500/40 rounded-2xl p-4 flex flex-col gap-3 shadow-lg">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-amber-300 text-sm flex items-center gap-1.5">
+                <span>⚡</span> ស្កេន QR ផ្ញើ Ping ទៅ Messenger (លោតឡើងលើគេក្នុង Meta Business Suite)
+              </span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={scanPingEnabled}
+                  onChange={e => setScanPingEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-950 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500 border border-slate-700"></div>
+              </label>
+            </div>
+
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              🔥 <strong className="text-amber-200">ល្បឿនលឿនអស្ចារ្យ ៖</strong> នៅពេលបុគ្គលិកស្កេន QR កូដ (Camera ឬកាំភ្លើងបាញ់បាកូដ) ប្រព័ន្ធនឹងផ្ញើសារ Ping ទៅកាន់ Messenger របស់ភ្ញៀវភ្លាមៗ! ការធ្វើបែបនេះធ្វើឱ្យ Chat របស់ភ្ញៀវ<strong className="text-emerald-400">លោតឡើងលើគេបង្អស់ (#1) ក្នុង Meta Business Suite</strong> ដោយបុគ្គលិកមិនបាច់វាយ search ឈ្មោះភ្ញៀវនាំតែយឺតឡើយ អាចថតរូបអីវ៉ាន់ផ្ញើទៅភ្ញៀវបានភ្លាម!
+            </p>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] text-slate-300 font-bold flex items-center justify-between">
+                <span>💬 ខ្លឹមសារសារ Ping (Template) [Name], [Basket], [Total] ៖</span>
+              </label>
+              <textarea
+                value={scanPingTemplate}
+                onChange={e => setScanPingTemplate(e.target.value)}
+                rows={3}
+                className="w-full bg-slate-950 text-slate-100 border border-[#1C2B4B] focus:border-amber-400 p-2.5 rounded-xl text-xs outline-none leading-relaxed"
+                placeholder="📦 [សួស្តីបង [Name]] បុគ្គលិកផ្នែករៀបចំ និងវេចខ្ចប់កំពុងផ្ទៀងផ្ទាត់កន្ត្រក #[Basket] ជូនបង! បុគ្គលិកអាចនឹងផ្ញើរូបភាព ឬបញ្ជាក់ទំនិញក្នុងឆាតនេះ។ សូមបងរង់ចាំបន្តិចណា៎! 🙏✨"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[10.5px] font-medium text-amber-400">
+                {scanPingFeedback || (scanPingEnabled ? '🟢 កំពុងបើកដំណើរការ Scan Ping (Auto-Bump #1)' : '⚪ កំពុងបិទ')}
+              </span>
+              <button
+                type="button"
+                disabled={savingScanPing}
+                onClick={handleSaveScanPing}
+                className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs active:scale-95 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              >
+                {savingScanPing ? 'កំពុងរក្សាទុក...' : '💾 រក្សាទុកការកំណត់ Scan Ping'}
               </button>
             </div>
           </div>

@@ -235,13 +235,110 @@ router.post('/update_product_stock_price', async (req: Request, res: Response) =
 });
 
 // -------------------------------------------------------------
-// 🌐 Public Customer Order Portal Endpoints (No Auth Required)
+// 🌐 Public Customer Order Portal & Quick Find Endpoints
 // -------------------------------------------------------------
 
-// GET /api/find_basket?basket=2712
-router.get('/find_basket', (req: Request, res: Response) => {
+// Helper: Resolve Meta Business Suite inbox URL for a customer
+export async function getMetaInboxUrlForUser(userId?: string, customerName?: string): Promise<string> {
+  const pageId = activeFacebookPage?.id || '102094263212256';
+  const token = activeFacebookPage?.access_token;
+  let selectedItemId = userId || '';
+
+  if (userId && token && !token.startsWith('simulated_') && token.length > 20) {
+    try {
+      const fbRes = await fetch(`https://graph.facebook.com/v21.0/${pageId}/conversations?user_id=${userId}&access_token=${token}`);
+      const fbJson: any = await fbRes.json();
+      if (fbJson?.data?.[0]?.link) {
+        const linkStr = String(fbJson.data[0].link);
+        const match = linkStr.match(/\/inbox\/(\d+)/) || linkStr.match(/threadid=(\d+)/);
+        if (match && match[1]) {
+          selectedItemId = match[1];
+        }
+      }
+    } catch (err) {
+      console.warn(`[Inbox Resolver] Could not resolve thread ID for ${userId}:`, err);
+    }
+  }
+
+  if (selectedItemId && selectedItemId !== 'MANUAL_USER_ID' && selectedItemId !== 'FB_USER_ID_STREAM' && !selectedItemId.startsWith('FB_USER_')) {
+    return `https://business.facebook.com/latest/inbox/messenger?selected_item_id=${selectedItemId}&mailbox_id=${pageId}&thread_type=FB_MESSAGE`;
+  }
+  if (customerName) {
+    return `https://business.facebook.com/latest/inbox/all?mailbox_id=${pageId}&search_query=${encodeURIComponent(customerName)}`;
+  }
+  return `https://business.facebook.com/latest/inbox/all?mailbox_id=${pageId}`;
+}
+
+// Helper: Execute Fast Scan Ping to Messenger
+export async function executeScanPing(inv: any, customMessage?: string) {
+  const customerName = inv.facebook_name || 'អតិថិជន';
+  const basketNo = inv.basket_no || inv.invoice_id;
+  const totalStr = `$${(Number(inv.total_amount) || 0).toFixed(2)}`;
+
+  const template = customMessage || settings.scan_ping_messenger_template ||
+    '📦 [សួស្តីបង [Name]] បុគ្គលិកផ្នែករៀបចំ និងវេចខ្ចប់កំពុងផ្ទៀងផ្ទាត់កន្ត្រក #[Basket] ជូនបង! បុគ្គលិកអាចនឹងផ្ញើរូបភាព ឬបញ្ជាក់ទំនិញក្នុងឆាតនេះ។ សូមបងរង់ចាំបន្តិចណា៎! 🙏✨';
+
+  const messageText = template
+    .replace(/\[Name\]/gi, customerName)
+    .replace(/\[Basket\]/gi, String(basketNo))
+    .replace(/\[Total\]/gi, totalStr);
+
+  // Gather comment ID candidates
+  const candidateCommentIds: string[] = [];
+  if (inv.last_comment_id) candidateCommentIds.push(inv.last_comment_id);
+  if (Array.isArray(inv.comment_ids)) {
+    for (const cid of inv.comment_ids) {
+      if (cid && !candidateCommentIds.includes(cid)) candidateCommentIds.push(cid);
+    }
+  }
+
+  const primaryCommentId = candidateCommentIds[0] || null;
+  const extraCommentIds = candidateCommentIds.slice(1);
+
+  let replyRes: any = { success: false, method: 'NONE' };
+  try {
+    replyRes = await sendFacebookReply(
+      primaryCommentId,
+      inv.facebook_user_id,
+      messageText,
+      undefined,
+      undefined,
+      undefined,
+      extraCommentIds
+    );
+  } catch (err: any) {
+    console.warn('[Scan Ping] sendFacebookReply exception:', err);
+    replyRes = {
+      success: false,
+      method: 'MANUAL_COPIED',
+      methodTitle: 'ផ្ញើដោយផ្ទាល់',
+      error: err?.message || 'Meta API error'
+    };
+  }
+
+  const metaInboxUrl = await getMetaInboxUrlForUser(inv.facebook_user_id, customerName);
+
+  return {
+    success: true,
+    pinged: Boolean(replyRes.success),
+    delivery_method: replyRes.method,
+    delivery_title: replyRes.methodTitle || 'Messenger Direct',
+    customer_name: customerName,
+    basket_no: basketNo,
+    meta_inbox_url: metaInboxUrl,
+    message_text: messageText,
+    message: replyRes.success
+      ? `✅ បាន Ping ទៅ Messenger ភ្ញៀវ (${customerName}) រួចរាល់! ឆាតរបស់គាត់បានលោតឡើងលើគេបង្អស់ក្នុង Meta Business Suite។`
+      : `⚠️ Messenger API: ${replyRes.error || 'មិនទាន់អាចផ្ញើស្វ័យប្រវត្តិតាម Token'}`
+  };
+}
+
+// GET /api/find_basket?basket=2712&auto_ping=1
+router.get('/find_basket', async (req: Request, res: Response) => {
   const rawQuery = String(req.query.basket || req.query.query || req.query.q || req.query.invoice_id || req.query.open_basket || '').trim().replace(/^#/, '');
   const targetLive = req.query.live ? String(req.query.live).trim() : '';
+  const shouldAutoPing = req.query.auto_ping === '1' || req.query.auto_ping === 'true' || 
+    (settings.scan_ping_messenger_enabled && (req.query.is_scan === '1' || req.query.is_scan === 'true'));
 
   if (!rawQuery) {
     return res.status(400).json({ success: false, error: 'Basket query is required' });
@@ -309,6 +406,18 @@ router.get('/find_basket', (req: Request, res: Response) => {
     stageName = 'មិនទាន់រើស';
   }
 
+  // Auto-Ping Messenger if requested so customer jumps to #1 in Meta Business Suite
+  let pingResult: any = null;
+  if (shouldAutoPing) {
+    try {
+      pingResult = await executeScanPing(match);
+    } catch (pingErr) {
+      console.warn('[find_basket] auto_ping error:', pingErr);
+    }
+  }
+
+  const metaInboxUrl = pingResult?.meta_inbox_url || await getMetaInboxUrlForUser(match.facebook_user_id, match.facebook_name);
+
   return res.json({
     success: true,
     found: true,
@@ -321,8 +430,44 @@ router.get('/find_basket', (req: Request, res: Response) => {
     total_amount: match.total_amount,
     stage: stageNum,
     stage_code: stageCode,
-    stage_name: stageName
+    stage_name: stageName,
+    meta_inbox_url: metaInboxUrl,
+    ping_result: pingResult
   });
+});
+
+// POST /api/scan_ping_messenger
+// Dedicated endpoint to ping customer on Messenger and bump their chat to #1 in Meta Business Suite
+router.post('/scan_ping_messenger', async (req: Request, res: Response) => {
+  try {
+    const { basket_no, invoice_id, live_id, custom_message } = req.body;
+    const rawTarget = String(invoice_id || basket_no || '').trim().replace(/^#/, '');
+    const numTarget = parseInt(rawTarget, 10);
+
+    let targetInv = invoices.find(inv => {
+      if (live_id && inv.live_id !== live_id) return false;
+      return (!isNaN(numTarget) && (inv.invoice_id === numTarget || inv.basket_no === numTarget)) ||
+             String(inv.basket_no) === rawTarget ||
+             String(inv.invoice_id) === rawTarget;
+    });
+
+    if (!targetInv && !isNaN(numTarget)) {
+      targetInv = invoices.find(inv => inv.invoice_id === numTarget || inv.basket_no === numTarget);
+    }
+
+    if (!targetInv) {
+      return res.status(404).json({ success: false, error: `រកមិនឃើញកន្ត្រក #${rawTarget} ក្នុងប្រព័ន្ធឡើយ` });
+    }
+
+    const pingRes = await executeScanPing(targetInv, custom_message);
+    return res.json({
+      success: true,
+      ...pingRes
+    });
+  } catch (err: any) {
+    console.error('[scan_ping_messenger] error:', err);
+    return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
 });
 
 // GET /api/public/order/:id
@@ -2363,13 +2508,23 @@ router.get('/parser/settings', (_req: Request, res: Response) => {
     parser_strict_catalog: !!settings.parser_strict_catalog,
     parser_allow_standalone: settings.parser_allow_standalone !== false,
     auto_private_reply_enabled: !!settings.auto_private_reply_enabled,
-    auto_private_reply_template: settings.auto_private_reply_template || ''
+    auto_private_reply_template: settings.auto_private_reply_template || '',
+    scan_ping_messenger_enabled: settings.scan_ping_messenger_enabled !== false,
+    scan_ping_messenger_template: settings.scan_ping_messenger_template || ''
   });
 });
 
-// POST /api/parser/settings - Update regex parser configuration
+// POST /api/parser/settings - Update regex parser configuration & messenger automation
 router.post('/parser/settings', (req: Request, res: Response) => {
-  const { parser_strict_catalog, parser_allow_standalone, auto_private_reply_enabled, auto_private_reply_template } = req.body;
+  const {
+    parser_strict_catalog,
+    parser_allow_standalone,
+    auto_private_reply_enabled,
+    auto_private_reply_template,
+    scan_ping_messenger_enabled,
+    scan_ping_messenger_template
+  } = req.body;
+
   if (parser_strict_catalog !== undefined) {
     settings.parser_strict_catalog = !!parser_strict_catalog;
   }
@@ -2382,6 +2537,13 @@ router.post('/parser/settings', (req: Request, res: Response) => {
   if (auto_private_reply_template !== undefined) {
     settings.auto_private_reply_template = String(auto_private_reply_template);
   }
+  if (scan_ping_messenger_enabled !== undefined) {
+    settings.scan_ping_messenger_enabled = !!scan_ping_messenger_enabled;
+  }
+  if (scan_ping_messenger_template !== undefined) {
+    settings.scan_ping_messenger_template = String(scan_ping_messenger_template);
+  }
+
   bumpDataRevision();
   saveDatabaseToDisk();
   res.json({
@@ -2390,7 +2552,9 @@ router.post('/parser/settings', (req: Request, res: Response) => {
       parser_strict_catalog: settings.parser_strict_catalog,
       parser_allow_standalone: settings.parser_allow_standalone,
       auto_private_reply_enabled: settings.auto_private_reply_enabled,
-      auto_private_reply_template: settings.auto_private_reply_template
+      auto_private_reply_template: settings.auto_private_reply_template,
+      scan_ping_messenger_enabled: settings.scan_ping_messenger_enabled,
+      scan_ping_messenger_template: settings.scan_ping_messenger_template
     }
   });
 });

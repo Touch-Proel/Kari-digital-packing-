@@ -8,6 +8,34 @@ interface CameraScannerModalProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
+export const parseScannedText = (rawText: string): { basket: string; liveId?: string } => {
+  const text = rawText.trim();
+  try {
+    if (text.includes('?') || text.startsWith('http://') || text.startsWith('https://')) {
+      const urlObj = new URL(text.startsWith('http') ? text : `http://dummy.com${text}`);
+      const basket = urlObj.searchParams.get('open_basket') ||
+                     urlObj.searchParams.get('order') ||
+                     urlObj.searchParams.get('basket') ||
+                     urlObj.searchParams.get('verify') ||
+                     urlObj.searchParams.get('staff_basket') ||
+                     urlObj.searchParams.get('id');
+      const liveId = urlObj.searchParams.get('live') || urlObj.searchParams.get('live_id');
+      if (basket) {
+        return {
+          basket: basket.trim().replace(/^#/, ''),
+          liveId: liveId ? liveId.trim() : undefined
+        };
+      }
+    }
+  } catch {}
+
+  if (text.startsWith('#')) {
+    return { basket: text.slice(1).trim() };
+  }
+
+  return { basket: text };
+};
+
 export function CameraScannerModal({
   isOpen,
   onClose,
@@ -42,34 +70,6 @@ export function CameraScannerModal({
       osc.start();
       osc.stop(audioCtx.currentTime + 0.09);
     } catch {}
-  };
-
-  const parseScannedText = (rawText: string): { basket: string; liveId?: string } => {
-    const text = rawText.trim();
-    try {
-      if (text.includes('?') || text.startsWith('http://') || text.startsWith('https://')) {
-        const urlObj = new URL(text.startsWith('http') ? text : `http://dummy.com${text}`);
-        const basket = urlObj.searchParams.get('open_basket') ||
-                       urlObj.searchParams.get('order') ||
-                       urlObj.searchParams.get('basket') ||
-                       urlObj.searchParams.get('verify') ||
-                       urlObj.searchParams.get('staff_basket') ||
-                       urlObj.searchParams.get('id');
-        const liveId = urlObj.searchParams.get('live') || urlObj.searchParams.get('live_id');
-        if (basket) {
-          return {
-            basket: basket.trim().replace(/^#/, ''),
-            liveId: liveId ? liveId.trim() : undefined
-          };
-        }
-      }
-    } catch {}
-
-    if (text.startsWith('#')) {
-      return { basket: text.slice(1).trim() };
-    }
-
-    return { basket: text };
   };
 
   // Decode Image File (from Camera capture or upload) with BarcodeDetector + Multi-scale jsQR
