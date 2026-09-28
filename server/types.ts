@@ -98,32 +98,6 @@ export interface Customer {
   last_remarketed_at?: string;
 }
 
-export interface CustomerCRMRecord extends Customer {
-  total_orders: number;
-  total_spent: number;
-  successful_orders: number;
-  last_order_date?: string;
-  last_live_id?: string;
-  days_since_last_order?: number;
-  vip_tier: 'DIAMOND' | 'GOLD' | 'SILVER' | 'REGULAR' | 'NEW' | 'INACTIVE';
-  last_comment_id?: string;
-  comment_ids?: string[];
-  recent_live_comments?: Array<{
-    comment_id: string;
-    comment_text?: string;
-    created_time?: string;
-    live_id?: string;
-  }>;
-  eligibility: {
-    status: 'SAFE_24H' | 'RECENT_7D' | 'EXPIRED';
-    label: string;
-    can_message: boolean;
-    description: string;
-    color: string;
-    hours_ago: number;
-  };
-}
-
 export interface PackerLog {
   log_id: number;
   invoice_id: number;

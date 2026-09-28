@@ -33,7 +33,6 @@ import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
 import { CustomerOrderPortal } from './components/CustomerOrderPortal';
 import { AdminPinModal } from './components/Modals/AdminPinModal';
 import { CameraScannerModal } from './components/Modals/CameraScannerModal';
-import { CRMModal } from './components/Modals/CRMModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -263,38 +262,6 @@ export default function App() {
     today_province: 0
   });
   const [dispatchedTimeFilter, setDispatchedTimeFilter] = useState<'ALL' | 'TODAY' | 'PP' | 'PROVINCE'>('ALL');
-
-  // 👥 CRM & Remarketing States
-  const [isCRMModalOpen, setIsCRMModalOpen] = useState(false);
-  const [crmTargetCustomerName, setCrmTargetCustomerName] = useState<string | undefined>(undefined);
-  const [crmInitialTab, setCrmInitialTab] = useState<'ALL' | 'SAFE_24H' | 'VIP' | 'INACTIVE' | 'PP' | 'PROVINCE' | 'BLACKLIST'>('ALL');
-  const [crmEligibleCount, setCrmEligibleCount] = useState<number>(0);
-
-  const fetchCRMStats = async () => {
-    try {
-      const res = await fetch(`/api/crm/customers?t=${Date.now()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.stats) {
-          setCrmEligibleCount(data.stats.safe_24h_count || 0);
-        }
-      }
-    } catch {
-      // silently ignore
-    }
-  };
-
-  useEffect(() => {
-    fetchCRMStats();
-    const interval = setInterval(fetchCRMStats, 45000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleOpenCRM = (initialQuery?: string, tab?: 'ALL' | 'SAFE_24H' | 'VIP' | 'INACTIVE' | 'PP' | 'PROVINCE' | 'BLACKLIST') => {
-    setCrmTargetCustomerName(initialQuery);
-    setCrmInitialTab(tab || 'ALL');
-    setIsCRMModalOpen(true);
-  };
 
   const fetchAllLivePaidInvoices = async () => {
     try {
@@ -1516,8 +1483,6 @@ export default function App() {
           isStreamOpen={isCommentStreamOpen}
           totalBasketCount={invoices.filter(i => i.status !== 'Cancelled').length}
           userRole={userRole}
-          onOpenCRM={() => handleOpenCRM()}
-          crmEligibleCount={crmEligibleCount}
         />
 
         {/* 2. Live Comment Stream Drawer / Simulator */}
@@ -1726,7 +1691,6 @@ export default function App() {
                 onShowToast={showToast}
                 onUndispatch={handleUndispatch}
                 onDeleteBasket={handleDeleteBasket}
-                onOpenCRMForCustomer={custName => handleOpenCRM(custName)}
               />
             ))
           )}
@@ -1996,7 +1960,6 @@ export default function App() {
         onResetFontSize={handleResetFontSize}
         userRole={userRole}
         onLockAdmin={handleLockAdmin}
-        onOpenCRM={() => handleOpenCRM()}
       />
 
       {/* Full-Screen Stock Management Modal (Button 2) */}
@@ -2075,23 +2038,6 @@ export default function App() {
         onClose={() => setIsCameraScannerOpen(false)}
         onScanSuccess={handleCameraScanSuccess}
         onShowToast={showToast}
-      />
-
-      {/* 👥 CRM & Remarketing Modal (គ្រប់គ្រងម៉ូយអាវយឺត & Broadcast Helper) */}
-      <CRMModal
-        isOpen={isCRMModalOpen}
-        onClose={() => {
-          setIsCRMModalOpen(false);
-          setCrmTargetCustomerName(undefined);
-          fetchCRMStats();
-        }}
-        onShowToast={showToast}
-        initialCustomerQuery={crmTargetCustomerName}
-        initialTab={crmInitialTab}
-        onCustomerUpdated={() => {
-          fetchInvoices();
-          fetchCRMStats();
-        }}
       />
     </div>
   );

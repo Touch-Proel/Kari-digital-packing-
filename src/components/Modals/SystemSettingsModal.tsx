@@ -23,7 +23,6 @@ interface SystemSettingsModalProps {
   onResetFontSize: () => void;
   userRole?: 'admin' | 'staff';
   onLockAdmin?: () => void;
-  onOpenCRM?: () => void;
 }
 
 export function SystemSettingsModal({
@@ -45,8 +44,7 @@ export function SystemSettingsModal({
   onAdjustFontSize,
   onResetFontSize,
   userRole = 'staff',
-  onLockAdmin,
-  onOpenCRM
+  onLockAdmin
 }: SystemSettingsModalProps) {
   const [strictCatalogMode, setStrictCatalogMode] = useState(false);
   const [loadingStrict, setLoadingStrict] = useState(false);
@@ -551,34 +549,6 @@ export function SystemSettingsModal({
               </button>
             </div>
           </div>
-
-          {/* Section 3.2: CRM & Remarketing (ម៉ូយ & CRM) */}
-          {onOpenCRM && (
-            <div className="bg-[#07162C] border border-cyan-500/40 rounded-2xl p-3 flex flex-col justify-between gap-2 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base">👥</span>
-                  <span className="font-bold text-cyan-300">គ្រប់គ្រងអតិថិជន & Remarketing (CRM)</span>
-                </div>
-                <span className="bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  ម៉ូយអាវយឺត
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                ពិនិត្យសិទ្ធិឆាត 24h, ម៉ូយ VIP, ប្រវត្តិទិញ, និងផ្ញើសារ Manual Broadcast តាមលំដាប់
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenCRM();
-                }}
-                className="w-full bg-gradient-to-r from-cyan-900/90 to-blue-900/90 hover:from-cyan-800 hover:to-blue-800 text-cyan-200 border border-cyan-500/60 font-bold py-2 rounded-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer shadow-sm"
-              >
-                <span>👥 បើកផ្ទាំងគ្រប់គ្រងម៉ូយ CRM</span>
-              </button>
-            </div>
-          )}
 
           {/* Section 3.5: Safety Guardrail - Strict Catalog vs Auto-Create Products */}
           <div className={`border rounded-2xl p-3.5 flex flex-col gap-2 transition-all ${

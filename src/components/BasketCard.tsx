@@ -84,7 +84,6 @@ interface BasketCardProps {
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onUndispatch?: (inv: Invoice) => void;
   onDeleteBasket?: (invId: number) => void;
-  onOpenCRMForCustomer?: (customerName: string) => void;
 }
 
 function BasketCardComponent({
@@ -108,8 +107,7 @@ function BasketCardComponent({
   onUpdateInvoice,
   onShowToast,
   onUndispatch,
-  onDeleteBasket,
-  onOpenCRMForCustomer
+  onDeleteBasket
 }: BasketCardProps) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -1163,20 +1161,6 @@ function BasketCardComponent({
               <span className="text-white font-black text-sm sm:text-base leading-tight truncate block drop-shadow-sm">
                 {invoice.facebook_name || 'អតិថិជន'}
               </span>
-              {onOpenCRMForCustomer && invoice.facebook_name && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenCRMForCustomer(invoice.facebook_name);
-                  }}
-                  className="bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/50 hover:border-cyan-400 text-cyan-300 hover:text-white px-1.5 py-0.2 rounded-md text-[9.5px] font-black flex items-center gap-0.5 shadow-sm active:scale-95 transition-all cursor-pointer"
-                  title={`មើល CRM & Remarketing សម្រាប់ ${invoice.facebook_name}`}
-                >
-                  <span>👥</span>
-                  <span>CRM</span>
-                </button>
-              )}
             </div>
           </div>
 
