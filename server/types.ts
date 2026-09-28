@@ -92,7 +92,28 @@ export interface Customer {
   is_zone_locked?: boolean;
   is_vip: boolean;
   is_blacklist: boolean;
+  notes?: string;
+  tags?: string[];
   last_interaction_at?: string;
+  last_remarketed_at?: string;
+}
+
+export interface CustomerCRMRecord extends Customer {
+  total_orders: number;
+  total_spent: number;
+  successful_orders: number;
+  last_order_date?: string;
+  last_live_id?: string;
+  days_since_last_order?: number;
+  vip_tier: 'DIAMOND' | 'GOLD' | 'SILVER' | 'REGULAR' | 'NEW' | 'INACTIVE';
+  eligibility: {
+    status: 'SAFE_24H' | 'RECENT_7D' | 'EXPIRED';
+    label: string;
+    can_message: boolean;
+    description: string;
+    color: string;
+    hours_ago: number;
+  };
 }
 
 export interface PackerLog {

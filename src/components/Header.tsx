@@ -20,6 +20,8 @@ interface HeaderProps {
   isStreamOpen: boolean;
   totalBasketCount?: number;
   userRole?: 'admin' | 'staff';
+  onOpenCRM?: () => void;
+  crmEligibleCount?: number;
 }
 
 export function Header({
@@ -39,7 +41,9 @@ export function Header({
   onToggleCommentStream,
   isStreamOpen,
   totalBasketCount,
-  userRole = 'staff'
+  userRole = 'staff',
+  onOpenCRM,
+  crmEligibleCount
 }: HeaderProps) {
   return (
     <div className="bg-[#081122]/95 backdrop-blur-md border border-[#182848] p-2.5 rounded-2xl flex flex-col gap-2 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
@@ -192,6 +196,25 @@ export function Header({
           <span>💬</span>
           <span>ខំមិន</span>
         </button>
+
+        {/* CRM & Remarketing (ម៉ូយ CRM) Button */}
+        {onOpenCRM && (
+          <button
+            type="button"
+            onClick={onOpenCRM}
+            className="bg-cyan-950/90 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/70 px-2 py-1 rounded-xl font-bold text-xs whitespace-nowrap active:scale-95 transition-all shadow-sm flex items-center gap-1 h-8 flex-shrink-0 cursor-pointer"
+            title="គ្រប់គ្រងម៉ូយ CRM & Remarketing (អតិថិជន)"
+          >
+            <span>👥</span>
+            <span>CRM</span>
+            {crmEligibleCount !== undefined && crmEligibleCount > 0 && (
+              <span
+                className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5"
+                title={`${crmEligibleCount} នាក់អាចឆាតបាន (<24h)`}
+              />
+            )}
+          </button>
+        )}
       </div>
     </div>
   );

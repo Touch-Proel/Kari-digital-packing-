@@ -210,7 +210,12 @@ function initTables(db: Database) {
   ensureColumns('customers', [
     ['location_zone', 'TEXT'],
     ['location_label', 'TEXT'],
-    ['is_zone_locked', 'INTEGER DEFAULT 0']
+    ['is_zone_locked', 'INTEGER DEFAULT 0'],
+    ['notes', 'TEXT'],
+    ['tags', 'TEXT'],
+    ['picture_url', 'TEXT'],
+    ['last_interaction_at', 'TEXT'],
+    ['last_remarketed_at', 'TEXT']
   ]);
 
   // Migration: Drop UNIQUE constraint on products.code if it exists from older schema
@@ -328,7 +333,7 @@ export async function persistToSqlite(data: {
 
       // 3. Customers
       db.run('DELETE FROM customers;');
-      const stmtCust = db.prepare('INSERT INTO customers (customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
+      const stmtCust = db.prepare('INSERT INTO customers (customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist, notes, tags, picture_url, last_interaction_at, last_remarketed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
       for (const c of data.customers) {
         stmtCust.run([
           c.customer_id,
@@ -340,7 +345,12 @@ export async function persistToSqlite(data: {
           c.location_label || (c.location_zone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត'),
           c.is_zone_locked ? 1 : 0,
           c.is_vip ? 1 : 0,
-          c.is_blacklist ? 1 : 0
+          c.is_blacklist ? 1 : 0,
+          c.notes || '',
+          c.tags ? JSON.stringify(c.tags) : '[]',
+          c.picture_url || '',
+          c.last_interaction_at || '',
+          c.last_remarketed_at || ''
         ]);
       }
       stmtCust.free();
@@ -559,20 +569,31 @@ export async function loadFromSqlite(): Promise<{
     }
 
     // 3. Customers
-    const custRows = db.exec('SELECT customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist FROM customers ORDER BY customer_id ASC;');
+    const custRows = db.exec('SELECT customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist, notes, tags, picture_url, last_interaction_at, last_remarketed_at FROM customers ORDER BY customer_id ASC;');
     if (custRows.length > 0 && custRows[0].values) {
-      result.customers = custRows[0].values.map((r: any) => ({
-        customer_id: Number(r[0]),
-        facebook_user_id: String(r[1]),
-        facebook_name: String(r[2]),
-        phone_number: String(r[3] || ''),
-        address: String(r[4] || ''),
-        location_zone: r[5] === 'PP' ? 'PP' : 'PROVINCE',
-        location_label: r[6] || (r[5] === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត'),
-        is_zone_locked: Boolean(r[7]),
-        is_vip: Boolean(r[8]),
-        is_blacklist: Boolean(r[9])
-      }));
+      result.customers = custRows[0].values.map((r: any) => {
+        let parsedTags: string[] = [];
+        try {
+          if (r[11]) parsedTags = JSON.parse(r[11]);
+        } catch {}
+        return {
+          customer_id: Number(r[0]),
+          facebook_user_id: String(r[1]),
+          facebook_name: String(r[2]),
+          phone_number: String(r[3] || ''),
+          address: String(r[4] || ''),
+          location_zone: r[5] === 'PP' ? 'PP' : 'PROVINCE',
+          location_label: r[6] || (r[5] === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត'),
+          is_zone_locked: Boolean(r[7]),
+          is_vip: Boolean(r[8]),
+          is_blacklist: Boolean(r[9]),
+          notes: String(r[10] || ''),
+          tags: parsedTags,
+          picture_url: String(r[12] || ''),
+          last_interaction_at: String(r[13] || ''),
+          last_remarketed_at: String(r[14] || '')
+        };
+      });
     }
 
     // 4. Invoices

@@ -6,6 +6,7 @@ interface GamifiedHudProps {
   isAllLiveQcActive?: boolean;
   onToggleAllLiveQc?: () => void;
   onOpenFastCheck?: () => void;
+  onOpenCRM?: () => void;
   onOpenBacklog?: () => void;
   onOpenLeaderboard: () => void;
   onOpenMyHistory: () => void;
@@ -16,6 +17,7 @@ export function GamifiedHud({
   mySessionPacks,
   backlogCount = 0,
   onOpenFastCheck,
+  onOpenCRM,
   onOpenBacklog,
   onOpenLeaderboard,
 }: GamifiedHudProps) {
@@ -54,6 +56,19 @@ export function GamifiedHud({
             <span>🚨</span>
             <span className="font-mono font-bold">{backlogCount}</span>
             <span className="hidden sm:inline text-[10px] font-normal">កកស្ទះ</span>
+          </button>
+        )}
+
+        {/* 👥 CRM (Customer Management & Remarketing) */}
+        {onOpenCRM && (
+          <button
+            type="button"
+            onClick={onOpenCRM}
+            className="h-[30px] px-2.5 rounded-lg bg-gradient-to-r from-cyan-600/80 to-blue-600/80 hover:from-cyan-500 hover:to-blue-500 border border-cyan-400/60 text-white shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all text-xs font-black"
+            title="គ្រប់គ្រងអតិថិជន & Remarketing (CRM)"
+          >
+            <span className="text-xs">👥</span>
+            <span className="whitespace-nowrap">CRM</span>
           </button>
         )}
 
