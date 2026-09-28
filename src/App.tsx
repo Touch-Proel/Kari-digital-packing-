@@ -1921,14 +1921,16 @@ export default function App() {
         onScanPingCustomer={handleManualScanPing}
       />
 
-      {/* ⚡ Floating Notification: Last Pinged Customer (Direct Meta Business Suite Link) */}
+      {/* 💬 Floating Notification: Last Pinged Customer (Direct Meta Business Suite Link) */}
       {lastPingedCustomer && (
-        <div className="fixed bottom-5 right-5 z-[99999] bg-[#07132B]/95 border-2 border-amber-400 rounded-2xl shadow-[0_8px_30px_rgba(245,158,11,0.4)] p-3.5 flex items-center gap-3 backdrop-blur-md animate-fade-in max-w-[92vw] sm:max-w-[420px]">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400 flex items-center justify-center text-xl flex-shrink-0 animate-pulse">
-            ⚡
+        <div className="fixed bottom-5 right-5 z-[99999] bg-[#07132B]/95 border border-sky-400/50 rounded-2xl shadow-[0_8px_32px_rgba(0,132,255,0.35)] p-3.5 flex items-center gap-3 backdrop-blur-md animate-fade-in max-w-[92vw] sm:max-w-[420px]">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#0084FF] to-[#0055D4] flex items-center justify-center text-white flex-shrink-0 shadow-[0_0_12px_rgba(0,132,255,0.45)]">
+            <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+              <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.19 5.43 3.14 7.15.16.14.26.35.26.57l-.05 1.77c-.02.59.54 1.01 1.07.78l1.97-.87c.18-.08.38-.09.57-.04.97.27 2.01.42 3.1.42 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm1.09 13.06l-2.54-2.71-4.96 2.71c-.55.3-1.18-.28-.9-.82l5.44-8.62c.32-.51 1.07-.5 1.38.01l2.54 2.71 4.96-2.71c.55-.3 1.18.28.9.82l-5.44 8.62c-.32.51-1.07.5-1.38-.01z"/>
+            </svg>
           </div>
           <div className="flex flex-col text-left min-w-0 flex-1">
-            <div className="text-xs font-black text-amber-300 flex items-center gap-1.5 truncate">
+            <div className="text-xs font-black text-sky-400 flex items-center gap-1.5 truncate">
               <span>ឆាតលោតលេខ #1 ក្នុង Meta Business Suite</span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping flex-shrink-0"></span>
             </div>
@@ -1941,9 +1943,9 @@ export default function App() {
               href={lastPingedCustomer.meta_inbox_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all flex-shrink-0 cursor-pointer"
+              className="bg-gradient-to-r from-[#0084FF] to-[#0055D4] hover:from-[#0094FF] hover:to-[#0066EE] text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all flex-shrink-0 cursor-pointer"
             >
-              <span>💬 ឆាត Meta</span>
+              <span>💬 បើកឆាត Meta</span>
               <span className="text-xs">↗</span>
             </a>
           )}

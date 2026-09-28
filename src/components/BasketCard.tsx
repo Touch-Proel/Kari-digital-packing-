@@ -163,6 +163,7 @@ function BasketCardComponent({
   const [isSendingVip, setIsSendingVip] = useState(false);
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
   const [isAiParsing, setIsAiParsing] = useState(false);
+  const [isPinging, setIsPinging] = useState(false);
   const [errorModalData, setErrorModalData] = useState<ErrorModalData | null>(null);
 
   const totalCount = invoice.items.length;
@@ -1421,18 +1422,40 @@ function BasketCardComponent({
               </button>
             )}
 
-            {/* Quick Ping Messenger (#1 Meta Business Suite) */}
+            {/* 💬 Sleek Official Ping Messenger Button (#1 Bump in Meta Business Suite) */}
             <button
               type="button"
-              onClick={(e) => {
+              disabled={isPinging}
+              onClick={async (e) => {
                 e.stopPropagation();
-                if (onScanPingCustomer) onScanPingCustomer(invoice);
+                if (isPinging || !onScanPingCustomer) return;
+                setIsPinging(true);
+                try {
+                  await onScanPingCustomer(invoice);
+                } finally {
+                  setIsPinging(false);
+                }
               }}
-              className="bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-300 hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+              className="relative overflow-hidden bg-gradient-to-r from-[#0084FF] via-[#0070F3] to-[#0055D4] hover:from-[#0094FF] hover:via-[#0080FF] hover:to-[#0066EE] text-white border border-sky-300/40 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-[0_2px_12px_rgba(0,132,255,0.35)] hover:shadow-[0_4px_18px_rgba(0,132,255,0.5)] active:scale-95 transition-all cursor-pointer group disabled:opacity-75 disabled:cursor-not-allowed"
               title="ផ្ញើសារ Ping ទៅកាន់ Messenger ភ្ញៀវ ដើម្បីឱ្យ Chat របស់គាត់លោតឡើងលេខ ១ លើគេបង្អស់ក្នុង Meta Business Suite"
             >
-              <span className="text-sm">⚡</span>
-              <span>Ping Messenger (#1 Meta)</span>
+              {isPinging ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin flex-shrink-0" />
+                  <span className="text-[11.5px] font-bold text-sky-100">កំពុង Ping...</span>
+                </>
+              ) : (
+                <>
+                  {/* Official Messenger SVG Icon */}
+                  <svg className="w-3.5 h-3.5 text-white flex-shrink-0 group-hover:scale-110 transition-transform drop-shadow" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.19 5.43 3.14 7.15.16.14.26.35.26.57l-.05 1.77c-.02.59.54 1.01 1.07.78l1.97-.87c.18-.08.38-.09.57-.04.97.27 2.01.42 3.1.42 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm1.09 13.06l-2.54-2.71-4.96 2.71c-.55.3-1.18-.28-.9-.82l5.44-8.62c.32-.51 1.07-.5 1.38.01l2.54 2.71 4.96-2.71c.55-.3 1.18.28.9.82l-5.44 8.62c-.32.51-1.07.5-1.38-.01z"/>
+                  </svg>
+                  <span className="tracking-tight font-extrabold text-[12px]">Ping Messenger</span>
+                  <span className="text-[9.5px] font-black bg-white/20 text-white px-1.5 py-0.5 rounded-md leading-none tracking-tight">
+                    #1 Meta
+                  </span>
+                </>
+              )}
             </button>
 
             {/* Public Customer Order Link (Direct Photo & Order View) */}
@@ -1449,10 +1472,10 @@ function BasketCardComponent({
                   prompt('Copy Link ផ្ញើឱ្យភ្ញៀវ៖', publicUrl);
                 }
               }}
-              className="bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 transition-all shadow-sm active:scale-95 cursor-pointer ml-auto"
+              className="bg-[#0A1A2E] hover:bg-[#0E2442] border border-cyan-500/40 text-cyan-300 hover:text-white text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer ml-auto"
               title="ចុចដើម្បី Copy Link ផ្ញើឱ្យភ្ញៀវមើលរូបភាព និងវិក្កយបត្រផ្ទាល់ខ្លួន"
             >
-              <span>🔗</span>
+              <span className="text-xs">🔗</span>
               <span>Link ភ្ញៀវ</span>
             </button>
           </div>

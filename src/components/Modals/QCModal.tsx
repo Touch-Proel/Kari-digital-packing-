@@ -111,20 +111,23 @@ export function QCModal({
         </div>
 
         {/* Quick Action: Messenger Ping (Bumps Chat to #1 in Meta Business Suite) */}
-        <div className="px-3.5 pt-3 pb-0 flex items-center justify-between gap-2 bg-[#081226] border-b border-slate-800">
-          <div className="flex items-center gap-1.5 text-xs text-amber-300">
-            <span className="text-sm">⚡</span>
-            <span className="font-bold">Ping ឱ្យឆាតភ្ញៀវលោតលេខ #1 ក្នុង Meta</span>
+        <div className="px-3.5 py-2 flex items-center justify-between gap-2 bg-[#081328] border-b border-slate-800/80">
+          <div className="flex items-center gap-2 text-xs text-sky-300">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="font-bold">Chat លោតឡើងលើគេក្នុង Meta Business Suite</span>
           </div>
           <button
             type="button"
             onClick={() => {
               if (onScanPingCustomer) onScanPingCustomer(invoice);
             }}
-            className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs shadow-md active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+            className="bg-gradient-to-r from-[#0084FF] via-[#0070F3] to-[#0055D4] hover:from-[#0094FF] hover:via-[#0080FF] hover:to-[#0066EE] text-white font-bold px-3 py-1.5 rounded-xl text-xs shadow-[0_2px_10px_rgba(0,132,255,0.35)] hover:shadow-[0_4px_16px_rgba(0,132,255,0.5)] active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 border border-sky-300/30"
             title="ផ្ញើសារ Ping ទៅកាន់ Messenger ភ្ញៀវ ដើម្បីឱ្យ Chat របស់គាត់លោតឡើងលេខ ១ លើគេបង្អស់ក្នុង Meta Business Suite"
           >
-            <span>⚡ Ping ភ្ញៀវឥឡូវ</span>
+            <svg className="w-3.5 h-3.5 text-white flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.19 5.43 3.14 7.15.16.14.26.35.26.57l-.05 1.77c-.02.59.54 1.01 1.07.78l1.97-.87c.18-.08.38-.09.57-.04.97.27 2.01.42 3.1.42 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm1.09 13.06l-2.54-2.71-4.96 2.71c-.55.3-1.18-.28-.9-.82l5.44-8.62c.32-.51 1.07-.5 1.38.01l2.54 2.71 4.96-2.71c.55-.3 1.18.28.9.82l-5.44 8.62c-.32.51-1.07.5-1.38-.01z"/>
+            </svg>
+            <span className="font-extrabold">Ping Messenger</span>
           </button>
         </div>
 
