@@ -992,12 +992,42 @@ export default function App() {
       })
       .catch(() => {});
 
-    const invTimer = setInterval(() => fetchInvoices(), 2000);
-    const stockTimer = setInterval(() => fetchStock(), 6000);
-    const packerTimer = setInterval(fetchPackerStats, 6000);
-    const backlogTimer = setInterval(() => fetchBacklogCount(selectedLiveIdRef.current), 6000);
-    const allLiveQcTimer = setInterval(fetchAllLivePaidInvoices, 5000);
-    const allLiveDispatchedTimer = setInterval(fetchAllLiveDispatchedInvoices, 5000);
+    // Smart adaptive polling: only poll when tab is active and visible
+    const isVisible = () => typeof document === 'undefined' || !document.hidden;
+
+    const invTimer = setInterval(() => {
+      if (isVisible()) fetchInvoices();
+    }, 3500);
+
+    const stockTimer = setInterval(() => {
+      if (isVisible()) fetchStock();
+    }, 15000);
+
+    const packerTimer = setInterval(() => {
+      if (isVisible()) fetchPackerStats();
+    }, 15000);
+
+    const backlogTimer = setInterval(() => {
+      if (isVisible()) fetchBacklogCount(selectedLiveIdRef.current);
+    }, 15000);
+
+    const allLiveQcTimer = setInterval(() => {
+      if (isVisible()) fetchAllLivePaidInvoices();
+    }, 15000);
+
+    const allLiveDispatchedTimer = setInterval(() => {
+      if (isVisible()) fetchAllLiveDispatchedInvoices();
+    }, 15000);
+
+    // Immediate refresh when tab becomes active again
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchInvoices();
+        fetchStock();
+        fetchBacklogCount(selectedLiveIdRef.current);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       clearInterval(invTimer);
@@ -1006,6 +1036,7 @@ export default function App() {
       clearInterval(backlogTimer);
       clearInterval(allLiveQcTimer);
       clearInterval(allLiveDispatchedTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [selectedLiveId, packerName]);
 

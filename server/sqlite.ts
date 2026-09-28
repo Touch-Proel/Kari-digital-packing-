@@ -507,10 +507,10 @@ export async function persistToSqlite(data: {
     if (pendingPersistData) {
       const nextData = pendingPersistData;
       pendingPersistData = null;
-      // Schedule next queued persist
+      // Schedule next queued persist with 3s debounce to protect CPU
       setTimeout(() => {
         persistToSqlite(nextData);
-      }, 50);
+      }, 3000);
     }
   }
 }

@@ -348,55 +348,75 @@ export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: str
   return posts;
 }
 
-// Generate realistic simulated sample comments for local/demo live testing
+// Generate realistic simulated sample comments for local/demo live testing with stable IDs
 function getSimulatedSampleComments() {
-  const now = Date.now();
   return [
     {
-      id: `cm_${now}_1`,
+      id: 'cm_sim_sample_1',
       from: {
         id: '100088991122334',
         name: 'សុខ ស្រីម៉ៅ (Srey Mao)',
         picture: { data: { url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80' } }
       },
       message: '30=2 យកពណ៍ផ្ទៃមេឃ 012889772 ភ្នំពេញ',
-      created_time: new Date(now - 150000).toISOString()
+      created_time: '2026-09-28T04:00:00.000Z'
     },
     {
-      id: `cm_${now}_2`,
+      id: 'cm_sim_sample_2',
       from: {
         id: '100099887766554',
         name: 'គីម ហុង (Kim Hong)',
         picture: { data: { url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80' } }
       },
       message: 'A12=2 ខោខូវប៊យ 098776655 សៀមរាប',
-      created_time: new Date(now - 110000).toISOString()
+      created_time: '2026-09-28T04:01:00.000Z'
     },
     {
-      id: `cm_${now}_3`,
+      id: 'cm_sim_sample_3',
       from: {
         id: '100077665544332',
         name: 'ម៉ៅ ចិន្តា (Chenda Mao)',
         picture: { data: { url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80' } }
       },
       message: '54=1 អាវយឺត និង 30=1 077334455 កំពង់ចាម',
-      created_time: new Date(now - 70000).toISOString()
+      created_time: '2026-09-28T04:02:00.000Z'
     },
     {
-      id: `cm_${now}_4`,
+      id: 'cm_sim_sample_4',
       from: {
         id: '100066554433221',
         name: 'លីណា ស្តាយ (Lina Style)',
         picture: { data: { url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80' } }
       },
       message: 'K99=1 អាវប៉ាក់ 015998877 ភ្នំពេញ',
-      created_time: new Date(now - 30000).toISOString()
+      created_time: '2026-09-28T04:03:00.000Z'
     }
   ];
 }
 
 // Fetch Comments for a Post or Live Stream with full multi-page pagination (up to 10,000+ comments)
-export async function fetchFacebookComments(targetPostId: string, pageAccessToken?: string, maxLimit = 15000) {
+// Cache resolved Facebook Live stream metadata across polling cycles to prevent redundant API queries
+interface LiveStreamState {
+  resolvedTargetId: string;
+  workingUrlTemplate: string;
+  seenCommentIds: Set<string>;
+  latestCommentTime: number;
+}
+const liveStreamCache = new Map<string, LiveStreamState>();
+const liveVideoIdCache = new Map<string, string>();
+
+export interface FetchCommentsOptions {
+  isRealtimePoll?: boolean;
+  forceFullFetch?: boolean;
+}
+
+// Fetch Comments for a Post or Live Stream with smart caching and fast incremental delta polling
+export async function fetchFacebookComments(
+  targetPostId: string,
+  pageAccessToken?: string,
+  maxLimit = 500,
+  options?: FetchCommentsOptions
+) {
   const token = pageAccessToken || activeFacebookPage?.access_token;
   const isSimulatedTarget = !targetPostId || targetPostId.startsWith('LIVE_') || targetPostId.startsWith('sim_') || targetPostId.startsWith('POST_');
 
@@ -407,10 +427,55 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
   try {
     const rawTarget = targetPostId.trim();
     const cleanId = rawTarget.includes('_') ? rawTarget.split('_').pop() || rawTarget : rawTarget;
+    const isRealtime = Boolean(options?.isRealtimePoll && !options?.forceFullFetch);
+
+    // FAST-PATH: Incremental Real-Time Polling for active stream
+    if (isRealtime && liveStreamCache.has(cleanId)) {
+      const state = liveStreamCache.get(cleanId)!;
+      const sinceParam = state.latestCommentTime > 0
+        ? `&since=${Math.max(0, Math.floor((state.latestCommentTime - 15000) / 1000))}`
+        : '';
+      
+      // Try reverse chronological (newest first) or filter=stream
+      const fastUrl = `https://graph.facebook.com/v21.0/${state.resolvedTargetId}/comments?fields=from{id,name,picture},message,id,created_time&order=reverse_chronological&limit=50&access_token=${token}${sinceParam}`;
+      const data: any = await safeGraphApiFetch(fastUrl);
+
+      if (data && Array.isArray(data.data) && !data.error) {
+        const newComments: any[] = [];
+        for (const itm of data.data) {
+          if (!itm.id || state.seenCommentIds.has(itm.id)) {
+            // Because order is reverse chronological (newest first), encountering a known ID
+            // means all older comments in this page have already been processed!
+            break;
+          }
+          state.seenCommentIds.add(itm.id);
+          newComments.push(itm);
+          if (itm.created_time) {
+            const t = new Date(itm.created_time).getTime();
+            if (t > state.latestCommentTime) state.latestCommentTime = t;
+          }
+        }
+
+        if (newComments.length > 0) {
+          // Sort chronological so earlier comments get allocated first
+          newComments.sort((a, b) => {
+            const tA = a.created_time ? new Date(a.created_time).getTime() : 0;
+            const tB = b.created_time ? new Date(b.created_time).getTime() : 0;
+            return tA - tB;
+          });
+          return { data: newComments, isSimulated: false, isIncremental: true };
+        }
+
+        // Zero new comments: instant return with zero processing overhead
+        return { data: [], isSimulated: false, isIncremental: true };
+      }
+    }
+
+    // INITIAL OR FULL SYNC PATH
     const allComments: any[] = [];
     const seenCommentIds = new Set<string>();
 
-    // Build list of candidate Facebook Graph API IDs (e.g., Live ID, Video ID, Page_Post ID)
+    // Candidate Facebook Graph API IDs
     const tryTargetIds: string[] = [];
     if (cleanId) tryTargetIds.push(cleanId);
     if (activeFacebookPage?.id && cleanId && !cleanId.includes('_') && cleanId !== activeFacebookPage.id) {
@@ -420,28 +485,32 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
       tryTargetIds.push(rawTarget);
     }
 
-    // Also resolve associated video ID if target is a Live Video object
-    try {
-      const vidMeta = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${cleanId}?fields=video{id},id&access_token=${token}`);
-      if (vidMeta?.video?.id && !tryTargetIds.includes(vidMeta.video.id)) {
-        tryTargetIds.push(vidMeta.video.id);
+    // Use cached video ID if known, or resolve once
+    if (liveVideoIdCache.has(cleanId)) {
+      const vidId = liveVideoIdCache.get(cleanId)!;
+      if (!tryTargetIds.includes(vidId)) tryTargetIds.push(vidId);
+    } else {
+      try {
+        const vidMeta = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${cleanId}?fields=video{id},id&access_token=${token}`);
+        if (vidMeta?.video?.id) {
+          liveVideoIdCache.set(cleanId, vidMeta.video.id);
+          if (!tryTargetIds.includes(vidMeta.video.id)) tryTargetIds.push(vidMeta.video.id);
+        }
+      } catch (e) {
+        // ignore
       }
-    } catch (e) {
-      // ignore
     }
 
     let lastErrorMessage = '';
+    let matchedTargetId = '';
+    let matchedStrategy = '';
 
     for (const targetId of tryTargetIds) {
       if (allComments.length > 0) break;
 
-      // Try multiple endpoint URL strategies for maximum compatibility (Live Stream vs VOD vs Standard Post)
       const urlStrategies = [
-        // Strategy 1: Standard comments endpoint (most universal for both Live, VOD & Posts)
-        `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&order=chronological&limit=100&access_token=${token}`,
-        // Strategy 2: Stream filter for active streaming live
         `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&filter=stream&order=chronological&limit=100&access_token=${token}`,
-        // Strategy 3: Default unfiltered query
+        `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&order=chronological&limit=100&access_token=${token}`,
         `https://graph.facebook.com/v21.0/${targetId}/comments?fields=from{id,name,picture},message,id,created_time&limit=100&access_token=${token}`
       ];
 
@@ -450,7 +519,7 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
 
         let nextUrl: string | null = initialUrl;
         let pageCount = 0;
-        const maxPages = Math.ceil(maxLimit / 100);
+        const maxPages = Math.min(5, Math.ceil(maxLimit / 100)); // Cap to max 5 pages for rapid sync
 
         while (nextUrl && pageCount < maxPages && allComments.length < maxLimit) {
           pageCount++;
@@ -458,14 +527,11 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
 
           if (data.error) {
             lastErrorMessage = data.error.message || 'Facebook API Error';
-            console.warn(`[FB Graph API] Target ${targetId} Strategy Notice (page ${pageCount}): [${data.error.code}] ${data.error.message}`);
-            break; // Try next strategy for this target
+            break;
           }
 
           const items = Array.isArray(data.data) ? data.data : [];
-          if (items.length === 0) {
-            break;
-          }
+          if (items.length === 0) break;
 
           let newItemsThisPage = 0;
           for (const itm of items) {
@@ -476,13 +542,12 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
             }
           }
 
-          console.log(`[FB Sync] Target ${targetId} (Page ${pageCount}): Fetched ${items.length} comments (+${newItemsThisPage} unique, Total: ${allComments.length})`);
+          matchedTargetId = targetId;
+          matchedStrategy = initialUrl;
 
-          // Follow Facebook pagination
           if (data.paging?.next) {
             nextUrl = data.paging.next;
           } else if (data.paging?.cursors?.after && newItemsThisPage > 0) {
-            // Build cursor URL fallback
             const baseUrl = initialUrl.split('&after=')[0];
             nextUrl = `${baseUrl}&after=${encodeURIComponent(data.paging.cursors.after)}`;
           } else {
@@ -499,7 +564,22 @@ export async function fetchFacebookComments(targetPostId: string, pageAccessToke
       return timeA - timeB;
     });
 
-    console.log(`[FB Sync Complete] Retrieved ${allComments.length} total unique comments for Live #${cleanId}.`);
+    // Cache the working stream state for high-speed subsequent delta polling
+    if (matchedTargetId) {
+      let maxTime = 0;
+      for (const c of allComments) {
+        if (c.created_time) {
+          const t = new Date(c.created_time).getTime();
+          if (t > maxTime) maxTime = t;
+        }
+      }
+      liveStreamCache.set(cleanId, {
+        resolvedTargetId: matchedTargetId,
+        workingUrlTemplate: matchedStrategy,
+        seenCommentIds,
+        latestCommentTime: maxTime
+      });
+    }
 
     if (allComments.length > 0) {
       return {

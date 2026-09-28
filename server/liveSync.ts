@@ -117,7 +117,13 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
   }
 
   try {
-    const result = await fetchFacebookComments(targetId);
+    const isRealtime = !force;
+    const result = await fetchFacebookComments(
+      targetId,
+      undefined,
+      force ? 500 : 100,
+      { isRealtimePoll: isRealtime, forceFullFetch: force }
+    );
     if (result.error && (!result.data || result.data.length === 0)) {
       liveSyncState.lastError = result.error;
       liveSyncState.lastSyncAt = new Date().toISOString();
@@ -135,6 +141,19 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
     let newAllocatedCount = 0;
     let newProcessedCommentsCount = 0;
 
+    // Fast return if zero new comments in incremental poll
+    if (comments.length === 0 && isRealtime) {
+      liveSyncState.lastSyncAt = new Date().toISOString();
+      liveSyncState.lastError = null;
+      return {
+        success: true,
+        target_live_id: targetId,
+        total_synced: liveSyncState.totalCommentsSynced,
+        new_orders: 0,
+        total_baskets: invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled').length
+      };
+    }
+
     for (const c of comments) {
       const parsed = parseAndAllocateComment(
         c.from?.id || '',
@@ -142,7 +161,8 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
         c.message || '',
         targetId,
         c.id,
-        c.from?.picture?.data?.url
+        c.from?.picture?.data?.url,
+        true // batchMode = true
       );
 
       if (parsed.status !== 'IGNORED') {
@@ -190,7 +210,6 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
 
     if (newProcessedCommentsCount > 0) {
       bumpDataRevision();
-      saveDatabaseToDisk();
       console.log(`🎉 [Live Real-Time Sync]: Processed ${newProcessedCommentsCount} comments (${newAllocatedCount} new orders) from Live #${targetId}!`);
     }
 

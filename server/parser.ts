@@ -125,6 +125,41 @@ export interface ParseCommentResult {
 }
 
 const processedCommentKeys = new Set<string>();
+let isCommentKeysPreloaded = false;
+
+// Fast sequential ID counters
+let maxInvoiceIdTracker = 0;
+let maxProductIdTracker = 0;
+let maxItemIdTracker = 0;
+
+function ensureCommentIndexReady() {
+  if (isCommentKeysPreloaded) return;
+  isCommentKeysPreloaded = true;
+
+  // Pre-index existing raw comments
+  for (const rc of rawComments) {
+    if (rc.comment_id) processedCommentKeys.add(rc.comment_id);
+    if (rc.live_id && rc.facebook_name && rc.comment_text) {
+      processedCommentKeys.add(`${rc.live_id}_${(rc.facebook_user_id || rc.facebook_name).toLowerCase()}_${rc.comment_text.trim()}`);
+    }
+  }
+
+  // Pre-index comments in invoices
+  for (const inv of invoices) {
+    if (inv.comment_ids) {
+      for (const cid of inv.comment_ids) processedCommentKeys.add(cid);
+    }
+    if (inv.invoice_id > maxInvoiceIdTracker) maxInvoiceIdTracker = inv.invoice_id;
+    for (const it of inv.items || []) {
+      if (it.id > maxItemIdTracker) maxItemIdTracker = it.id;
+    }
+  }
+
+  for (const p of products) {
+    if ((p.id || 0) > maxProductIdTracker) maxProductIdTracker = p.id || 0;
+  }
+}
+
 export const sentPrivateRepliesByLive = new Map<string, Set<string>>();
 
 export function parseAndAllocateComment(
@@ -133,8 +168,11 @@ export function parseAndAllocateComment(
   commentText: string,
   liveId: string = activeLiveId,
   commentId?: string,
-  userPicUrl?: string
+  userPicUrl?: string,
+  batchMode = false
 ): ParseCommentResult {
+  ensureCommentIndexReady();
+
   const cleanFbName = (fbName || 'អតិថិជន Facebook').trim();
   const rawText = (commentText || '').trim();
 
@@ -156,6 +194,23 @@ export function parseAndAllocateComment(
 
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
+
+  // O(1) Instant Hash Check for duplicate comments
+  const isDuplicate =
+    (commentId && processedCommentKeys.has(commentId)) ||
+    processedCommentKeys.has(savedCommentId) ||
+    processedCommentKeys.has(signatureKey);
+
+  if (isDuplicate) {
+    return {
+      status: 'IGNORED',
+      message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`
+    };
+  }
+
+  processedCommentKeys.add(savedCommentId);
+  if (commentId) processedCommentKeys.add(commentId);
+  processedCommentKeys.add(signatureKey);
 
   // Safe invoice lookup helper: avoids merging two distinct users who happen to share the same name
   const existingInv = invoices.find(i => {
@@ -195,26 +250,12 @@ export function parseAndAllocateComment(
     (existingInv.items && existingInv.items.some(it => it.item_comment === rawText))
   );
 
-  const isDuplicate =
-    isAlreadyInBasket ||
-    (commentId && processedCommentKeys.has(commentId)) ||
-    processedCommentKeys.has(savedCommentId) ||
-    processedCommentKeys.has(signatureKey) ||
-    rawComments.some(rc => 
-      (commentId && rc.comment_id === commentId) ||
-      (rc.live_id === liveId && rc.facebook_name.toLowerCase() === cleanFbName.toLowerCase() && rc.comment_text.trim() === rawText)
-    );
-
-  if (isDuplicate) {
+  if (isAlreadyInBasket) {
     return {
       status: 'IGNORED',
       message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`
     };
   }
-
-  processedCommentKeys.add(savedCommentId);
-  if (commentId) processedCommentKeys.add(commentId);
-  processedCommentKeys.add(signatureKey);
 
   const newCommentEntry: CustomerComment = {
     comment_id: savedCommentId,
@@ -337,7 +378,7 @@ export function parseAndAllocateComment(
       }
 
       recalculateInvoice(inv);
-      bumpDataRevision();
+      if (!batchMode) bumpDataRevision();
     }
 
     return {
@@ -350,7 +391,8 @@ export function parseAndAllocateComment(
   }
 
   if (!inv) {
-    const nextId = invoices.length > 0 ? Math.max(...invoices.map(i => i.invoice_id)) + 1 : 101;
+    maxInvoiceIdTracker = Math.max(maxInvoiceIdTracker + 1, 101);
+    const nextId = maxInvoiceIdTracker;
 
     // SAFE AUTOFILL RULE:
     // Only autofill phone & address from DB if:
@@ -497,7 +539,7 @@ export function parseAndAllocateComment(
       if (settings.parser_strict_catalog) {
         continue;
       }
-      const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
+      const nextId = ++maxProductIdTracker;
       prod = {
         id: nextId,
         code: cleanPairCode,
@@ -509,8 +551,10 @@ export function parseAndAllocateComment(
         live_id: liveId
       };
       products.push(prod);
-      saveDatabaseToDisk();
-      bumpDataRevision();
+      if (!batchMode) {
+        saveDatabaseToDisk();
+        bumpDataRevision();
+      }
     }
 
     if (prod.stock_qty <= 0) {
@@ -543,7 +587,7 @@ export function parseAndAllocateComment(
         }
       }
     } else {
-      const nextItemId = inv.items.length > 0 ? Math.max(...inv.items.map(it => it.id)) + 1 : 1;
+      const nextItemId = ++maxItemIdTracker;
       inv.items.push({
         id: nextItemId,
         invoice_id: inv.invoice_id,
@@ -568,7 +612,7 @@ export function parseAndAllocateComment(
   }
 
   recalculateInvoice(inv);
-  bumpDataRevision();
+  if (!batchMode) bumpDataRevision();
 
   if (allocated.length === 0 && soldOut.length > 0) {
     if (!inv.unmatched_comments) inv.unmatched_comments = [];

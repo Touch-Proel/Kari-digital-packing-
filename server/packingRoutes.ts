@@ -67,9 +67,8 @@ router.get('/invoices', (req: Request, res: Response) => {
     filtered = invoices.filter(inv => inv.live_id === liveId);
   }
 
-  // Calculate live lock state and pricing
+  // Calculate live lock state without redundant recalculateInvoice calls
   const result = filtered.map(inv => {
-    recalculateInvoice(inv);
     const lock = activeInvoiceLocks.get(inv.invoice_id);
     const isLocked = !!lock;
     return {

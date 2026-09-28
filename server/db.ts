@@ -15,10 +15,11 @@ import { detectDeliveryZone } from './locationHelper';
 
 let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;
+let lastSqlitePersistTime = 0;
 
 const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
 
-export function saveDatabaseToDisk() {
+export async function saveDatabaseToDisk(forceSync = false) {
   try {
     const payload = {
       dataRevision,
@@ -31,19 +32,31 @@ export function saveDatabaseToDisk() {
       packerLogs,
       activeFacebookPage
     };
-    fs.writeFileSync(DB_FILE_PATH, JSON.stringify(payload, null, 2), 'utf8');
+    const jsonStr = JSON.stringify(payload);
 
-    // Also persist to binary SQLite database pos.db
-    persistToSqlite({
-      activeLiveId,
-      settings,
-      products,
-      invoices,
-      rawComments,
-      customers,
-      packerLogs,
-      activeFacebookPage
-    }).catch(err => console.error('[SQLite] Persist error:', err));
+    if (forceSync) {
+      fs.writeFileSync(DB_FILE_PATH, jsonStr, 'utf8');
+    } else {
+      await fs.promises.writeFile(DB_FILE_PATH, jsonStr, 'utf8').catch(err => {
+        console.error('[DB] Async save error:', err);
+      });
+    }
+
+    // Persist to binary SQLite database pos.db with 4-second throttle to save CPU
+    const now = Date.now();
+    if (now - lastSqlitePersistTime > 4000 || forceSync) {
+      lastSqlitePersistTime = now;
+      persistToSqlite({
+        activeLiveId,
+        settings,
+        products,
+        invoices,
+        rawComments,
+        customers,
+        packerLogs,
+        activeFacebookPage
+      }).catch(err => console.error('[SQLite] Persist error:', err));
+    }
   } catch (err) {
     console.error('Failed to save database:', err);
   }
@@ -54,7 +67,7 @@ export function bumpDataRevision(): number {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveDatabaseToDisk();
-  }, 400);
+  }, 1200);
   return dataRevision;
 }
 

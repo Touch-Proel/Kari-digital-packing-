@@ -109,7 +109,7 @@ export function LiveCommentStream({
     if (!isOpen) return;
     fetchLiveSyncStatus();
     fetchParserSettings();
-    const timer = setInterval(fetchLiveSyncStatus, 2500);
+    const timer = setInterval(fetchLiveSyncStatus, 3500);
     return () => clearInterval(timer);
   }, [isOpen, activeLiveId]);
 
