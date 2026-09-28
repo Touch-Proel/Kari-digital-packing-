@@ -10,8 +10,8 @@ interface CRMModalProps {
   initialTab?: FilterTab;
 }
 
-type FilterTab = 'ALL' | 'SAFE_24H' | 'VIP' | 'INACTIVE' | 'PP' | 'PROVINCE' | 'BLACKLIST';
-type TemplateType = 'LIVE_INVITE' | 'VIP_PROMO' | 'NEW_ARRIVAL' | 'BULK_DISCOUNT' | 'CARE';
+type FilterTab = 'ALL' | 'SAFE_24H' | 'HAS_COMMENT' | 'VIP' | 'INACTIVE' | 'PP' | 'PROVINCE' | 'BLACKLIST';
+type TemplateType = 'PRIVATE_REPLY' | 'LIVE_INVITE' | 'VIP_PROMO' | 'NEW_ARRIVAL' | 'BULK_DISCOUNT' | 'CARE';
 
 const PRESET_TAGS = [
   '👕 Size S/M',
@@ -49,9 +49,12 @@ export function CRMModal({
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState(initialCustomerQuery || '');
   const [activeTab, setActiveTab] = useState<FilterTab>(initialTab || 'ALL');
-  const [activeTemplate, setActiveTemplate] = useState<TemplateType>('LIVE_INVITE');
+  const [activeTemplate, setActiveTemplate] = useState<TemplateType>('PRIVATE_REPLY');
   const [broadcastFilter, setBroadcastFilter] = useState<'ALL' | 'UNSENT' | 'SENT'>('ALL');
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [copiedNameId, setCopiedNameId] = useState<number | null>(null);
+  const [sendingPrivateReplyId, setSendingPrivateReplyId] = useState<number | null>(null);
+  const [selectedCommentMap, setSelectedCommentMap] = useState<Record<number, string>>({});
 
   // Edit Customer State
   const [editingCust, setEditingCust] = useState<CustomerCRMRecord | null>(null);
@@ -114,6 +117,8 @@ export function CRMModal({
   const getRemarketingMessage = (customerName: string, type: TemplateType): string => {
     const cleanName = customerName || 'អូន';
     switch (type) {
+      case 'PRIVATE_REPLY':
+        return `ជម្រាបសួរអូន ${cleanName} ចាស! ចែឃើញអូនបានខមិនកាត់អាវយឺតក្នុង Live យប់មិញ ម៉ូតដែលអូនចាប់អារម្មណ៍ឥឡូវចូលស្តុកគ្រប់ Size (S, M, L, XL, Oversize) ណាអូន! បើអូនចង់បានអាចតបឆាតនេះបានចាស 🥰✨👕`;
       case 'LIVE_INVITE':
         return `ជម្រាបសួរអូន ${cleanName} ចាស! យប់នេះផេកយើងខ្ញុំមាន Live ម៉ូតអាវយឺតថ្មីៗ (T-Shirt Collection) ទើបមកដល់ស្អាតៗខ្លាំង សាច់ក្រណាត់កប្បាសត្រជាក់ស្រួលពាក់ និងមានប្រូម៉ូសិនពិសេសសម្រាប់ម៉ូយចាស់ផងដែរ។ កុំភ្លេចចូលទស្សនានៅម៉ោង 8:00 យប់នេះណាអូន! 🥰✨👕`;
       case 'VIP_PROMO':
@@ -160,12 +165,10 @@ export function CRMModal({
     }
   };
 
-  // Open Chat directly (Meta Business Suite Inbox or Messenger) & Copy Message
-  const handleOpenChat = async (cust: CustomerCRMRecord) => {
-    // 1. Copy message first so user can paste immediately
+  // 1. Open Direct Chat (< 24h window) & Copy Message
+  const handleOpenDirectChat = async (cust: CustomerCRMRecord) => {
     await handleCopyMessage(cust);
 
-    // 2. Open chat window
     if (cust.facebook_user_id && cust.facebook_user_id !== 'FB_USER_ID_STREAM') {
       try {
         const res = await fetch(`/api/fb/inbox_link/${cust.facebook_user_id}`);
@@ -174,12 +177,108 @@ export function CRMModal({
           window.open(data.url, '_blank');
           return;
         }
-      } catch {
-        // fallback below
-      }
+      } catch {}
       window.open(`https://m.me/${cust.facebook_user_id}`, '_blank');
     } else {
-      window.open(`https://www.facebook.com/search/top?q=${encodeURIComponent(cust.facebook_name)}`, '_blank');
+      window.open(`https://business.facebook.com/latest/inbox/all?search_query=${encodeURIComponent(cust.facebook_name)}`, '_blank');
+    }
+  };
+
+  // 2. Expired > 24h window: Copy Customer Name & Open Meta Business Suite Inbox Search
+  const handleCopyNameAndOpenMetaSuite = async (cust: CustomerCRMRecord) => {
+    const cleanName = cust.facebook_name || '';
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(cleanName);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = cleanName;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+
+      setCopiedNameId(cust.customer_id);
+      setTimeout(() => setCopiedNameId(null), 3500);
+
+      // Optimistically record remarket timestamp in state
+      const nowIso = new Date().toISOString();
+      setCustomers(prev =>
+        prev.map(c => c.customer_id === cust.customer_id ? { ...c, last_remarketed_at: nowIso } : c)
+      );
+
+      onShowToast(`📋 បានចម្លងឈ្មោះ "${cleanName}" រួចរាល់! កំពុងបើក Meta Business Suite ដើម្បី Paste Search ក្នុង Inbox...`, 'success');
+
+      // Log remarket event to backend
+      fetch(`/api/crm/customers/${cust.customer_id}/log_remarket`, { method: 'POST' }).catch(() => {});
+
+      // Open Meta Business Suite Search directly
+      try {
+        const res = await fetch(`/api/fb/inbox_link/${cust.facebook_user_id || '0'}?name=${encodeURIComponent(cleanName)}&search=1`);
+        const data = await res.json();
+        if (data.success && data.url) {
+          window.open(data.url, '_blank');
+          return;
+        }
+      } catch {}
+
+      window.open(`https://business.facebook.com/latest/inbox/all?search_query=${encodeURIComponent(cleanName)}`, '_blank');
+    } catch {
+      onShowToast('❌ មិនអាច Copy ឈ្មោះបាន', 'error');
+    }
+  };
+
+  // 3. Send Meta Official Private Reply using Comment ID from Live
+  const handleSendPrivateReply = async (cust: CustomerCRMRecord, overrideCommentId?: string) => {
+    const targetCid = overrideCommentId || selectedCommentMap[cust.customer_id] || cust.last_comment_id || (cust.comment_ids && cust.comment_ids[0]);
+    if (!targetCid) {
+      onShowToast('⚠️ មិនមាន Comment ID សម្រាប់អតិថិជននេះទេ!', 'error');
+      return;
+    }
+
+    setSendingPrivateReplyId(cust.customer_id);
+    const msgText = getRemarketingMessage(cust.facebook_name, activeTemplate === 'PRIVATE_REPLY' ? 'PRIVATE_REPLY' : activeTemplate);
+
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(msgText).catch(() => {});
+      }
+
+      const res = await fetch(`/api/crm/customers/${cust.customer_id}/send_private_reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          comment_id: targetCid,
+          message: msgText,
+          templateType: activeTemplate
+        })
+      });
+      const data = await res.json();
+
+      const nowIso = new Date().toISOString();
+      setCustomers(prev =>
+        prev.map(c => c.customer_id === cust.customer_id ? { ...c, last_remarketed_at: nowIso } : c)
+      );
+
+      if (data.success) {
+        onShowToast(`🎉 បានផ្ញើ Private Reply តាមខមិន #${targetCid} របស់ ${cust.facebook_name} ដោយជោគជ័យ!`, 'success');
+      } else {
+        onShowToast(`📋 ${data.detail || data.error || 'បានចម្លងសារ Private Reply រួចរាល់! អាច Paste ក្នុងឆាតបាន'}`, 'success');
+      }
+    } catch {
+      onShowToast('⚠️ មិនអាចតភ្ជាប់ API — បានចម្លងសារ Private Reply រួចរាល់!', 'success');
+    } finally {
+      setSendingPrivateReplyId(null);
+    }
+  };
+
+  // Backward compatible dispatcher for general Chat button
+  const handleOpenChat = (cust: CustomerCRMRecord) => {
+    if (cust.eligibility.status === 'SAFE_24H') {
+      handleOpenDirectChat(cust);
+    } else {
+      handleCopyNameAndOpenMetaSuite(cust);
     }
   };
 
@@ -247,6 +346,8 @@ export function CRMModal({
     // Filter by tab
     if (activeTab === 'SAFE_24H') {
       result = result.filter(c => c.eligibility.status === 'SAFE_24H');
+    } else if (activeTab === 'HAS_COMMENT') {
+      result = result.filter(c => Boolean(c.last_comment_id || (c.comment_ids && c.comment_ids.length > 0)));
     } else if (activeTab === 'VIP') {
       result = result.filter(c => c.vip_tier === 'DIAMOND' || c.vip_tier === 'GOLD' || c.is_vip);
     } else if (activeTab === 'INACTIVE') {
@@ -284,6 +385,7 @@ export function CRMModal({
   // Statistics for currently filtered subset
   const safeCount = useMemo(() => customers.filter(c => c.eligibility.status === 'SAFE_24H').length, [customers]);
   const safeSentCount = useMemo(() => customers.filter(c => c.eligibility.status === 'SAFE_24H' && c.last_remarketed_at).length, [customers]);
+  const hasCommentCount = useMemo(() => customers.filter(c => Boolean(c.last_comment_id || (c.comment_ids && c.comment_ids.length > 0))).length, [customers]);
 
   if (!isOpen) return null;
 
@@ -328,21 +430,25 @@ export function CRMModal({
         </div>
 
         {/* Top Metric Cards */}
-        <div className="grid grid-cols-4 gap-1.5 p-2.5 bg-[#040813] border-b border-slate-800/80 flex-shrink-0 text-center">
-          <div className="p-1.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col items-center">
-            <span className="text-[10px] text-slate-400 font-bold">ម៉ូយសរុប</span>
+        <div className="grid grid-cols-5 gap-1 sm:gap-1.5 p-2 bg-[#040813] border-b border-slate-800/80 flex-shrink-0 text-center">
+          <div className="p-1 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col items-center">
+            <span className="text-[9.5px] text-slate-400 font-bold">ម៉ូយសរុប</span>
             <span className="text-sm font-black text-cyan-300 font-mono">{stats.total_customers}</span>
           </div>
-          <div className="p-1.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex flex-col items-center">
-            <span className="text-[10px] text-emerald-400 font-bold">🟢 ឆាតបាន (24h)</span>
+          <div className="p-1 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex flex-col items-center">
+            <span className="text-[9.5px] text-emerald-400 font-bold truncate">🟢 ឆាត (24h)</span>
             <span className="text-sm font-black text-emerald-300 font-mono">{stats.safe_24h_count}</span>
           </div>
-          <div className="p-1.5 rounded-xl bg-amber-950/40 border border-amber-500/40 flex flex-col items-center">
-            <span className="text-[10px] text-amber-400 font-bold">👑 ម៉ូយ VIP</span>
+          <div className="p-1 rounded-xl bg-teal-950/40 border border-teal-500/40 flex flex-col items-center">
+            <span className="text-[9.5px] text-teal-300 font-bold truncate">💬 មានខមិន</span>
+            <span className="text-sm font-black text-teal-300 font-mono">{hasCommentCount}</span>
+          </div>
+          <div className="p-1 rounded-xl bg-amber-950/40 border border-amber-500/40 flex flex-col items-center">
+            <span className="text-[9.5px] text-amber-400 font-bold truncate">👑 ម៉ូយ VIP</span>
             <span className="text-sm font-black text-amber-300 font-mono">{stats.vip_count}</span>
           </div>
-          <div className="p-1.5 rounded-xl bg-purple-950/40 border border-purple-500/40 flex flex-col items-center">
-            <span className="text-[10px] text-purple-300 font-bold">💤 បាត់មុខ</span>
+          <div className="p-1 rounded-xl bg-purple-950/40 border border-purple-500/40 flex flex-col items-center">
+            <span className="text-[9.5px] text-purple-300 font-bold truncate">💤 បាត់មុខ</span>
             <span className="text-sm font-black text-purple-200 font-mono">{stats.inactive_count}</span>
           </div>
         </div>
@@ -357,6 +463,19 @@ export function CRMModal({
             <span className="text-[10px] text-cyan-400 font-normal">ចុច [📋 Copy] វានឹងដាក់ឈ្មោះភ្ញៀវស្វ័យប្រវត្តិ</span>
           </div>
           <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar text-xs">
+            <button
+              type="button"
+              onClick={() => setActiveTemplate('PRIVATE_REPLY')}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 ${
+                activeTemplate === 'PRIVATE_REPLY'
+                  ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-sm border border-teal-400/50'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              <span>💬</span>
+              <span>Private Reply (តាមខមិន)</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setActiveTemplate('LIVE_INVITE')}
@@ -472,6 +591,19 @@ export function CRMModal({
             >
               <span>🟢 អាចឆាតបាន (&lt;24h)</span>
               <span className="font-mono">({stats.safe_24h_count})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => startTransition(() => setActiveTab('HAS_COMMENT'))}
+              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] whitespace-nowrap cursor-pointer transition-all flex items-center gap-1 ${
+                activeTab === 'HAS_COMMENT'
+                  ? 'bg-teal-500 text-slate-950 font-black shadow-md'
+                  : 'bg-teal-950/40 text-teal-300 hover:bg-teal-950/60 border border-teal-500/30'
+              }`}
+            >
+              <span>💬 មាន Comment Live</span>
+              <span className="font-mono">({hasCommentCount})</span>
             </button>
 
             <button
@@ -776,54 +908,138 @@ export function CRMModal({
                     </div>
                   )}
 
+                  {/* Live Comment Context & Private Reply Action if available */}
+                  {(cust.last_comment_id || (cust.comment_ids && cust.comment_ids.length > 0)) && (
+                    <div className="bg-gradient-to-r from-teal-950/60 to-slate-900/80 border border-teal-500/40 rounded-xl p-2.5 text-[11px] flex flex-col gap-1.5 shadow-sm">
+                      <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-teal-400 font-bold flex items-center gap-1">
+                            <span>💬</span>
+                            <span>Comment ក្នុង Live ៖</span>
+                          </span>
+                          {cust.comment_ids && cust.comment_ids.length > 1 ? (
+                            <select
+                              value={selectedCommentMap[cust.customer_id] || cust.last_comment_id || cust.comment_ids[0]}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setSelectedCommentMap(prev => ({ ...prev, [cust.customer_id]: val }));
+                              }}
+                              className="bg-slate-950 border border-teal-400/50 rounded-lg px-2 py-0.5 text-[10px] text-teal-300 font-mono outline-none cursor-pointer"
+                              title="ជ្រើសរើស Comment ID ដើម្បីផ្ញើ Private Reply"
+                            >
+                              {cust.comment_ids.map((cid, cIdx) => (
+                                <option key={cIdx} value={cid}>
+                                  #{cid} {cIdx === 0 ? '(ចុងក្រោយ)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <strong className="text-cyan-300 font-mono text-[10.5px] bg-slate-950 px-1.5 py-0.2 rounded border border-teal-500/30">
+                              #{cust.last_comment_id || cust.comment_ids?.[0]}
+                            </strong>
+                          )}
+                          <span className="text-[9px] bg-teal-900/60 text-teal-300 border border-teal-500/30 px-1.5 py-0.2 rounded-full font-bold">
+                            Meta 7D Window
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendPrivateReply(cust)}
+                          disabled={sendingPrivateReplyId === cust.customer_id}
+                          className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white px-2.5 py-1 rounded-xl text-[10.5px] font-black flex items-center gap-1 shadow-sm cursor-pointer active:scale-95 transition-all"
+                          title="ផ្ញើ Private Reply ទៅកាន់ខមិននេះតាមរយៈ Meta Graph API ដោយស្វ័យប្រវត្តិ"
+                        >
+                          <span>{sendingPrivateReplyId === cust.customer_id ? '⏳' : '⚡'}</span>
+                          <span>{sendingPrivateReplyId === cust.customer_id ? 'កំពុងផ្ញើ...' : 'ផ្ញើ Private Reply (API)'}</span>
+                        </button>
+                      </div>
+
+                      {cust.recent_live_comments?.[0]?.comment_text && (
+                        <div className="text-slate-300 text-[10.5px] bg-slate-950/80 rounded-lg px-2 py-1 border border-slate-800 italic flex items-center justify-between gap-1">
+                          <span className="truncate">"{cust.recent_live_comments[0].comment_text}"</span>
+                          {cust.recent_live_comments[0].created_time && (
+                            <span className="text-[9px] text-slate-400 font-mono flex-shrink-0">
+                              {new Date(cust.recent_live_comments[0].created_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Action Buttons Row */}
                   <div className="grid grid-cols-4 gap-1.5 pt-1 border-t border-slate-800/80">
                     {/* Button 1: Copy Message */}
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(cust)}
-                      className={`py-1.5 px-2 rounded-xl text-xs font-black flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm ${
+                      className={`py-1.5 px-1.5 rounded-xl text-xs font-black flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm ${
                         copiedId === cust.customer_id
                           ? 'bg-emerald-600 text-white'
                           : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white border border-cyan-400/40'
                       }`}
-                      title="ចម្លងសារ Remarketing សម្រាប់ភ្ញៀវនេះ"
+                      title={activeTemplate === 'PRIVATE_REPLY' ? 'ចម្លងសារ Private Reply' : 'ចម្លងសារ Remarketing សម្រាប់ភ្ញៀវនេះ'}
                     >
                       <span>{copiedId === cust.customer_id ? '✓' : '📋'}</span>
-                      <span className="text-[11px] whitespace-nowrap">
-                        {copiedId === cust.customer_id ? 'បានចម្លង' : 'Copy សារ'}
+                      <span className="text-[10.5px] whitespace-nowrap">
+                        {copiedId === cust.customer_id
+                          ? 'បានចម្លង'
+                          : activeTemplate === 'PRIVATE_REPLY'
+                          ? 'Copy Private'
+                          : 'Copy សារ'}
                       </span>
                     </button>
 
-                    {/* Button 2: Chat Messenger */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenChat(cust)}
-                      className="py-1.5 px-2 rounded-xl text-xs font-black bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white border border-blue-400/40 flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm"
-                      title="បើកប្រអប់ឆាត Messenger"
-                    >
-                      <span>💬</span>
-                      <span className="text-[11px] whitespace-nowrap">ឆាត</span>
-                    </button>
+                    {/* Button 2: Direct Chat (<24h) OR Copy Name & Open Meta Suite (>24h) */}
+                    {cust.eligibility.status === 'SAFE_24H' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDirectChat(cust)}
+                        className="py-1.5 px-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/50 flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm"
+                        title="អតិថិជនស្ថិតក្នុងគម្លាត ២៤ ម៉ោង — បើកប្រអប់ឆាត Direct ភ្លាមៗ (បាន Copy សារ)"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                        <span className="text-[10px] sm:text-[10.5px] whitespace-nowrap font-bold">
+                          ឆាត Direct 24h
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleCopyNameAndOpenMetaSuite(cust)}
+                        className={`py-1.5 px-1 rounded-xl text-xs font-black flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm ${
+                          copiedNameId === cust.customer_id
+                            ? 'bg-emerald-600 text-white border border-emerald-400'
+                            : 'bg-gradient-to-r from-amber-600 via-orange-600 to-indigo-700 hover:from-amber-500 hover:to-indigo-600 text-white border border-amber-400/60'
+                        }`}
+                        title="ហួស ២៤ ម៉ោង — ចុចដើម្បីចម្លងឈ្មោះ និងបើក Meta Business Suite ស្វែងរកក្នុង Inbox"
+                      >
+                        <span>{copiedNameId === cust.customer_id ? '✓' : '📋'}</span>
+                        <span className="text-[9.5px] sm:text-[10px] whitespace-nowrap font-bold">
+                          {copiedNameId === cust.customer_id ? 'បានចម្លងឈ្មោះ' : 'ចម្លងឈ្មោះ & Meta'}
+                        </span>
+                      </button>
+                    )}
 
                     {/* Button 3: Telegram or Call */}
                     {cust.phone_number && cust.phone_number !== 'គ្មានលេខ' ? (
                       <a
                         href={`tel:${cust.phone_number.replace(/\s+/g, '')}`}
-                        className="py-1.5 px-2 rounded-xl text-xs font-black bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all text-center"
+                        className="py-1.5 px-1.5 rounded-xl text-xs font-black bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all text-center"
                         title="ខលទៅកាន់លេខទូរស័ព្ទ"
                       >
                         <span>📞</span>
-                        <span className="text-[11px] whitespace-nowrap">ខល</span>
+                        <span className="text-[10.5px] whitespace-nowrap">ខល</span>
                       </a>
                     ) : (
                       <button
                         type="button"
                         disabled
-                        className="py-1.5 px-2 rounded-xl text-xs font-bold bg-slate-900 text-slate-600 border border-slate-800 flex items-center justify-center gap-1 cursor-not-allowed opacity-60"
+                        className="py-1.5 px-1.5 rounded-xl text-xs font-bold bg-slate-900 text-slate-600 border border-slate-800 flex items-center justify-center gap-1 cursor-not-allowed opacity-60"
                       >
                         <span>📞</span>
-                        <span className="text-[11px]">គ្មានលេខ</span>
+                        <span className="text-[10.5px]">គ្មានលេខ</span>
                       </button>
                     )}
 
@@ -831,11 +1047,11 @@ export function CRMModal({
                     <button
                       type="button"
                       onClick={() => handleOpenEdit(cust)}
-                      className="py-1.5 px-2 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm"
+                      className="py-1.5 px-1.5 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 flex items-center justify-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm"
                       title="កែប្រែព័ត៌មាន និងចំណាំ"
                     >
                       <span>✏️</span>
-                      <span className="text-[11px] whitespace-nowrap">Note</span>
+                      <span className="text-[10.5px] whitespace-nowrap">Note</span>
                     </button>
                   </div>
                 </div>

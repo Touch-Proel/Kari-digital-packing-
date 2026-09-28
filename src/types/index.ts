@@ -132,6 +132,14 @@ export interface CustomerCRMRecord extends Customer {
   last_live_id?: string;
   days_since_last_order?: number;
   vip_tier: 'DIAMOND' | 'GOLD' | 'SILVER' | 'REGULAR' | 'NEW' | 'INACTIVE';
+  last_comment_id?: string;
+  comment_ids?: string[];
+  recent_live_comments?: Array<{
+    comment_id: string;
+    comment_text?: string;
+    created_time?: string;
+    live_id?: string;
+  }>;
   eligibility: {
     status: 'SAFE_24H' | 'RECENT_7D' | 'EXPIRED';
     label: string;

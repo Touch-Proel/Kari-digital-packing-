@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { customers, invoices, bumpDataRevision } from './db';
+import { customers, invoices, rawComments, activeFacebookPage, activeLiveId, bumpDataRevision } from './db';
 import { Customer, CustomerCRMRecord, DeliveryZone } from './types';
+import { sendFacebookReply } from './fbAuth';
 
 const router = Router();
 
@@ -78,25 +79,90 @@ function buildCRMRecord(c: Customer, allInvoices: typeof invoices): CustomerCRMR
     }
   }
 
-  // Determine eligibility status (< 24h = SAFE_24H, < 7d = RECENT_7D, else EXPIRED)
+  // Find all comment IDs for this customer from invoices & rawComments
+  let lastCommentId: string | undefined;
+  const commentIdsSet = new Set<string>();
+  const recentLiveComments: Array<{
+    comment_id: string;
+    comment_text?: string;
+    created_time?: string;
+    live_id?: string;
+  }> = [];
+
+  // 1. Check matched invoices
+  if (matchedInvoices.length > 0) {
+    const sortedByDate = [...matchedInvoices].sort((a, b) => {
+      const ta = new Date(a.created_at || 0).getTime();
+      const tb = new Date(b.created_at || 0).getTime();
+      return tb - ta;
+    });
+    for (const inv of sortedByDate) {
+      if (inv.last_comment_id) {
+        if (!lastCommentId) lastCommentId = inv.last_comment_id;
+        commentIdsSet.add(inv.last_comment_id);
+      }
+      if (Array.isArray(inv.comment_ids)) {
+        for (const cid of inv.comment_ids) {
+          if (cid) {
+            if (!lastCommentId) lastCommentId = cid;
+            commentIdsSet.add(cid);
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Check rawComments (from live stream)
+  if (Array.isArray(rawComments)) {
+    const matchedComments = rawComments.filter(cm => {
+      if (targetUserId && cm.facebook_user_id && cm.facebook_user_id !== 'FB_USER_ID_STREAM') {
+        return cm.facebook_user_id === targetUserId;
+      }
+      const cmName = (cm.facebook_name || '').trim().toLowerCase();
+      return cmName && cmName === cleanCustName;
+    });
+
+    for (const cm of matchedComments) {
+      if (cm.comment_id) {
+        if (!lastCommentId) lastCommentId = cm.comment_id;
+        commentIdsSet.add(cm.comment_id);
+        recentLiveComments.push({
+          comment_id: cm.comment_id,
+          comment_text: cm.comment_text,
+          created_time: cm.created_at || (cm as any).created_time,
+          live_id: cm.live_id
+        });
+      }
+    }
+  }
+
+  const allCommentIds = Array.from(commentIdsSet);
+
+  // Determine eligibility status (< 24h = SAFE_24H, has comment = RECENT_7D with private reply, else EXPIRED)
   let eligibilityStatus: 'SAFE_24H' | 'RECENT_7D' | 'EXPIRED' = 'EXPIRED';
   let eligibilityLabel = '🔒 ផុតកំណត់ (> 7 ថ្ងៃ)';
-  let eligibilityDesc = 'Facebook បានបិទសិទ្ធិផ្ញើសារស្វ័យប្រវត្តិ — ត្រូវឆាតដោយដៃផ្ទាល់ ឬខល/Telegram';
+  let eligibilityDesc = 'Facebook បានបិទសិទ្ធិផ្ញើសារ — ត្រូវចម្លងឈ្មោះទៅស្វែងរកក្នុង Meta Business Suite ឬខល/Telegram';
   let eligibilityColor = 'slate';
   let canMessage = false;
 
   if (hoursAgo <= 24) {
     eligibilityStatus = 'SAFE_24H';
     eligibilityLabel = '✅ អាចឆាតបាន (<24h)';
-    eligibilityDesc = 'អន្តរកម្មក្រោម ២៤ ម៉ោង — សុវត្ថិភាពខ្ពស់ក្នុងការផ្ញើសារ Remarketing';
+    eligibilityDesc = 'អន្តរកម្មក្រោម ២៤ ម៉ោង — សុវត្ថិភាពខ្ពស់ក្នុងការផ្ញើសារ Remarketing Direct';
     eligibilityColor = 'emerald';
+    canMessage = true;
+  } else if (allCommentIds.length > 0) {
+    eligibilityStatus = 'RECENT_7D';
+    eligibilityLabel = `💬 មាន Comment (${allCommentIds.length}) Private Reply`;
+    eligibilityDesc = `មាន Comment ID ចំនួន ${allCommentIds.length} ក្នុង Live — អាចប្រើ Private Reply ផ្ញើសារចូល Messenger បាន!`;
+    eligibilityColor = 'amber';
     canMessage = true;
   } else if (hoursAgo <= 24 * 7) {
     eligibilityStatus = 'RECENT_7D';
     eligibilityLabel = '⚠️ ហួស 24h (< 7 ថ្ងៃ)';
-    eligibilityDesc = 'ហួស ២៤ ម៉ោង — អាចប្រើ Private Reply លើខមិន ឬឆាតដៃផ្ទាល់';
+    eligibilityDesc = 'ហួស ២៤ ម៉ោង — ត្រូវចម្លងឈ្មោះទៅស្វែងរកក្នុង Meta Business Suite ឬខល/Telegram';
     eligibilityColor = 'amber';
-    canMessage = true;
+    canMessage = false;
   }
 
   // VIP Tier determination
@@ -122,6 +188,9 @@ function buildCRMRecord(c: Customer, allInvoices: typeof invoices): CustomerCRMR
     successful_orders: successfulOrders,
     last_order_date: lastOrderDate,
     last_live_id: lastLiveId,
+    last_comment_id: lastCommentId,
+    comment_ids: allCommentIds,
+    recent_live_comments: recentLiveComments.slice(0, 10),
     days_since_last_order: daysSinceLastOrder,
     vip_tier: vipTier,
     eligibility: {
@@ -307,6 +376,61 @@ router.post('/customers/:id/log_remarket', (req: Request, res: Response) => {
     bumpDataRevision();
 
     return res.json({ success: true, last_remarketed_at: cust.last_remarketed_at });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
+});
+
+/**
+ * POST /api/crm/customers/:id/send_private_reply
+ * Dispatches Meta Graph API Private Reply to customer's live comment
+ */
+router.post('/customers/:id/send_private_reply', async (req: Request, res: Response) => {
+  try {
+    const customerId = parseInt(req.params.id, 10);
+    const cust = customers.find(c => c.customer_id === customerId);
+
+    if (!cust) {
+      return res.status(404).json({ success: false, error: 'Customer not found' });
+    }
+
+    const { comment_id, message } = req.body;
+    const record = buildCRMRecord(cust, invoices);
+
+    const targetCommentId = comment_id || record.last_comment_id || (record.comment_ids && record.comment_ids[0]);
+    if (!targetCommentId) {
+      return res.status(400).json({
+        success: false,
+        error: 'មិនមាន Comment ID សម្រាប់អតិថិជននេះទេ — សូមប្រើវិធីចម្លងឈ្មោះ ឬឆាតផ្ទាល់'
+      });
+    }
+
+    const cleanName = cust.facebook_name || 'អូន';
+    const msgText = message || `ជម្រាបសួរអូន ${cleanName} ចាស! ចែឃើញអូនបានខមិនក្នុង Live អាវយឺតកាលពីយប់មិញ ម៉ូតដែលអូនចាប់អារម្មណ៍ឥឡូវចូលស្តុកគ្រប់ Size (S, M, L, XL, Oversize) ណាអូន! បើអូនចង់បានអាចតបឆាតនេះបានចាស 🥰✨👕`;
+
+    // Attempt Meta Graph API Private Reply
+    const replyResult = await sendFacebookReply(
+      targetCommentId,
+      cust.facebook_user_id || null,
+      msgText,
+      activeFacebookPage?.access_token,
+      undefined,
+      undefined,
+      record.comment_ids
+    );
+
+    // Record last remarketed timestamp
+    cust.last_remarketed_at = new Date().toISOString();
+    bumpDataRevision();
+
+    return res.json({
+      success: replyResult.success || replyResult.method === 'MANUAL_COPIED',
+      method: replyResult.method || 'PRIVATE_REPLY',
+      methodTitle: replyResult.methodTitle || 'Private Reply (តាម Comment ID)',
+      detail: replyResult.detail || replyResult.error || `បានចាត់ចែង Private Reply តាម Comment #${targetCommentId}`,
+      comment_id: targetCommentId,
+      last_remarketed_at: cust.last_remarketed_at
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err?.message || 'Server error' });
   }

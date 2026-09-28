@@ -259,11 +259,26 @@ app.get('/api/fb/avatar/:userId', async (req: Request, res: Response) => {
   return res.send(generateFallbackAvatarSvg(fallbackName));
 });
 
-// 6.6 Resolve Direct Meta Business Suite Inbox URL for a User ID / PSID
+// 6.6 Resolve Direct Meta Business Suite Inbox URL for a User ID / PSID or Search
 app.get('/api/fb/inbox_link/:userId', async (req: Request, res: Response) => {
   const userId = String(req.params.userId || '').trim();
+  const nameQuery = String(req.query.name || '').trim();
+  const isSearch = req.query.search === '1' || req.query.search === 'true';
   const token = activeFacebookPage?.access_token;
   const pageId = activeFacebookPage?.id || '102094263212256';
+
+  // If search mode is requested (e.g. for expired >24h window customers)
+  if (isSearch || nameQuery) {
+    const searchTarget = nameQuery || userId;
+    const searchUrl = `https://business.facebook.com/latest/inbox/all?mailbox_id=${pageId}&search_query=${encodeURIComponent(searchTarget)}`;
+    return res.json({
+      success: true,
+      mode: 'SEARCH',
+      searchTarget,
+      pageId,
+      url: searchUrl
+    });
+  }
 
   let selectedItemId = userId;
 
@@ -290,6 +305,7 @@ app.get('/api/fb/inbox_link/:userId', async (req: Request, res: Response) => {
 
   res.json({
     success: true,
+    mode: 'DIRECT',
     userId,
     selectedItemId,
     pageId,
