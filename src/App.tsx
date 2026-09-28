@@ -151,16 +151,41 @@ export default function App() {
         .then(r => r.json())
         .then(data => {
           if (data.success && data.found) {
-            if (data.live_id && data.live_id !== selectedLiveId) {
-              setSelectedLiveId(data.live_id);
-              localStorage.setItem('selectedLiveId', data.live_id);
-              fetchInvoices(data.live_id);
+            let stageNum = 1;
+            if (typeof data.stage === 'number') {
+              stageNum = data.stage;
+            } else if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED' || data.stage_code === 'WAITING_PAYMENT') {
+              stageNum = 2;
+            } else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID' || data.stage_code === 'QC_VERIFY') {
+              stageNum = 3;
+            } else if (data.stage === 'DISPATCHED' || data.stage_code === 'DISPATCHED') {
+              stageNum = 4;
             }
-            if (data.stage) {
-              setCurrentMasterStage(data.stage);
+
+            const targetLive = data.live_id || scanLive;
+            if (targetLive && targetLive !== selectedLiveIdRef.current) {
+              selectedLiveIdRef.current = targetLive;
+              setSelectedLiveId(targetLive);
+              localStorage.setItem('selectedLiveId', targetLive);
+              setCurrentRevision(0);
+              currentRevisionRef.current = 0;
+              if (data.invoice) {
+                setInvoices([data.invoice]);
+              }
+              setCurrentMasterStage(stageNum);
+              setActiveSubFilter('ALL');
+              fetchInvoices(targetLive, 0);
+              fetchStock(targetLive);
+              fetchBacklogCount(targetLive);
+            } else {
+              if (data.invoice) {
+                handleUpdateInvoice(data.invoice);
+              }
+              setCurrentMasterStage(stageNum);
+              setActiveSubFilter('ALL');
             }
             playSuccessFanfare();
-            showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
+            showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name || 'ត្រួតពិនិត្យ'}»!`, 'success');
           } else {
             playSuccessFanfare();
             showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
@@ -932,38 +957,63 @@ export default function App() {
   };
 
   // 📷 In-App Camera Scanner Handler (Cross-Live Session Auto-Switch)
-  const handleCameraScanSuccess = useCallback(async (scannedVal: string) => {
+  const handleCameraScanSuccess = useCallback(async (scannedVal: string, scannedLiveId?: string) => {
     const cleanBasket = scannedVal.trim().replace(/^#/, '');
     setSearchQuery(cleanBasket);
     setActiveSubFilter('ALL');
 
     try {
-      // Query server to find basket & stage across ALL live sessions
-      const res = await fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}`);
+      // Query server to find basket & stage across ALL live sessions (prioritizing scannedLiveId if present)
+      const queryUrl = `/api/find_basket?basket=${encodeURIComponent(cleanBasket)}${scannedLiveId ? `&live=${encodeURIComponent(scannedLiveId)}` : ''}`;
+      const res = await fetch(queryUrl);
       const data = await res.json();
 
       if (data.success && data.found) {
         let stageNum = 1;
-        if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED') stageNum = 2;
-        else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID') stageNum = 3;
-        else if (data.stage === 'DISPATCHED') stageNum = 4;
+        if (typeof data.stage === 'number') {
+          stageNum = data.stage;
+        } else if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED' || data.stage_code === 'WAITING_PAYMENT') {
+          stageNum = 2;
+        } else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID' || data.stage_code === 'QC_VERIFY') {
+          stageNum = 3;
+        } else if (data.stage === 'DISPATCHED' || data.stage_code === 'DISPATCHED') {
+          stageNum = 4;
+        }
 
-        if (data.live_id && data.live_id !== selectedLiveId) {
-          setSelectedLiveId(data.live_id);
-          localStorage.setItem('selectedLiveId', data.live_id);
+        const targetLive = data.live_id || scannedLiveId;
+
+        // Auto-switch live session immediately if from another session
+        if (targetLive && targetLive !== selectedLiveIdRef.current) {
+          selectedLiveIdRef.current = targetLive;
+          setSelectedLiveId(targetLive);
+          localStorage.setItem('selectedLiveId', targetLive);
           setCurrentRevision(0);
           currentRevisionRef.current = 0;
-          await fetchInvoices(data.live_id, 0);
-          await fetchStock(data.live_id);
+
+          // Seed the invoice immediately into UI so it displays in 0ms!
+          if (data.invoice) {
+            setInvoices([data.invoice]);
+          }
+
+          setCurrentMasterStage(stageNum);
+          setActiveSubFilter('ALL');
+
+          // Fetch full data for the new live session in background
+          fetchInvoices(targetLive, 0);
+          fetchStock(targetLive);
+          fetchBacklogCount(targetLive);
+        } else {
+          // Same live session: switch stage & update invoice immediately
+          if (data.invoice) {
+            handleUpdateInvoice(data.invoice);
+          }
+          setCurrentMasterStage(stageNum);
+          setActiveSubFilter('ALL');
         }
 
-        if (data.invoice) {
-          handleUpdateInvoice(data.invoice);
-        }
-
-        setCurrentMasterStage(stageNum);
         playSuccessFanfare();
-        showToast(`⚡ រកឃើញកន្ត្រក #${cleanBasket} ក្នុងផ្នែក «${data.stage_name}»!`, 'success');
+        const liveLabel = targetLive ? ` (Live #${targetLive.replace('LIVE_', '')})` : '';
+        showToast(`⚡ ស្កេនឃើញកន្ត្រក #${cleanBasket}${liveLabel} ក្នុងផ្នែក «${data.stage_name || 'ត្រួតពិនិត្យ'}»!`, 'success');
       } else {
         playSuccessFanfare();
         showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
@@ -972,7 +1022,7 @@ export default function App() {
       playSuccessFanfare();
       showToast(`⚡ ស្កេនកន្ត្រក #${cleanBasket}`, 'success');
     }
-  }, [selectedLiveId, showToast, handleUpdateInvoice]);
+  }, [showToast, handleUpdateInvoice]);
 
   // Initial loads and polling
   useEffect(() => {
@@ -1423,9 +1473,15 @@ export default function App() {
         .then(data => {
           if (data.success && data.found && data.invoice) {
             let stageNum = 1;
-            if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED') stageNum = 2;
-            else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID') stageNum = 3;
-            else if (data.stage === 'DISPATCHED') stageNum = 4;
+            if (typeof data.stage === 'number') {
+              stageNum = data.stage;
+            } else if (data.stage === 'WAITING_PAYMENT' || data.stage === 'STAGED' || data.stage_code === 'WAITING_PAYMENT') {
+              stageNum = 2;
+            } else if (data.stage === 'QC_VERIFY' || data.stage === 'PAID' || data.stage_code === 'QC_VERIFY') {
+              stageNum = 3;
+            } else if (data.stage === 'DISPATCHED' || data.stage_code === 'DISPATCHED') {
+              stageNum = 4;
+            }
 
             setCrossLiveMatch({
               live_id: data.live_id,
@@ -1658,21 +1714,30 @@ export default function App() {
               </div>
               <button
                 type="button"
-                onClick={async () => {
-                  if (crossLiveMatch.live_id !== selectedLiveId) {
+                onClick={() => {
+                  if (crossLiveMatch.live_id !== selectedLiveIdRef.current) {
+                    selectedLiveIdRef.current = crossLiveMatch.live_id;
                     setSelectedLiveId(crossLiveMatch.live_id);
                     localStorage.setItem('selectedLiveId', crossLiveMatch.live_id);
                     setCurrentRevision(0);
                     currentRevisionRef.current = 0;
-                    await fetchInvoices(crossLiveMatch.live_id, 0);
-                    await fetchStock(crossLiveMatch.live_id);
+                    if (crossLiveMatch.invoice) {
+                      setInvoices([crossLiveMatch.invoice]);
+                    }
+                    setCurrentMasterStage(crossLiveMatch.stage_num);
+                    setActiveSubFilter('ALL');
+                    setCrossLiveMatch(null);
+                    fetchInvoices(crossLiveMatch.live_id, 0);
+                    fetchStock(crossLiveMatch.live_id);
+                    fetchBacklogCount(crossLiveMatch.live_id);
+                  } else {
+                    if (crossLiveMatch.invoice) {
+                      handleUpdateInvoice(crossLiveMatch.invoice);
+                    }
+                    setCurrentMasterStage(crossLiveMatch.stage_num);
+                    setActiveSubFilter('ALL');
+                    setCrossLiveMatch(null);
                   }
-                  if (crossLiveMatch.invoice) {
-                    handleUpdateInvoice(crossLiveMatch.invoice);
-                  }
-                  setCurrentMasterStage(crossLiveMatch.stage_num);
-                  setActiveSubFilter('ALL');
-                  setCrossLiveMatch(null);
                   playSuccessFanfare();
                   showToast(`⚡ បានប្តូរទៅកាន់ Live Session & ផ្នែក «${crossLiveMatch.stage_name}»!`, 'success');
                 }}

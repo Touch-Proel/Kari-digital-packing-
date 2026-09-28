@@ -4,7 +4,7 @@ import jsQR from 'jsqr';
 interface CameraScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onScanSuccess: (scannedValue: string) => void;
+  onScanSuccess: (scannedValue: string, scannedLiveId?: string) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
@@ -44,7 +44,7 @@ export function CameraScannerModal({
     } catch {}
   };
 
-  const parseScannedText = (rawText: string): string => {
+  const parseScannedText = (rawText: string): { basket: string; liveId?: string } => {
     const text = rawText.trim();
     try {
       if (text.includes('?') || text.startsWith('http://') || text.startsWith('https://')) {
@@ -52,18 +52,24 @@ export function CameraScannerModal({
         const basket = urlObj.searchParams.get('open_basket') ||
                        urlObj.searchParams.get('order') ||
                        urlObj.searchParams.get('basket') ||
+                       urlObj.searchParams.get('verify') ||
+                       urlObj.searchParams.get('staff_basket') ||
                        urlObj.searchParams.get('id');
+        const liveId = urlObj.searchParams.get('live') || urlObj.searchParams.get('live_id');
         if (basket) {
-          return basket.trim().replace(/^#/, '');
+          return {
+            basket: basket.trim().replace(/^#/, ''),
+            liveId: liveId ? liveId.trim() : undefined
+          };
         }
       }
     } catch {}
 
     if (text.startsWith('#')) {
-      return text.slice(1).trim();
+      return { basket: text.slice(1).trim() };
     }
 
-    return text;
+    return { basket: text };
   };
 
   // Decode Image File (from Camera capture or upload) with BarcodeDetector + Multi-scale jsQR
@@ -83,7 +89,7 @@ export function CameraScannerModal({
             playScanBeep();
             stopCamera();
             setIsProcessingFile(false);
-            onScanSuccess(parsed);
+            onScanSuccess(parsed.basket, parsed.liveId);
             onClose();
             return;
           }
@@ -142,7 +148,7 @@ export function CameraScannerModal({
             const parsed = parseScannedText(foundCode);
             playScanBeep();
             stopCamera();
-            onScanSuccess(parsed);
+            onScanSuccess(parsed.basket, parsed.liveId);
             onClose();
           } else {
             onShowToast('❌ រកមិនឃើញ QR Code ក្នុងរូបថតទេ! សូមព្យាយាមថតឱ្យចំ និងច្បាស់។', 'error');
@@ -278,7 +284,7 @@ export function CameraScannerModal({
           const parsed = parseScannedText(rawValue);
           playScanBeep();
           stopCamera();
-          onScanSuccess(parsed);
+          onScanSuccess(parsed.basket, parsed.liveId);
           onClose();
           return;
         }

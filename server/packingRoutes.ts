@@ -240,47 +240,72 @@ router.post('/update_product_stock_price', async (req: Request, res: Response) =
 
 // GET /api/find_basket?basket=2712
 router.get('/find_basket', (req: Request, res: Response) => {
-  const basketQuery = String(req.query.basket || req.query.q || req.query.invoice_id || req.query.open_basket || '').trim().replace(/^#/, '');
+  const rawQuery = String(req.query.basket || req.query.query || req.query.q || req.query.invoice_id || req.query.open_basket || '').trim().replace(/^#/, '');
   const targetLive = req.query.live ? String(req.query.live).trim() : '';
 
-  if (!basketQuery) {
+  if (!rawQuery) {
     return res.status(400).json({ success: false, error: 'Basket query is required' });
   }
 
-  // 1. Check in invoices by basket_no or invoice_id with live priority
-  let match = invoices.find(inv => {
-    const isLiveMatch = targetLive ? inv.live_id === targetLive : true;
-    const isNoMatch = String(inv.basket_no) === basketQuery || String(inv.invoice_id) === basketQuery;
-    return isLiveMatch && isNoMatch;
-  });
+  const numQuery = parseInt(rawQuery, 10);
 
-  // 2. If not found in target live, search across ALL lives
+  // 1. Search in target live first if provided
+  let match: any;
+  if (targetLive) {
+    match = invoices.find(inv => {
+      if (inv.live_id !== targetLive) return false;
+      return (!isNaN(numQuery) && (inv.basket_no === numQuery || inv.invoice_id === numQuery)) ||
+             String(inv.basket_no) === rawQuery ||
+             String(inv.invoice_id) === rawQuery;
+    });
+  }
+
+  // 2. Search exact basket_no or invoice_id across ALL lives
   if (!match) {
-    match = invoices.find(inv => String(inv.basket_no) === basketQuery || String(inv.invoice_id) === basketQuery);
+    match = invoices.find(inv => 
+      (!isNaN(numQuery) && (inv.basket_no === numQuery || inv.invoice_id === numQuery)) ||
+      String(inv.basket_no) === rawQuery ||
+      String(inv.invoice_id) === rawQuery
+    );
+  }
+
+  // 3. Fallback: Search by customer phone or name
+  if (!match) {
+    const qLower = rawQuery.toLowerCase();
+    match = invoices.find(inv => 
+      (inv.phone_number && inv.phone_number.includes(rawQuery)) ||
+      (inv.facebook_name && inv.facebook_name.toLowerCase().includes(qLower))
+    );
   }
 
   if (!match) {
-    return res.status(404).json({
-      success: false,
+    return res.json({
+      success: true,
       found: false,
-      message: `រកមិនឃើញកន្ត្រក #${basketQuery} ក្នុងប្រព័ន្ធឡើយ!`
+      message: `រកមិនឃើញកន្ត្រក #${rawQuery} ក្នុងប្រព័ន្ធឡើយ`
     });
   }
 
   // Determine stage (1: Unpicked, 2: Staged/Waiting Payment, 3: QC/Paid, 4: Dispatched)
-  let stage = 1;
+  let stageNum = 1;
+  let stageCode = 'UNPICKED';
   let stageName = 'មិនទាន់រើស';
+
   if (match.status === 'Dispatched' || match.status === 'Packed' || match.packing_stage === 'DISPATCHED') {
-    stage = 4;
+    stageNum = 4;
+    stageCode = 'DISPATCHED';
     stageName = 'ចេញរួចហើយ';
   } else if (match.status === 'Paid' || match.payment_status === 'Paid' || Boolean(match.paid_at)) {
-    stage = 3;
-    stageName = 'បង្កក-QC';
-  } else if (match.packing_stage === 'STAGED') {
-    stage = 2;
+    stageNum = 3;
+    stageCode = 'QC_VERIFY';
+    stageName = 'បង្កក-QC (បង់រួច)';
+  } else if (match.packing_stage === 'STAGED' || (match.packing_stage as any) === 'WAITING_PAYMENT') {
+    stageNum = 2;
+    stageCode = 'WAITING_PAYMENT';
     stageName = 'រង់ចាំបង់';
   } else {
-    stage = 1;
+    stageNum = 1;
+    stageCode = 'UNPICKED';
     stageName = 'មិនទាន់រើស';
   }
 
@@ -288,10 +313,14 @@ router.get('/find_basket', (req: Request, res: Response) => {
     success: true,
     found: true,
     invoice: match,
-    basket_no: match.basket_no,
+    basket_no: match.basket_no || match.invoice_id,
     invoice_id: match.invoice_id,
     live_id: match.live_id,
-    stage,
+    customer_name: match.facebook_name,
+    customer_phone: match.phone_number,
+    total_amount: match.total_amount,
+    stage: stageNum,
+    stage_code: stageCode,
     stage_name: stageName
   });
 });
@@ -2162,62 +2191,7 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
   });
 });
 
-// GET /api/find_basket - Global Search for any basket/invoice across ALL live sessions!
-router.get('/find_basket', (req: Request, res: Response) => {
-  const rawBasket = String(req.query.basket || req.query.query || '').trim().replace(/^#/, '');
-  if (!rawBasket) {
-    return res.status(400).json({ success: false, error: 'Basket query is required' });
-  }
 
-  const numBasket = parseInt(rawBasket, 10);
-
-  // 1. Search by exact basket_no or invoice_id
-  let matched = invoices.find(i => 
-    (!isNaN(numBasket) && (i.basket_no === numBasket || i.invoice_id === numBasket)) ||
-    String(i.basket_no) === rawBasket ||
-    String(i.invoice_id) === rawBasket
-  );
-
-  // 2. If not found by exact ID, search by customer phone or name or tracking code
-  if (!matched) {
-    matched = invoices.find(i => 
-      (i.phone_number && i.phone_number.includes(rawBasket)) ||
-      (i.facebook_name && i.facebook_name.toLowerCase().includes(rawBasket.toLowerCase()))
-    );
-  }
-
-  if (!matched) {
-    return res.json({
-      success: true,
-      found: false,
-      message: `រកមិនឃើញកន្ត្រក #${rawBasket} ក្នុងប្រព័ន្ធឡើយ`
-    });
-  }
-
-  const stage = matched.packing_stage || 'UNPICKED';
-  let stageName = 'មិនទាន់រើស';
-  if ((matched.status as any) === 'Paid' || (matched.payment_status as any) === 'Paid' || Boolean((matched as any).paid_at)) {
-    stageName = 'បង់រួច - QC';
-  } else if (stage === 'STAGED' || (stage as any) === 'WAITING_PAYMENT') {
-    stageName = 'រង់ចាំបង់ប្រាក់';
-  } else if (stage === 'DISPATCHED' || matched.status === 'Dispatched' || matched.status === 'Packed') {
-    stageName = 'ចេញដឹកហើយ';
-  }
-
-  res.json({
-    success: true,
-    found: true,
-    basket_no: matched.basket_no || matched.invoice_id,
-    invoice_id: matched.invoice_id,
-    live_id: matched.live_id,
-    customer_name: matched.facebook_name,
-    customer_phone: matched.phone_number,
-    total_amount: matched.total_amount,
-    stage: stage,
-    stage_name: stageName,
-    invoice: matched
-  });
-});
 
 // POST /api/set_active_live_id
 router.post('/set_active_live_id', (req: Request, res: Response) => {
