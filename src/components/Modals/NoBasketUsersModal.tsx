@@ -14,13 +14,16 @@ export interface NonBasketUser {
   picture_url?: string;
   comment_count: number;
   last_comment_time: string;
-  primary_reason: 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT';
+  primary_reason: 'EMPTY_BASKET' | 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT';
   reason_label: string;
   reason_color: string;
   detected_phone?: string;
   detected_location?: string;
   suggested_codes: string[];
   comments: NonBasketComment[];
+  basket_no?: number | string;
+  invoice_id?: number;
+  is_empty_basket?: boolean;
 }
 
 interface ApiResponse {
@@ -31,6 +34,7 @@ interface ApiResponse {
   total_comments_count: number;
   active_live_id: string;
   categories: {
+    empty_basket_count: number;
     inquiries_count: number;
     phone_only_count: number;
     unmatched_codes_count: number;
@@ -123,6 +127,29 @@ export function NoBasketUsersModal({
     if (!creatingUser) return;
     setSubmittingBasket(true);
     try {
+      // If customer already has an empty basket (invoice_id), add items directly to restore it!
+      if (creatingUser.is_empty_basket && creatingUser.invoice_id && inputCode.trim()) {
+        const addRes = await fetch('/api/add_item_to_invoice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            invoice_id: creatingUser.invoice_id,
+            code: inputCode.trim().toUpperCase(),
+            quantity: Number(inputQty) || 1
+          })
+        });
+        const addData = await addRes.json();
+        if (addData.success) {
+          playSuccessFanfare();
+          onShowToast(addData.message || `🎉 បានបញ្ចូលកូដ ${inputCode} ទៅកន្ត្រក #${creatingUser.basket_no} ជោគជ័យ!`, 'success');
+          setCreatingUser(null);
+          fetchNonBasketUsers();
+          if (onBasketCreated) onBasketCreated();
+          return;
+        }
+      }
+
+      // Otherwise create a new basket
       const items = inputCode.trim()
         ? [{
             product_code: inputCode.trim().toUpperCase(),
@@ -166,7 +193,8 @@ export function NoBasketUsersModal({
   const handleCopyUserInfo = (user: NonBasketUser) => {
     playPureTone(900, 0.05);
     const commentSummary = user.comments.map(c => `- ${c.text}`).join('\n');
-    const textToCopy = `👤 អតិថិជន: ${user.facebook_name}\n📞 លេខទូរស័ព្ទ: ${user.detected_phone || 'គ្មានលេខ'}\n📍 អាសយដ្ឋាន: ${user.detected_location || 'មិនទាន់មាន'}\n💬 ខំមិនក្នុង Live:\n${commentSummary}`;
+    const basketInfo = user.is_empty_basket ? ` (ធ្លាប់មានកន្ត្រក #${user.basket_no} តែដកកូដអស់)` : '';
+    const textToCopy = `👤 អតិថិជន: ${user.facebook_name}${basketInfo}\n📞 លេខទូរស័ព្ទ: ${user.detected_phone || 'គ្មានលេខ'}\n📍 អាសយដ្ឋាន: ${user.detected_location || 'មិនទាន់មាន'}\n💬 ខំមិនក្នុង Live:\n${commentSummary}`;
     navigator.clipboard.writeText(textToCopy);
     onShowToast(`📋 បានចម្លងព័ត៌មាន «${user.facebook_name}» រួចរាល់!`);
   };
@@ -192,7 +220,8 @@ export function NoBasketUsersModal({
     const matchPhone = u.detected_phone && u.detected_phone.includes(q);
     const matchLocation = u.detected_location && u.detected_location.toLowerCase().includes(q);
     const matchComment = u.comments.some(c => c.text.toLowerCase().includes(q));
-    return matchName || matchPhone || matchLocation || matchComment;
+    const matchBasket = u.basket_no && String(u.basket_no).includes(q);
+    return matchName || matchPhone || matchLocation || matchComment || matchBasket;
   });
 
   const liveTitle = getLiveDisplayTitle(activeLiveId);
@@ -211,13 +240,13 @@ export function NoBasketUsersModal({
             </div>
             <div className="min-w-0">
               <div className="font-black text-white text-base sm:text-lg tracking-tight flex items-center gap-2 truncate">
-                <span>អ្នកខំមិនដែលគ្មានកន្ត្រក (Non-Basket Users)</span>
+                <span>អ្នកខំមិនដែលគ្មានកន្ត្រក & កន្ត្រកទទេ</span>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-cyan-950/90 text-cyan-300 border border-cyan-500/40 font-mono">
                   {liveTitle}
                 </span>
               </div>
               <div className="text-[11.5px] text-cyan-300/90 font-medium">
-                ត្រួតពិនិត្យអ្នកខំមិនទាំងអស់ដែលប្រព័ន្ធមិនបានបង្កើតកន្ត្រក (សួរនាំ, ផ្ញើតែលេខ, កូដខុស, ឬដាច់ស្តុក)
+                ត្រួតពិនិត្យអ្នកខំមិនទាំងអស់ដែលគ្មានកន្ត្រក (កន្ត្រកទទេដកកូដអស់, សួរនាំ, ផ្ញើតែលេខ, កូដខុស, ឬដាច់ស្តុក)
               </div>
             </div>
           </div>
@@ -256,7 +285,7 @@ export function NoBasketUsersModal({
           {/* With Basket */}
           <div className="bg-gradient-to-b from-emerald-950/40 to-slate-900/90 border border-emerald-500/40 rounded-2xl p-2.5 flex flex-col items-center justify-center text-center shadow-sm">
             <span className="text-[11px] text-emerald-300 font-bold flex items-center gap-1">
-              <span>🛒</span> បានបង្កើតកន្ត្រក
+              <span>🛒</span> មានកន្ត្រក (មានទំនិញ)
             </span>
             <span className="font-mono font-black text-emerald-400 text-xl sm:text-2xl mt-0.5">
               {(data?.commenters_with_basket_count || 0).toLocaleString()} <span className="text-xs font-normal text-emerald-300/70">នាក់</span>
@@ -266,7 +295,7 @@ export function NoBasketUsersModal({
           {/* Without Basket - PROMINENT HIGHLIGHT */}
           <div className="bg-gradient-to-b from-rose-950/50 via-amber-950/30 to-slate-900/90 border-2 border-rose-500/60 rounded-2xl p-2.5 flex flex-col items-center justify-center text-center shadow-[0_0_20px_rgba(244,63,94,0.2)]">
             <span className="text-[11px] text-rose-300 font-black flex items-center gap-1">
-              <span>⚠️</span> គ្មានកន្ត្រក (សល់)
+              <span>⚠️</span> គ្មានកន្ត្រក / កន្ត្រកទទេ
             </span>
             <span className="font-mono font-black text-rose-400 text-xl sm:text-2xl mt-0.5 animate-pulse">
               {(data?.commenters_without_basket_count || 0).toLocaleString()} <span className="text-xs font-normal text-rose-300/80">នាក់</span>
@@ -297,6 +326,18 @@ export function NoBasketUsersModal({
               }`}
             >
               ទាំងអស់ ({data?.commenters_without_basket_count || 0})
+            </button>
+
+            {/* Empty Baskets Tab */}
+            <button
+              onClick={() => { playPureTone(500, 0.03); setSelectedCategory('EMPTY_BASKET'); }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1 transition-all cursor-pointer ${
+                selectedCategory === 'EMPTY_BASKET'
+                  ? 'bg-rose-500 text-white font-black shadow-md shadow-rose-500/30'
+                  : 'bg-rose-950/60 text-rose-300 border border-rose-800/40 hover:bg-rose-900/40'
+              }`}
+            >
+              <span>🗑️</span> កន្ត្រកទទេ/ដកកូដ ({data?.categories.empty_basket_count || 0})
             </button>
 
             <button
@@ -350,7 +391,7 @@ export function NoBasketUsersModal({
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="ស្វែងរកតាមឈ្មោះ, លេខទូរស័ព្ទ, ទីតាំង, ឬពាក្យក្នុងខំមិន..."
+              placeholder="ស្វែងរកតាមឈ្មោះ, លេខទូរស័ព្ទ, លេខកន្ត្រក, ឬពាក្យក្នុងខំមិន..."
               className="w-full bg-[#030914] border border-slate-700/80 focus:border-cyan-400 rounded-xl pl-9 pr-8 py-2 text-xs sm:text-sm text-cyan-200 outline-none placeholder:text-slate-500 transition-all shadow-inner"
             />
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
@@ -379,14 +420,16 @@ export function NoBasketUsersModal({
                 {searchQuery ? 'មិនមានលទ្ធផលត្រូវនឹងការស្វែងរកឡើយ' : 'អស្ចារ្យណាស់! គ្មានអ្នកខំមិនណាសល់ចោលដោយគ្មានកន្ត្រកឡើយ'}
               </div>
               <div className="text-xs text-slate-500 max-w-md">
-                អ្នកខំមិនទាំងអស់ត្រូវបានបង្កើតកន្ត្រក ឬមិនទាន់មានទិន្នន័យខំមិនក្នុង Live នេះទេ។
+                អ្នកខំមិនទាំងអស់ត្រូវបានបង្កើតកន្ត្រក និងមានទំនិញពេញលេញ។
               </div>
             </div>
           ) : (
             filteredUsers.map((user, idx) => {
               const isExpanded = expandedUsers.has(user.facebook_name);
               const reasonBadgeClass =
-                user.primary_reason === 'PURE_PHONE_OR_LOCATION'
+                user.primary_reason === 'EMPTY_BASKET'
+                  ? 'bg-rose-950/90 text-rose-300 border-rose-500/60 font-black shadow-[0_0_10px_rgba(244,63,94,0.3)]'
+                  : user.primary_reason === 'PURE_PHONE_OR_LOCATION'
                   ? 'bg-cyan-950/80 text-cyan-300 border-cyan-500/50'
                   : user.primary_reason === 'QUESTION_OR_INQUIRY'
                   ? 'bg-indigo-950/80 text-indigo-300 border-indigo-500/50'
@@ -399,7 +442,11 @@ export function NoBasketUsersModal({
               return (
                 <div
                   key={`${user.facebook_name}-${idx}`}
-                  className="bg-[#08152e]/90 border border-slate-800 hover:border-cyan-500/40 rounded-2xl p-3 sm:p-4 transition-all flex flex-col gap-2.5 shadow-md"
+                  className={`border rounded-2xl p-3 sm:p-4 transition-all flex flex-col gap-2.5 shadow-md ${
+                    user.is_empty_basket
+                      ? 'bg-gradient-to-r from-rose-950/30 via-[#08152e] to-[#08152e] border-rose-500/50 hover:border-rose-400'
+                      : 'bg-[#08152e]/90 border-slate-800 hover:border-cyan-500/40'
+                  }`}
                 >
                   {/* Top Row: User Meta + Badges + Actions */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -424,6 +471,11 @@ export function NoBasketUsersModal({
                           <span className={`text-[10.5px] font-bold px-2 py-0.5 rounded-full border ${reasonBadgeClass}`}>
                             {user.reason_label}
                           </span>
+                          {user.basket_no && (
+                            <span className="text-[11px] font-mono font-black px-2 py-0.5 rounded-md bg-slate-950 text-amber-300 border border-amber-500/40">
+                              កន្ត្រក #{user.basket_no}
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5 flex-wrap">
@@ -456,9 +508,14 @@ export function NoBasketUsersModal({
 
                       <button
                         onClick={() => handleOpenCreateBasket(user)}
-                        className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all active:scale-95 cursor-pointer border border-emerald-400/40"
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer border ${
+                          user.is_empty_basket
+                            ? 'bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white border-amber-400/50 shadow-amber-600/30'
+                            : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border-emerald-400/40 shadow-emerald-600/30'
+                        }`}
                       >
-                        <span>➕</span> <span>បង្កើតកន្ត្រក</span>
+                        <span>➕</span>
+                        <span>{user.is_empty_basket ? `បន្ថែមកូដចូល #${user.basket_no}` : 'បង្កើតកន្ត្រក'}</span>
                       </button>
                     </div>
                   </div>
@@ -466,7 +523,7 @@ export function NoBasketUsersModal({
                   {/* Comment History List */}
                   <div className="bg-[#030914] border border-slate-800/80 rounded-xl p-2.5 flex flex-col gap-1.5">
                     <div className="flex justify-between items-center text-[11px] text-slate-400 font-bold px-1">
-                      <span>ខំមិនក្នុង Live ៖</span>
+                      <span>{user.is_empty_basket ? 'ប្រវត្តិខំមិនក្នុង Live ៖' : 'ខំមិនក្នុង Live ៖'}</span>
                       {user.comments.length > 1 && (
                         <button
                           onClick={() => toggleExpand(user.facebook_name)}
@@ -512,13 +569,13 @@ export function NoBasketUsersModal({
         </div>
       </div>
 
-      {/* Quick Create Basket Sub-Modal */}
+      {/* Quick Create / Add Items to Basket Sub-Modal */}
       {creatingUser && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[9999999] flex items-center justify-center p-3 animate-fadeIn">
           <div className="bg-[#0b1b36] border-2 border-emerald-500/60 rounded-3xl w-full max-w-md p-5 flex flex-col gap-4 shadow-2xl">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <div className="font-black text-white text-base flex items-center gap-2">
-                <span>➕ បង្កើតកន្ត្រកដោយដៃ</span>
+                <span>{creatingUser.is_empty_basket ? `➕ បន្ថែមកូដចូលកន្ត្រក #${creatingUser.basket_no}` : '➕ បង្កើតកន្ត្រកថ្មី'}</span>
               </div>
               <button
                 onClick={() => setCreatingUser(null)}
@@ -540,7 +597,9 @@ export function NoBasketUsersModal({
               </div>
               <div>
                 <div className="font-black text-white text-sm">{creatingUser.facebook_name}</div>
-                <div className="text-[11px] text-cyan-300 font-mono">Live: #{activeLiveId}</div>
+                <div className="text-[11px] text-cyan-300 font-mono">
+                  {creatingUser.is_empty_basket ? `កន្ត្រក #${creatingUser.basket_no} (ដកកូដអស់)` : `Live: #${activeLiveId}`}
+                </div>
               </div>
             </div>
 
@@ -551,7 +610,7 @@ export function NoBasketUsersModal({
                   type="text"
                   value={inputCode}
                   onChange={e => setInputCode(e.target.value)}
-                  placeholder="ឧ. A12, 24, R01 (ទុកទទេបើមិនទាន់មានកូដ)..."
+                  placeholder="ឧ. A12, 24, R01..."
                   className="w-full bg-[#040c1a] border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-cyan-400 outline-none"
                 />
               </div>
@@ -579,27 +638,31 @@ export function NoBasketUsersModal({
                 </div>
               </div>
 
-              <div>
-                <label className="text-slate-300 font-bold block mb-1">លេខទូរស័ព្ទ (Phone) ៖</label>
-                <input
-                  type="text"
-                  value={inputPhone}
-                  onChange={e => setInputPhone(e.target.value)}
-                  placeholder="012345678..."
-                  className="w-full bg-[#040c1a] border border-slate-700 rounded-xl px-3 py-2 text-cyan-300 font-mono text-xs focus:border-cyan-400 outline-none"
-                />
-              </div>
+              {!creatingUser.is_empty_basket && (
+                <>
+                  <div>
+                    <label className="text-slate-300 font-bold block mb-1">លេខទូរស័ព្ទ (Phone) ៖</label>
+                    <input
+                      type="text"
+                      value={inputPhone}
+                      onChange={e => setInputPhone(e.target.value)}
+                      placeholder="012345678..."
+                      className="w-full bg-[#040c1a] border border-slate-700 rounded-xl px-3 py-2 text-cyan-300 font-mono text-xs focus:border-cyan-400 outline-none"
+                    />
+                  </div>
 
-              <div>
-                <label className="text-slate-300 font-bold block mb-1">អាសយដ្ឋាន (Address) ៖</label>
-                <input
-                  type="text"
-                  value={inputAddress}
-                  onChange={e => setInputAddress(e.target.value)}
-                  placeholder="ចោមចៅ, ភ្នំពេញ, ឬតាមខេត្ត..."
-                  className="w-full bg-[#040c1a] border border-slate-700 rounded-xl px-3 py-2 text-emerald-300 text-xs focus:border-cyan-400 outline-none"
-                />
-              </div>
+                  <div>
+                    <label className="text-slate-300 font-bold block mb-1">អាសយដ្ឋាន (Address) ៖</label>
+                    <input
+                      type="text"
+                      value={inputAddress}
+                      onChange={e => setInputAddress(e.target.value)}
+                      placeholder="ចោមចៅ, ភ្នំពេញ, ឬតាមខេត្ត..."
+                      className="w-full bg-[#040c1a] border border-slate-700 rounded-xl px-3 py-2 text-emerald-300 text-xs focus:border-cyan-400 outline-none"
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
@@ -616,7 +679,7 @@ export function NoBasketUsersModal({
                 disabled={submittingBasket}
                 className="flex-2 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
               >
-                {submittingBasket ? 'កំពុងបង្កើត...' : '✓ បង្កើតកន្ត្រកភ្លាម'}
+                {submittingBasket ? 'កំពុងដំណើរការ...' : (creatingUser.is_empty_basket ? `✓ បញ្ចូលកូដទៅ #${creatingUser.basket_no}` : '✓ បង្កើតកន្ត្រក')}
               </button>
             </div>
           </div>

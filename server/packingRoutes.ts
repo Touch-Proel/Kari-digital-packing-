@@ -2647,9 +2647,8 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
     return cLive === targetLiveId || (c.live_id && c.live_id.includes(targetLiveId));
   });
 
-  // Active invoices in this session
+  // All invoices in this session
   const sessionInvoices = invoices.filter(i => {
-    if (i.status === 'Cancelled') return false;
     if (!targetLiveId) return true;
     const iLive = i.live_id ? (i.live_id.includes('_') && !i.live_id.startsWith('LIVE_') ? i.live_id.split('_').pop() || i.live_id : i.live_id) : '';
     return iLive === targetLiveId || (i.live_id && i.live_id.includes(targetLiveId));
@@ -2697,6 +2696,7 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
   let withoutBasketCount = 0;
 
   const categories = {
+    empty_basket_count: 0,
     inquiries_count: 0,
     phone_only_count: 0,
     unmatched_codes_count: 0,
@@ -2710,19 +2710,24 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
     picture_url?: string;
     comment_count: number;
     last_comment_time: string;
-    primary_reason: 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT';
+    primary_reason: 'EMPTY_BASKET' | 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT';
     reason_label: string;
     reason_color: string;
     detected_phone?: string;
     detected_location?: string;
     suggested_codes: string[];
     comments: Array<{ id?: string; text: string; created_at: string }>;
+    basket_no?: number | string;
+    invoice_id?: number;
+    is_empty_basket?: boolean;
   }
 
   const nonBasketUsers: NonBasketUserResult[] = [];
+  const processedUserKeys = new Set<string>();
 
-  for (const [_, cData] of commenterMap.entries()) {
+  for (const [key, cData] of commenterMap.entries()) {
     totalCommenters++;
+    processedUserKeys.add(key);
 
     // Check if this commenter matches any invoice in this session
     const matchingInv = sessionInvoices.find(inv => {
@@ -2741,14 +2746,16 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
       return false;
     });
 
-    if (matchingInv) {
+    const hasActiveItems = matchingInv && matchingInv.status !== 'Cancelled' && Array.isArray(matchingInv.items) && matchingInv.items.length > 0;
+
+    if (hasActiveItems) {
       withBasketCount++;
     } else {
       withoutBasketCount++;
 
       // Analyze comments for reason
-      let detectedPhone: string | undefined;
-      let detectedLocation: string | undefined;
+      let detectedPhone: string | undefined = matchingInv?.phone_number && matchingInv.phone_number !== 'គ្មានលេខ' ? matchingInv.phone_number : undefined;
+      let detectedLocation: string | undefined = matchingInv?.address && !matchingInv.address.includes('មិនទាន់មាន') ? matchingInv.address : undefined;
       const potentialCodes = new Set<string>();
       let hasQuestion = false;
       let hasPhoneOnly = false;
@@ -2781,7 +2788,6 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
           hasCodeAttempt = true;
           for (const m of codeMatches) {
             potentialCodes.add(m.trim());
-            // Check if this code was in products catalog and stock was 0
             const cleanCode = m.replace(/[^\w\u1780-\u17D2]/g, '').toUpperCase();
             const prod = products.find(p => p.code.toUpperCase() === cleanCode);
             if (prod && prod.stock_qty <= 0) {
@@ -2796,11 +2802,17 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
       }
 
       // Determine primary reason
-      let primaryReason: 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT' = 'GENERAL_CHAT';
+      let primaryReason: 'EMPTY_BASKET' | 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT' = 'GENERAL_CHAT';
       let reasonLabel = '💬 ខំមិនទូទៅ';
       let reasonColor = 'slate';
+      const isEmptyBasket = Boolean(matchingInv && (!matchingInv.items || matchingInv.items.length === 0 || matchingInv.status === 'Cancelled'));
 
-      if (isOutOfStock) {
+      if (isEmptyBasket) {
+        primaryReason = 'EMPTY_BASKET';
+        reasonLabel = `🗑️ កន្ត្រកទទេ #${matchingInv?.basket_no || '?'} (ដកកូដអស់)`;
+        reasonColor = 'rose';
+        categories.empty_basket_count++;
+      } else if (isOutOfStock) {
         primaryReason = 'OUT_OF_STOCK';
         reasonLabel = '❌ ដាច់ស្តុក (Out of Stock)';
         reasonColor = 'rose';
@@ -2844,7 +2856,43 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
         detected_phone: detectedPhone,
         detected_location: detectedLocation,
         suggested_codes: Array.from(potentialCodes),
-        comments: sortedComments
+        comments: sortedComments,
+        basket_no: matchingInv?.basket_no,
+        invoice_id: matchingInv?.invoice_id,
+        is_empty_basket: isEmptyBasket
+      });
+    }
+  }
+
+  // Also include any other empty baskets from invoices that might not have active comments
+  for (const inv of sessionInvoices) {
+    const isAlreadyIncluded = nonBasketUsers.some(u => u.invoice_id === inv.invoice_id || (inv.facebook_name && u.facebook_name.toLowerCase() === inv.facebook_name.toLowerCase()));
+    if (!isAlreadyIncluded && (!inv.items || inv.items.length === 0 || inv.status === 'Cancelled')) {
+      withoutBasketCount++;
+      categories.empty_basket_count++;
+
+      const invComments = (inv.comments || []).map((txt, idx) => ({
+        id: inv.comment_ids?.[idx] || `inv-c-${idx}`,
+        text: txt,
+        created_at: inv.created_at || new Date().toISOString()
+      }));
+
+      nonBasketUsers.push({
+        user_id: inv.facebook_user_id || '',
+        facebook_name: inv.facebook_name,
+        picture_url: inv.picture_url,
+        comment_count: invComments.length,
+        last_comment_time: inv.created_at || new Date().toISOString(),
+        primary_reason: 'EMPTY_BASKET',
+        reason_label: `🗑️ កន្ត្រកទទេ #${inv.basket_no} (ដកកូដអស់)`,
+        reason_color: 'rose',
+        detected_phone: inv.phone_number !== 'គ្មានលេខ' ? inv.phone_number : undefined,
+        detected_location: !inv.address?.includes('មិនទាន់មាន') ? inv.address : undefined,
+        suggested_codes: [],
+        comments: invComments,
+        basket_no: inv.basket_no,
+        invoice_id: inv.invoice_id,
+        is_empty_basket: true
       });
     }
   }
