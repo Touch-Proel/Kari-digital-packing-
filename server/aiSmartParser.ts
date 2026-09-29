@@ -1,6 +1,6 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { Product } from './types';
-import { detectDeliveryZone } from './locationHelper';
+import { detectDeliveryZone, extractCleanAddressFromComment } from './locationHelper';
 import { convertKhmerDigitsToArabic, extractPhoneNumber } from './parser';
 import { settings } from './db';
 
@@ -119,7 +119,11 @@ STRICT AUDIT INSTRUCTIONS:
    - Comments like "ខោពាក់បានត្រឹមប៉ុន្មានគីឡូ?", "សួស្តី", "សុំមើលកូដ 5", "តម្លៃប៉ុន្មាន" are questions, NOT orders. Do not extract numbers from questions.
 6. Phone & Location:
    - Phone: Extract Cambodian phone numbers (e.g. 012889772, 0975544321).
-   - Address: Full address string if given.
+   - Address: Geographical location / delivery address ONLY (e.g. "ផ្សារបែកចាន", "ទឹកថ្លា", "សៀមរាប", "ទួលគោក").
+     * CRITICAL RULE: NEVER include product codes (e.g. "24=1L", "15=1"), quantities ("1L", "2L", "មួយអាវ"), colors ("ពណ៌សរ", "ពណ៌ស"), sizes ("size L", "SML"), clothing names ("ខោជើងប៉ាត"), or customer questions ("160mពាក់បានអត់") in the "address" field!
+     * If a comment says "24=1L 0968121774 ផ្សារបែកចាន", the address is ONLY "ផ្សារបែកចាន"!
+     * If a comment says "15=1 ពណ៌សរ 0965855706 ទឹកថ្លា", the address is ONLY "ទឹកថ្លា"!
+     * If a comment says "ខោជើងប៉ាតនិង160mពាក់បានអត់បង", it is an inquiry, NOT an address! Set address to null!
    - Zone: "PP" (Phnom Penh) or "PROVINCE" (all provinces).
 7. CLOTHING SIZES & PANTS/WAIST SIZES ARE NOT PRODUCT CODES:
    - Letter sizes (XS, S, M, L, XL, XXL, 2XL, 3XL, 4XL, 5XL, FreeSize) and pants waist sizes (24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 40, etc., written as "សាយ 34", "size 34", "ចង្កេះ 32", "លេខ 34") are SIZES / ATTRIBUTES.
@@ -201,10 +205,22 @@ Return ONLY valid JSON:
         }
       }
 
+      let cleanAddress: string | null = null;
+      if (parsed.address) {
+        const rawAddr = String(parsed.address).trim();
+        cleanAddress = extractCleanAddressFromComment(rawAddr) || null;
+        if (!cleanAddress && !/(?:ខោ|អាវ|សំពត់|កូដ|យក|កាត់|សុំ|ពាក់បាន|160m)/i.test(rawAddr)) {
+          const zCheck = detectDeliveryZone(rawAddr);
+          if (zCheck.hasExplicitLocation && zCheck.detectedLocation) {
+            cleanAddress = zCheck.detectedLocation;
+          }
+        }
+      }
+
       return {
         verified_items: validItems,
         phone: parsed.phone ? String(parsed.phone).replace(/\D/g, '') : null,
-        address: parsed.address ? String(parsed.address).trim() : null,
+        address: cleanAddress,
         zone: detectedZone,
         corrections_made: Array.isArray(parsed.corrections_made) ? parsed.corrections_made : [],
         confidence: parsed.confidence || 'HIGH',
@@ -254,8 +270,8 @@ export function fallbackFullBasketAudit(
 
   const { phone } = extractPhoneNumber(normText);
   const zoneRes = detectDeliveryZone(normText);
-  const finalZone: 'PP' | 'PROVINCE' | null =
-    zoneRes.zone === 'PP' || zoneRes.zone === 'PROVINCE' ? zoneRes.zone : null;
+  const extractedAddr = extractCleanAddressFromComment(normText) || (zoneRes.hasExplicitLocation ? zoneRes.detectedLocation : null);
+  const finalZone: 'PP' | 'PROVINCE' = zoneRes.zone === 'PP' ? 'PP' : 'PROVINCE';
 
   const catalogMap = new Map<string, Product>();
   for (const p of catalog) {
@@ -434,12 +450,13 @@ export function fallbackFullBasketAudit(
   }
 
   if (phone) corrections.push(`ទូរស័ព្ទ: ${phone}`);
+  if (extractedAddr) corrections.push(`ទីតាំង: ${extractedAddr}`);
   if (finalZone) corrections.push(`តំបន់: ${finalZone === 'PP' ? 'ភ្នំពេញ' : 'ខេត្ត'}`);
 
   return {
     verified_items: finalItems,
     phone,
-    address: null,
+    address: extractedAddr || null,
     zone: finalZone,
     corrections_made: corrections,
     confidence: 'HIGH',

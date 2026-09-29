@@ -29,6 +29,7 @@ interface LiveCommentStreamProps {
   activeLiveId: string;
   onCommentProcessed: () => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
+  onOpenNoBasketModal?: () => void;
 }
 
 export function LiveCommentStream({
@@ -36,7 +37,8 @@ export function LiveCommentStream({
   onClose,
   activeLiveId,
   onCommentProcessed,
-  onShowToast
+  onShowToast,
+  onOpenNoBasketModal
 }: LiveCommentStreamProps) {
   const [activeTab, setActiveTab] = useState<'feed' | 'simulator'>('feed');
   const [commentText, setCommentText] = useState('');
@@ -323,33 +325,46 @@ export function LiveCommentStream({
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-slate-800 gap-2">
-        <button
-          onClick={() => setActiveTab('feed')}
-          className={`pb-1 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'feed'
-              ? 'text-cyan-400 border-b-2 border-cyan-400'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <span>📡 កន្ត្រកកាត់ថ្មីៗ Real-time</span>
-          {recentOrders.length > 0 && (
-            <span className="bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[9px] px-1.5 rounded-full font-mono">
-              {recentOrders.length}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('simulator')}
-          className={`pb-1 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'simulator'
-              ? 'text-cyan-400 border-b-2 border-cyan-400'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <span>🧪 ម៉ាស៊ីនតេស្តខំមិន (Simulator)</span>
-        </button>
+      {/* Tabs & Extra Tools */}
+      <div className="flex items-center justify-between border-b border-slate-800 gap-2 pb-1">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveTab('feed')}
+            className={`pb-1 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'feed'
+                ? 'text-cyan-400 border-b-2 border-cyan-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span>📡 កន្ត្រកកាត់ថ្មីៗ</span>
+            {recentOrders.length > 0 && (
+              <span className="bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[9px] px-1.5 rounded-full font-mono">
+                {recentOrders.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('simulator')}
+            className={`pb-1 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'simulator'
+                ? 'text-cyan-400 border-b-2 border-cyan-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span>🧪 តេស្តខំមិន</span>
+          </button>
+        </div>
+
+        {onOpenNoBasketModal && (
+          <button
+            onClick={onOpenNoBasketModal}
+            className="px-2.5 py-1 bg-gradient-to-r from-rose-950/80 to-amber-950/80 hover:from-rose-900/90 hover:to-amber-900/90 text-rose-300 hover:text-white rounded-lg text-[11px] font-black border border-rose-500/40 flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer"
+            title="ពិនិត្យអ្នកខំមិនដែលគ្មានកន្ត្រក"
+          >
+            <span>⚠️</span>
+            <span>Users គ្មានកន្ត្រក</span>
+          </button>
+        )}
       </div>
 
       {activeTab === 'feed' ? (

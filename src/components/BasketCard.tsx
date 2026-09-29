@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
-import { extractCodeQtyPairsFromComment } from '../utils/commentParser';
+import { extractCodeQtyPairsFromComment, isPureContactOrInquiryComment, extractPhoneNumber } from '../utils/commentParser';
 import { formatLiveShortBadge } from '../utils/liveUtils';
 import { ErrorAlertModal, ErrorModalData } from './Modals/ErrorAlertModal';
 
@@ -256,10 +256,10 @@ function BasketCardComponent({
     const list: string[] = [];
     const seen = new Set<string>();
 
-    // 1. Explicit unmatched comments
+    // 1. Explicit unmatched comments (ignore pure phone, pure address, and chatter)
     for (const c of invoice.unmatched_comments || []) {
       const trimmed = (c || '').trim();
-      if (trimmed && !seen.has(trimmed)) {
+      if (trimmed && !seen.has(trimmed) && !isPureContactOrInquiryComment(trimmed)) {
         seen.add(trimmed);
         list.push(trimmed);
       }
@@ -273,7 +273,7 @@ function BasketCardComponent({
     // 3. Comments that contain genuine purchase orders not yet in items
     for (const c of invoice.comments || []) {
       const trimmed = (c || '').trim();
-      if (!trimmed || seen.has(trimmed)) continue;
+      if (!trimmed || seen.has(trimmed) || isPureContactOrInquiryComment(trimmed)) continue;
 
       const parsed = parseQuickComment(trimmed);
       // Skip general questions, greetings, or inquiries without order intent

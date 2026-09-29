@@ -217,6 +217,7 @@ export function selectPageById(pageId: string): FacebookPage | null {
 }
 
 // Fetch Page Live Videos & Posts
+// Fetch Page Live Videos & Posts with Real-Time Comment & Reaction Summary Counts
 export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: string): Promise<FacebookPost[]> {
   const targetPage = activeFacebookPage;
   const token = accessToken || targetPage?.access_token;
@@ -225,27 +226,35 @@ export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: str
     // Provide simulated sample posts/live streams so the app functions instantly
     return [
       {
-        id: 'LIVE_20260913_VIP',
-        message: '🔴 [LIVE STREAM] ប្រូម៉ូសិនពិសេស Live លក់សម្លៀកបំពាក់នាំចូល និងរ៉ូបប្រណិត KARI ARNETT 🛍️',
-        created_time: '2026-09-13T14:00:00+0700',
+        id: '1639570547628063',
+        message: '🔴 [LIVE STREAM] អាវចូលថ្មីស្អាតៗណាស់ ប្រូម៉ូសិនពិសេស Live លក់សម្លៀកបំពាក់នាំចូល និងរ៉ូបប្រណិត 🛍️',
+        created_time: '2026-09-28T12:29:00+0700',
         is_live: true,
         live_status: 'LIVE',
-        status_type: 'added_video'
+        status_type: 'added_video',
+        comments_count: 1420,
+        reactions_count: 850,
+        views_count: 5200
       },
       {
-        id: 'LIVE_20260912_NIGHT',
-        message: '🎥 [LIVE STREAM] មេឃភ្លៀង Live លក់ខោខូវប៊យ និងអាវយឺតកូរ៉េ VIP 12/09',
-        created_time: '2026-09-12T20:00:00+0700',
+        id: '1638592827725835',
+        message: '📼 [Live Stream] ម៉ូតថ្មីៗហ្កាសុកមុនភ្នំច្រើនម៉ូតណាស់បងៗ ខោខូវប៊យ និងអាវយឺតកូរ៉េ VIP',
+        created_time: '2026-09-27T12:25:00+0700',
         is_live: false,
         live_status: 'VOD',
-        status_type: 'added_video'
+        status_type: 'added_video',
+        comments_count: 3850,
+        reactions_count: 1200,
+        views_count: 12500
       },
       {
-        id: 'POST_20260911_NEW',
+        id: '1637829104829102',
         message: '📸 រ៉ូបសាច់ក្រណាត់ផ្កា និងខោខូវប៊យម៉ូតថ្មីទើបមកដល់ស្តុកចា៎ ខំមិនកូដកាត់ឥឡូវនេះ!',
-        created_time: '2026-09-11T10:00:00+0700',
+        created_time: '2026-09-26T10:00:00+0700',
         is_live: false,
-        status_type: 'mobile_status_update'
+        status_type: 'mobile_status_update',
+        comments_count: 640,
+        reactions_count: 420
       }
     ];
   }
@@ -267,26 +276,39 @@ export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: str
 
   const posts: FacebookPost[] = [];
 
-  // 2. Fetch live videos from /me/live_videos
+  // 2. Fetch live videos from /me/live_videos with comments and reactions summary count
   try {
-    const liveUrl = `https://graph.facebook.com/v21.0/me/live_videos?fields=id,title,description,status,creation_time,video{id,description,permalink_url},embed_html&limit=25&access_token=${token}`;
+    const liveUrl = `https://graph.facebook.com/v21.0/me/live_videos?fields=id,title,description,status,creation_time,video{id,description,permalink_url,picture,views,comments.summary(true),reactions.summary(true)},comments.summary(true),reactions.summary(true),embed_html&limit=15&access_token=${token}`;
     const liveData = await safeGraphApiFetch(liveUrl);
 
     if (liveData.data && Array.isArray(liveData.data)) {
       for (const lv of liveData.data) {
+        // Facebook Live status: LIVE_NOW or LIVE means actively broadcasting right now. All others (VOD, UNPUBLISHED) are ended.
         const isLiveNow = lv.status === 'LIVE_NOW' || lv.status === 'LIVE';
         const rawDesc = lv.title || lv.description || lv.video?.description || '';
         const displayTitle = rawDesc.trim()
           ? (isLiveNow ? `🔴 [LIVE NOW] ${rawDesc}` : `📼 [Live Stream] ${rawDesc}`)
-          : (isLiveNow ? `🔴 វីដេអូកំពុងផ្សាយផ្ទាល់ (Live Now)` : `📼 វីដេអូផ្សាយផ្ទាល់ #${lv.id.slice(-6)} (${lv.status || 'VOD'})`);
+          : (isLiveNow ? `🔴 វីដេអូកំពុងផ្សាយផ្ទាល់ (Live Now)` : `📼 វីដេអូផ្សាយផ្ទាល់ #${lv.id.slice(-6)}`);
+
+        const commentCount =
+          (typeof lv.comments?.summary?.total_count === 'number' ? lv.comments.summary.total_count : 0) ||
+          (typeof lv.video?.comments?.summary?.total_count === 'number' ? lv.video.comments.summary.total_count : 0);
+
+        const reactionCount =
+          (typeof lv.reactions?.summary?.total_count === 'number' ? lv.reactions.summary.total_count : 0) ||
+          (typeof lv.video?.reactions?.summary?.total_count === 'number' ? lv.video.reactions.summary.total_count : 0);
 
         posts.push({
           id: lv.id,
           message: displayTitle,
           created_time: lv.creation_time || new Date().toISOString(),
           is_live: isLiveNow,
-          live_status: lv.status || (isLiveNow ? 'LIVE' : 'VOD'),
+          live_status: isLiveNow ? 'LIVE' : 'VOD',
           permalink_url: lv.video?.permalink_url || `https://www.facebook.com/watch/?v=${lv.id}`,
+          thumbnail_url: lv.video?.picture || '',
+          comments_count: commentCount,
+          reactions_count: reactionCount,
+          views_count: typeof lv.video?.views === 'number' ? lv.video.views : undefined,
           status_type: 'added_video'
         });
       }
@@ -295,25 +317,36 @@ export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: str
     console.error('Error fetching live_videos:', err);
   }
 
-  // 3. Fetch page published posts & feeds
+  // 3. Fetch page published posts & feeds with comments & reactions summary (specifically live VODs)
   try {
-    const postsUrl = `https://graph.facebook.com/v21.0/me/posts?fields=id,message,created_time,status_type,permalink_url,story&limit=25&access_token=${token}`;
+    const postsUrl = `https://graph.facebook.com/v21.0/me/posts?fields=id,message,created_time,status_type,permalink_url,story,full_picture,comments.summary(true),reactions.summary(true)&limit=20&access_token=${token}`;
     const postsData = await safeGraphApiFetch(postsUrl);
 
     if (postsData.data && Array.isArray(postsData.data)) {
       for (const p of postsData.data) {
-        if (!posts.some(existing => existing.id === p.id)) {
+        const cleanPostId = p.id.includes('_') ? p.id.split('_').pop() || p.id : p.id;
+        if (!posts.some(existing => existing.id === cleanPostId || existing.id === p.id)) {
           const isLiveStory = p.story && p.story.toLowerCase().includes('live');
-          const cleanText = p.message || p.story || `Post #${p.id.split('_').pop()}`;
-          const formattedText = isLiveStory ? `🎥 ${cleanText}` : `📝 ${cleanText}`;
+          const isVideoPost = p.status_type === 'added_video';
+          
+          // Only include video/live posts, prioritize live streams
+          const cleanText = p.message || p.story || `Live #${cleanPostId}`;
+          const formattedText = isLiveStory ? `🎥 ${cleanText}` : cleanText;
 
+          const commentCount = typeof p.comments?.summary?.total_count === 'number' ? p.comments.summary.total_count : 0;
+          const reactionCount = typeof p.reactions?.summary?.total_count === 'number' ? p.reactions.summary.total_count : 0;
+
+          // A published past live post ("Kari Arnett was live") is a past VOD (is_live: false, live_status: 'VOD')
           posts.push({
-            id: p.id,
+            id: cleanPostId,
             message: formattedText,
             created_time: p.created_time || new Date().toISOString(),
-            is_live: isLiveStory,
-            live_status: isLiveStory ? 'VOD' : undefined,
+            is_live: false,
+            live_status: isLiveStory || isVideoPost ? 'VOD' : undefined,
             permalink_url: p.permalink_url,
+            thumbnail_url: p.full_picture || '',
+            comments_count: commentCount,
+            reactions_count: reactionCount,
             status_type: p.status_type || 'status'
           });
         }
@@ -323,29 +356,48 @@ export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: str
     console.error('Error fetching posts:', err);
   }
 
+  // Sort newest first and limit to the Top 10 Live Videos
+  posts.sort((a, b) => {
+    const tA = a.created_time ? new Date(a.created_time).getTime() : 0;
+    const tB = b.created_time ? new Date(b.created_time).getTime() : 0;
+    return tB - tA;
+  });
+
+  const top10LivePosts = posts
+    .filter(p => p.is_live || p.live_status === 'VOD' || p.status_type === 'added_video')
+    .slice(0, 10);
+
+  if (top10LivePosts.length > 0) {
+    return top10LivePosts;
+  }
+
   // Fallback to sample demo posts if Facebook returned zero items
   if (posts.length === 0) {
     return [
       {
-        id: 'LIVE_20260913_VIP',
-        message: '🔴 [LIVE DEMO] ប្រូម៉ូសិនពិសេស Live លក់សម្លៀកបំពាក់នាំចូល និងរ៉ូបប្រណិត KARI ARNETT 🛍️',
-        created_time: '2026-09-13T14:00:00+0700',
-        is_live: true,
-        live_status: 'LIVE',
-        status_type: 'added_video'
-      },
-      {
-        id: 'LIVE_20260912_NIGHT',
-        message: '🎥 [LIVE DEMO] Live លក់ខោខូវប៊យ និងអាវយឺតកូរ៉េ VIP 12/09',
-        created_time: '2026-09-12T20:00:00+0700',
+        id: '1639570547628063',
+        message: '🔴 [LIVE DEMO] អាវចូលថ្មីស្អាតៗណាស់ ប្រូម៉ូសិនពិសេស Live លក់សម្លៀកបំពាក់នាំចូល និងរ៉ូបប្រណិត KARI ARNETT 🛍️',
+        created_time: '2026-09-28T12:29:00+0700',
         is_live: false,
         live_status: 'VOD',
-        status_type: 'added_video'
+        status_type: 'added_video',
+        comments_count: 1420,
+        reactions_count: 850
+      },
+      {
+        id: '1638592827725835',
+        message: '📼 [LIVE DEMO] ម៉ូតថ្មីៗហ្កាសុកមុនភ្នំច្រើនម៉ូតណាស់បងៗ ខោខូវប៊យ និងអាវយឺតកូរ៉េ VIP',
+        created_time: '2026-09-27T12:25:00+0700',
+        is_live: false,
+        live_status: 'VOD',
+        status_type: 'added_video',
+        comments_count: 3850,
+        reactions_count: 1200
       }
     ];
   }
 
-  return posts;
+  return posts.slice(0, 10);
 }
 
 // Generate realistic simulated sample comments for local/demo live testing with stable IDs
@@ -394,7 +446,6 @@ function getSimulatedSampleComments() {
   ];
 }
 
-// Fetch Comments for a Post or Live Stream with full multi-page pagination (up to 10,000+ comments)
 // Cache resolved Facebook Live stream metadata across polling cycles to prevent redundant API queries
 interface LiveStreamState {
   resolvedTargetId: string;
@@ -411,10 +462,11 @@ export interface FetchCommentsOptions {
 }
 
 // Fetch Comments for a Post or Live Stream with smart caching and fast incremental delta polling
+// Supports deep pagination for up to 10,000+ comments (no artificial 500-comment cap)
 export async function fetchFacebookComments(
   targetPostId: string,
   pageAccessToken?: string,
-  maxLimit = 500,
+  maxLimit = 10000,
   options?: FetchCommentsOptions
 ) {
   const token = pageAccessToken || activeFacebookPage?.access_token;
@@ -436,7 +488,6 @@ export async function fetchFacebookComments(
         ? `&since=${Math.max(0, Math.floor((state.latestCommentTime - 15000) / 1000))}`
         : '';
       
-      // Try reverse chronological (newest first) or filter=stream
       const fastUrl = `https://graph.facebook.com/v21.0/${state.resolvedTargetId}/comments?fields=from{id,name,picture},message,id,created_time&order=reverse_chronological&limit=50&access_token=${token}${sinceParam}`;
       const data: any = await safeGraphApiFetch(fastUrl);
 
@@ -444,8 +495,6 @@ export async function fetchFacebookComments(
         const newComments: any[] = [];
         for (const itm of data.data) {
           if (!itm.id || state.seenCommentIds.has(itm.id)) {
-            // Because order is reverse chronological (newest first), encountering a known ID
-            // means all older comments in this page have already been processed!
             break;
           }
           state.seenCommentIds.add(itm.id);
@@ -457,7 +506,6 @@ export async function fetchFacebookComments(
         }
 
         if (newComments.length > 0) {
-          // Sort chronological so earlier comments get allocated first
           newComments.sort((a, b) => {
             const tA = a.created_time ? new Date(a.created_time).getTime() : 0;
             const tB = b.created_time ? new Date(b.created_time).getTime() : 0;
@@ -466,12 +514,11 @@ export async function fetchFacebookComments(
           return { data: newComments, isSimulated: false, isIncremental: true };
         }
 
-        // Zero new comments: instant return with zero processing overhead
         return { data: [], isSimulated: false, isIncremental: true };
       }
     }
 
-    // INITIAL OR FULL SYNC PATH
+    // INITIAL OR FULL SYNC PATH (Deep Pagination up to 10,000+ comments)
     const allComments: any[] = [];
     const seenCommentIds = new Set<string>();
 
@@ -485,7 +532,6 @@ export async function fetchFacebookComments(
       tryTargetIds.push(rawTarget);
     }
 
-    // Use cached video ID if known, or resolve once
     if (liveVideoIdCache.has(cleanId)) {
       const vidId = liveVideoIdCache.get(cleanId)!;
       if (!tryTargetIds.includes(vidId)) tryTargetIds.push(vidId);
@@ -519,7 +565,7 @@ export async function fetchFacebookComments(
 
         let nextUrl: string | null = initialUrl;
         let pageCount = 0;
-        const maxPages = Math.min(5, Math.ceil(maxLimit / 100)); // Cap to max 5 pages for rapid sync
+        const maxPages = Math.ceil(maxLimit / 100); // Supports up to 100 pages = 10,000 comments!
 
         while (nextUrl && pageCount < maxPages && allComments.length < maxLimit) {
           pageCount++;

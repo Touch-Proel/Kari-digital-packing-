@@ -121,7 +121,7 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
     const result = await fetchFacebookComments(
       targetId,
       undefined,
-      force ? 500 : 100,
+      force ? 15000 : 200,
       { isRealtimePoll: isRealtime, forceFullFetch: force }
     );
     if (result.error && (!result.data || result.data.length === 0)) {

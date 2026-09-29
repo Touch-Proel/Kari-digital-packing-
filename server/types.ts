@@ -155,4 +155,8 @@ export interface FacebookPost {
   permalink_url?: string;
   is_live?: boolean;
   live_status?: string;
+  comments_count?: number;
+  reactions_count?: number;
+  views_count?: number;
+  thumbnail_url?: string;
 }

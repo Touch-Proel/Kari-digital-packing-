@@ -11,7 +11,7 @@ import {
 } from './db';
 import { sendFacebookReply } from './fbAuth';
 import { DeliveryZone, Invoice, OrderItem, CustomerComment } from './types';
-import { detectDeliveryZone } from './locationHelper';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper';
 import {
   CLOTHING_SIZES,
   CLOTHING_SIZES_SET,
@@ -269,6 +269,8 @@ export function parseAndAllocateComment(
   rawComments.push(newCommentEntry);
 
   const { zone, label, detectedLocation, hasExplicitLocation } = detectDeliveryZone(rawText);
+  const cleanAddrFromComment = extractCleanAddressFromComment(rawText);
+  const bestLocation = cleanAddrFromComment || (hasExplicitLocation ? detectedLocation : undefined);
 
   // SAFE CUSTOMER DB LOOKUP:
   // 1. First priority: match by unique facebook_user_id
@@ -289,7 +291,7 @@ export function parseAndAllocateComment(
     }
   }
 
-  const initialCustAddress = hasExplicitLocation ? (detectedLocation || label) : undefined;
+  const initialCustAddress = hasExplicitLocation ? (bestLocation || label) : undefined;
 
   if (!cust) {
     cust = {
@@ -308,8 +310,8 @@ export function parseAndAllocateComment(
   } else {
     if (userPicUrl) cust.picture_url = userPicUrl;
     if (phone) cust.phone_number = phone;
-    if (hasExplicitLocation && detectedLocation) {
-      cust.address = detectedLocation;
+    if (hasExplicitLocation && bestLocation) {
+      cust.address = bestLocation;
     } else if (hasExplicitLocation && !cust.address) {
       cust.address = label;
     }
@@ -364,17 +366,29 @@ export function parseAndAllocateComment(
 
       if (!inv.comments) inv.comments = [];
       if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
-      if (!inv.unmatched_comments) inv.unmatched_comments = [];
-      if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
 
-      if (hasExplicitLocation) {
+      // If customer sent phone number in this comment, immediately update invoice and customer profile!
+      if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ' || inv.phone_number.includes('មិនទាន់មាន') || inv.phone_number.length < 8)) {
+        inv.phone_number = phone;
+        if (cust) cust.phone_number = phone;
+      }
+
+      if (hasExplicitLocation && !isQuestion) {
         inv.location_zone = zone;
         inv.location_label = label;
-        if (detectedLocation) {
-          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
-            inv.address = detectedLocation;
+        if (bestLocation) {
+          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || bestLocation.length > inv.address.length) {
+            inv.address = bestLocation;
           }
+          if (cust) cust.address = inv.address;
         }
+      }
+
+      // If comment is purely contact info (phone/address) or general inquiry, do NOT flag as unmatched product code warning!
+      const isPureContactOrChat = isQuestion || isPureContactOrInquiryComment(rawText);
+      if (!isPureContactOrChat) {
+        if (!inv.unmatched_comments) inv.unmatched_comments = [];
+        if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
       }
 
       recalculateInvoice(inv);
@@ -415,7 +429,7 @@ export function parseAndAllocateComment(
         resolvedLabel = cust.location_label || '🏞️ តាមខេត្ត';
         resolvedAddress = custHasSavedAddr ? cust!.address! : '🏞️ តាមខេត្ត';
       } else {
-        resolvedAddress = detectedLocation || label;
+        resolvedAddress = bestLocation || label;
         resolvedZone = zone;
         resolvedLabel = label;
       }
@@ -473,9 +487,9 @@ export function parseAndAllocateComment(
       } else {
         inv.location_zone = zone;
         inv.location_label = label;
-        if (detectedLocation) {
-          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
-            inv.address = detectedLocation;
+        if (bestLocation) {
+          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || bestLocation.length > inv.address.length) {
+            inv.address = bestLocation;
           }
         } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
           inv.address = label;

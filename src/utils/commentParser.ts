@@ -36,7 +36,7 @@ export const RE_PRICE_CLEANUP = /(?:[:=]\s*)?(?:\$\s*\d+(?:[\.,]\d{1,2})?|\b\d+(
 export const RE_MEASUREMENTS_CLEANUP = /(?:(?:kg|kilo|gk|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ)\s*[:=\s\-_/]?\s*\d{1,3}(?![A-Za-z0-9\u1780-\u17FF])|(?<!\d)\d{2,3}\s*(?:kg|kilo|gk|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ)(?!\s*[:=\-]?\s*\d)(?![A-Za-z0-9\u1780-\u17FF])|(?<![A-Za-z0-9])គ\d{2}\b|(?:ដើមទ្រូង|ទ្រូង)\s*[:=\s\-]?\s*\d{2,3}|កម្ពស់\s*[:=\s\-]?\s*\d{2,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
 export const RE_ADDRESS_NUMBERS_CLEANUP = /(?:គំរោង(?:ទី)?\s*\d+|គម្រោង(?:ទី)?\s*\d+|ផ្លូវ(?:លេខ|ទី)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*[A-Za-z0-9\-]+|បន្ទប់(?:លេខ)?\s*\d+|ជាន់ទី\s*\d+|គីឡូ\s*\d+\s*(?:ដីថ្មី|ផ្សារ|សង្កាត់|ភូមិ|\.|\*|0\d{8,9})|ផ្សារ\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d*|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*(?:គំរោង|គម្រោង)?\s*\d*|សង្កាត់\s*[\u1780-\u17FFa-zA-Z0-9_]+|ខណ្ឌ\s*[\u1780-\u17FFa-zA-Z0-9_]+|ភូមិ\s*[\u1780-\u17FFa-zA-Z0-9_]+)/gi;
 
-export const RE_CAMBODIAN_PHONE = /(?:\+?855[\s.\-()]*|0)(?:1\d|3[18]|6[016-9]|7[016-9]|8[15-9]|9[0-8])(?:[\s.\-()]*\d){6,7}(?!\d)/i;
+export const RE_CAMBODIAN_PHONE = /(?:\+?855[\s.\-()]*|0)(?:[1-9]\d)(?:[\s.\-()]*\d){6,7}(?!\d)/i;
 
 export function convertKhmerDigitsToArabic(text: string): string {
   if (!text) return '';
@@ -553,3 +553,38 @@ export function extractCodeQtyPairsFromComment(
 
   return pairs;
 }
+
+/**
+ * Checks if a comment is purely contact info (phone/address) or customer chat inquiry,
+ * with NO product order intent.
+ */
+export function isPureContactOrInquiryComment(text: string): boolean {
+  if (!text) return true;
+  const s = text.trim();
+  if (!s) return true;
+
+  // 1. Phone numbers: if comment is purely a Cambodian phone number (e.g. 012345678, លេខ016285098, 099 942032)
+  const phoneOnly = s
+    .replace(/(?:(?:\+?855[\s.\-()]*|0)[1-9](?:[\s.\-()]*\d){7,8}(?!\d))|(?:លេខ\s*0\d{8,9})|(?:\b0\d{8,9}\b)/gi, '')
+    .replace(/^(?:លេខ|phone|tell?|tel|hp|phone\s*number)?:?\s*/i, '')
+    .replace(/[\s\-_.,/]+/g, '');
+  if (phoneOnly.length === 0) {
+    return true;
+  }
+
+  // 2. Chat inquiries & questions (e.g. "ខោជើងប៉ាតនិង160mពាក់បានអត់បង", "សួស្តី", "សុំមើល", "លក់ម៉េច", "ប៉ុន្មាន")
+  if (/(?:ពាក់បានអត់|ពាក់បានទេ|ពាក់បាន|ស្លៀកបាន|មានអត់|អស់នៅ|អស់ហើយ|លក់ម៉េច|ប៉ុន្មាន|ប៉ុន្មានបង|ប៉ុន្មានចែ|សុំមើល|លើកអាវ|លើកខោ|សាច់ស្អាត|សួស្តី|ជម្រាបសួរ|អរគុណ|បងលើក)/i.test(s)) {
+    return true;
+  }
+
+  // 3. Pure location comments without order intent (e.g. "ផ្សារព្រែកឯង", "ចោមចៅ", "បែកចាន", "ទួលគោក", "សៀមរាប", "តាកែវ")
+  const hasOrderPattern = /(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})/i.test(s);
+  if (!hasOrderPattern) {
+    if (/(?:ផ្សារ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ភ្នំពេញ|ចោមចៅ|ទឹកថ្លា|បែកចាន|ទួលគោក|ដង្កោ|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|តាកែវ|កំពត|ព្រៃវែង|ស្វាយរៀង|វីរៈប៊ុនថាំ|j&t|flash|បសេដ្ឋ|បរសេដ្ឋ|ទន្លាប់)/i.test(s)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+

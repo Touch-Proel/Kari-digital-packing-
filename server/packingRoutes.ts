@@ -24,7 +24,8 @@ import {
 } from './db';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
 import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES } from './parser';
-import { detectDeliveryZone } from './locationHelper';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper';
+import { Invoice, Product, OrderItem } from './types';
 import { sendFacebookReply, fetchFacebookComments } from './fbAuth';
 import { generateServerKHQRPNG } from './khqrServer';
 import {
@@ -573,9 +574,25 @@ router.post('/public/order/:id/update_info', (req: Request, res: Response) => {
     (inv as any).phone = String(phone).trim();
   }
   if (address && address.trim()) {
-    inv.address = String(address).trim();
-    (inv as any).shipping_address = String(address).trim();
-    (inv as any).delivery_address = String(address).trim();
+    const cleanAddr = String(address).trim();
+    inv.address = cleanAddr;
+    (inv as any).shipping_address = cleanAddr;
+    (inv as any).delivery_address = cleanAddr;
+
+    const { zone, label, hasExplicitLocation } = detectDeliveryZone(cleanAddr);
+    if (hasExplicitLocation) {
+      inv.location_zone = zone;
+      inv.location_label = label;
+    }
+
+    const targetUserId = inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' ? inv.facebook_user_id : undefined;
+    let cust = targetUserId
+      ? customers.find(c => c.facebook_user_id === targetUserId)
+      : customers.find(c => c.facebook_name.toLowerCase() === (inv.facebook_name || '').toLowerCase());
+    if (cust) {
+      cust.address = cleanAddr;
+      if (phone && phone.trim()) cust.phone_number = String(phone).trim();
+    }
   }
 
   bumpDataRevision();
@@ -1448,13 +1465,21 @@ router.post('/update_customer_contact', (req: Request, res: Response) => {
   if (inv) {
     if (phone) inv.phone_number = String(phone).trim();
     if (address !== undefined) {
-      inv.address = String(address).trim();
-      const allText = `${inv.address || ''} ${(inv.comments || []).join(' ')} ${inv.phone_number || ''}`.trim();
-      const { zone, label, detectedLocation } = detectDeliveryZone(allText);
-      inv.location_zone = zone;
-      inv.location_label = label;
-      if (detectedLocation && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត')) {
-        inv.address = detectedLocation;
+      const cleanAddr = String(address).trim();
+      inv.address = cleanAddr;
+      if (cleanAddr && !cleanAddr.includes('មិនទាន់មាន')) {
+        const addrRes = detectDeliveryZone(cleanAddr);
+        if (addrRes.hasExplicitLocation) {
+          inv.location_zone = addrRes.zone;
+          inv.location_label = addrRes.label;
+        } else {
+          const allText = `${cleanAddr} ${(inv.comments || []).join(' ')}`.trim();
+          const fallbackRes = detectDeliveryZone(allText);
+          if (fallbackRes.hasExplicitLocation) {
+            inv.location_zone = fallbackRes.zone;
+            inv.location_label = fallbackRes.label;
+          }
+        }
       }
     }
   }
@@ -1941,15 +1966,16 @@ router.post('/ai_smart_parse_basket', async (req: Request, res: Response) => {
         if (cust) cust.phone_number = auditResult.phone;
       }
 
-      if (auditResult.address && (!inv.address || inv.address.includes('មិនទាន់មាន'))) {
-        inv.address = auditResult.address;
+      if (auditResult.address && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត')) {
+        const cleanAuditAddr = extractCleanAddressFromComment(auditResult.address) || auditResult.address;
+        inv.address = cleanAuditAddr;
         const cust = customers.find(c => c.facebook_name.toLowerCase() === (inv.facebook_name || '').toLowerCase());
-        if (cust) cust.address = auditResult.address;
+        if (cust) cust.address = cleanAuditAddr;
       }
 
       if (auditResult.zone) {
         inv.location_zone = auditResult.zone;
-        inv.location_label = auditResult.zone === 'PP' ? 'ភ្នំពេញ' : 'ខេត្ត';
+        inv.location_label = auditResult.zone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត';
       }
 
       // 4. Clear unmatched comments as they have been fully audited by AI
@@ -2605,6 +2631,336 @@ router.post('/comments/test_simulate', (req: Request, res: Response) => {
 // GET /api/comments/recent
 router.get('/comments/recent', (_req: Request, res: Response) => {
   res.json(rawComments.slice(-30).reverse());
+});
+
+// GET /api/comments/non_basket_users - Analyze commenters without baskets for the active live session
+router.get('/comments/non_basket_users', (req: Request, res: Response) => {
+  const queryLiveId = req.query.live_id ? String(req.query.live_id).trim() : '';
+  const targetLiveId = queryLiveId && queryLiveId !== 'ALL'
+    ? (queryLiveId.includes('_') && !queryLiveId.startsWith('LIVE_') ? queryLiveId.split('_').pop() || queryLiveId : queryLiveId)
+    : '';
+
+  // Filter rawComments for target live session
+  const commentsForSession = rawComments.filter(c => {
+    if (!targetLiveId) return true;
+    const cLive = c.live_id ? (c.live_id.includes('_') && !c.live_id.startsWith('LIVE_') ? c.live_id.split('_').pop() || c.live_id : c.live_id) : '';
+    return cLive === targetLiveId || (c.live_id && c.live_id.includes(targetLiveId));
+  });
+
+  // Active invoices in this session
+  const sessionInvoices = invoices.filter(i => {
+    if (i.status === 'Cancelled') return false;
+    if (!targetLiveId) return true;
+    const iLive = i.live_id ? (i.live_id.includes('_') && !i.live_id.startsWith('LIVE_') ? i.live_id.split('_').pop() || i.live_id : i.live_id) : '';
+    return iLive === targetLiveId || (i.live_id && i.live_id.includes(targetLiveId));
+  });
+
+  // Group raw comments by commenter key
+  const commenterMap = new Map<string, {
+    user_id: string;
+    facebook_name: string;
+    picture_url?: string;
+    comments: Array<{ id?: string; text: string; created_at: string }>;
+  }>();
+
+  for (const rc of commentsForSession) {
+    const rawName = (rc.facebook_name || '').trim();
+    if (!rawName) continue;
+    const hasUserId = Boolean(rc.facebook_user_id && rc.facebook_user_id !== 'FB_USER_ID_STREAM');
+    const key = hasUserId ? rc.facebook_user_id! : rawName.toLowerCase();
+
+    if (!commenterMap.has(key)) {
+      commenterMap.set(key, {
+        user_id: rc.facebook_user_id || '',
+        facebook_name: rawName,
+        picture_url: rc.picture_url,
+        comments: []
+      });
+    }
+
+    const entry = commenterMap.get(key)!;
+    if (rc.picture_url && !entry.picture_url) entry.picture_url = rc.picture_url;
+    entry.comments.push({
+      id: rc.comment_id,
+      text: rc.comment_text,
+      created_at: rc.created_at || new Date().toISOString()
+    });
+  }
+
+  // Evaluate which commenters have a basket vs who do NOT have a basket
+  const phoneRegex = /(?:(?:\+?855[\s.\-()]*|0)[1-9](?:[\s.\-()]*\d){7,8}(?!\d))|(?:លេខ\s*0\d{8,9})|(?:\b0\d{8,9}\b)/i;
+  const questionRegex = /(?:ពាក់បានអត់|ពាក់បានទេ|ពាក់បាន|ស្លៀកបាន|មានអត់|អស់នៅ|អស់ហើយ|លក់ម៉េច|ប៉ុន្មាន|ប៉ុន្មានបង|ប៉ុន្មានចែ|សុំមើល|លើកអាវ|លើកខោ|សាច់ស្អាត|សួស្តី|ជម្រាបសួរ|អរគុណ|បងលើក|\?|ថ្លៃ|ដឹក|ដឹកជញ្ជូន|ហ្វ្រី|free)/i;
+  const codeRegex = /(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})/gi;
+
+  let totalCommenters = 0;
+  let withBasketCount = 0;
+  let withoutBasketCount = 0;
+
+  const categories = {
+    inquiries_count: 0,
+    phone_only_count: 0,
+    unmatched_codes_count: 0,
+    out_of_stock_count: 0,
+    general_count: 0
+  };
+
+  interface NonBasketUserResult {
+    user_id: string;
+    facebook_name: string;
+    picture_url?: string;
+    comment_count: number;
+    last_comment_time: string;
+    primary_reason: 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT';
+    reason_label: string;
+    reason_color: string;
+    detected_phone?: string;
+    detected_location?: string;
+    suggested_codes: string[];
+    comments: Array<{ id?: string; text: string; created_at: string }>;
+  }
+
+  const nonBasketUsers: NonBasketUserResult[] = [];
+
+  for (const [_, cData] of commenterMap.entries()) {
+    totalCommenters++;
+
+    // Check if this commenter matches any invoice in this session
+    const matchingInv = sessionInvoices.find(inv => {
+      if (cData.user_id && cData.user_id !== 'FB_USER_ID_STREAM' && inv.facebook_user_id === cData.user_id) {
+        return true;
+      }
+      if (inv.facebook_name.toLowerCase().trim() === cData.facebook_name.toLowerCase().trim()) {
+        return true;
+      }
+      if (inv.comment_ids && cData.comments.some(cm => cm.id && inv.comment_ids?.includes(cm.id))) {
+        return true;
+      }
+      if (inv.comments && cData.comments.some(cm => inv.comments?.includes(cm.text))) {
+        return true;
+      }
+      return false;
+    });
+
+    if (matchingInv) {
+      withBasketCount++;
+    } else {
+      withoutBasketCount++;
+
+      // Analyze comments for reason
+      let detectedPhone: string | undefined;
+      let detectedLocation: string | undefined;
+      const potentialCodes = new Set<string>();
+      let hasQuestion = false;
+      let hasPhoneOnly = false;
+      let hasCodeAttempt = false;
+      let isOutOfStock = false;
+
+      for (const cm of cData.comments) {
+        const txt = cm.text || '';
+        
+        // Check phone
+        const pMatch = txt.match(phoneRegex);
+        if (pMatch && !detectedPhone) {
+          detectedPhone = pMatch[0].replace(/\s+/g, '');
+        }
+
+        // Check location
+        const loc = extractCleanAddressFromComment(txt);
+        if (loc && !detectedLocation) {
+          detectedLocation = loc;
+        }
+
+        // Check question
+        if (questionRegex.test(txt)) {
+          hasQuestion = true;
+        }
+
+        // Check code pattern
+        const codeMatches = txt.match(codeRegex);
+        if (codeMatches && codeMatches.length > 0) {
+          hasCodeAttempt = true;
+          for (const m of codeMatches) {
+            potentialCodes.add(m.trim());
+            // Check if this code was in products catalog and stock was 0
+            const cleanCode = m.replace(/[^\w\u1780-\u17D2]/g, '').toUpperCase();
+            const prod = products.find(p => p.code.toUpperCase() === cleanCode);
+            if (prod && prod.stock_qty <= 0) {
+              isOutOfStock = true;
+            }
+          }
+        }
+
+        if (isPureContactOrInquiryComment(txt) && pMatch && !codeMatches) {
+          hasPhoneOnly = true;
+        }
+      }
+
+      // Determine primary reason
+      let primaryReason: 'QUESTION_OR_INQUIRY' | 'PURE_PHONE_OR_LOCATION' | 'UNMATCHED_CODE' | 'OUT_OF_STOCK' | 'GENERAL_CHAT' = 'GENERAL_CHAT';
+      let reasonLabel = '💬 ខំមិនទូទៅ';
+      let reasonColor = 'slate';
+
+      if (isOutOfStock) {
+        primaryReason = 'OUT_OF_STOCK';
+        reasonLabel = '❌ ដាច់ស្តុក (Out of Stock)';
+        reasonColor = 'rose';
+        categories.out_of_stock_count++;
+      } else if (hasCodeAttempt) {
+        primaryReason = 'UNMATCHED_CODE';
+        reasonLabel = '❓ កូដមិនត្រូវស្តុក (Unmatched Code)';
+        reasonColor = 'amber';
+        categories.unmatched_codes_count++;
+      } else if (hasPhoneOnly || (detectedPhone && !hasCodeAttempt)) {
+        primaryReason = 'PURE_PHONE_OR_LOCATION';
+        reasonLabel = '📞 ផ្ញើតែលេខ/ទីតាំង (គ្មានកូដ)';
+        reasonColor = 'cyan';
+        categories.phone_only_count++;
+      } else if (hasQuestion) {
+        primaryReason = 'QUESTION_OR_INQUIRY';
+        reasonLabel = '💬 សាកសួរព័ត៌មាន/តម្លៃ';
+        reasonColor = 'indigo';
+        categories.inquiries_count++;
+      } else {
+        primaryReason = 'GENERAL_CHAT';
+        reasonLabel = '💬 ខំមិនទូទៅ/ស្វាគមន៍';
+        reasonColor = 'slate';
+        categories.general_count++;
+      }
+
+      // Sort comments newest first
+      const sortedComments = cData.comments.slice().sort((a, b) => {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+
+      nonBasketUsers.push({
+        user_id: cData.user_id,
+        facebook_name: cData.facebook_name,
+        picture_url: cData.picture_url,
+        comment_count: cData.comments.length,
+        last_comment_time: sortedComments[0]?.created_at || new Date().toISOString(),
+        primary_reason: primaryReason,
+        reason_label: reasonLabel,
+        reason_color: reasonColor,
+        detected_phone: detectedPhone,
+        detected_location: detectedLocation,
+        suggested_codes: Array.from(potentialCodes),
+        comments: sortedComments
+      });
+    }
+  }
+
+  // Sort non-basket users by latest comment timestamp descending
+  nonBasketUsers.sort((a, b) => {
+    return new Date(b.last_comment_time).getTime() - new Date(a.last_comment_time).getTime();
+  });
+
+  res.json({
+    success: true,
+    total_commenters_count: totalCommenters,
+    commenters_with_basket_count: withBasketCount,
+    commenters_without_basket_count: withoutBasketCount,
+    total_comments_count: commentsForSession.length,
+    active_live_id: targetLiveId || 'ALL',
+    categories,
+    users: nonBasketUsers
+  });
+});
+
+// POST /api/comments/create_basket_for_user - Create basket directly for a commenter who didn't get one
+router.post('/comments/create_basket_for_user', (req: Request, res: Response) => {
+  const { live_id, user_id, facebook_name, picture_url, phone_number, address, items } = req.body;
+
+  if (!facebook_name || !facebook_name.trim()) {
+    return res.status(400).json({ success: false, error: 'Facebook Name is required' });
+  }
+
+  const cleanName = facebook_name.trim();
+  const targetLiveId = live_id || (invoices[0]?.live_id || 'LIVE_DEFAULT');
+
+  // Find max invoice ID
+  const maxId = invoices.reduce((max, inv) => Math.max(max, inv.invoice_id), 100);
+  const newInvoiceId = maxId + 1;
+  const nextBasketNo = invoices.filter(i => i.live_id === targetLiveId && i.status !== 'Cancelled').length + 1;
+
+  // Find or create customer
+  let cust = customers.find(c => c.facebook_name.toLowerCase() === cleanName.toLowerCase());
+  if (!cust) {
+    cust = {
+      customer_id: customers.length + 1,
+      facebook_user_id: user_id || 'FB_MANUAL_USER',
+      facebook_name: cleanName,
+      picture_url: picture_url || undefined,
+      phone_number: phone_number || undefined,
+      address: address || undefined,
+      is_vip: false,
+      is_blacklist: false,
+      last_interaction_at: new Date().toISOString()
+    };
+    customers.push(cust);
+  }
+
+  // Delivery zone detection
+  const zoneInfo = detectDeliveryZone(address || '');
+  const cleanAddr = address ? (extractCleanAddressFromComment(address) || address) : (zoneInfo.hasExplicitLocation ? zoneInfo.detectedLocation : '⚠️ មិនទាន់មានអាសយដ្ឋាន');
+
+  // Collect historical comments from this user in this session
+  const userComments = rawComments
+    .filter(c => c.facebook_name.toLowerCase() === cleanName.toLowerCase() && (!targetLiveId || c.live_id === targetLiveId))
+    .map(c => c.comment_text);
+
+  const newInvoice: Invoice = {
+    invoice_id: newInvoiceId,
+    basket_no: nextBasketNo,
+    facebook_user_id: user_id || cust.facebook_user_id || 'FB_MANUAL_USER',
+    facebook_name: cleanName,
+    phone_number: phone_number || cust.phone_number || 'គ្មានលេខ',
+    address: cleanAddr || cust.address || '⚠️ មិនទាន់មានអាសយដ្ឋាន',
+    location_zone: zoneInfo.zone || 'PROVINCE',
+    location_label: zoneInfo.label || '🏞️ តាមខេត្ត',
+    status: 'Pending',
+    packing_stage: 'UNPICKED',
+    msg_status: 'UNSENT',
+    total_amount: 0,
+    items: [],
+    comments: userComments.length > 0 ? userComments : ['បង្កើតកន្ត្រកដោយដៃ'],
+    live_id: targetLiveId,
+    picture_url: picture_url || cust.picture_url || undefined,
+    created_at: new Date().toISOString()
+  };
+
+  // Add items if provided
+  if (Array.isArray(items) && items.length > 0) {
+    let total = 0;
+    for (const itm of items) {
+      const pCode = String(itm.product_code || '').trim().toUpperCase();
+      const pQty = Number(itm.quantity) || 1;
+      const prod = products.find(p => p.code.toUpperCase() === pCode);
+      const price = typeof itm.price === 'number' ? itm.price : (prod?.price || 10);
+      const name = prod?.name || `ទំនិញ ${pCode}`;
+
+      newInvoice.items.push({
+        id: (newInvoice.items.length + 1),
+        invoice_id: newInvoiceId,
+        product_id: prod?.id,
+        product_code: pCode,
+        product_name: name,
+        quantity: pQty,
+        price: price,
+        is_packed: false
+      });
+      total += price * pQty;
+    }
+    newInvoice.total_amount = total;
+  }
+
+  invoices.push(newInvoice);
+  bumpDataRevision();
+
+  return res.json({
+    success: true,
+    message: `បានបង្កើតកន្ត្រក #${newInvoice.basket_no} សម្រាប់ «${cleanName}» ដោយជោគជ័យ!`,
+    invoice: newInvoice
+  });
 });
 
 // -------------------------------------------------------------

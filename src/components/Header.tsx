@@ -15,7 +15,6 @@ interface HeaderProps {
   onSelectLiveId: (id: string) => void;
   onCreateLiveSession?: () => void;
   onOpenManageLiveModal?: () => void;
-  onOpenPickingModal: () => void;
   onToggleCommentStream: () => void;
   isStreamOpen: boolean;
   totalBasketCount?: number;
@@ -27,23 +26,19 @@ export function Header({
   onOpenFullStockManager,
   productsCount = 0,
   outStockCount = 0,
-  activePage,
   packerName,
-  dispatchedCount,
   liveSessions,
   selectedLiveId,
-  onSelectLiveId,
   onCreateLiveSession,
   onOpenManageLiveModal,
-  onOpenPickingModal,
   onToggleCommentStream,
   isStreamOpen,
   totalBasketCount,
   userRole = 'staff'
 }: HeaderProps) {
   return (
-    <div className="bg-[#081122]/95 backdrop-blur-md border border-[#182848] p-2.5 rounded-2xl flex flex-col gap-2 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
-      {/* 2 Big Top Buttons Side-by-Side (ទទឹមគ្នា ២ ប៊ូតុងធំៗ) */}
+    <div className="bg-[#081122]/95 backdrop-blur-md border border-[#182848] p-2.5 rounded-2xl flex flex-col gap-2.5 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
+      {/* 2 Big Top Action Buttons Side-by-Side (ទទឹមគ្នា ២ ប៊ូតុងធំៗ) */}
       <div className="grid grid-cols-2 gap-2">
         {/* Button 1 (Left): KARI ARNETT OS (Settings & System) */}
         <button
@@ -117,9 +112,9 @@ export function Header({
         </button>
       </div>
 
-      {/* Sleek Live Session Bar (បន្ទាត់ជ្រើសរើស Live ខាងក្រោម) */}
-      <div className="flex items-center gap-1.5 pt-1 border-t border-[#15233E]">
-        {/* Live Session Selector */}
+      {/* Spacious Clean Live Session & Comment Control Bar (ប្រអប់ Live Session និងប៊ូតុងខំមិន ស្រឡះស្អាត) */}
+      <div className="flex items-center gap-2 pt-1 border-t border-[#15233E]">
+        {/* Live Session Selector Box */}
         <div className="flex-1 min-w-0">
           {(() => {
             const currentLiveSession = liveSessions.find(s => s.live_id === selectedLiveId);
@@ -145,11 +140,16 @@ export function Header({
               <button
                 type="button"
                 onClick={onOpenManageLiveModal}
-                className="w-full bg-[#050B16] hover:bg-[#091428] text-sky-300 border border-sky-600/40 hover:border-cyan-400 px-2.5 py-1 rounded-xl text-xs font-bold truncate flex items-center justify-between gap-1 shadow-inner active:scale-[0.98] transition-all cursor-pointer text-left h-8"
+                className="w-full bg-[#050E1F] hover:bg-[#091834] text-sky-200 hover:text-white border border-cyan-500/40 hover:border-cyan-400 px-3 py-1.5 rounded-xl text-xs font-black truncate flex items-center justify-between gap-1.5 shadow-inner active:scale-[0.98] transition-all cursor-pointer text-left h-9 shadow-[0_2px_8px_rgba(0,0,0,0.5)]"
                 title="ចុចដើម្បីប្តូរ ឬលុបវគ្គ Live"
               >
-                <span className="truncate">{liveDisplayTitle}</span>
-                <span className="text-[10px] text-sky-400/80 flex-shrink-0">▼</span>
+                <span className="truncate flex items-center gap-1.5">
+                  <span className="text-cyan-400 text-sm">🎥</span>
+                  <span className="truncate">{liveDisplayTitle.replace(/^🎥\s*/, '')}</span>
+                </span>
+                <span className="text-[10px] text-cyan-400 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/30 font-bold flex-shrink-0">
+                  ប្តូរ ▼
+                </span>
               </button>
             );
           })()}
@@ -160,39 +160,27 @@ export function Header({
           <button
             type="button"
             onClick={onCreateLiveSession}
-            className="w-8 h-8 rounded-xl bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm"
+            className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-950 via-[#0C244A] to-cyan-900 hover:from-cyan-900 hover:to-cyan-800 border border-cyan-500/60 text-cyan-300 hover:text-white text-xs font-black active:scale-95 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer shadow-md shadow-cyan-950/50"
             title="បង្កើតវគ្គ Live ថ្មី"
           >
-            <span>➕</span>
+            <span className="text-sm">➕</span>
           </button>
         )}
-
-        {/* Picking List (ប្រមូល) Button */}
-        <button
-          type="button"
-          onClick={onOpenPickingModal}
-          className="bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/70 px-2 py-1 rounded-xl font-bold text-xs whitespace-nowrap active:scale-95 transition-all shadow-sm flex items-center gap-1 h-8 flex-shrink-0 cursor-pointer"
-          title="បើកបញ្ជីប្រមូលទំនិញ (Picking List)"
-        >
-          <span>📋</span>
-          <span>ប្រមូល</span>
-        </button>
 
         {/* Live Comments Toggle (ខំមិន) */}
         <button
           type="button"
           onClick={onToggleCommentStream}
-          className={`px-2 py-1 rounded-xl font-bold text-xs border flex items-center gap-1 transition-all h-8 flex-shrink-0 cursor-pointer ${
+          className={`h-9 px-3.5 rounded-xl font-black text-xs border flex items-center gap-1.5 transition-all flex-shrink-0 cursor-pointer shadow-md active:scale-95 ${
             isStreamOpen
-              ? 'bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
-              : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:border-slate-500'
+              ? 'bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 border-rose-400 text-white shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse'
+              : 'bg-gradient-to-r from-[#0C2145] to-[#0A1A36] hover:from-[#102B5A] hover:to-[#0D2248] border-cyan-500/40 text-cyan-300 hover:text-white shadow-sm'
           }`}
           title="បើក/បិទ ផ្ទាំងចាប់ខំមិន Live"
         >
-          <span>💬</span>
-          <span>ខំមិន</span>
+          <span className="text-sm">{isStreamOpen ? '🔴' : '💬'}</span>
+          <span>{isStreamOpen ? 'Live ខំមិន' : 'ខំមិន'}</span>
         </button>
-
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ interface FacebookAuthModalProps {
   onSelectLiveId: (liveId: string) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onSyncSuccess?: (liveId: string, ordersCount: number, basketsCount: number) => void;
+  onOpenNoBasketModal?: () => void;
 }
 
 export function FacebookAuthModal({
@@ -21,7 +22,8 @@ export function FacebookAuthModal({
   activeLiveId,
   onSelectLiveId,
   onShowToast,
-  onSyncSuccess
+  onSyncSuccess,
+  onOpenNoBasketModal
 }: FacebookAuthModalProps) {
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [posts, setPosts] = useState<FacebookPost[]>([]);
@@ -61,7 +63,7 @@ export function FacebookAuthModal({
       const res = await fetch(`/api/fb/page_posts${activePage?.id ? `?page_id=${activePage.id}` : ''}`);
       if (res.ok) {
         const list = await res.json();
-        setPosts(list);
+        setPosts(Array.isArray(list) ? list : []);
       }
     } catch (e) {
       console.error(e);
@@ -183,7 +185,6 @@ export function FacebookAuthModal({
   const handleApplyCustomId = () => {
     if (!customPostId.trim()) return;
     let clean = customPostId.trim();
-    // Parse URL if pasted
     const match = clean.match(/(?:videos\/|watch\/\?v=|reel\/|posts\/)?(\d{10,})/);
     if (match && match[1]) {
       clean = match[1];
@@ -195,7 +196,7 @@ export function FacebookAuthModal({
   const handleSyncComments = async () => {
     setSyncingComments(true);
     const displayLiveId = activeLiveId.length > 12 ? activeLiveId.slice(-8) : activeLiveId;
-    onShowToast(`🔄 កំពុងទាញយកខំមិនពី Live #${displayLiveId}...`);
+    onShowToast(`🔄 កំពុងទាញយកខំមិនទាំងអស់ (Full Sync) ពី Live #${displayLiveId}...`);
     try {
       const res = await fetch('/api/fb/sync_comments', {
         method: 'POST',
@@ -212,7 +213,7 @@ export function FacebookAuthModal({
         playSuccessFanfare();
         const targetId = data.target_live_id || activeLiveId;
         onSelectLiveId(targetId);
-        onShowToast(`🎉 បានទាញយកខំមិន ${data.total_synced} ជួរ និងបង្កើតបាន ${data.total_baskets || 0} កន្ត្រកដោយជោគជ័យ!`);
+        onShowToast(`🎉 បានទាញយកខំមិនសរុប ${data.total_synced} និងបង្កើតបាន ${data.total_baskets || 0} កន្ត្រកដោយជោគជ័យ!`);
         if (onSyncSuccess) {
           onSyncSuccess(targetId, data.total_orders || 0, data.total_baskets || 0);
         }
@@ -241,48 +242,75 @@ export function FacebookAuthModal({
     }
   };
 
+  const selectedPost = posts.find(p => p.id === activeLiveId || (p.id && activeLiveId && (p.id.endsWith(activeLiveId) || activeLiveId.endsWith(p.id))));
+
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[999999] flex items-center justify-center p-3 animate-fadeIn">
-      <div className="bg-[#0B1426] border-[1.5px] border-sky-500 rounded-2xl w-full max-w-[480px] max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+      <div className="bg-[#081226] border border-cyan-500/40 rounded-3xl w-full max-w-[500px] max-h-[94vh] flex flex-col overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.8)]">
+        
         {/* Header */}
-        <div className="p-3.5 bg-gradient-to-r from-blue-950 to-[#0F2442] border-b-[1.5px] border-sky-500 flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">🔵</span>
+        <div className="p-4 bg-gradient-to-r from-[#071938] via-[#0A2654] to-[#0A1830] border-b border-cyan-500/30 flex justify-between items-center shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#1877F2] to-cyan-400 p-0.5 flex items-center justify-center shadow-lg shadow-blue-500/30">
+              <div className="w-full h-full bg-[#07132B] rounded-[14px] flex items-center justify-center">
+                <svg className="w-5 h-5 text-cyan-400" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+              </div>
+            </div>
             <div>
-              <div className="font-black text-sky-300 text-[14.5px]">គ្រប់គ្រង FACEBOOK PAGES & LIVE STREAM</div>
-              <div className="text-[11px] text-sky-400 font-semibold tracking-wider">
-                OAUTH & PAGE ACCESS FOR LIVE ORDERS
+              <div className="font-black text-white text-[15px] tracking-tight">
+                គ្រប់គ្រង FACEBOOK LIVE & POSTS
+              </div>
+              <div className="text-[11px] text-cyan-300 font-semibold tracking-wider">
+                OAUTH & REAL-TIME LIVE ORDER SYNC
               </div>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-lg bg-slate-800 text-white font-bold flex items-center justify-center hover:bg-slate-700"
+            className="w-8 h-8 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white font-bold flex items-center justify-center transition-all border border-slate-700 active:scale-95"
           >
             ✕
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-3.5 overflow-y-auto flex flex-col gap-3 bg-[#070D1B] max-h-[78vh]">
+        <div className="p-4 overflow-y-auto flex flex-col gap-3.5 bg-[#050C1C] max-h-[80vh] custom-scroll">
+          
           {/* Active Connected Page Pill */}
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 flex flex-col gap-2">
+          <div className="bg-gradient-to-r from-slate-900/90 via-[#0A1A36] to-slate-900/90 border border-cyan-500/30 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-md">
             <div className="text-xs text-slate-400 font-bold flex justify-between items-center">
-              <span>ទំព័រ FACEBOOK PAGE សកម្ម ៖</span>
-              <span className="text-emerald-400 text-[11px] font-mono font-black flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> បានភ្ជាប់
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span>🌐</span> ទំព័រ FACEBOOK PAGE សកម្ម ៖
+              </span>
+              <span className="text-emerald-400 text-[11px] font-mono font-black flex items-center gap-1.5 bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> បានភ្ជាប់
               </span>
             </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-white font-black text-sm">{activePage?.name || 'Kari Arnett'}</div>
-                <div className="text-sky-400 font-mono text-xs font-bold">ID: {activePage?.id || '102094263212256'}</div>
+            
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex-shrink-0 shadow">
+                  {activePage?.picture?.data?.url ? (
+                    <img src={activePage.picture.data.url} alt="page" className="w-full h-full object-cover rounded-[10px]" />
+                  ) : (
+                    <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center text-xs font-black text-cyan-300">
+                      FB
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-white font-black text-sm truncate">{activePage?.name || 'Kari Arnett'}</div>
+                  <div className="text-cyan-400/90 font-mono text-[11px] font-bold truncate">ID: {activePage?.id || '102094263212256'}</div>
+                </div>
               </div>
+
               <button
                 onClick={handleConnectFacebook}
-                className="bg-[#1877F2] hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-md active:scale-95"
+                className="bg-gradient-to-r from-[#1877F2] to-[#0A60D4] hover:from-blue-600 hover:to-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-[0_4px_12px_rgba(24,119,242,0.35)] active:scale-95 transition-all flex-shrink-0 border border-blue-400/30"
               >
-                <span>🌐 Login FB</span>
+                <span>🔄 ចូលគណនី FB</span>
               </button>
             </div>
           </div>
@@ -290,11 +318,11 @@ export function FacebookAuthModal({
           {/* Connected Pages Selection if multiple */}
           {pages.length > 1 && (
             <div>
-              <label className="text-xs text-slate-400 font-bold block mb-1">ជ្រើសរើសទំព័រ Facebook ផ្សេងទៀត ៖</label>
+              <label className="text-xs text-slate-300 font-bold block mb-1">ជ្រើសរើសទំព័រ Facebook ផ្សេងទៀត ៖</label>
               <select
                 value={activePage?.id || ''}
                 onChange={e => handleSelectPage(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-sky-300 font-bold rounded-xl px-3 py-2 text-xs outline-none"
+                className="w-full bg-slate-900 border border-slate-700 text-cyan-300 font-bold rounded-xl px-3 py-2 text-xs outline-none focus:border-cyan-400"
               >
                 {pages.map((p, pIdx) => (
                   <option key={p.id ? `fb-page-${p.id}` : `fb-page-${pIdx}`} value={p.id}>
@@ -305,77 +333,82 @@ export function FacebookAuthModal({
             </div>
           )}
 
-          {/* Live Streams and Posts Selector */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col gap-2.5">
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-slate-300 font-black flex items-center gap-1.5">
-                <span>🎥</span> វីដេអូផ្សាយផ្ទាល់ & Posts ({posts.length})
+          {/* Live Streams Section (10 Latest Live Streams) */}
+          <div className="bg-[#08152E]/90 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3 shadow-md">
+            
+            {/* Header & Refresh */}
+            <div className="flex justify-between items-center gap-2">
+              <span className="text-xs text-white font-black flex items-center gap-1.5">
+                <span>🎥</span> វីដេអូផ្សាយផ្ទាល់ Live Stream ({posts.length})
               </span>
+              
               <button
                 onClick={fetchPosts}
                 disabled={loadingPosts}
-                className="text-[11px] text-sky-400 hover:underline font-bold flex items-center gap-1"
+                className="text-[11px] bg-slate-900 hover:bg-slate-800 text-cyan-300 px-2.5 py-1 rounded-lg border border-slate-700/80 font-bold flex items-center gap-1 transition-all active:scale-95"
+                title="ទាញយកបញ្ជី Live ឡើងវិញ"
               >
                 <span className={loadingPosts ? 'animate-spin' : ''}>🔄</span>
-                {loadingPosts ? 'កំពុងទាញ...' : 'Refresh'}
+                <span>{loadingPosts ? 'កំពុងទាញ...' : 'Refresh'}</span>
               </button>
             </div>
 
-            {/* List of fetched live streams and posts */}
+            {/* List of fetched 10 live streams */}
             {loadingPosts ? (
-              <div className="p-6 text-center text-xs text-sky-300 flex flex-col items-center justify-center gap-2">
-                <span className="animate-spin text-xl">⏳</span>
-                <span>កំពុងទាញយក Live Streams & Posts ពី Facebook...</span>
+              <div className="py-10 text-center text-xs text-cyan-300 flex flex-col items-center justify-center gap-2.5">
+                <div className="w-7 h-7 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                <span className="font-semibold">កំពុងទាញយក Live Streams ពី Facebook...</span>
               </div>
             ) : posts.length === 0 ? (
-              <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 text-center text-xs text-slate-400 flex flex-col gap-2">
-                <div>មិនទាន់មានវីដេអូ ឬ Posts ក្នុងទំព័រនេះទេ</div>
+              <div className="p-5 bg-slate-950/60 rounded-2xl border border-slate-800 text-center text-xs text-slate-400 flex flex-col gap-2">
+                <div>មិនទាន់មានវីដេអូ Live ក្នុងទំព័រនេះទេ</div>
                 <button
                   onClick={fetchPosts}
-                  className="bg-slate-800 text-sky-300 px-3 py-1 rounded-lg text-[11px] font-bold self-center"
+                  className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-3 py-1 rounded-lg text-[11px] font-bold self-center transition-all"
                 >
                   🔄 ព្យាយាមទាញឡើងវិញ
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto pr-1 custom-scroll">
+              <div className="flex flex-col gap-2.5 max-h-[280px] overflow-y-auto pr-1 custom-scroll">
                 {posts.map((p, pIdx) => {
-                  const isSelected = p.id === activeLiveId;
+                  const isSelected = p.id === activeLiveId || (p.id && activeLiveId && (p.id.endsWith(activeLiveId) || activeLiveId.endsWith(p.id)));
                   const isLive = p.is_live;
+                  const commentsCount = typeof p.comments_count === 'number' ? p.comments_count : 0;
+                  const reactionsCount = typeof p.reactions_count === 'number' ? p.reactions_count : 0;
+                  const displayId = p.id.length > 20 ? p.id.split('_').pop() || p.id : p.id;
+
                   return (
                     <div
                       key={p.id ? `fb-post-${p.id}` : `fb-post-idx-${pIdx}`}
                       onClick={() => handleSelectLive(p.id)}
-                      className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all flex flex-col gap-1.5 relative ${
+                      className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all flex flex-col gap-2 relative ${
                         isSelected
-                          ? 'bg-sky-950/60 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.35)]'
-                          : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                          ? 'bg-gradient-to-r from-[#0B254E] via-[#0E3166] to-[#0B254E] border-cyan-400 shadow-[0_0_18px_rgba(6,182,212,0.4)] ring-1 ring-cyan-400/50'
+                          : 'bg-[#060E20]/90 border-slate-800 hover:border-slate-700 hover:bg-[#0A1630]'
                       }`}
                     >
-                      <div className="flex justify-between items-center gap-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                      {/* Top Meta Line: Badge + ID + Actions */}
+                      <div className="flex justify-between items-center gap-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
                           {isLive ? (
-                            <span className="bg-rose-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 animate-pulse">
-                              ● LIVE NOW
-                            </span>
-                          ) : p.live_status === 'VOD' ? (
-                            <span className="bg-amber-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded flex items-center gap-1">
-                              📼 LIVE VOD
+                            <span className="bg-gradient-to-r from-rose-600 to-red-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-md shadow-rose-600/30 animate-pulse">
+                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span> កំពុង LIVE
                             </span>
                           ) : (
-                            <span className="bg-slate-700 text-slate-200 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                              📝 POST
+                            <span className="bg-gradient-to-r from-amber-600/90 to-amber-700/90 border border-amber-400/40 text-amber-100 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                              <span>📼</span> វីដេអូឡាយ (បានចប់)
                             </span>
                           )}
-                          <span className="font-mono font-bold text-sky-400 text-[11px]">
-                            ID: {p.id.length > 20 ? p.id.split('_').pop() : p.id}
+                          <span className="font-mono font-bold text-sky-300 text-[11px]">
+                            ID: {displayId}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                           {isSelected && (
-                            <span className="text-emerald-400 font-bold text-[10px] bg-emerald-950/80 border border-emerald-500/40 px-1.5 py-0.5 rounded">
-                              ✓ ជ្រើសរើស
+                            <span className="text-emerald-300 font-extrabold text-[10px] bg-emerald-950/90 border border-emerald-400/60 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                              <span>✓</span> ជ្រើសរើស
                             </span>
                           )}
                           {p.permalink_url && (
@@ -384,24 +417,59 @@ export function FacebookAuthModal({
                               target="_blank"
                               rel="noreferrer"
                               onClick={e => e.stopPropagation()}
-                              className="text-[10px] text-sky-400 hover:text-sky-200 bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-800/40"
-                              title="មើលលើ Facebook"
+                              className="text-[10.5px] text-cyan-400 hover:text-cyan-200 bg-cyan-950/60 hover:bg-cyan-900/60 px-2 py-0.5 rounded-lg border border-cyan-700/50 flex items-center gap-0.5 font-bold transition-all"
+                              title="បើកមើលលើ Facebook"
                             >
-                              ↗ FB
+                              <span>↗ FB</span>
                             </a>
                           )}
                         </div>
                       </div>
 
-                      <div className="text-slate-100 font-medium line-clamp-2 leading-relaxed text-[11.5px]">
+                      {/* Video Title / Post Content */}
+                      <div className="text-slate-100 font-medium line-clamp-2 leading-snug text-[12px]">
                         {p.message}
                       </div>
 
-                      <div className="text-[10px] text-slate-400 flex justify-between items-center">
-                        <span>{formatPostTime(p.created_time)}</span>
-                        <span className="text-cyan-400/80 font-mono text-[9px] truncate max-w-[120px]">
-                          {p.id}
-                        </span>
+                      {/* Bottom Stat Highlights: Total Comments, Reactions, Time */}
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5 flex-wrap">
+                        
+                        {/* Highlights Pill Badges */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {/* Total Comments Badge */}
+                          <div
+                            className={`px-2.5 py-0.5 rounded-lg font-black text-[11px] flex items-center gap-1 shadow-sm ${
+                              commentsCount > 0
+                                ? 'bg-gradient-to-r from-cyan-950 via-teal-950 to-cyan-950 border border-cyan-400/60 text-cyan-300'
+                                : 'bg-slate-900 border border-slate-800 text-slate-400'
+                            }`}
+                          >
+                            <span className="text-[11px]">💬</span>
+                            <span className="font-mono font-black">{commentsCount.toLocaleString()}</span>
+                            <span className="text-[9.5px] font-semibold opacity-80">ខំមិន</span>
+                          </div>
+
+                          {/* Reactions Badge */}
+                          {reactionsCount > 0 && (
+                            <div className="bg-slate-900/90 border border-slate-800 text-slate-300 px-2 py-0.5 rounded-lg text-[10.5px] font-mono flex items-center gap-1">
+                              <span>👍</span>
+                              <span>{reactionsCount.toLocaleString()}</span>
+                            </div>
+                          )}
+
+                          {/* Views Badge */}
+                          {typeof p.views_count === 'number' && p.views_count > 0 && (
+                            <div className="bg-slate-900/90 border border-slate-800 text-slate-300 px-2 py-0.5 rounded-lg text-[10.5px] font-mono flex items-center gap-1">
+                              <span>👁️</span>
+                              <span>{p.views_count.toLocaleString()}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Date Time */}
+                        <div className="text-[10px] text-slate-400 font-medium whitespace-nowrap ml-auto">
+                          📅 {formatPostTime(p.created_time)}
+                        </div>
                       </div>
                     </div>
                   );
@@ -409,75 +477,119 @@ export function FacebookAuthModal({
               </div>
             )}
 
-            {/* Direct Custom Post/Live ID Input */}
-            <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1.5">
-              <div className="text-[11px] text-slate-300 font-bold flex items-center justify-between">
-                <span>🎯 បញ្ចូល Live ID ឬ Link វីដេអូដោយផ្ទាល់ ៖</span>
-                <span className="text-[10px] text-cyan-400 font-mono font-bold">Live #{activeLiveId}</span>
+            {/* Direct Custom Post/Live ID Input - Clean & Spacious Layout */}
+            <div className="bg-gradient-to-b from-[#09152C] to-[#060E1E] border border-cyan-500/30 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                <span className="text-xs font-black text-white flex items-center gap-1.5">
+                  <span className="text-sm">🎯</span> បញ្ចូល ID ឬ Link Live ដោយដៃ ៖
+                </span>
+                <div className="flex items-center gap-1 self-start sm:self-auto bg-cyan-950/90 border border-cyan-500/40 px-2.5 py-0.5 rounded-lg text-[11px] font-mono text-cyan-300 font-bold max-w-full">
+                  <span className="text-slate-400 font-sans text-[10px]">Live សកម្ម:</span>
+                  <span className="truncate max-w-[150px]">#{activeLiveId.includes('_') ? activeLiveId.split('_').pop() : activeLiveId}</span>
+                </div>
               </div>
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={customPostId}
-                  onChange={e => setCustomPostId(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleApplyCustomId()}
-                  placeholder="e.g. 1613298173588634 ឬ link វីដេអូ"
-                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-sky-300 font-mono outline-none focus:border-cyan-400 placeholder:text-slate-600"
-                />
+
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={customPostId}
+                    onChange={e => setCustomPostId(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleApplyCustomId()}
+                    placeholder="បិទភ្ជាប់ (Paste) ID ឬ Link វីដេអូ Facebook..."
+                    className="w-full bg-[#030914] border border-slate-700/90 focus:border-cyan-400 rounded-xl pl-3 pr-8 py-2 text-xs text-cyan-200 font-mono outline-none placeholder:text-slate-500 transition-all shadow-inner"
+                  />
+                  {customPostId && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomPostId('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs px-1"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
                 <button
+                  type="button"
                   onClick={handleApplyCustomId}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-black font-black px-3 py-1.5 rounded-lg text-xs active:scale-95 whitespace-nowrap shadow cursor-pointer"
+                  className="bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs active:scale-95 shadow-lg shadow-cyan-500/20 cursor-pointer transition-all whitespace-nowrap flex-shrink-0"
                 >
-                  កំណត់
+                  កំណត់ Live
                 </button>
               </div>
             </div>
 
-            {/* Sync Comments Trigger */}
+            {/* Sync Comments Trigger with Deep Pagination up to 10,000+ comments */}
             <button
               onClick={handleSyncComments}
               disabled={syncingComments}
-              className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-lg active:scale-98 cursor-pointer"
+              className="w-full py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:via-teal-500 hover:to-emerald-500 text-white rounded-2xl text-[12.5px] font-black flex items-center justify-center gap-2 shadow-[0_4px_20px_rgba(16,185,129,0.35)] active:scale-98 cursor-pointer transition-all border border-emerald-400/40 disabled:opacity-75 disabled:cursor-not-allowed"
             >
-              <span>{syncingComments ? '⏳ កំពុងទាញយក...' : `🔄 ទាញយក Comment ទាំងអស់ពី Live #${activeLiveId}`}</span>
+              {syncingComments ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin flex-shrink-0" />
+                  <span>កំពុងទាញយក Comment ទាំងអស់ (Full Sync)...</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-base">⚡</span>
+                  <span>
+                    ទាញយក Comment ទាំងអស់ពី Live #{activeLiveId.includes('_') ? activeLiveId.split('_').pop() : activeLiveId}
+                    {selectedPost?.comments_count ? ` (💬 ${selectedPost.comments_count.toLocaleString()})` : ''}
+                  </span>
+                </>
+              )}
             </button>
+
+            {/* Check Non-Basket Users Button */}
+            {onOpenNoBasketModal && (
+              <button
+                onClick={onOpenNoBasketModal}
+                className="w-full py-2.5 bg-gradient-to-r from-slate-900 via-[#101b33] to-slate-900 hover:from-slate-800 hover:to-slate-800 text-amber-300 hover:text-amber-200 rounded-2xl text-xs font-black flex items-center justify-center gap-2 border border-amber-500/40 shadow-sm active:scale-98 transition-all cursor-pointer"
+              >
+                <span>⚠️</span>
+                <span>ពិនិត្យអ្នកខំមិនដែលគ្មានកន្ត្រក (Users គ្មានកន្ត្រក)</span>
+                <span>➔</span>
+              </button>
+            )}
           </div>
 
           {/* Toggle Manual Access Token Form */}
-          <div className="border-t border-slate-800 pt-2 flex flex-col gap-2">
+          <div className="border-t border-slate-800/80 pt-2.5 flex flex-col gap-2">
             <button
               onClick={() => setShowManualForm(!showManualForm)}
-              className="text-xs text-slate-400 hover:text-slate-200 flex items-center justify-between font-bold"
+              className="text-xs text-slate-400 hover:text-slate-200 flex items-center justify-between font-bold px-1 transition-colors"
             >
               <span>⚙️ ជម្រើសកំណត់ដោយដៃ (Page Access Token / App Settings)</span>
-              <span>{showManualForm ? '▲' : '▼'}</span>
+              <span className="text-[10px]">{showManualForm ? '▲' : '▼'}</span>
             </button>
 
             {showManualForm && (
-              <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 flex flex-col gap-2.5">
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3 flex flex-col gap-2.5 shadow-inner">
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-0.5">ឈ្មោះ Facebook Page ៖</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">ឈ្មោះ Facebook Page ៖</label>
                   <input
                     type="text"
                     value={manualPageName}
                     onChange={e => setManualPageName(e.target.value)}
                     placeholder="e.g. Kari Arnett"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-0.5">Page Access Token (EAAR...) ៖</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">Page Access Token (EAAR...) ៖</label>
                   <textarea
                     rows={2}
                     value={manualToken}
                     onChange={e => setManualToken(e.target.value)}
                     placeholder="Paste Page Access Token from Graph API Explorer..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-sky-300 font-mono outline-none focus:border-cyan-400"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-300 font-mono outline-none focus:border-cyan-400"
                   />
                 </div>
                 <button
                   onClick={handleManualConnect}
-                  className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow"
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow transition-all active:scale-95"
                 >
                   💾 រក្សាទុក & ភ្ជាប់ Token នេះ
                 </button>
@@ -486,13 +598,15 @@ export function FacebookAuthModal({
           </div>
 
           {/* OAuth Callback Info box for Facebook Dev Console */}
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1 text-[11px] text-slate-400">
-            <div className="font-bold text-slate-300">📋 Facebook App OAuth Valid Redirect URI ៖</div>
-            <code className="bg-slate-900 text-sky-400 p-1.5 rounded font-mono break-all text-[10px] select-all">
+          <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-3 flex flex-col gap-1.5 text-[11px] text-slate-400">
+            <div className="font-bold text-slate-300 flex items-center gap-1.5">
+              <span>📋</span> Facebook App OAuth Valid Redirect URI ៖
+            </div>
+            <code className="bg-slate-900 text-cyan-300 p-2 rounded-xl font-mono break-all text-[10.5px] select-all border border-slate-800">
               {callbackUrl}
             </code>
-            <div className="text-[10px] text-slate-500">
-              បន្ថែម URL នេះទៅក្នុង Facebook Login Settings ក្នុង Meta Developer Portal។
+            <div className="text-[10px] text-slate-500 leading-normal">
+              បន្ថែម URL នេះទៅក្នុង Facebook Login Settings ក្នុង Meta Developer Portal ដើម្បីដំណើរការ OAuth Login។
             </div>
           </div>
         </div>

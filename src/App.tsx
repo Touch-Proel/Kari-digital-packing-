@@ -33,6 +33,7 @@ import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
 import { CustomerOrderPortal } from './components/CustomerOrderPortal';
 import { AdminPinModal } from './components/Modals/AdminPinModal';
 import { CameraScannerModal, parseScannedText } from './components/Modals/CameraScannerModal';
+import { NoBasketUsersModal } from './components/Modals/NoBasketUsersModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
 
 export default function App() {
@@ -258,6 +259,7 @@ export default function App() {
   const [isManageLiveModalOpen, setIsManageLiveModalOpen] = useState(false);
   const [isCreateLiveModalOpen, setIsCreateLiveModalOpen] = useState(false);
   const [isCommentStreamOpen, setIsCommentStreamOpen] = useState(false);
+  const [isNoBasketModalOpen, setIsNoBasketModalOpen] = useState(false);
 
   const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
   const [zoomCode, setZoomCode] = useState('');
@@ -1641,7 +1643,6 @@ export default function App() {
             }
           }}
           onOpenManageLiveModal={() => setIsManageLiveModalOpen(true)}
-          onOpenPickingModal={() => setIsPickingModalOpen(true)}
           onToggleCommentStream={() => setIsCommentStreamOpen(!isCommentStreamOpen)}
           isStreamOpen={isCommentStreamOpen}
           totalBasketCount={invoices.filter(i => i.status !== 'Cancelled').length}
@@ -1659,9 +1660,10 @@ export default function App() {
             fetchStock();
           }}
           onShowToast={showToast}
+          onOpenNoBasketModal={() => setIsNoBasketModalOpen(true)}
         />
 
-        {/* 3. Gamified HUD Strip with Integrated Dynamic Backlog Alert & QC All Live & Fast-Check */}
+        {/* 3. Gamified HUD Strip with Integrated Picking, Non-Basket Users, Fast-Check & Leaderboard */}
         <GamifiedHud
           topPackerName={topPackerName}
           mySessionPacks={mySessionPacks}
@@ -1677,6 +1679,8 @@ export default function App() {
             }
             fetchAllLivePaidInvoices();
           }}
+          onOpenPickingModal={() => setIsPickingModalOpen(true)}
+          onOpenNoBasketModal={() => setIsNoBasketModalOpen(true)}
           onOpenFastCheck={() => setIsFastCheckModalOpen(true)}
           onOpenBacklog={() => setIsBacklogModalOpen(true)}
           onOpenLeaderboard={() => {
@@ -2032,6 +2036,20 @@ export default function App() {
           }
         }}
         onShowToast={showToast}
+        onOpenNoBasketModal={() => setIsNoBasketModalOpen(true)}
+      />
+
+      {/* ⚠️ Non-Basket Users & Unmatched Commenters Modal */}
+      <NoBasketUsersModal
+        isOpen={isNoBasketModalOpen}
+        onClose={() => setIsNoBasketModalOpen(false)}
+        activeLiveId={selectedLiveId}
+        onShowToast={showToast}
+        onBasketCreated={() => {
+          fetchInvoices();
+          fetchLiveSessions();
+          fetchStock();
+        }}
       />
 
       <ImageZoomModal

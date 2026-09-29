@@ -11,7 +11,8 @@ import {
   FacebookPage
 } from './types';
 import { persistToSqlite, loadFromSqlite } from './sqlite';
-import { detectDeliveryZone } from './locationHelper';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper';
+import { extractPhoneNumber } from './parser';
 
 let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;
@@ -79,7 +80,8 @@ export function getDataRevision(): number {
 export let activeLiveId = '1626350178950100';
 
 export function setActiveLiveId(id: string) {
-  activeLiveId = id;
+  const cleanId = id && id.includes('_') && !id.startsWith('LIVE_') ? id.split('_').pop() || id : id;
+  activeLiveId = cleanId;
   saveDatabaseToDisk();
 }
 
@@ -559,8 +561,16 @@ export async function loadDatabaseFromDisk() {
       });
     }
 
-    // Sanitize products, ensure live_id is assigned, and format names
+    // Normalize activeLiveId if it contains composite page prefix
+    if (activeLiveId && activeLiveId.includes('_') && !activeLiveId.startsWith('LIVE_')) {
+      activeLiveId = activeLiveId.split('_').pop() || activeLiveId;
+    }
+
+    // Sanitize products, ensure live_id is normalized & assigned, and format names
     products.forEach(p => {
+      if (p.live_id && p.live_id.includes('_') && !p.live_id.startsWith('LIVE_')) {
+        p.live_id = p.live_id.split('_').pop() || p.live_id;
+      }
       if (!p.live_id) {
         p.live_id = activeLiveId;
       }
@@ -569,23 +579,93 @@ export async function loadDatabaseFromDisk() {
       }
     });
 
-    // Migrate all loaded invoices to ensure shipping fee is strictly $2.00 flat, discounts removed, and item names cleaned
+    // Normalize rawComments live_id
+    rawComments.forEach(rc => {
+      if (rc.live_id && rc.live_id.includes('_') && !rc.live_id.startsWith('LIVE_')) {
+        rc.live_id = rc.live_id.split('_').pop() || rc.live_id;
+      }
+    });
+
+    // Migrate all loaded invoices: normalize live_id, ensure shipping fee is strictly $2.00 flat, discounts removed
     invoices.forEach(inv => {
+      if (inv.live_id && inv.live_id.includes('_') && !inv.live_id.startsWith('LIVE_')) {
+        inv.live_id = inv.live_id.split('_').pop() || inv.live_id;
+      }
       inv.is_free_ship = false;
       (inv as any).discount_amount = 0;
       if (!inv.shipping_fee || inv.shipping_fee <= 0 || inv.shipping_fee === 2.5) {
         inv.shipping_fee = 2.0;
       }
 
-      // Auto-detect delivery zone with comprehensive Phnom Penh rules
-      const allText = `${inv.address || ''} ${(inv.comments || []).join(' ')} ${inv.phone_number || ''}`.trim();
-      const { zone, label, detectedLocation } = detectDeliveryZone(allText);
-      inv.location_zone = zone;
-      inv.location_label = label;
-      if (detectedLocation) {
-        if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
-          inv.address = detectedLocation;
+      // Auto-heal missing phone number from comments
+      if (!inv.phone_number || inv.phone_number === 'គ្មានលេខ' || inv.phone_number.includes('មិនទាន់មាន') || inv.phone_number.length < 8) {
+        for (const c of inv.comments || []) {
+          const mPhone = String(c).match(/(?:(?:\+?855[\s.\-()]*|0)[1-9](?:[\s.\-()]*\d){7,8}(?!\d))|(?:លេខ\s*0\d{8,9})|(?:\b0\d{8,9}\b)/i);
+          if (mPhone) {
+            const digits = mPhone[0].replace(/\D/g, '');
+            if (digits.length >= 8 && digits.length <= 11) {
+              inv.phone_number = digits.startsWith('855') ? '0' + digits.slice(3) : digits;
+              break;
+            }
+          }
         }
+      }
+
+      // Sanitize existing address: strip accidental product codes, phone numbers, sizes, colors, or chat questions
+      if (inv.address) {
+        if (/(?:ខោជើងប៉ាត|160m|ពាក់បានអត់|ពាក់បានទេ|លក់ម៉េច|ប៉ុន្មាន)/i.test(inv.address)) {
+          inv.address = '';
+        } else if (/(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS)\b)|(?:ពណ៌|ពណ៍)\s*[\u1780-\u17D2]+|(?:\b0\d{8,9}\b)|(?:\*+)/i.test(inv.address)) {
+          const cleaned = extractCleanAddressFromComment(inv.address);
+          inv.address = cleaned || '';
+        } else if (inv.address === 'ចេាមចៅ') {
+          inv.address = 'ចោមចៅ';
+        }
+      }
+
+      // If address is empty or missing, search comments for clean address
+      if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
+        for (const c of inv.comments || []) {
+          const clean = extractCleanAddressFromComment(c);
+          if (clean) {
+            inv.address = clean;
+            break;
+          }
+        }
+      }
+
+      // Core Routing Rule: Accurate Phnom Penh detection, all remaining baskets are Province!
+      // "ex 200 កន្រ្តក់ ប្រពន្ធ័ ចាប់ភ្នំពេញបាន 50 ក្រៅពីនឹងដាក់ចូលខេត្ត 150"
+      const zoneCheckTarget = (inv.address && !inv.address.includes('មិនទាន់មាន')) ? inv.address : (inv.comments || []).join(' ');
+      const zoneRes = detectDeliveryZone(zoneCheckTarget);
+
+      if (zoneRes.zone === 'PP') {
+        inv.location_zone = 'PP';
+        inv.location_label = '🏙️ ភ្នំពេញ';
+        if (zoneRes.detectedLocation && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត')) {
+          inv.address = zoneRes.detectedLocation;
+        }
+      } else {
+        inv.location_zone = 'PROVINCE';
+        inv.location_label = '🏞️ តាមខេត្ត';
+        if (zoneRes.hasExplicitLocation && zoneRes.detectedLocation) {
+          inv.address = zoneRes.detectedLocation;
+        } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
+          inv.address = '🏞️ តាមខេត្ត';
+        }
+      }
+
+      // Clean unclosed parenthesis if any (e.g. "បាត់ដំបង (BTB" or "ឈូក (កំពត")
+      if (inv.address) {
+        inv.address = inv.address.replace(/\s*\([A-Za-z0-9\s]*$/, '').trim();
+        const openP = (inv.address.match(/\(/g) || []).length;
+        const closeP = (inv.address.match(/\)/g) || []).length;
+        if (openP > closeP) inv.address += ')';
+      }
+
+      // Filter out pure phone numbers, pure addresses, and chat inquiries from unmatched_comments
+      if (inv.unmatched_comments && Array.isArray(inv.unmatched_comments)) {
+        inv.unmatched_comments = inv.unmatched_comments.filter(c => !isPureContactOrInquiryComment(c));
       }
 
       if (inv.items && Array.isArray(inv.items)) {
