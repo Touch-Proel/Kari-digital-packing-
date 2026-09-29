@@ -68,14 +68,66 @@ router.get('/invoices', (req: Request, res: Response) => {
     filtered = invoices.filter(inv => inv.live_id === liveId);
   }
 
-  // Calculate live lock state without redundant recalculateInvoice calls
+  // Calculate live lock state and find cross-live merge candidates
   const result = filtered.map(inv => {
     const lock = activeInvoiceLocks.get(inv.invoice_id);
     const isLocked = !!lock;
+
+    // Find cross-live merge candidates (Active baskets from previous/other lives belonging to the same customer)
+    let mergeCandidates: Array<{
+      invoice_id: number;
+      basket_no: number | string;
+      live_id: string;
+      total_amount: number;
+      items_count: number;
+      created_at: string;
+      status: string;
+      staged_by?: string;
+    }> = [];
+
+    if (inv.status !== 'Dispatched' && inv.status !== 'Cancelled' && !(inv as any).is_merged) {
+      const uId = inv.facebook_user_id;
+      const fName = (inv.facebook_name || '').trim().toLowerCase();
+      const pNum = (inv.phone_number || '').replace(/[^0-9]/g, '');
+
+      mergeCandidates = invoices
+        .filter(other => {
+          if (other.invoice_id === inv.invoice_id || other.status === 'Dispatched' || other.status === 'Cancelled' || (other as any).is_merged) {
+            return false;
+          }
+          if (!other.items || other.items.length === 0) return false;
+
+          // Match by Facebook User ID (Priority)
+          if (uId && uId !== 'FB_USER_ID_STREAM' && uId !== 'FB_MANUAL_USER' && other.facebook_user_id === uId) {
+            return true;
+          }
+          // Match by Facebook Name
+          if (fName && other.facebook_name && other.facebook_name.trim().toLowerCase() === fName) {
+            return true;
+          }
+          // Match by Valid Phone Number
+          if (pNum && pNum.length >= 8 && other.phone_number && other.phone_number.replace(/[^0-9]/g, '') === pNum) {
+            return true;
+          }
+          return false;
+        })
+        .map(other => ({
+          invoice_id: other.invoice_id,
+          basket_no: other.basket_no || other.invoice_id,
+          live_id: other.live_id,
+          total_amount: other.total_amount,
+          items_count: other.items.reduce((s, it) => s + (it.quantity || 1), 0),
+          created_at: other.created_at,
+          status: other.status,
+          staged_by: other.staged_by
+        }));
+    }
+
     return {
       ...inv,
       is_locked: isLocked,
-      locked_by: lock?.packer_name || null
+      locked_by: lock?.packer_name || null,
+      merge_candidates: mergeCandidates
     };
   });
 
@@ -83,6 +135,95 @@ router.get('/invoices', (req: Request, res: Response) => {
     changed: true,
     revision: currentRev,
     data: result
+  });
+});
+
+// POST /api/invoices/merge_baskets - Consolidate cross-live multi-baskets into one primary delivery parcel
+router.post(['/invoices/merge_baskets', '/api/invoices/merge_baskets', '/merge_invoices', '/api/merge_invoices'], (req: Request, res: Response) => {
+  const { target_invoice_id, source_invoice_ids, source_invoice_id } = req.body;
+  const targetId = parseInt(String(target_invoice_id).replace('#', '').trim(), 10);
+  const targetInv = invoices.find(i => i.invoice_id === targetId);
+
+  if (!targetInv) {
+    return res.status(404).json({ success: false, error: 'Target invoice not found' });
+  }
+
+  const rawSourceIds = Array.isArray(source_invoice_ids) ? source_invoice_ids : (source_invoice_id ? [source_invoice_id] : []);
+  const sourceIds = rawSourceIds.map((id: any) => parseInt(String(id).replace('#', '').trim(), 10)).filter(Boolean);
+
+  if (sourceIds.length === 0) {
+    return res.status(400).json({ success: false, error: 'No source invoices specified' });
+  }
+
+  const mergedBaskets: string[] = [];
+
+  for (const sId of sourceIds) {
+    const sourceInv = invoices.find(i => i.invoice_id === sId);
+    if (!sourceInv || sourceInv.invoice_id === targetInv.invoice_id) continue;
+
+    mergedBaskets.push(`#${sourceInv.basket_no || sourceInv.invoice_id}`);
+
+    // Merge items from source into target
+    for (const sItem of sourceInv.items) {
+      const existing = targetInv.items.find(t => t.product_code.toUpperCase() === sItem.product_code.toUpperCase() && t.price === sItem.price);
+      if (existing) {
+        existing.quantity += sItem.quantity;
+        if (sItem.item_comment && !existing.item_comment?.includes(sItem.item_comment)) {
+          existing.item_comment = `${existing.item_comment ? existing.item_comment + ' | ' : ''}${sItem.item_comment}`;
+        }
+      } else {
+        targetInv.items.push({
+          ...sItem,
+          id: Date.now() + Math.floor(Math.random() * 10000),
+          invoice_id: targetInv.invoice_id,
+          note: sItem.note ? `${sItem.note} (ពី Live #${sourceInv.basket_no || sourceInv.live_id})` : `(ពី Live #${sourceInv.basket_no || sourceInv.live_id})`
+        });
+      }
+    }
+
+    // Merge phone / address if target is missing them
+    if ((!targetInv.phone_number || targetInv.phone_number === 'គ្មានលេខ' || targetInv.phone_number.includes('មិនទាន់')) && sourceInv.phone_number && sourceInv.phone_number !== 'គ្មានលេខ') {
+      targetInv.phone_number = sourceInv.phone_number;
+    }
+    if ((!targetInv.address || targetInv.address.includes('មិនទាន់')) && sourceInv.address && !sourceInv.address.includes('មិនទាន់')) {
+      targetInv.address = sourceInv.address;
+    }
+    if (sourceInv.location_zone && sourceInv.location_zone !== 'UNKNOWN' && targetInv.location_zone === 'UNKNOWN') {
+      targetInv.location_zone = sourceInv.location_zone;
+    }
+
+    // Merge comments
+    if (Array.isArray(sourceInv.comments)) {
+      targetInv.comments = Array.from(new Set([...(targetInv.comments || []), ...sourceInv.comments]));
+    }
+    if (Array.isArray(sourceInv.comment_ids)) {
+      targetInv.comment_ids = Array.from(new Set([...(targetInv.comment_ids || []), ...sourceInv.comment_ids]));
+    }
+
+    // Mark source invoice as merged/cancelled
+    sourceInv.status = 'Cancelled';
+    (sourceInv as any).is_merged = true;
+    (sourceInv as any).merged_into_invoice_id = targetInv.invoice_id;
+    (sourceInv as any).merged_into_basket_no = targetInv.basket_no || targetInv.invoice_id;
+    sourceInv.items = []; // Emptied so stock is not double counted
+  }
+
+  // Recalculate target invoice totals
+  const subtotal = targetInv.items.reduce((s, it) => s + (it.price * it.quantity), 0);
+  const ship = targetInv.is_free_ship ? 0 : (targetInv.shipping_fee ?? (targetInv.location_zone === 'PROVINCE' ? 1.5 : 1.0));
+  targetInv.total_amount = Math.round((subtotal + ship) * 100) / 100;
+  targetInv.updated_at = new Date().toISOString();
+
+  if (!targetInv.notes) targetInv.notes = [];
+  targetInv.notes.push(`បានច្របាច់បញ្ចូលទំនិញពីកន្ត្រក ${mergedBaskets.join(', ')} ចូលកញ្ចប់នេះ (${new Date().toLocaleTimeString('en-US', { hour12: false })})`);
+
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  res.json({
+    success: true,
+    message: `🎉 បានច្របាច់កន្ត្រក ${mergedBaskets.join(', ')} ចូលកន្ត្រក #${targetInv.basket_no || targetInv.invoice_id} ជោគជ័យ! សរុបថ្មី $${targetInv.total_amount.toFixed(2)}`,
+    invoice: targetInv
   });
 });
 
@@ -2255,21 +2396,52 @@ router.get('/packer_history', (req: Request, res: Response) => {
 
 // GET /api/packer_leaderboard
 router.get('/packer_leaderboard', (_req: Request, res: Response) => {
-  const statsMap = new Map<string, { packer_name: string; total_bags: number; total_items: number; total_duration: number }>();
+  const statsMap = new Map<string, { packer_name: string; total_bags: number; total_items: number; total_duration: number; tracked_invoice_ids: Set<number> }>();
+
+  // 1. Process packerLogs
   for (const log of packerLogs) {
-    const p = log.packer_name;
-    const existing = statsMap.get(p);
-    if (existing) {
-      existing.total_bags += 1;
-      existing.total_items += log.items_count;
-      existing.total_duration += log.duration_seconds;
-    } else {
+    const p = (log.packer_name || '').trim();
+    if (!p) continue;
+    if (!statsMap.has(p)) {
       statsMap.set(p, {
         packer_name: p,
-        total_bags: 1,
-        total_items: log.items_count,
-        total_duration: log.duration_seconds
+        total_bags: 0,
+        total_items: 0,
+        total_duration: 0,
+        tracked_invoice_ids: new Set<number>()
       });
+    }
+    const st = statsMap.get(p)!;
+    if (!st.tracked_invoice_ids.has(log.invoice_id)) {
+      st.tracked_invoice_ids.add(log.invoice_id);
+      st.total_bags += 1;
+      st.total_items += (log.items_count || 1);
+      st.total_duration += (log.duration_seconds || 25);
+    }
+  }
+
+  // 2. Also calculate all active staged/dispatched baskets from invoices so staged items reflect in real-time
+  for (const inv of invoices) {
+    if (inv.status === 'Cancelled' || (inv as any).is_merged) continue;
+    const pName = (inv.staged_by || (inv as any).dispatched_by || '').trim();
+    if (!pName || pName === 'បុគ្គលិក' || pName === 'មិនទាន់កំណត់') continue;
+
+    if (!statsMap.has(pName)) {
+      statsMap.set(pName, {
+        packer_name: pName,
+        total_bags: 0,
+        total_items: 0,
+        total_duration: 0,
+        tracked_invoice_ids: new Set<number>()
+      });
+    }
+    const st = statsMap.get(pName)!;
+    if (!st.tracked_invoice_ids.has(inv.invoice_id)) {
+      st.tracked_invoice_ids.add(inv.invoice_id);
+      st.total_bags += 1;
+      const q = (inv.items || []).reduce((s, it) => s + (it.quantity || 1), 0);
+      st.total_items += (q || 1);
+      st.total_duration += 25;
     }
   }
 
@@ -2277,7 +2449,7 @@ router.get('/packer_leaderboard', (_req: Request, res: Response) => {
     packer_name: s.packer_name,
     total_bags: s.total_bags,
     total_items: s.total_items,
-    avg_duration: Math.round(s.total_duration / s.total_bags)
+    avg_duration: s.total_bags > 0 ? Math.round(s.total_duration / s.total_bags) : 25
   })).sort((a, b) => b.total_bags - a.total_bags);
 
   res.json(list);

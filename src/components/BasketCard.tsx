@@ -158,6 +158,44 @@ function BasketCardComponent({
   const [editingPhone, setEditingPhone] = useState(false);
   const [phoneInput, setPhoneInput] = useState('');
   const [editingAddress, setEditingAddress] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+
+  const handleMergeWithCandidate = async (candidateInvId: number, candidateBasketNo: number | string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!checkLockGuard()) return;
+    if (isMerging) return;
+    setIsMerging(true);
+    playPureTone(750, 0.06);
+
+    try {
+      const res = await fetch('/api/invoices/merge_baskets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_invoice_id: invoice.invoice_id,
+          source_invoice_id: candidateInvId
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast(data.message || `🎉 បានច្របាច់កន្ត្រក #${candidateBasketNo} ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id} ជោគជ័យ!`, 'success');
+        if (data.invoice && onUpdateInvoice) {
+          onUpdateInvoice(data.invoice, data.revision);
+        } else {
+          onDataChanged();
+        }
+      } else {
+        playWarningBuzzer();
+        onShowToast(`❌ មិនអាចច្របាច់បានទេ៖ ${data.error || data.message}`, 'error');
+      }
+    } catch {
+      playWarningBuzzer();
+      onShowToast('⚠️ មានបញ្ហាបណ្តាញ WiFi!', 'error');
+    } finally {
+      setIsMerging(false);
+    }
+  };
   const [addressInput, setAddressInput] = useState('');
   const [showAllComments, setShowAllComments] = useState(false);
   const [isSendingVip, setIsSendingVip] = useState(false);
@@ -1246,6 +1284,44 @@ function BasketCardComponent({
             </span>
           )}
         </div>
+
+        {/* 🔗 Cross-Live Multi-Basket Merge Notification Banner (Smart Merge - Option 1) */}
+        {invoice.merge_candidates && invoice.merge_candidates.length > 0 && !isDispatched && (
+          <div
+            className="w-full bg-gradient-to-r from-[#170E03]/95 via-[#091E2C]/95 to-[#170E03]/95 border border-amber-500/60 p-2.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-[0_0_16px_rgba(245,158,11,0.2)] animate-fade-in text-xs"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start sm:items-center gap-2">
+              <span className="text-base flex-shrink-0 animate-bounce">📦</span>
+              <div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-bold text-amber-300">
+                    ភ្ញៀវនេះមានកន្ត្រកផ្សេងទៀត ({invoice.merge_candidates.length} កន្ត្រក) ៖
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                  {invoice.merge_candidates.map(c => (
+                    <span key={c.invoice_id} className="text-[11px] text-cyan-200 bg-[#040D1B] px-2 py-0.5 rounded-lg border border-cyan-500/40 font-mono flex items-center gap-1">
+                      <span className="font-black text-amber-400">#{c.basket_no}</span>
+                      <span>(${c.total_amount.toFixed(2)} ‧ {c.items_count}មុខ ‧ {formatLiveShortBadge(c.live_id)})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isMerging}
+              onClick={e => handleMergeWithCandidate(invoice.merge_candidates![0].invoice_id, invoice.merge_candidates![0].basket_no, e)}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer whitespace-nowrap self-end sm:self-auto flex-shrink-0"
+              title="ច្របាច់ទំនិញពីកន្ត្រកផ្សេងចូលកន្ត្រកនេះដើម្បីដឹកជញ្ជូនតែ ១ កញ្ចប់"
+            >
+              <span>{isMerging ? '⏳' : '🔗'}</span>
+              <span>{isMerging ? 'កំពុងច្របាច់...' : 'ច្របាច់ចូលគ្នាតែ ១ កញ្ចប់'}</span>
+            </button>
+          </div>
+        )}
 
         {/* Sub Header Row: Location Zone buttons (Left) + Total Price (Right) */}
         <div className="flex items-center justify-between gap-2 pt-1">

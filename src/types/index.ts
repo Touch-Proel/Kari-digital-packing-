@@ -62,6 +62,20 @@ export interface Invoice {
   items: OrderItem[];
   unmatched_comments?: string[];
   comments?: string[];
+  notes?: string[];
+  merge_candidates?: Array<{
+    invoice_id: number;
+    basket_no: number | string;
+    live_id: string;
+    total_amount: number;
+    items_count: number;
+    created_at: string;
+    status: string;
+    staged_by?: string;
+  }>;
+  is_merged?: boolean;
+  merged_into_invoice_id?: number;
+  merged_into_basket_no?: number | string;
 }
 
 export interface FacebookPage {
