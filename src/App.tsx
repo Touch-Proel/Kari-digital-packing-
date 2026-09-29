@@ -2105,6 +2105,9 @@ export default function App() {
       <DatabaseModal
         isOpen={isDatabaseModalOpen}
         onClose={() => setIsDatabaseModalOpen(false)}
+        packerName={packerName}
+        onChangePackerName={handleChangePackerName}
+        userRole={userRole}
         onSelectDateFilter={selectedDate => {
           setSearchQuery(selectedDate);
           showToast(`📅 បានជ្រើសរើសផ្ទៀងផ្ទាត់កាលបរិច្ឆេទ៖ ${selectedDate}`);
