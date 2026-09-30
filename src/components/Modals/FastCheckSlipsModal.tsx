@@ -743,30 +743,53 @@ export function FastCheckSlipsModal({
                       {/* Candidate Selection Dropdown */}
                       {(isAmbiguous || isNotFound) && item.candidates && item.candidates.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-amber-500/30 space-y-2">
-                          {/* 1-Click Multi-Basket Merge Option if 2 or more baskets exist for customer */}
-                          {item.candidates.length >= 2 && (() => {
-                            const totalCandidatesPrice = item.candidates.reduce((sum, c) => sum + (c.total_amount || 0), 0);
-                            const mergedNames = item.candidates.map(c => `#${c.basket_no}`).join(' + ');
-                            const displayPay = item.extracted.paid_amount > 0 ? item.extracted.paid_amount : totalCandidatesPrice;
+                          {/* 1-Click Multi-Basket Merge Option - ONLY when 2 or more baskets belong to the EXACT SAME customer */}
+                          {(() => {
+                            if (!item.candidates || item.candidates.length < 2) return null;
+
+                            // Group candidates strictly by customer identity
+                            const customerMap = new Map<string, typeof item.candidates>();
+                            for (const cand of item.candidates) {
+                              const rawName = (cand.facebook_name || '').trim();
+                              if (!rawName) continue;
+                              const key = (cand.facebook_user_id && cand.facebook_user_id !== 'FB_USER_ID_STREAM')
+                                ? cand.facebook_user_id
+                                : rawName.toLowerCase();
+
+                              if (!customerMap.has(key)) {
+                                customerMap.set(key, []);
+                              }
+                              customerMap.get(key)!.push(cand);
+                            }
+
+                            // Find if any customer has 2 or more baskets
+                            const sameCustomerGroup = Array.from(customerMap.values()).find(baskets => baskets.length >= 2);
+                            if (!sameCustomerGroup || sameCustomerGroup.length < 2) return null;
+
+                            const totalCandidatesPrice = sameCustomerGroup.reduce((sum, c) => sum + (c.total_amount || 0), 0);
+                            const mergedNames = sameCustomerGroup.map(c => `#${c.basket_no}`).join(' + ');
+                            const custName = sameCustomerGroup[0].facebook_name;
 
                             return (
                               <div className="bg-gradient-to-r from-amber-950/80 via-indigo-950/90 to-amber-950/80 border-2 border-amber-400/80 rounded-xl p-2.5 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
                                 <div className="flex items-center justify-between text-xs font-bold text-amber-200 mb-1.5 flex-wrap gap-1">
                                   <span className="flex items-center gap-1">
                                     <span>📦</span>
-                                    <span>ភ្ញៀវមាន {item.candidates.length} កន្ត្រក ($5 + $7 = $12) ៖</span>
+                                    <span>ភ្ញៀវ «{custName}» មាន {sameCustomerGroup.length} កន្ត្រក ($${totalCandidatesPrice.toFixed(2)}) ៖</span>
                                   </span>
-                                  <span className="font-mono text-emerald-400 font-black">
-                                    Slip បង់: ${displayPay.toFixed(2)}
-                                  </span>
+                                  {item.extracted.paid_amount > 0 && (
+                                    <span className="font-mono text-emerald-400 font-black">
+                                      Slip បង់: ${item.extracted.paid_amount.toFixed(2)}
+                                    </span>
+                                  )}
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => handleMergeCandidates(idx, item.candidates!, item.extracted.paid_amount)}
+                                  onClick={() => handleMergeCandidates(idx, sameCustomerGroup, item.extracted.paid_amount)}
                                   className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
                                 >
                                   <span>🔗</span>
-                                  <span>ច្របាច់ទាំង {item.candidates.length} កន្ត្រក ({mergedNames}) ចូលគ្នាតែ ១ កញ្ចប់ ➔ ផ្ទៀងផ្ទាត់ [បង់រួច]</span>
+                                  <span>ច្របាច់ទាំង {sameCustomerGroup.length} កន្ត្រក ({mergedNames}) ចូលគ្នាតែ ១ កញ្ចប់ (គិតថ្លៃដឹកតែម្តង) ➔ ផ្ទៀងផ្ទាត់ [បង់រួច]</span>
                                 </button>
                               </div>
                             );

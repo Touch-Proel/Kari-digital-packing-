@@ -165,23 +165,38 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
   const scored = pool.map(inv => {
     let score = 0;
     const normInv = normalizeName(inv.facebook_name);
+    let hasNameAffinity = false;
 
-    // 1. Name Match
+    // 1. Name Match (Highest priority)
     if (normInv === normExtracted) {
-      score += 60;
+      score += 70;
+      hasNameAffinity = true;
     } else if (normInv.includes(normExtracted) || normExtracted.includes(normInv)) {
-      score += 40;
+      score += 50;
+      hasNameAffinity = true;
     } else {
       // Check token overlap
       const invTokens = normInv.split(' ');
       const extTokens = normExtracted.split(' ');
-      const overlap = invTokens.filter(t => t.length > 2 && extTokens.includes(t));
+      const overlap = invTokens.filter(t => t.length >= 2 && extTokens.includes(t));
       if (overlap.length > 0) {
-        score += 25 * overlap.length;
+        score += 30 * overlap.length;
+        hasNameAffinity = true;
       }
     }
 
-    // 2. Amount Match (Handle USD and KHR conversion ~ 4000-4100 KHR/USD)
+    // 2. Phone Match
+    let hasPhoneAffinity = false;
+    if (data.phone_number && inv.phone_number) {
+      const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
+      const cleanInvPhone = inv.phone_number.replace(/\D/g, '');
+      if (cleanSlipPhone && cleanInvPhone && (cleanSlipPhone.includes(cleanInvPhone) || cleanInvPhone.includes(cleanSlipPhone))) {
+        score += 40;
+        hasPhoneAffinity = true;
+      }
+    }
+
+    // 3. Amount Match (Only adds value if there is name or phone affinity)
     if (data.paid_amount > 0 && inv.total_amount > 0) {
       let paidUsd = data.paid_amount;
       if (data.currency === 'KHR' || data.paid_amount > 500) {
@@ -190,34 +205,23 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
 
       const diff = Math.abs(inv.total_amount - paidUsd);
       if (diff < 0.25) {
-        score += 35; // Near-exact match
+        score += hasNameAffinity || hasPhoneAffinity ? 35 : 10;
       } else if (diff < 1.0) {
-        score += 20; // Close match
-      } else if (data.paid_amount === inv.total_amount) {
-        score += 35;
-      }
-    }
-
-    // 3. Phone Match
-    if (data.phone_number && inv.phone_number) {
-      const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
-      const cleanInvPhone = inv.phone_number.replace(/\D/g, '');
-      if (cleanSlipPhone && cleanInvPhone && (cleanSlipPhone.includes(cleanInvPhone) || cleanInvPhone.includes(cleanSlipPhone))) {
-        score += 30;
+        score += hasNameAffinity || hasPhoneAffinity ? 20 : 5;
       }
     }
 
     // 4. Prefer baskets that are waiting for payment (STAGED / UNPICKED)
     if (inv.packing_stage === 'STAGED' && inv.status !== 'Paid') {
-      score += 15;
+      score += 10;
     }
 
-    return { inv, score };
+    return { inv, score, hasNameAffinity, hasPhoneAffinity };
   });
 
-  // Filter candidates with minimum plausible score
-  const validCandidates = scored
-    .filter(item => item.score >= 45)
+  // Filter candidates with minimum plausible score and name/phone affinity
+  const nameOrPhoneMatches = scored.filter(item => (item.hasNameAffinity || item.hasPhoneAffinity) && item.score >= 40);
+  const validCandidates = (nameOrPhoneMatches.length > 0 ? nameOrPhoneMatches : scored.filter(item => item.score >= 50))
     .sort((a, b) => b.score - a.score);
 
   if (validCandidates.length === 0) {
@@ -225,7 +229,26 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
     return { status: 'NOT_FOUND', confidence: 0, candidates: fallbackUnpaid };
   }
 
-  // If top candidate has high score and is clearly ahead
+  // Check if top matched customer has MULTIPLE baskets across different lives
+  const topCandidate = validCandidates[0].inv;
+  const sameCustomerBaskets = pool.filter(inv => {
+    if (inv.status === 'Cancelled' || inv.status === 'Dispatched') return false;
+    if (topCandidate.facebook_user_id && topCandidate.facebook_user_id !== 'FB_USER_ID_STREAM' && inv.facebook_user_id === topCandidate.facebook_user_id) {
+      return true;
+    }
+    return normalizeName(inv.facebook_name) === normalizeName(topCandidate.facebook_name);
+  });
+
+  // If customer has 2 or more active baskets, return all of their baskets as candidate group!
+  if (sameCustomerBaskets.length >= 2) {
+    return {
+      status: 'MULTIPLE_CANDIDATES',
+      confidence: 90,
+      candidates: sameCustomerBaskets
+    };
+  }
+
+  // If single clear match
   if (validCandidates.length === 1 || (validCandidates[0].score >= 80 && validCandidates[0].score - (validCandidates[1]?.score || 0) >= 25)) {
     return {
       status: 'MATCHED',
