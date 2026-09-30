@@ -23,6 +23,7 @@ interface SystemSettingsModalProps {
   onResetFontSize: () => void;
   userRole?: 'admin' | 'staff';
   onLockAdmin?: () => void;
+  onOpenChatbot?: () => void;
 }
 
 export function SystemSettingsModal({
@@ -44,7 +45,8 @@ export function SystemSettingsModal({
   onAdjustFontSize,
   onResetFontSize,
   userRole = 'staff',
-  onLockAdmin
+  onLockAdmin,
+  onOpenChatbot
 }: SystemSettingsModalProps) {
   const [strictCatalogMode, setStrictCatalogMode] = useState(false);
   const [loadingStrict, setLoadingStrict] = useState(false);
@@ -587,6 +589,43 @@ export function SystemSettingsModal({
                 ⚙️ បើកការកំណត់ហាង
               </button>
             </div>
+          </div>
+
+          {/* Section 3.2: 🤖 KARI AI Chatbot Engine (Auto Slips, Address, Reminders, FAQ) */}
+          <div className="bg-gradient-to-r from-[#0C1733] via-[#14234C] to-[#0C1733] border-2 border-indigo-500/60 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-[0_0_20px_rgba(99,102,241,0.2)]">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/50 flex items-center justify-center text-lg flex-shrink-0">
+                  🤖
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-white">KARI AI Chatbot Engine</span>
+                    <span className="bg-gradient-to-r from-indigo-500 to-purple-500 text-[9.5px] text-white px-2 py-0.5 rounded-full font-bold">
+                      24/7 Active
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-indigo-200">
+                    ស្កេន Slip អូតូ, ស្រង់ទីតាំង, រំលឹកបង់លុយ, ដំណឹងចេញដឹក, និង AI Smart FAQ
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {onOpenChatbot && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenChatbot();
+                }}
+                className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
+              >
+                <span>⚡</span>
+                <span>បើកផ្ទាំងគ្រប់គ្រង & តេស្តសាកល្បង Chatbot (Live Simulator)</span>
+                <span>➔</span>
+              </button>
+            )}
           </div>
 
           {/* Section 3.5: Safety Guardrail - Strict Catalog vs Auto-Create Products */}

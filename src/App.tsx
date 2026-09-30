@@ -30,6 +30,7 @@ import { RequirePackerNameModal } from './components/Modals/RequirePackerNameMod
 import { CreateLiveSessionModal } from './components/Modals/CreateLiveSessionModal';
 import { BacklogModal } from './components/Modals/BacklogModal';
 import { FastCheckSlipsModal } from './components/Modals/FastCheckSlipsModal';
+import { ChatbotModal } from './components/Modals/ChatbotModal';
 import { CustomerOrderPortal } from './components/CustomerOrderPortal';
 import { AdminPinModal } from './components/Modals/AdminPinModal';
 import { CameraScannerModal, parseScannedText } from './components/Modals/CameraScannerModal';
@@ -293,6 +294,7 @@ export default function App() {
   const [allLivePaidInvoices, setAllLivePaidInvoices] = useState<Invoice[]>([]);
   const [allLivePaidCount, setAllLivePaidCount] = useState(0);
   const [isFastCheckModalOpen, setIsFastCheckModalOpen] = useState(false);
+  const [isChatbotModalOpen, setIsChatbotModalOpen] = useState(false);
 
   // All Live Dispatched States & Daily Output Metrics
   const [isAllLiveDispatched, setIsAllLiveDispatched] = useState(false);
@@ -1691,6 +1693,7 @@ export default function App() {
             setPackerModalMode('history');
             setIsPackerModalOpen(true);
           }}
+          onOpenChatbot={() => setIsChatbotModalOpen(true)}
         />
 
         {/* 5. Workflow Tabs & Sub-Filters & Search Bar */}
@@ -2193,6 +2196,7 @@ export default function App() {
         onResetFontSize={handleResetFontSize}
         userRole={userRole}
         onLockAdmin={handleLockAdmin}
+        onOpenChatbot={() => setIsChatbotModalOpen(true)}
       />
 
       {/* Full-Screen Stock Management Modal (Button 2) */}
@@ -2263,6 +2267,18 @@ export default function App() {
           showToast(`🎉 បានសម្គាល់បង់រួច ${count} កន្ត្រកដោយជោគជ័យ!`, 'success');
         }}
         onShowToast={showToast}
+      />
+
+      {/* 🤖 KARI AI Chatbot Control & Simulator Modal */}
+      <ChatbotModal
+        isOpen={isChatbotModalOpen}
+        onClose={() => setIsChatbotModalOpen(false)}
+        onShowToast={showToast}
+        onDataChanged={() => {
+          fetchInvoices();
+          fetchStock();
+          fetchAllLivePaidInvoices();
+        }}
       />
 
       {/* 📷 In-App Camera Scanner Modal (QR & Barcode) */}

@@ -8,6 +8,8 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import packingRoutes from './server/packingRoutes';
 import fastCheckRoutes from './server/fastCheckRoutes';
+import chatbotRoutes from './server/chatbotRoutes';
+import { initChatbotStore } from './server/chatbotEngine';
 import {
   getFacebookOAuthUrl,
   handleOAuthCallback,
@@ -389,6 +391,8 @@ app.get('/api/download/:filename', (req: Request, res: Response) => {
 app.use('/api', packingRoutes);
 app.use('/api/fast_check', fastCheckRoutes);
 app.use('/api', fastCheckRoutes);
+app.use('/api/chatbot', chatbotRoutes);
+app.use('/api', chatbotRoutes);
 
 // Shortcut routes for printing slips and payment screen directly in any tab
 app.get(['/print/:invoice_id', '/print_slip/:invoice_id'], (req: Request, res: Response) => {
@@ -453,6 +457,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT} (${isProduction ? 'Production Static Build' : 'Vite Dev Mode'})`);
+    initChatbotStore();
     initTelegramBotService();
   });
 }

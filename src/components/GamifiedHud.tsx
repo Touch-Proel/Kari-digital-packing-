@@ -13,6 +13,7 @@ interface GamifiedHudProps {
   onOpenMyHistory?: () => void;
   onOpenPickingModal?: () => void;
   onOpenNoBasketModal?: () => void;
+  onOpenChatbot?: () => void;
 }
 
 export function GamifiedHud({
@@ -21,7 +22,8 @@ export function GamifiedHud({
   onOpenBacklog,
   onOpenLeaderboard,
   onOpenPickingModal,
-  onOpenNoBasketModal
+  onOpenNoBasketModal,
+  onOpenChatbot
 }: GamifiedHudProps) {
   return (
     <div className="bg-gradient-to-r from-[#060D1E]/95 via-[#08152E]/95 to-[#060D1E]/95 border border-[#162746] px-2.5 py-1.5 rounded-2xl shadow-lg backdrop-blur-md flex items-center justify-between sm:justify-start gap-1.5 overflow-x-auto custom-scroll no-scrollbar">
@@ -75,6 +77,19 @@ export function GamifiedHud({
         >
           <span className="text-sm">🏆</span>
           <span>ជើងខ្លាំង</span>
+        </button>
+      )}
+
+      {/* 🤖 AI Chatbot */}
+      {onOpenChatbot && (
+        <button
+          type="button"
+          onClick={onOpenChatbot}
+          className="flex-1 sm:flex-none h-8 px-2.5 rounded-xl bg-gradient-to-r from-purple-950/90 to-indigo-950/90 hover:from-purple-900 hover:to-indigo-900 border border-purple-500/60 hover:border-purple-400 text-purple-300 hover:text-purple-100 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all shadow-sm whitespace-nowrap"
+          title="បើកផ្ទាំងគ្រប់គ្រង KARI AI Chatbot (Auto Slips, Address, Reminders, FAQ)"
+        >
+          <span className="text-sm">🤖</span>
+          <span>Chatbot</span>
         </button>
       )}
 
