@@ -557,3 +557,50 @@ Rules:
     return `សួស្តីបង ${senderName}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
   }
 }
+
+/**
+ * -------------------------------------------------------------
+ * 6. FACEBOOK GRAPH SEND API (Reply directly into Messenger)
+ * -------------------------------------------------------------
+ */
+export async function sendFacebookMessengerReply(
+  recipientPsid: string,
+  text: string
+): Promise<{ success: boolean; error?: string }> {
+  const token = (
+    chatbotConfig.pageAccessToken ||
+    activeFacebookPage?.access_token ||
+    process.env.FACEBOOK_PAGE_ACCESS_TOKEN ||
+    ''
+  ).trim();
+
+  if (!token || token.startsWith('simulated_')) {
+    console.warn(`[Messenger Bot] Missing valid Page Access Token for PSID ${recipientPsid}`);
+    return { success: false, error: 'Missing Page Access Token' };
+  }
+
+  try {
+    const pageId = activeFacebookPage?.id || 'me';
+    const res = await fetch(`https://graph.facebook.com/v21.0/${pageId}/messages?access_token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipient: { id: recipientPsid },
+        message: { text },
+        messaging_type: 'RESPONSE'
+      })
+    });
+
+    const data: any = await res.json();
+    if (data?.message_id) {
+      console.log(`✅ [Messenger Bot] Sent message to ${recipientPsid}: ${text.slice(0, 40)}...`);
+      return { success: true };
+    } else {
+      console.error(`❌ [Messenger Bot] Facebook API error sending to ${recipientPsid}:`, data?.error?.message || data);
+      return { success: false, error: data?.error?.message };
+    }
+  } catch (err: any) {
+    console.error(`❌ [Messenger Bot] Network error sending to ${recipientPsid}:`, err);
+    return { success: false, error: err.message };
+  }
+}

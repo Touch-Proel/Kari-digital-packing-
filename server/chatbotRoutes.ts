@@ -7,7 +7,8 @@ import {
   processIncomingAddressText,
   generatePaymentReminders,
   generateShippingNotification,
-  processCustomerFaq
+  processCustomerFaq,
+  sendFacebookMessengerReply
 } from './chatbotEngine';
 
 const router = Router();
@@ -79,6 +80,13 @@ router.post('/test_message', async (req: Request, res: Response) => {
 // POST /api/chatbot/send_payment_reminders - Trigger bulk payment reminders (#4)
 router.post('/send_payment_reminders', async (_req: Request, res: Response) => {
   const result = await generatePaymentReminders();
+  // If customer has PSID, send via Messenger
+  for (const item of result.messages) {
+    if (item.invoice.facebook_user_id) {
+      sendFacebookMessengerReply(item.invoice.facebook_user_id, item.message).catch(() => {});
+    }
+  }
+
   res.json({
     success: true,
     message: `បានផ្ញើសាររំលឹកបង់ប្រាក់ចំនួន ${result.count} កន្ត្រក!`,
@@ -120,18 +128,30 @@ router.post('/webhook', async (req: Request, res: Response) => {
       const message = webhookEvent.message;
 
       if (message && senderPsid) {
+        console.log(`📩 [Messenger Inbound] from PSID ${senderPsid}:`, message.text || '[Attachment]');
+
         // Handle image attachments (Slips)
         if (message.attachments && message.attachments.length > 0) {
           const imageAttachment = message.attachments.find((att: any) => att.type === 'image');
           if (imageAttachment && imageAttachment.payload?.url) {
-            // Process slip URL or base64 asynchronously
-            processIncomingSlipImage(senderPsid, 'Facebook Customer', imageAttachment.payload.url);
+            processIncomingSlipImage(senderPsid, 'Facebook Customer', imageAttachment.payload.url)
+              .then(slipRes => {
+                if (slipRes.reply) {
+                  sendFacebookMessengerReply(senderPsid, slipRes.reply);
+                }
+              })
+              .catch(err => console.error('[Webhook Slip Error]', err));
           }
         } else if (message.text) {
           // Handle Text (Address/Phone or FAQ)
           const addrRes = await processIncomingAddressText(senderPsid, 'Facebook Customer', message.text);
-          if (!addrRes.isAddressOrPhone) {
-            await processCustomerFaq(senderPsid, 'Facebook Customer', message.text);
+          if (addrRes.isAddressOrPhone && addrRes.reply) {
+            await sendFacebookMessengerReply(senderPsid, addrRes.reply);
+          } else {
+            const faqReply = await processCustomerFaq(senderPsid, 'Facebook Customer', message.text);
+            if (faqReply) {
+              await sendFacebookMessengerReply(senderPsid, faqReply);
+            }
           }
         }
       }

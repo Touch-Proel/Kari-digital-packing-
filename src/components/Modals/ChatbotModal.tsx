@@ -794,6 +794,29 @@ export function ChatbotModal({
                       </button>
                     </div>
                   </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1 flex items-center justify-between">
+                      <span>🔑 Facebook Page Access Token (សម្រាប់ផ្ញើសារតបទៅ Messenger)</span>
+                      <span className="text-[10px] text-amber-400 font-normal">Meta Developer ➔ Messenger ➔ Generate Token</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="password"
+                        placeholder="បិទភ្ជាប់ (Paste) Page Access Token ទីនេះ..."
+                        value={config?.pageAccessToken || ''}
+                        onChange={e => config && setConfig({ ...config, pageAccessToken: e.target.value })}
+                        className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-emerald-400 font-mono text-xs focus:outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveConfig}
+                        className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold whitespace-nowrap shadow"
+                      >
+                        💾 រក្សាទុក Token
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
