@@ -120,6 +120,26 @@ export function ChatbotModal({
 
   if (!isOpen) return null;
 
+  // Auto-Save Toggle Switches
+  const updateConfigAndSave = async (updated: Partial<ChatbotConfig>) => {
+    if (!config) return;
+    const nextConfig = { ...config, ...updated };
+    setConfig(nextConfig);
+    try {
+      const res = await fetch('/api/chatbot/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextConfig)
+      });
+      const data = await res.json();
+      if (data.success) {
+        playPureTone(nextConfig.enabled ? 800 : 500, 0.04);
+      }
+    } catch (err) {
+      console.error('Auto-save error:', err);
+    }
+  };
+
   // Save Settings
   const handleSaveConfig = async () => {
     if (!config) return;
@@ -403,7 +423,7 @@ export function ChatbotModal({
                   <input
                     type="checkbox"
                     checked={config.enabled}
-                    onChange={e => setConfig({ ...config, enabled: e.target.checked })}
+                    onChange={e => updateConfigAndSave({ enabled: e.target.checked })}
                     className="sr-only peer"
                   />
                   <div className="w-14 h-7 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -425,7 +445,7 @@ export function ChatbotModal({
                   <input
                     type="checkbox"
                     checked={config.enableSlipAutoVerify}
-                    onChange={e => setConfig({ ...config, enableSlipAutoVerify: e.target.checked })}
+                    onChange={e => updateConfigAndSave({ enableSlipAutoVerify: e.target.checked })}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -447,7 +467,7 @@ export function ChatbotModal({
                   <input
                     type="checkbox"
                     checked={config.enableAddressAutoExtract}
-                    onChange={e => setConfig({ ...config, enableAddressAutoExtract: e.target.checked })}
+                    onChange={e => updateConfigAndSave({ enableAddressAutoExtract: e.target.checked })}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -470,7 +490,7 @@ export function ChatbotModal({
                     <input
                       type="checkbox"
                       checked={config.enablePaymentReminders}
-                      onChange={e => setConfig({ ...config, enablePaymentReminders: e.target.checked })}
+                      onChange={e => updateConfigAndSave({ enablePaymentReminders: e.target.checked })}
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -483,7 +503,10 @@ export function ChatbotModal({
                       <span className="text-slate-400">រំលឹកក្រោយពេលកក់ ៖</span>
                       <select
                         value={config.paymentReminderHours}
-                        onChange={e => setConfig({ ...config, paymentReminderHours: Number(e.target.value) })}
+                        onChange={e => {
+                          const val = Number(e.target.value);
+                          updateConfigAndSave({ paymentReminderHours: val });
+                        }}
                         className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white text-xs font-bold focus:outline-none focus:border-indigo-500"
                       >
                         <option value={2}>2 ម៉ោង</option>
@@ -521,7 +544,7 @@ export function ChatbotModal({
                   <input
                     type="checkbox"
                     checked={config.enableShippingNotifications}
-                    onChange={e => setConfig({ ...config, enableShippingNotifications: e.target.checked })}
+                    onChange={e => updateConfigAndSave({ enableShippingNotifications: e.target.checked })}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -544,7 +567,7 @@ export function ChatbotModal({
                     <input
                       type="checkbox"
                       checked={config.enableAiFaq}
-                      onChange={e => setConfig({ ...config, enableAiFaq: e.target.checked })}
+                      onChange={e => updateConfigAndSave({ enableAiFaq: e.target.checked })}
                       className="sr-only peer"
                     />
                     <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
