@@ -8,7 +8,8 @@ import {
   generatePaymentReminders,
   generateShippingNotification,
   processCustomerFaq,
-  sendFacebookMessengerReply
+  sendFacebookMessengerReply,
+  resolveCustomerFacebookName
 } from './chatbotEngine';
 
 const router = Router();
@@ -129,12 +130,13 @@ router.post('/webhook', async (req: Request, res: Response) => {
 
       if (message && senderPsid) {
         console.log(`📩 [Messenger Inbound] from PSID ${senderPsid}:`, message.text || '[Attachment]');
+        const customerName = await resolveCustomerFacebookName(senderPsid);
 
         // Handle image attachments (Slips)
         if (message.attachments && message.attachments.length > 0) {
           const imageAttachment = message.attachments.find((att: any) => att.type === 'image');
           if (imageAttachment && imageAttachment.payload?.url) {
-            processIncomingSlipImage(senderPsid, 'Facebook Customer', imageAttachment.payload.url)
+            processIncomingSlipImage(senderPsid, customerName, imageAttachment.payload.url)
               .then(slipRes => {
                 if (slipRes.reply) {
                   sendFacebookMessengerReply(senderPsid, slipRes.reply);
@@ -143,12 +145,12 @@ router.post('/webhook', async (req: Request, res: Response) => {
               .catch(err => console.error('[Webhook Slip Error]', err));
           }
         } else if (message.text) {
-          // Handle Text (Address/Phone or FAQ)
-          const addrRes = await processIncomingAddressText(senderPsid, 'Facebook Customer', message.text);
+          // Handle Text (Address/Phone or FAQ / Basket Query)
+          const addrRes = await processIncomingAddressText(senderPsid, customerName, message.text);
           if (addrRes.isAddressOrPhone && addrRes.reply) {
             await sendFacebookMessengerReply(senderPsid, addrRes.reply);
           } else {
-            const faqReply = await processCustomerFaq(senderPsid, 'Facebook Customer', message.text);
+            const faqReply = await processCustomerFaq(senderPsid, customerName, message.text);
             if (faqReply) {
               await sendFacebookMessengerReply(senderPsid, faqReply);
             }

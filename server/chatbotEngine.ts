@@ -487,21 +487,137 @@ export function generateShippingNotification(
  * 5. AI SMART FAQ 24/7 (#11)
  * -------------------------------------------------------------
  */
+const customerNameCache = new Map<string, string>();
+
+/**
+ * Resolve Real Customer Facebook Name from local database or Graph API
+ */
+export async function resolveCustomerFacebookName(senderPsid: string): Promise<string> {
+  if (!senderPsid || senderPsid === 'TEST_USER_1') return 'ភ្ញៀវ';
+  if (customerNameCache.has(senderPsid)) {
+    return customerNameCache.get(senderPsid)!;
+  }
+
+  // 1. Check local invoices database for matching PSID
+  const localInv = invoices.find(
+    i => i.facebook_user_id === senderPsid && i.facebook_name && !i.facebook_name.toLowerCase().includes('customer')
+  );
+  if (localInv && localInv.facebook_name) {
+    customerNameCache.set(senderPsid, localInv.facebook_name);
+    return localInv.facebook_name;
+  }
+
+  // 2. Fetch from Facebook Graph API (PSID Profile Endpoint)
+  const token = (
+    chatbotConfig.pageAccessToken ||
+    activeFacebookPage?.access_token ||
+    process.env.FACEBOOK_PAGE_ACCESS_TOKEN ||
+    ''
+  ).trim();
+
+  if (token && !token.startsWith('simulated_')) {
+    try {
+      const res = await fetch(`https://graph.facebook.com/v21.0/${senderPsid}?fields=first_name,last_name,name&access_token=${token}`);
+      const data: any = await res.json();
+      if (data?.name) {
+        customerNameCache.set(senderPsid, data.name);
+        return data.name;
+      }
+      if (data?.first_name || data?.last_name) {
+        const full = `${data.first_name || ''} ${data.last_name || ''}`.trim();
+        customerNameCache.set(senderPsid, full);
+        return full;
+      }
+    } catch (err) {
+      console.warn(`[Profile Resolver] Failed to fetch name for PSID ${senderPsid}:`, err);
+    }
+  }
+
+  return 'ភ្ញៀវ';
+}
+
+/**
+ * -------------------------------------------------------------
+ * 5. AI SMART FAQ 24/7 (#11) & BASKET STATUS QUERY
+ * -------------------------------------------------------------
+ */
 export async function processCustomerFaq(
   senderId: string,
   senderName: string,
   userMessage: string
 ): Promise<string> {
+  const displayName = senderName && !senderName.toLowerCase().includes('customer') ? senderName : 'ភ្ញៀវ';
+
+  // 1. Check if user is asking about their basket or mentioning basket number (e.g. #860, 860, អីវ៉ាន់ខ្ញុំបានអីខ្លះ)
+  const basketNumberMatch = userMessage.match(/(?:#|កន្ត្រក\s*|basket\s*|no\s*)?(\d{2,6})\b/i);
+  const isAskingBasket = /(អីវ៉ាន់|កន្ត្រក|កុម្ម៉ង់|ទិញបាន|order|basket|ទំនិញ|បានអីខ្លះ)/i.test(userMessage) || Boolean(basketNumberMatch);
+
+  if (isAskingBasket) {
+    const activeInvoices = invoices.filter(i => i.status !== 'Cancelled');
+    let targetInv: Invoice | undefined;
+
+    if (basketNumberMatch && basketNumberMatch[1]) {
+      const bNum = basketNumberMatch[1];
+      targetInv = activeInvoices.find(i => String(i.basket_no) === bNum || String(i.invoice_id) === bNum);
+    }
+
+    if (!targetInv && senderId && senderId !== 'TEST_USER_1') {
+      targetInv = activeInvoices.find(i => i.facebook_user_id === senderId);
+    }
+
+    if (!targetInv && displayName !== 'ភ្ញៀវ') {
+      targetInv = activeInvoices.find(
+        i => i.facebook_name && i.facebook_name.toLowerCase().trim() === displayName.toLowerCase().trim()
+      );
+    }
+
+    if (targetInv) {
+      const itemsList = targetInv.items.length > 0
+        ? targetInv.items.map(it => `• [${it.product_code}] x ${it.quantity} ($${(it.price * it.quantity).toFixed(2)})`).join('\n')
+        : '• មិនទាន់មានមុខទំនិញ';
+
+      let stageLabel = '⏳ កំពុងរង់ចាំការទូទាត់ប្រាក់ (STAGED)';
+      if (targetInv.status === 'Paid') {
+        stageLabel = '🔍 បានបង់ប្រាក់រួចរាល់ (កំពុងរៀបចំវេចខ្ចប់ & QC)';
+      } else if (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED') {
+        stageLabel = '🚚 បានចេញដឹកជញ្ជូនរួចរាល់ (DISPATCHED)';
+      }
+
+      const shipFee = targetInv.is_free_ship ? 'Free' : `$${(targetInv.shipping_fee ?? (targetInv.location_zone === 'PROVINCE' ? 1.5 : 1.0)).toFixed(2)}`;
+      
+      let reply = `📦 ព័ត៌មានកន្ត្រកលេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n${itemsList}\n\n🚚 សេវាដឹក ៖ ${shipFee} (${targetInv.location_zone === 'PROVINCE' ? 'តាមខេត្ត' : 'ភ្នំពេញ'})\n💵 សរុបទឹកប្រាក់ ៖ $${targetInv.total_amount.toFixed(2)}\n📍 ស្ថានភាព ៖ ${stageLabel}`;
+
+      if (targetInv.status !== 'Paid' && targetInv.packing_stage !== 'DISPATCHED') {
+        reply += `\n\n👉 បងអាចផ្ញើវិក្កយបត្រ (Slip) បង់ប្រាក់ចូលទីនេះ ដើម្បីហាងរៀបចំច្រក និងចេញដឹកជូនបងឆាប់ៗនេះ! សូមអរគុណច្រើនបង! 🙏`;
+      } else {
+        reply += `\n\nអរគុណច្រើនបងសម្រាប់ការគាំទ្រហាងយើងខ្ញុំ! 🙏✨`;
+      }
+
+      addChatbotLog({
+        type: 'AI_FAQ',
+        customer_name: targetInv.facebook_name,
+        customer_id: senderId,
+        basket_no: targetInv.basket_no || targetInv.invoice_id,
+        incoming_message: userMessage,
+        bot_reply: reply,
+        status: 'SUCCESS'
+      });
+
+      return reply;
+    }
+  }
+
   if (!chatbotConfig.enableAiFaq) {
-    return `សួស្តីបង ${senderName}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
+    return `សួស្តីបង${displayName !== 'ភ្ញៀវ' ? ` ${displayName}` : ''}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
   }
 
   const ai = getGenAI();
   if (!ai) {
-    return `សួស្តីបង ${senderName}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
+    return `សួស្តីបង${displayName !== 'ភ្ញៀវ' ? ` ${displayName}` : ''}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
   }
 
   try {
+    const customerGreeting = displayName !== 'ភ្ញៀវ' ? `បង ${displayName}` : 'បង';
     const systemInstruction = `You are a polite, helpful, and friendly Khmer AI Customer Service Assistant for "${chatbotConfig.shopName}".
 Here is the official shop knowledge base:
 - Shop Location: ${chatbotConfig.shopLocation}
@@ -513,7 +629,7 @@ Here is the official shop knowledge base:
 
 Rules:
 1. Always respond in natural, polite, respectful Khmer.
-2. Address the customer as "បង ${senderName}".
+2. Address the customer as "${customerGreeting}". Never call them "Facebook Customer".
 3. Keep answers clear, accurate to the knowledge base, and concise.
 4. If asked about their basket or order, kindly invite them to provide their phone number or basket number.`;
 
@@ -540,11 +656,11 @@ Rules:
       }
     }
 
-    const reply = faqText || `សួស្តីបង ${senderName}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
+    const reply = faqText || `សួស្តីបង${displayName !== 'ភ្ញៀវ' ? ` ${displayName}` : ''}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
 
     addChatbotLog({
       type: 'AI_FAQ',
-      customer_name: senderName,
+      customer_name: displayName,
       customer_id: senderId,
       incoming_message: userMessage,
       bot_reply: reply,
@@ -554,7 +670,7 @@ Rules:
     return reply;
   } catch (err) {
     console.error('AI FAQ Error:', err);
-    return `សួស្តីបង ${senderName}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
+    return `សួស្តីបង${displayName !== 'ភ្ញៀវ' ? ` ${displayName}` : ''}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
   }
 }
 
