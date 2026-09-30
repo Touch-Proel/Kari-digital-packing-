@@ -843,6 +843,29 @@ function BasketCardComponent({
         : [];
 
     if (itemsToCut.length === 0) {
+      const { phone, cleanText } = extractPhoneNumber(commentText);
+      if (phone) {
+        const cleanAddr = cleanText ? cleanText.replace(/[:=]/g, ' ').trim() : '';
+        try {
+          await fetch('/api/update_customer_contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              invoice_id: invoice.invoice_id,
+              facebook_name: invoice.facebook_name,
+              phone: phone,
+              address: cleanAddr && cleanAddr.length >= 2 ? cleanAddr : undefined
+            })
+          });
+          handleDismissComment(commentText, e);
+          playSuccessFanfare();
+          onShowToast(`✅ បានកាត់លេខ [${phone}] ${cleanAddr ? `និងទីតាំង [${cleanAddr}]` : ''} ចូលកន្ត្រក #${invoice.basket_no || invoice.invoice_id}!`, 'success');
+          onDataChanged();
+          return;
+        } catch {
+          // fallback to manual add
+        }
+      }
       setIsAddingManualCode(true);
       setManualCommentSource(commentText);
       setManualCodeInput('');

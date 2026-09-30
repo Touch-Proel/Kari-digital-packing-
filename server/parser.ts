@@ -367,12 +367,14 @@ export function parseAndAllocateComment(
       if (!inv.comments) inv.comments = [];
       if (!inv.comments.includes(rawText)) inv.comments.push(rawText);
 
-      // If customer sent phone number in this comment, immediately update invoice and customer profile!
-      if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ' || inv.phone_number.includes('មិនទាន់មាន') || inv.phone_number.length < 8)) {
+      // If customer sent phone number in this comment, ALWAYS update invoice and customer profile with the fresh number!
+      if (phone) {
         inv.phone_number = phone;
         if (cust) cust.phone_number = phone;
       }
 
+      // If comment contains location or clean address text
+      const cleanLocationText = cleanText ? cleanText.replace(/[:=]/g, ' ').trim() : '';
       if (hasExplicitLocation && !isQuestion) {
         inv.location_zone = zone;
         inv.location_label = label;
@@ -382,13 +384,23 @@ export function parseAndAllocateComment(
           }
           if (cust) cust.address = inv.address;
         }
+      } else if (cleanLocationText && cleanLocationText.length >= 2 && !inv.address?.includes(cleanLocationText)) {
+        if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត' || inv.address === '🏙️ ភ្នំពេញ') {
+          inv.address = cleanLocationText;
+          if (cust) cust.address = cleanLocationText;
+        }
       }
 
       // If comment is purely contact info (phone/address) or general inquiry, do NOT flag as unmatched product code warning!
-      const isPureContactOrChat = isQuestion || isPureContactOrInquiryComment(rawText);
+      const isPureContactOrChat = Boolean(phone) || isQuestion || isPureContactOrInquiryComment(rawText);
       if (!isPureContactOrChat) {
         if (!inv.unmatched_comments) inv.unmatched_comments = [];
         if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
+      } else {
+        // If it was in unmatched_comments previously, clean it up
+        if (inv.unmatched_comments) {
+          inv.unmatched_comments = inv.unmatched_comments.filter(c => c !== rawText);
+        }
       }
 
       recalculateInvoice(inv);
@@ -399,8 +411,8 @@ export function parseAndAllocateComment(
       status: isQuestion ? 'QUESTION_SAVED' : 'UNMATCHED_SAVED',
       message: `💬 កត់ត្រាខមិន${isQuestion ? 'សួរ' : ''} (មិនមានកូដទំនិញត្រូវ) ៖ «${cleanFbName}» ៖ "${rawText}"`,
       customer_name: cleanFbName,
-      phone_number: phone || (isVerifiedIdCustomer ? cust.phone_number : undefined),
-      address: isVerifiedIdCustomer ? cust.address : undefined
+      phone_number: phone || (isVerifiedIdCustomer ? cust?.phone_number : undefined),
+      address: isVerifiedIdCustomer ? cust?.address : undefined
     };
   }
 
