@@ -490,7 +490,10 @@ export function parseAndAllocateComment(
     if (!inv.comment_ids.includes(savedCommentId)) inv.comment_ids.push(savedCommentId);
 
     if (userPicUrl && !inv.picture_url) inv.picture_url = userPicUrl;
-    if (phone && (!inv.phone_number || inv.phone_number === 'គ្មានលេខ')) inv.phone_number = phone;
+    if (phone) {
+      inv.phone_number = phone;
+      if (cust) cust.phone_number = phone;
+    }
     
     if (hasExplicitLocation) {
       // If customer has a locked PROVINCE preference, do not override with generic PP words
@@ -505,6 +508,11 @@ export function parseAndAllocateComment(
           }
         } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
           inv.address = label;
+        }
+        if (cust) {
+          cust.location_zone = zone;
+          cust.location_label = label;
+          if (inv.address) cust.address = inv.address;
         }
       }
     } else if (cust?.is_zone_locked && cust.location_zone && (!inv.location_zone || inv.location_zone === 'UNKNOWN')) {

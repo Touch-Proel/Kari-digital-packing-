@@ -271,7 +271,7 @@ export function fallbackFullBasketAudit(
   const { phone } = extractPhoneNumber(normText);
   const zoneRes = detectDeliveryZone(normText);
   const extractedAddr = extractCleanAddressFromComment(normText) || (zoneRes.hasExplicitLocation ? zoneRes.detectedLocation : null);
-  const finalZone: 'PP' | 'PROVINCE' = zoneRes.zone === 'PP' ? 'PP' : 'PROVINCE';
+  const finalZone: 'PP' | 'PROVINCE' | null = (zoneRes.hasExplicitLocation && (zoneRes.zone === 'PP' || zoneRes.zone === 'PROVINCE')) ? zoneRes.zone : null;
 
   const catalogMap = new Map<string, Product>();
   for (const p of catalog) {
