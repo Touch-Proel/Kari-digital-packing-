@@ -5,6 +5,7 @@ interface ChatbotConfig {
   enabled: boolean;
   enableSlipAutoVerify: boolean;
   enableAddressAutoExtract: boolean;
+  enableVoiceUnderstanding: boolean;
   enablePaymentReminders: boolean;
   paymentReminderHours: number;
   enableShippingNotifications: boolean;
@@ -25,7 +26,7 @@ interface ChatbotConfig {
 interface ChatbotLogItem {
   id: string;
   timestamp: string;
-  type: 'SLIP_VERIFIED' | 'ADDRESS_EXTRACTED' | 'PAYMENT_REMINDER' | 'SHIPPING_NOTIFIED' | 'AI_FAQ';
+  type: 'SLIP_VERIFIED' | 'ADDRESS_EXTRACTED' | 'VOICE_PROCESSED' | 'PAYMENT_REMINDER' | 'SHIPPING_NOTIFIED' | 'AI_FAQ';
   customer_name: string;
   customer_id?: string;
   basket_no?: number | string;
@@ -69,30 +70,51 @@ export function ChatbotModal({
   const [simCustomerId, setSimCustomerId] = useState('1255089173446765');
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const slipInputRef = useRef<HTMLInputElement | null>(null);
+  const voiceInputRef = useRef<HTMLInputElement | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const [activeBaskets, setActiveBaskets] = useState<Array<{ basket_no: string | number; facebook_name: string; facebook_user_id?: string; total_amount: number; status: string }>>([]);
+
+  // Safe JSON helper to guard against HTML error responses
+  const safeFetchJson = async <T,>(url: string, options?: RequestInit): Promise<T | null> => {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) return null;
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      }
+      return await res.json();
+    } catch {
+      return null;
+    }
+  };
 
   // Fetch initial config & logs
   const fetchChatbotData = async () => {
     setIsLoading(true);
     try {
-      const [confRes, logsRes, invRes] = await Promise.all([
-        fetch('/api/chatbot/config'),
-        fetch('/api/chatbot/logs'),
-        fetch('/api/invoices')
+      const [confJson, logsJson, invJson] = await Promise.all([
+        safeFetchJson<{ success: boolean; config: ChatbotConfig }>('/api/chatbot/config'),
+        safeFetchJson<{ success: boolean; logs: ChatbotLogItem[] }>('/api/chatbot/logs'),
+        safeFetchJson<{ changed?: boolean; data?: any[] }>('/api/invoices')
       ]);
 
-      if (confRes.ok) {
-        const confJson = await confRes.json();
-        if (confJson.config) setConfig(confJson.config);
+      if (confJson?.config) {
+        setConfig(confJson.config);
       }
-      if (logsRes.ok) {
-        const logsJson = await logsRes.json();
-        if (logsJson.logs) setLogs(logsJson.logs);
+      if (logsJson?.logs) {
+        setLogs(logsJson.logs);
       }
-      if (invRes.ok) {
-        const invJson = await invRes.json();
-        const active = (invJson.data || []).filter((i: any) => i.status !== 'Cancelled');
+      if (invJson?.data) {
+        const active = invJson.data.filter((i: any) => i.status !== 'Cancelled');
         setActiveBaskets(active);
         if (active.length > 0) {
           setSimCustomerName(active[0].facebook_name || 'អតិថិជន');
@@ -100,7 +122,7 @@ export function ChatbotModal({
         }
       }
     } catch (err) {
-      console.error('Failed to fetch chatbot data:', err);
+      console.warn('Chatbot data fetch notice:', err);
     } finally {
       setIsLoading(false);
     }
@@ -275,6 +297,11 @@ export function ChatbotModal({
           if (data.result.success && onDataChanged) {
             onDataChanged();
           }
+        } else {
+          setChatMessages(prev => [
+            ...prev,
+            { sender: 'bot', text: 'ℹ️ (រូបភាពទូទៅ/មិនមែន Slip ធនាគារ ➔ Bot ស្ងាត់ស្ងៀមមិនឆ្លើយតបរំខានភ្ញៀវឡើយ ទុកឱ្យ Admin ឆ្លើយតបធម្មតា)', time: replyTime }
+          ]);
         }
       } catch {
         setChatMessages(prev => [
@@ -288,6 +315,142 @@ export function ChatbotModal({
     reader.readAsDataURL(file);
 
     if (slipInputRef.current) slipInputRef.current.value = '';
+  };
+
+  // Test Upload Voice / Audio in Simulator
+  const handleUploadTestVoice = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string;
+      if (!base64) return;
+
+      const nowTime = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+      setChatMessages(prev => [...prev, { sender: 'user', text: `🎙️ [បានផ្ញើសារសំឡេង Voice Note ${file.name}]`, time: nowTime }]);
+      setIsSimulating(true);
+
+      try {
+        const res = await fetch('/api/chatbot/test_voice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sender_id: simCustomerId,
+            sender_name: simCustomerName,
+            audio_base64: base64,
+            mime_type: file.type || 'audio/mp4'
+          })
+        });
+
+        const data = await res.json();
+        const replyTime = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+        if (data.result?.reply) {
+          playSuccessFanfare();
+          const transcriptText = data.result.transcription ? `\n\n(📝 AI ស្តាប់ឮ ៖ «${data.result.transcription}»)` : '';
+          setChatMessages(prev => [
+            ...prev,
+            { sender: 'bot', text: `${data.result.reply}${transcriptText}`, time: replyTime, type: 'VOICE_PROCESSED' }
+          ]);
+          if (onDataChanged) onDataChanged();
+        } else {
+          setChatMessages(prev => [
+            ...prev,
+            { sender: 'bot', text: 'ℹ️ (Bot មិនអាចស្តាប់សំឡេងបានច្បាស់ ឬមិនមានសំឡេង)', time: replyTime }
+          ]);
+        }
+      } catch {
+        setChatMessages(prev => [
+          ...prev,
+          { sender: 'bot', text: '⚠️ មានបញ្ហាក្នុងការដំណើរការសំឡេង', time: nowTime }
+        ]);
+      } finally {
+        setIsSimulating(false);
+      }
+    };
+    reader.readAsDataURL(file);
+
+    if (voiceInputRef.current) voiceInputRef.current.value = '';
+  };
+
+  // Toggle Live Microphone Recording in Simulator
+  const handleToggleRecord = async () => {
+    if (isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecording(false);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/mp4' });
+        stream.getTracks().forEach(track => track.stop());
+
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const base64 = reader.result as string;
+          if (!base64) return;
+
+          const nowTime = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+          setChatMessages(prev => [...prev, { sender: 'user', text: `🎙️ [សំឡេង Voice Record ពី Mic]`, time: nowTime }]);
+          setIsSimulating(true);
+
+          try {
+            const res = await fetch('/api/chatbot/test_voice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sender_id: simCustomerId,
+                sender_name: simCustomerName,
+                audio_base64: base64,
+                mime_type: 'audio/mp4'
+              })
+            });
+            const data = await res.json();
+            const replyTime = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+            if (data.result?.reply) {
+              playSuccessFanfare();
+              const transcriptText = data.result.transcription ? `\n\n(📝 AI ស្តាប់ឮ ៖ «${data.result.transcription}»)` : '';
+              setChatMessages(prev => [
+                ...prev,
+                { sender: 'bot', text: `${data.result.reply}${transcriptText}`, time: replyTime, type: 'VOICE_PROCESSED' }
+              ]);
+              if (onDataChanged) onDataChanged();
+            }
+          } catch {
+            setChatMessages(prev => [
+              ...prev,
+              { sender: 'bot', text: '⚠️ មានបញ្ហាក្នុងការដំណើរការសំឡេងពី Mic', time: nowTime }
+            ]);
+          } finally {
+            setIsSimulating(false);
+          }
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      playPureTone(600, 0.05);
+    } catch (err) {
+      console.warn('Microphone access denied:', err);
+      voiceInputRef.current?.click();
+    }
   };
 
   const webhookUrl = `${window.location.origin}/api/webhook`;
@@ -468,6 +631,31 @@ export function ChatbotModal({
                     type="checkbox"
                     checked={config.enableAddressAutoExtract}
                     onChange={e => updateConfigAndSave({ enableAddressAutoExtract: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </label>
+              </div>
+
+              {/* Feature 2.5: Khmer Voice Note Understanding (#12) */}
+              <div className="p-4 rounded-2xl bg-[#09152C] border border-[#1C335C] flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🎙️</span>
+                    <h3 className="font-bold text-sm text-white">#12. AI ស្តាប់សំឡេង Voice (Khmer Voice Note Understanding)</h3>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      Gemini Audio Live
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    ពេលភ្ញៀវផ្ញើសារសំឡេង (Voice Record) ចូល Messenger ➔ AI ស្តាប់យល់ភាសាខ្មែរ ស្រង់លេខទូរស័ព្ទ/ទីតាំង ឬឆ្លើយតបសំណួរជូនភ្ញៀវភ្លាមៗ។
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={config.enableVoiceUnderstanding ?? true}
+                    onChange={e => updateConfigAndSave({ enableVoiceUnderstanding: e.target.checked })}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -720,6 +908,13 @@ export function ChatbotModal({
                   onChange={handleUploadTestSlip}
                   className="hidden"
                 />
+                <input
+                  type="file"
+                  ref={voiceInputRef}
+                  accept="audio/*"
+                  onChange={handleUploadTestVoice}
+                  className="hidden"
+                />
                 <button
                   type="button"
                   onClick={() => slipInputRef.current?.click()}
@@ -729,12 +924,36 @@ export function ChatbotModal({
                   🖼️
                 </button>
 
+                {/* Voice / Mic Button */}
+                <button
+                  type="button"
+                  onClick={handleToggleRecord}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center text-base border cursor-pointer transition-all ${
+                    isRecording
+                      ? 'bg-rose-600 text-white border-rose-400 animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.6)]'
+                      : 'bg-slate-800 hover:bg-slate-700 text-purple-300 border-slate-700'
+                  }`}
+                  title={isRecording ? 'ចុចដើម្បីបញ្ចប់ការ Record សំឡេង' : 'ចុចដើម្បីនិយាយសំឡេង Voice សាកល្បង (Mic)'}
+                >
+                  {isRecording ? '⏹️' : '🎙️'}
+                </button>
+
+                {/* Voice File Upload Button */}
+                <button
+                  type="button"
+                  onClick={() => voiceInputRef.current?.click()}
+                  className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 flex items-center justify-center text-sm border border-slate-700 cursor-pointer hidden sm:flex"
+                  title="Upload ឯកសារសំឡេង (.mp3, .m4a, .aac, .ogg) សាកល្បង"
+                >
+                  🎵
+                </button>
+
                 <input
                   type="text"
                   value={inputMessage}
                   onChange={e => setInputMessage(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
-                  placeholder="វាយសារសាកល្បង (ឧ. ទីតាំង, លេខទូរស័ព្ទ, ឬសួរសំណួរ)..."
+                  placeholder={isRecording ? '🎙️ កំពុង Record សំឡេង... ចុច ⏹️ ពេលនិយាយចប់' : 'វាយសារសាកល្បង (ឧ. ទីតាំង, លេខទូរស័ព្ទ, ឬសួរសំណួរ)...'}
                   className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
 

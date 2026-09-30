@@ -5,6 +5,7 @@ import {
   getChatbotLogs,
   processIncomingSlipImage,
   processIncomingAddressText,
+  processIncomingVoiceAudio,
   generatePaymentReminders,
   generateShippingNotification,
   processCustomerFaq,
@@ -14,25 +15,25 @@ import {
 
 const router = Router();
 
-// GET /api/chatbot/config
-router.get('/config', (_req: Request, res: Response) => {
+// GET /api/chatbot/config or /api/config
+router.get(['/config', '/chatbot/config'], (_req: Request, res: Response) => {
   res.json({ success: true, config: getChatbotConfig() });
 });
 
-// POST /api/chatbot/config
-router.post('/config', (req: Request, res: Response) => {
+// POST /api/chatbot/config or /api/config
+router.post(['/config', '/chatbot/config'], (req: Request, res: Response) => {
   const newConfig = req.body;
   saveChatbotConfigToDisk(newConfig);
   res.json({ success: true, message: 'បានរក្សាទុកការកំណត់ Chatbot រួចរាល់!', config: getChatbotConfig() });
 });
 
-// GET /api/chatbot/logs
-router.get('/logs', (_req: Request, res: Response) => {
+// GET /api/chatbot/logs or /api/logs
+router.get(['/logs', '/chatbot/logs'], (_req: Request, res: Response) => {
   res.json({ success: true, logs: getChatbotLogs() });
 });
 
 // POST /api/chatbot/test_slip - Live Simulator for testing slip verification
-router.post('/test_slip', async (req: Request, res: Response) => {
+router.post(['/test_slip', '/chatbot/test_slip'], async (req: Request, res: Response) => {
   const { sender_id, sender_name, image_base64, mime_type } = req.body;
   if (!image_base64) {
     return res.status(400).json({ success: false, error: 'Missing image_base64' });
@@ -48,8 +49,25 @@ router.post('/test_slip', async (req: Request, res: Response) => {
   res.json({ success: true, result });
 });
 
+// POST /api/chatbot/test_voice - Live Simulator for testing Khmer voice note understanding
+router.post(['/test_voice', '/chatbot/test_voice'], async (req: Request, res: Response) => {
+  const { sender_id, sender_name, audio_base64, mime_type } = req.body;
+  if (!audio_base64) {
+    return res.status(400).json({ success: false, error: 'Missing audio_base64' });
+  }
+
+  const result = await processIncomingVoiceAudio(
+    sender_id || 'TEST_USER_1',
+    sender_name || 'អតិថិជនសាកល្បង',
+    audio_base64,
+    mime_type || 'audio/mp4'
+  );
+
+  res.json({ success: true, result });
+});
+
 // POST /api/chatbot/test_message - Live Simulator for testing address extraction or AI FAQ
-router.post('/test_message', async (req: Request, res: Response) => {
+router.post(['/test_message', '/chatbot/test_message'], async (req: Request, res: Response) => {
   const { sender_id, sender_name, message } = req.body;
   if (!message) {
     return res.status(400).json({ success: false, error: 'Missing message' });
@@ -79,7 +97,7 @@ router.post('/test_message', async (req: Request, res: Response) => {
 });
 
 // POST /api/chatbot/send_payment_reminders - Trigger bulk payment reminders (#4)
-router.post('/send_payment_reminders', async (_req: Request, res: Response) => {
+router.post(['/send_payment_reminders', '/chatbot/send_payment_reminders'], async (_req: Request, res: Response) => {
   const result = await generatePaymentReminders();
   // If customer has PSID, send via Messenger
   for (const item of result.messages) {
@@ -138,9 +156,11 @@ router.post('/webhook', async (req: Request, res: Response) => {
         console.log(`📩 [Messenger Inbound] from PSID ${senderPsid}:`, message.text || '[Attachment]');
         const customerName = await resolveCustomerFacebookName(senderPsid);
 
-        // Handle image attachments (Slips)
+        // Handle attachments (Slips or Audio Voice Notes)
         if (message.attachments && message.attachments.length > 0) {
           const imageAttachment = message.attachments.find((att: any) => att.type === 'image');
+          const audioAttachment = message.attachments.find((att: any) => att.type === 'audio');
+
           if (imageAttachment && imageAttachment.payload?.url) {
             processIncomingSlipImage(senderPsid, customerName, imageAttachment.payload.url)
               .then(slipRes => {
@@ -149,6 +169,20 @@ router.post('/webhook', async (req: Request, res: Response) => {
                 }
               })
               .catch(err => console.error('[Webhook Slip Error]', err));
+          } else if (audioAttachment && audioAttachment.payload?.url) {
+            // Stream audio from Facebook CDN to Gemini
+            fetch(audioAttachment.payload.url)
+              .then(res => res.arrayBuffer())
+              .then(buffer => {
+                const base64 = Buffer.from(buffer).toString('base64');
+                return processIncomingVoiceAudio(senderPsid, customerName, base64, 'audio/mp4');
+              })
+              .then(voiceRes => {
+                if (voiceRes.reply && voiceRes.reply.trim()) {
+                  sendFacebookMessengerReply(senderPsid, voiceRes.reply);
+                }
+              })
+              .catch(err => console.error('[Webhook Voice Error]', err));
           }
         } else if (message.text) {
           // Handle Text (Address/Phone or FAQ / Basket Query)

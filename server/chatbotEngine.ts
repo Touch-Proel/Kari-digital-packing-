@@ -8,6 +8,7 @@ export interface ChatbotConfig {
   enabled: boolean;
   enableSlipAutoVerify: boolean;
   enableAddressAutoExtract: boolean;
+  enableVoiceUnderstanding: boolean;
   enablePaymentReminders: boolean;
   paymentReminderHours: number;
   enableShippingNotifications: boolean;
@@ -28,7 +29,7 @@ export interface ChatbotConfig {
 export interface ChatbotLogItem {
   id: string;
   timestamp: string;
-  type: 'SLIP_VERIFIED' | 'ADDRESS_EXTRACTED' | 'PAYMENT_REMINDER' | 'SHIPPING_NOTIFIED' | 'AI_FAQ';
+  type: 'SLIP_VERIFIED' | 'ADDRESS_EXTRACTED' | 'VOICE_PROCESSED' | 'PAYMENT_REMINDER' | 'SHIPPING_NOTIFIED' | 'AI_FAQ';
   customer_name: string;
   customer_id?: string;
   basket_no?: number | string;
@@ -47,6 +48,7 @@ let chatbotConfig: ChatbotConfig = {
   enabled: true,
   enableSlipAutoVerify: true,
   enableAddressAutoExtract: true,
+  enableVoiceUnderstanding: true,
   enablePaymentReminders: true,
   paymentReminderHours: 4,
   enableShippingNotifications: true,
@@ -131,6 +133,9 @@ function getGenAI(): GoogleGenAI | null {
   return getGemini();
 }
 
+// Anti-Replay Guard: Keep track of used transaction references
+const usedSlipRefs = new Set<string>();
+
 /**
  * -------------------------------------------------------------
  * 1. AI SLIP AUTO-VERIFY IN CHAT (#2)
@@ -160,18 +165,40 @@ export async function processIncomingSlipImage(
   try {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     
-    // OCR & Extract using Gemini Flash with multi-model fallback
-    const promptText = `You are an expert OCR parser for Cambodian bank transfer slips (ABA, ACLEDA, Canadia, TrueMoney, Wing, Bakong/KHQR, etc.).
-Extract the following information in strict JSON:
+    // Strict OCR & Slip Verification using Gemini Flash
+    const promptText = `You are a strict validation & OCR parser for Cambodian Mobile Banking Transfer Slips (ABA Mobile, ACLEDA ToanChet, Bakong / KHQR, Wing Bank, Canadia, TrueMoney, Chip Mong, Sathapana, FTB, etc.).
+
+CRITICAL RULES:
+1. First, verify whether the image is a REAL digital mobile banking transfer slip / receipt screenshot.
+   - It MUST be an authentic digital bank payment confirmation (e.g. ABA Mobile transfer receipt, ACLEDA ToanChet transfer receipt, KHQR payment confirmation, Wing receipt).
+   - REJECT (set is_bank_slip: false) if the image is:
+     * A paper-printed packing list / fulfillment delivery receipt / thermal receipt (e.g. "KARI ARNETT BOUTIQUE", "PACKING LIST", store receipt, delivery waybill).
+     * A photo of parcels, yellow shipping bags, or packaging.
+     * A photo of clothes, dresses, shirts, pants, products, or goods.
+     * A selfie, person photo, screenshot of conversation, or random image.
+     * An ABA KHQR payment code screen (asking someone to scan) rather than a completed transaction receipt.
+
+2. If is_bank_slip is true:
+   - "customer_name": payer name or sender name or recipient note on the slip.
+   - "paid_amount": exact transferred numeric amount (e.g. 11.20 or 45000).
+   - "currency": "USD" or "KHR".
+   - "bank_name": "ABA" | "ACLEDA" | "Canadia" | "Wing" | "Bakong" | "TrueMoney" | "Chip Mong" | "Sathapana" | "Other".
+   - "trans_ref": transaction reference or ID number.
+   - "trans_date": date/time of transfer.
+   - "basket_no_in_slip": order / basket number if mentioned in transfer remarks (e.g. 5093 or null).
+
+Return strict JSON ONLY:
 {
-  "customer_name": "payer or sender name on the slip or recipient note",
+  "is_bank_slip": true or false,
+  "rejection_reason": "NOT_A_BANK_SLIP" | "PACKING_OR_STORE_RECEIPT" | "PHOTO_OF_GOODS" | "NONE",
+  "customer_name": "...",
   "paid_amount": 0.00,
-  "currency": "USD" or "KHR",
-  "bank_name": "ABA" or "ACLEDA" or "Canadia" or "Wing" or other,
-  "trans_ref": "transaction reference or ID",
-  "trans_date": "date/time"
-}
-Return ONLY pure JSON. No markdown ticks, no commentary.`;
+  "currency": "USD" | "KHR",
+  "bank_name": "...",
+  "trans_ref": "...",
+  "trans_date": "...",
+  "basket_no_in_slip": null or number
+}`;
 
     const ocrRes = await callGeminiSlipExtraction(
       ai,
@@ -180,65 +207,99 @@ Return ONLY pure JSON. No markdown ticks, no commentary.`;
     );
 
     const rawText = ocrRes.text || '';
-    const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
-    const extracted = JSON.parse(cleaned);
+    if (!rawText.trim()) {
+      return {
+        success: false,
+        reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
+      };
+    }
 
-    const paidAmount = Number(extracted.paid_amount) || 0;
+    let extracted: any = {};
+    try {
+      const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+      extracted = JSON.parse(cleaned);
+    } catch {
+      return {
+        success: false,
+        reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
+      };
+    }
+
+    const isBankSlip = Boolean(extracted.is_bank_slip);
+    let paidAmount = Number(extracted.paid_amount) || 0;
+    const currency = String(extracted.currency || 'USD').toUpperCase();
     const bankName = extracted.bank_name || 'ធនាគារ';
-    const transRef = extracted.trans_ref || '';
+    const transRef = extracted.trans_ref ? String(extracted.trans_ref).trim() : '';
+    const basketNoInSlip = extracted.basket_no_in_slip ? Number(extracted.basket_no_in_slip) : null;
 
-    // Locate active invoice for customer
+    // KHR to USD conversion if paid in Riel
+    if (currency === 'KHR' && paidAmount > 0) {
+      paidAmount = Math.round((paidAmount / 4100) * 100) / 100;
+    }
+
+    // 1. SILENT REJECTION OF NON-BANK SLIP IMAGES (photos of clothes, products, packaging, paper receipts)
+    // Remain 100% SILENT so customers asking product questions are not spammed or disturbed by bot!
+    if (!isBankSlip || paidAmount <= 0) {
+      addChatbotLog({
+        type: 'SLIP_VERIFIED',
+        customer_name: senderName,
+        customer_id: senderId,
+        incoming_message: `[រូបភាពទូទៅ/មិនមែន Slip ធនាគារ - ${extracted.rejection_reason || 'NOT_A_BANK_SLIP'}]`,
+        bot_reply: '[ស្ងាត់ស្ងៀម - ទុកឱ្យ Admin ឆ្លើយតបធម្មតា]',
+        status: 'WARNING',
+        meta: extracted
+      });
+
+      return { success: false, reply: '' };
+    }
+
+    // 2. REJECT DUPLICATE SLIPS (Anti-Replay Attack)
+    if (transRef && usedSlipRefs.has(transRef)) {
+      const dupReply = `⚠️ វិក្កយបត្រនេះ (Ref: ${transRef}) ត្រូវបានប្រើប្រាស់កាត់បង់រួចម្តងរួចមកហើយ។ សូមកុំផ្ញើវិក្កយបត្រដដែលៗ! អរគុណច្រើនបង! 🙏`;
+      return { success: false, reply: dupReply };
+    }
+
+    // 3. LOCATE ACTIVE INVOICE BELONGING STRICTLY TO THIS CUSTOMER
     const activeInvoices = invoices.filter(
       i => i.status !== 'Cancelled' && i.status !== 'Dispatched' && i.packing_stage !== 'DISPATCHED'
     );
 
     let matchedInv: Invoice | undefined;
 
-    // 1. Direct match by sender ID
-    if (senderId && senderId !== 'TEST_USER_1') {
+    // A. Match if basket number is explicitly mentioned in slip remarks (e.g. #5093)
+    if (basketNoInSlip) {
+      matchedInv = activeInvoices.find(
+        i => i.basket_no === basketNoInSlip || i.invoice_id === basketNoInSlip
+      );
+    }
+
+    // B. Direct match by Facebook sender ID
+    if (!matchedInv && senderId && senderId !== 'TEST_USER_1') {
       matchedInv = activeInvoices.find(i => i.facebook_user_id === senderId);
     }
 
-    // 2. Direct match by sender name
-    if (!matchedInv && senderName && senderName !== 'Dany Ka' && senderName !== 'អតិថិជនសាកល្បង') {
+    // C. Direct match by Facebook sender Name
+    if (!matchedInv && senderName && senderName !== 'Dany Ka' && senderName !== 'អតិថិជនសាកល្បង' && senderName !== 'Facebook Customer') {
       matchedInv = activeInvoices.find(
         i => i.facebook_name && i.facebook_name.toLowerCase().trim() === senderName.toLowerCase().trim()
       );
     }
 
-    // 3. Fallback: Search all active invoices using Fast-Check match engine
-    if (!matchedInv) {
-      const matchResult = matchInvoiceForSlip({
-        customer_name: extracted.customer_name || senderName,
-        paid_amount: paidAmount,
-        currency: extracted.currency || 'USD',
-        bank_name: bankName,
-        trans_ref: transRef
-      });
-
-      if (matchResult.matched) {
-        matchedInv = matchResult.matched;
-      } else if (matchResult.candidates && matchResult.candidates.length > 0) {
-        matchedInv = matchResult.candidates[0];
-      }
+    // D. Direct match by extracted customer name on slip IF sender is in test simulator
+    if (!matchedInv && (senderName === 'Dany Ka' || senderName === 'អតិថិជនសាកល្បង') && extracted.customer_name) {
+      matchedInv = activeInvoices.find(
+        i => i.facebook_name && i.facebook_name.toLowerCase().trim() === extracted.customer_name.toLowerCase().trim()
+      );
     }
 
-    // 4. If still not matched, check if any unpaid invoice matches the exact amount or fuzzy name
+    // 4. STRICT GUARD: If no basket belongs to THIS customer, DO NOT touch anyone else's basket!
     if (!matchedInv) {
-      matchedInv = activeInvoices.find(i => {
-        if (paidAmount > 0 && Math.abs(i.total_amount - paidAmount) < 0.25) return true;
-        if (extracted.customer_name && i.facebook_name && i.facebook_name.toLowerCase().includes(extracted.customer_name.toLowerCase())) return true;
-        return false;
-      });
-    }
-
-    if (!matchedInv) {
-      const reply = `🧾 ហាងបានស្កេនឃើញវិក្កយបត្រ ៖\n👤 ឈ្មោះ ៖ ${extracted.customer_name || senderName}\n💵 ចំនួន ៖ $${paidAmount.toFixed(2)} (${bankName})\n🔖 Ref ៖ ${transRef || 'N/A'}\n\n⚠️ ប្រព័ន្ធមិនទាន់រកឃើញកន្ត្រកដែលកំពុងរង់ចាំបង់ប្រាក់ត្រូវគ្នានឹងព័ត៌មាននេះទេ។ បុគ្គលិកនឹងទាក់ទងផ្ទៀងផ្ទាត់ជូនបងបន្ថែម!`;
+      const reply = `🧾 ហាងបានស្កេនឃើញវិក្កយបត្រចំនួន $${paidAmount.toFixed(2)} (${bankName} ‧ Ref: ${transRef || 'N/A'}) ពីបង ${senderName}។\n\n⚠️ ប៉ុន្តែប្រព័ន្ធមិនទាន់រកឃើញកន្ត្រកដែលកំពុងរង់ចាំបង់ប្រាក់ត្រូវគ្នានឹងគណនីរបស់បងទេ។ បុគ្គលិកនឹងជួយពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែម! 🙏`;
       addChatbotLog({
         type: 'SLIP_VERIFIED',
         customer_name: extracted.customer_name || senderName,
         customer_id: senderId,
-        incoming_message: `[រូបភាព Slip $${paidAmount.toFixed(2)}]`,
+        incoming_message: `[រូបភាព Slip $${paidAmount.toFixed(2)} (${bankName})]`,
         bot_reply: reply,
         status: 'WARNING',
         meta: extracted
@@ -258,6 +319,10 @@ Return ONLY pure JSON. No markdown ticks, no commentary.`;
       matchedInv.staged_at = new Date().toISOString();
     }
 
+    if (transRef) {
+      usedSlipRefs.add(transRef);
+    }
+
     bumpDataRevision();
     saveDatabaseToDisk();
 
@@ -268,17 +333,19 @@ Return ONLY pure JSON. No markdown ticks, no commentary.`;
       customer_name: matchedInv.facebook_name,
       customer_id: senderId,
       basket_no: matchedInv.basket_no || matchedInv.invoice_id,
-      incoming_message: `[រូបភាព Slip $${paidAmount.toFixed(2)}]`,
+      incoming_message: `[រូបភាព Slip $${paidAmount.toFixed(2)} (${bankName})]`,
       bot_reply: reply,
       status: 'SUCCESS',
-      meta: { paidAmount, bankName, transRef, invoice_id: matchedInv.invoice_id }
+      meta: { ...extracted, paid_amount: paidAmount }
     });
 
     return { success: true, reply, invoice: matchedInv };
   } catch (err: any) {
-    console.error('Slip auto-verification error:', err);
-    const reply = `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពវិក្កយបត្រហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងភ្លាមៗ។`;
-    return { success: false, reply };
+    console.error('Slip processing error:', err);
+    return {
+      success: false,
+      reply: `អរគុណបង ${senderName}! ហាងបានទទួលវិក្កយបត្រហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែម។`
+    };
   }
 }
 
@@ -320,7 +387,7 @@ Extract in strict JSON:
 If this is just a general question or not delivery info, return "is_delivery_info": false.
 Return ONLY valid JSON.`;
 
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
       let rawResponseText = '';
 
       for (const model of modelsToTry) {
@@ -349,11 +416,25 @@ Return ONLY valid JSON.`;
         }
       }
     } catch {
-      // Fallback regex extraction
-      const phoneMatch = text.match(/(?:0\d{2}[\s.-]?\d{3}[\s.-]?\d{3,4}|0\d{8,9})/);
-      extracted.phone_number = phoneMatch ? phoneMatch[0].replace(/[\s.-]/g, '') : '';
-      extracted.full_address = text.trim();
-      extracted.location_zone = /ភ្នំពេញ|pp|phnom penh/i.test(text) ? 'PHNOM_PENH' : 'PROVINCE';
+      // ignore
+    }
+  }
+
+  // Resilient Regex & Khmer Heuristic Fallback if AI is exhausted or offline
+  if (!extracted.phone_number && !extracted.full_address) {
+    const phoneMatch = text.match(/(?:0\d{2}[\s.-]?\d{3}[\s.-]?\d{3,4}|0\d{8,9}|\+855\d{8,9})/);
+    const phone = phoneMatch ? phoneMatch[0].replace(/[\s.-]/g, '') : '';
+    let address = text.replace(/(?:0\d{2}[\s.-]?\d{3}[\s.-]?\d{3,4}|0\d{8,9}|\+855\d{8,9})/, '').trim();
+    if (!address) address = text.trim();
+    const isPP = /ភ្នំពេញ|pp|phnom penh|ចាក់អង្រែ|ទួលគោក|បឹងកេងកង|សែនសុខ|មានជ័យ|ដង្កោ|ច្បារអំពៅ|ឫស្សីកែវ|ជ្រោយចង្វារ|ពោធិ៍សែនជ័យ|កំបូល|ព្រែកព្នៅ/i.test(text);
+    const zone = isPP ? 'PHNOM_PENH' : 'PROVINCE';
+
+    if (phone || (address && address.length > 2)) {
+      extracted = {
+        phone_number: phone,
+        full_address: address,
+        location_zone: zone
+      };
     }
   }
 
@@ -392,9 +473,9 @@ Return ONLY valid JSON.`;
     bumpDataRevision();
     saveDatabaseToDisk();
 
-    const zoneText = matchedInv.location_zone === 'PP' ? 'រាជធានីភ្នំពេញ' : 'តាមបណ្តាខេត្ត';
+    const zoneText = matchedInv.location_zone === 'PP' ? 'ភ្នំពេញ' : 'ខេត្ត';
     const feeText = `$${(matchedInv.shipping_fee ?? 1.0).toFixed(2)}`;
-    const reply = `📍 ហាងបានកត់ត្រាព័ត៌មានដឹកជញ្ជូនរបស់បង ${senderName} ក្នុងកន្ត្រក #${matchedInv.basket_no || matchedInv.invoice_id} រួចរាល់ ៖\n\n📞 លេខទូរស័ព្ទ ៖ ${matchedInv.phone_number || 'មិនទាន់មាន'}\n🏠 ទីតាំង ៖ ${matchedInv.address}\n🚚 តំបន់ ៖ ${zoneText} (សេវាដឹក ${feeText})\n💵 សរុបរួម ៖ $${matchedInv.total_amount.toFixed(2)}\n\nអរគុណច្រើនបង! 🙏`;
+    const reply = `✅ ហាងបានកត់ត្រាទីតាំងរបស់បង ${senderName} ក្នុងកន្ត្រក #${matchedInv.basket_no || matchedInv.invoice_id} ៖\n📞 ${matchedInv.phone_number || 'មិនទាន់មាន'}\n📍 ${matchedInv.address}\n🚚 សេវាដឹក (${zoneText}) ៖ ${feeText} ‧ សរុប ៖ $${matchedInv.total_amount.toFixed(2)}\nអរគុណច្រើនបង! 🙏`;
 
     addChatbotLog({
       type: 'ADDRESS_EXTRACTED',
@@ -408,6 +489,19 @@ Return ONLY valid JSON.`;
     });
 
     return { isAddressOrPhone: true, reply, invoice: matchedInv };
+  } else {
+    // No active basket, but confirmed address/phone
+    const reply = `✅ ហាងបានកត់ត្រាលេខទូរស័ព្ទ និងទីតាំងរបស់បង ${senderName} រួចរាល់ហើយ។ អរគុណច្រើនបង! 🙏`;
+    addChatbotLog({
+      type: 'ADDRESS_EXTRACTED',
+      customer_name: senderName,
+      customer_id: senderId,
+      incoming_message: text,
+      bot_reply: reply,
+      status: 'SUCCESS',
+      meta: extracted
+    });
+    return { isAddressOrPhone: true, reply };
   }
 
   return { isAddressOrPhone: false };
@@ -480,6 +574,136 @@ export function generateShippingNotification(
   });
 
   return msg;
+}
+
+/**
+ * -------------------------------------------------------------
+ * 4.5. AI KHMER VOICE / AUDIO NOTE UNDERSTANDING (#12)
+ * -------------------------------------------------------------
+ */
+export async function processIncomingVoiceAudio(
+  senderId: string,
+  senderName: string,
+  audioBase64: string,
+  mimeType: string = 'audio/mp4'
+): Promise<{ success: boolean; reply: string; transcription?: string; invoice?: Invoice; type?: string }> {
+  if (!chatbotConfig.enabled || !chatbotConfig.enableVoiceUnderstanding) {
+    return { success: false, reply: '' };
+  }
+
+  const ai = getGenAI();
+  if (!ai) {
+    return { success: false, reply: '' };
+  }
+
+  try {
+    const cleanBase64 = audioBase64.replace(/^data:audio\/\w+;base64,/, '');
+
+    const promptText = `You are an expert Khmer speech-to-text transcriber and conversational AI assistant for "${chatbotConfig.shopName}".
+Listen to this Khmer audio voice note from customer "${senderName}".
+1. Transcribe the spoken Khmer audio accurately.
+2. Determine what the customer is saying:
+   - Are they providing a phone number (e.g. 012..., 096..., 015..., 088...)?
+   - Are they providing a delivery address/location (e.g. ភ្នំពេញ, ច្បារអំពៅ, សៀមរាប, បាត់ដំបង...)?
+   - Are they asking a customer service FAQ question (e.g. shop location, working hours, shipping rate, basket status)?
+
+Return strictly valid JSON:
+{
+  "transcription": "spoken Khmer text",
+  "has_phone_or_address": true/false,
+  "phone": "012345678" or null,
+  "address": "location text" or null,
+  "reply_khmer": "Polite, direct 1-2 lines Khmer reply"
+}
+Return ONLY pure JSON. No markdown ticks, no commentary.`;
+
+    const modelCandidates = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+    let ocrResText = '';
+    for (const modelName of modelCandidates) {
+      try {
+        const res = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { inlineData: { mimeType: mimeType || 'audio/mp4', data: cleanBase64 } },
+                { text: promptText }
+              ]
+            }
+          ]
+        });
+        if (res.text) {
+          ocrResText = res.text;
+          break;
+        }
+      } catch (e: any) {
+        console.warn(`[Gemini Voice Audio candidate ${modelName} unavailable/quota]:`, e?.message || e);
+      }
+    }
+
+    if (!ocrResText) {
+      return {
+        success: false,
+        reply: '⚠️ ប្រព័ន្ធទទួលសំឡេងកំពុងមមាញឹកបន្តិច សូមបងសាកល្បងម្ដងទៀត ឬវាយជាអក្សរជំនួសវិញបានណា៎បង! 🙏'
+      };
+    }
+
+    const cleaned = ocrResText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const transcription = parsed.transcription || '';
+
+    // If customer spoke address or phone
+    if (parsed.has_phone_or_address || parsed.phone || parsed.address) {
+      const addressResult = await processIncomingAddressText(
+        senderId,
+        senderName,
+        transcription || `${parsed.phone || ''} ${parsed.address || ''}`
+      );
+      if (addressResult.isAddressOrPhone && addressResult.reply) {
+        addChatbotLog({
+          type: 'VOICE_PROCESSED',
+          customer_name: senderName,
+          customer_id: senderId,
+          incoming_message: `🎙️ [Voice]: "${transcription}"`,
+          bot_reply: addressResult.reply,
+          status: 'SUCCESS',
+          meta: { transcription, phone: parsed.phone, address: parsed.address }
+        });
+        return {
+          success: true,
+          reply: addressResult.reply,
+          transcription,
+          invoice: addressResult.invoice,
+          type: 'ADDRESS_EXTRACTED'
+        };
+      }
+    }
+
+    // FAQ / Query reply
+    const faqReply = await processCustomerFaq(senderId, senderName, transcription);
+    const finalReply = faqReply || parsed.reply_khmer || `🎙️ ចាសបង ${senderName}! ហាងបានទទួលសារជាសំឡេងរបស់បងហើយ។ អរគុណបង! 🙏`;
+
+    addChatbotLog({
+      type: 'VOICE_PROCESSED',
+      customer_name: senderName,
+      customer_id: senderId,
+      incoming_message: `🎙️ [Voice]: "${transcription}"`,
+      bot_reply: finalReply,
+      status: 'SUCCESS',
+      meta: { transcription, parsed }
+    });
+
+    return {
+      success: true,
+      reply: finalReply,
+      transcription,
+      type: 'VOICE_PROCESSED'
+    };
+  } catch (err: any) {
+    console.error('[Process Voice Error]:', err);
+    return { success: false, reply: '' };
+  }
 }
 
 /**
@@ -618,8 +842,8 @@ export async function processCustomerFaq(
 
   try {
     const customerGreeting = displayName !== 'ភ្ញៀវ' ? `បង ${displayName}` : 'បង';
-    const systemInstruction = `You are a polite, helpful, and friendly Khmer AI Customer Service Assistant for "${chatbotConfig.shopName}".
-Here is the official shop knowledge base:
+    const systemInstruction = `You are a concise, polite, straight-to-the-point Khmer customer service AI for "${chatbotConfig.shopName}".
+Official Shop Knowledge:
 - Shop Location: ${chatbotConfig.shopLocation}
 - Working Hours: ${chatbotConfig.workingHours}
 - Delivery Time: Phnom Penh (${chatbotConfig.deliveryTimePP}), Provinces (${chatbotConfig.deliveryTimeProvince})
@@ -627,13 +851,13 @@ Here is the official shop knowledge base:
 - Exchange Policy: ${chatbotConfig.exchangePolicy}
 - Additional Guidelines: ${chatbotConfig.customFaqPrompt}
 
-Rules:
-1. Always respond in natural, polite, respectful Khmer.
-2. Address the customer as "${customerGreeting}". Never call them "Facebook Customer".
-3. Keep answers clear, accurate to the knowledge base, and concise.
-4. If asked about their basket or order, kindly invite them to provide their phone number or basket number.`;
+CRITICAL RULES:
+1. STRICTLY CONCISE: Reply in maximum 1-3 short lines. Do NOT write long essays, paragraphs, or fluff.
+2. DIRECT TO THE POINT: Answer the customer's question directly (price, location, delivery, time) without unnecessary pleasantries or repeating long greetings.
+3. Natural, polite Khmer. Address customer as "${customerGreeting}".
+4. Never ask long unnecessary follow-up questions.`;
 
-    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
     let faqText = '';
 
     for (const model of modelsToTry) {
@@ -648,7 +872,7 @@ Rules:
           }
         });
         if (response.text) {
-          faqText = response.text;
+          faqText = response.text.trim();
           break;
         }
       } catch {
@@ -656,7 +880,21 @@ Rules:
       }
     }
 
-    const reply = faqText || `សួស្តីបង${displayName !== 'ភ្ញៀវ' ? ` ${displayName}` : ''}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
+    // Smart Knowledge Fallback if AI quota is exhausted
+    if (!faqText) {
+      const lower = userMessage.toLowerCase();
+      if (/ទីតាំង|នៅឯណា|កន្លែងណា|location|ហាងនៅ|ម្តុំណា/i.test(lower)) {
+        faqText = `ចាស${customerGreeting}! ហាងអូនមានទីតាំងនៅ ៖ ${chatbotConfig.shopLocation} បងណា៎ 🙏`;
+      } else if (/ម៉ោង|បើក|បិទ|working hours|time/i.test(lower)) {
+        faqText = `ចាស${customerGreeting}! ហាងបើកទទួលភ្ញៀវជារៀងរាល់ថ្ងៃ ម៉ោង ${chatbotConfig.workingHours} ណា៎បង 🙏`;
+      } else if (/ថ្លៃដឹក|សេវាដឹក|ដឹកភ្នំពេញ|ដឹកខេត្ត|delivery|shipping/i.test(lower)) {
+        faqText = `ចាស${customerGreeting}! សេវាដឹកភ្នំពេញ $${chatbotConfig.shippingRatePP.toFixed(2)} (${chatbotConfig.deliveryTimePP}) និងតាមខេត្ត $${chatbotConfig.shippingRateProvince.toFixed(2)} (${chatbotConfig.deliveryTimeProvince}) បងណា៎! 🚚`;
+      } else if (/ប្តូរ|ដូរ|ខូច|exchange|return/i.test(lower)) {
+        faqText = `ចាស${customerGreeting}! គោលការណ៍ប្តូរទំនិញ ៖ ${chatbotConfig.exchangePolicy} ណា៎បង 🙏`;
+      }
+    }
+
+    const reply = faqText || `សួស្តី${customerGreeting}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះណា៎។ 🙏`;
 
     addChatbotLog({
       type: 'AI_FAQ',

@@ -273,15 +273,20 @@ export async function callGeminiSlipExtraction(
   imagePart: { inlineData: { mimeType: string; data: string } },
   textPart: { text: string }
 ): Promise<{ text: string; error?: string }> {
-  // Use gemini-3.8-flash with gemini-3.1-flash-lite fallback for high-throughput extraction
-  const modelCandidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+  // Flagship high-accuracy model with high-throughput fallbacks
+  const modelCandidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   let lastErrorMessage = '';
 
   for (const model of modelCandidates) {
     try {
       const response: GenerateContentResponse = await ai.models.generateContent({
         model,
-        contents: { parts: [imagePart, textPart] },
+        contents: [
+          {
+            role: 'user',
+            parts: [imagePart, textPart]
+          }
+        ],
         config: {
           responseMimeType: 'application/json',
           temperature: 0.1
@@ -294,7 +299,7 @@ export async function callGeminiSlipExtraction(
     } catch (err: any) {
       const msg = String(err?.message || (typeof err === 'object' ? JSON.stringify(err) : err));
       lastErrorMessage = msg;
-      // Seamlessly proceed to the next fallback model without throwing noisy console warnings
+      console.warn(`[Gemini Slip Scan on ${model}]:`, msg);
     }
   }
 
