@@ -370,6 +370,46 @@ export function ChatbotModal({
             </div>
           ) : activeTab === 'FEATURES' && config ? (
             <div className="space-y-4">
+              {/* MASTER SWITCH: Enable/Disable Entire Chatbot */}
+              <div className={`p-4 rounded-2xl border-2 transition-all flex items-center justify-between gap-4 ${
+                config.enabled
+                  ? 'bg-gradient-to-r from-emerald-950/80 via-indigo-950/80 to-emerald-950/80 border-emerald-500/70 shadow-[0_0_25px_rgba(16,185,129,0.2)]'
+                  : 'bg-rose-950/40 border-rose-500/50'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold ${
+                    config.enabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                  }`}>
+                    {config.enabled ? '🟢' : '🔴'}
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-white flex items-center gap-2">
+                      <span>ដំណើរការ AI Chatbot ទាំងមូល (Master Switch)</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                        config.enabled ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-400/50' : 'bg-rose-500/30 text-rose-300 border border-rose-400/50'
+                      }`}>
+                        {config.enabled ? 'កំពុងដំណើរការ (ACTIVE)' : 'បានផ្អាក/បិទ (PAUSED)'}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-300">
+                      {config.enabled
+                        ? 'ប្រព័ន្ធ AI កំពុងដំណើរការឆ្លើយតបសារ និងស្កេន Slip ស្វ័យប្រវត្តិតាមមុខងារដែលបានបើកខាងក្រោម'
+                        : 'បានផ្អាក/បិទដំណើរការ Chatbot ទាំងស្រុង (គ្មានការឆ្លើយតបសារ ឬផ្ញើសារចូល Messenger ឡើយ)'}
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={config.enabled}
+                    onChange={e => setConfig({ ...config, enabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-14 h-7 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-500"></div>
+                </label>
+              </div>
+
               {/* Feature 1: Slip Auto-Verification (#2) */}
               <div className="p-4 rounded-2xl bg-[#09152C] border border-[#1C335C] flex items-start justify-between gap-4">
                 <div className="space-y-1">

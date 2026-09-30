@@ -142,10 +142,10 @@ export async function processIncomingSlipImage(
   imageBase64: string,
   mimeType: string = 'image/jpeg'
 ): Promise<{ success: boolean; reply: string; invoice?: Invoice }> {
-  if (!chatbotConfig.enableSlipAutoVerify) {
+  if (!chatbotConfig.enabled || !chatbotConfig.enableSlipAutoVerify) {
     return {
       success: false,
-      reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពវិក្កយបត្រហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងឆាប់ៗនេះ។`
+      reply: ''
     };
   }
 
@@ -153,7 +153,7 @@ export async function processIncomingSlipImage(
   if (!ai) {
     return {
       success: false,
-      reply: `អរគុណបង ${senderName}! ហាងបានទទួលវិក្កយបត្រហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបង។`
+      reply: ''
     };
   }
 
@@ -292,7 +292,7 @@ export async function processIncomingAddressText(
   senderName: string,
   text: string
 ): Promise<{ isAddressOrPhone: boolean; reply?: string; invoice?: Invoice }> {
-  if (!chatbotConfig.enableAddressAutoExtract) return { isAddressOrPhone: false };
+  if (!chatbotConfig.enabled || !chatbotConfig.enableAddressAutoExtract) return { isAddressOrPhone: false };
 
   // Quick heuristic: does it contain phone numbers or typical address keywords?
   const hasPhone = /(?:0\d{8,9}|\+855\d{8,9})/.test(text.replace(/[\s-]/g, ''));
@@ -546,6 +546,10 @@ export async function processCustomerFaq(
   senderName: string,
   userMessage: string
 ): Promise<string> {
+  if (!chatbotConfig.enabled || !chatbotConfig.enableAiFaq) {
+    return '';
+  }
+
   const displayName = senderName && !senderName.toLowerCase().includes('customer') ? senderName : 'ភ្ញៀវ';
 
   // 1. Check if user is asking about their basket or mentioning basket number (e.g. #860, 860, អីវ៉ាន់ខ្ញុំបានអីខ្លះ)
@@ -607,13 +611,9 @@ export async function processCustomerFaq(
     }
   }
 
-  if (!chatbotConfig.enableAiFaq) {
-    return `សួស្តីបង${displayName !== 'ភ្ញៀវ' ? ` ${displayName}` : ''}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
-  }
-
   const ai = getGenAI();
   if (!ai) {
-    return `សួស្តីបង${displayName !== 'ភ្ញៀវ' ? ` ${displayName}` : ''}! ហាងបានទទួលសាររបស់បងហើយ បុគ្គលិកនឹងឆ្លើយតបជូនបងឆាប់ៗនេះ។`;
+    return '';
   }
 
   try {

@@ -121,6 +121,12 @@ router.post('/webhook', async (req: Request, res: Response) => {
   const body = req.body;
 
   if (body.object === 'page') {
+    const config = getChatbotConfig();
+    if (!config.enabled) {
+      console.log('⏸️ [Messenger Inbound] Ignored - Chatbot Master Switch is OFF');
+      return res.status(200).send('CHATBOT_DISABLED');
+    }
+
     for (const entry of body.entry) {
       const webhookEvent = entry.messaging?.[0];
       if (!webhookEvent) continue;
@@ -138,7 +144,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
           if (imageAttachment && imageAttachment.payload?.url) {
             processIncomingSlipImage(senderPsid, customerName, imageAttachment.payload.url)
               .then(slipRes => {
-                if (slipRes.reply) {
+                if (slipRes.reply && slipRes.reply.trim()) {
                   sendFacebookMessengerReply(senderPsid, slipRes.reply);
                 }
               })
@@ -147,11 +153,11 @@ router.post('/webhook', async (req: Request, res: Response) => {
         } else if (message.text) {
           // Handle Text (Address/Phone or FAQ / Basket Query)
           const addrRes = await processIncomingAddressText(senderPsid, customerName, message.text);
-          if (addrRes.isAddressOrPhone && addrRes.reply) {
+          if (addrRes.isAddressOrPhone && addrRes.reply && addrRes.reply.trim()) {
             await sendFacebookMessengerReply(senderPsid, addrRes.reply);
           } else {
             const faqReply = await processCustomerFaq(senderPsid, customerName, message.text);
-            if (faqReply) {
+            if (faqReply && faqReply.trim()) {
               await sendFacebookMessengerReply(senderPsid, faqReply);
             }
           }
