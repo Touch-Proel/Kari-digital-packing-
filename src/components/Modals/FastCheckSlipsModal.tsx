@@ -265,6 +265,51 @@ export function FastCheckSlipsModal({
     });
   };
 
+  // Merge multiple candidate baskets for same customer directly from Fast-Check
+  const handleMergeCandidates = async (itemIndex: number, candidates: any[], paidAmount?: number) => {
+    if (!candidates || candidates.length < 2) return;
+    const target = candidates[0];
+    const sources = candidates.slice(1);
+
+    try {
+      const res = await fetch('/api/invoices/merge_baskets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_invoice_id: target.invoice_id,
+          source_invoice_ids: sources.map(s => s.invoice_id)
+        })
+      });
+
+      const data = await res.json();
+      if (data.success && data.invoice) {
+        playSuccessFanfare();
+        const mergedBasketNos = candidates.map(c => `#${c.basket_no}`).join(' + ');
+        onShowToast(`🎉 បានច្របាច់កន្ត្រក ${mergedBasketNos} ចូលគ្នាតែ ១ កញ្ចប់ជោគជ័យ!`, 'success');
+        
+        // Update the result item to MATCHED with the newly consolidated invoice
+        setResults(prev => {
+          const copy = [...prev];
+          copy[itemIndex] = {
+            ...copy[itemIndex],
+            status: 'MATCHED',
+            confidence: 100,
+            matched_invoice: {
+              ...data.invoice,
+              total_amount: paidAmount && paidAmount > 0 ? paidAmount : data.invoice.total_amount
+            }
+          };
+          return copy;
+        });
+      } else {
+        throw new Error(data.error || 'បរាជ័យក្នុងការច្របាច់កន្ត្រក');
+      }
+    } catch (err: any) {
+      playWarningBuzzer();
+      onShowToast(err.message || '⚠️ មានបញ្ហាក្នុងការច្របាច់កន្ត្រក!', 'error');
+    }
+  };
+
   // Confirm and mark all matched invoices as Paid
   const handleConfirmAll = async () => {
     const matchedItems = results.filter(r => r.status === 'MATCHED' && r.matched_invoice);
@@ -697,10 +742,38 @@ export function FastCheckSlipsModal({
 
                       {/* Candidate Selection Dropdown */}
                       {(isAmbiguous || isNotFound) && item.candidates && item.candidates.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-amber-500/30">
-                          <div className="text-[11px] text-amber-300 font-bold mb-1.5 flex items-center justify-between">
-                            <span>👉 {isAmbiguous ? 'រកឃើញកន្ត្រកដែលមានឈ្មោះស្រដៀងគ្នា' : 'ជ្រើសរើសកន្ត្រកដែលត្រូវគ្នានឹងវិក្កយបត្រនេះ'} ៖</span>
-                            <span className="text-[10px] text-slate-400">ចុចរើសកន្ត្រក</span>
+                        <div className="mt-2 pt-2 border-t border-amber-500/30 space-y-2">
+                          {/* 1-Click Multi-Basket Merge Option if 2 or more baskets exist for customer */}
+                          {item.candidates.length >= 2 && (() => {
+                            const totalCandidatesPrice = item.candidates.reduce((sum, c) => sum + (c.total_amount || 0), 0);
+                            const mergedNames = item.candidates.map(c => `#${c.basket_no}`).join(' + ');
+                            const displayPay = item.extracted.paid_amount > 0 ? item.extracted.paid_amount : totalCandidatesPrice;
+
+                            return (
+                              <div className="bg-gradient-to-r from-amber-950/80 via-indigo-950/90 to-amber-950/80 border-2 border-amber-400/80 rounded-xl p-2.5 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
+                                <div className="flex items-center justify-between text-xs font-bold text-amber-200 mb-1.5 flex-wrap gap-1">
+                                  <span className="flex items-center gap-1">
+                                    <span>📦</span>
+                                    <span>ភ្ញៀវមាន {item.candidates.length} កន្ត្រក ($5 + $7 = $12) ៖</span>
+                                  </span>
+                                  <span className="font-mono text-emerald-400 font-black">
+                                    Slip បង់: ${displayPay.toFixed(2)}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleMergeCandidates(idx, item.candidates!, item.extracted.paid_amount)}
+                                  className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
+                                >
+                                  <span>🔗</span>
+                                  <span>ច្របាច់ទាំង {item.candidates.length} កន្ត្រក ({mergedNames}) ចូលគ្នាតែ ១ កញ្ចប់ ➔ ផ្ទៀងផ្ទាត់ [បង់រួច]</span>
+                                </button>
+                              </div>
+                            );
+                          })()}
+
+                          <div className="text-[11px] text-slate-300 font-bold mb-1 flex items-center justify-between">
+                            <span>ឬរើសយកកន្ត្រកតែមួយ ៖</span>
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                             {item.candidates.map((cand, cIdx) => (
@@ -708,7 +781,7 @@ export function FastCheckSlipsModal({
                                 key={cIdx}
                                 type="button"
                                 onClick={() => handleSelectCandidate(idx, cand)}
-                                className="text-left p-2 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-400 text-xs text-slate-200 flex items-center justify-between group transition-colors"
+                                className="text-left p-2 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-400 text-xs text-slate-200 flex items-center justify-between group transition-colors cursor-pointer"
                               >
                                 <div>
                                   <span className="font-bold text-white">#{cand.basket_no}</span> - {cand.facebook_name}
@@ -717,7 +790,7 @@ export function FastCheckSlipsModal({
                                   </div>
                                 </div>
                                 <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-bold group-hover:bg-amber-500 group-hover:text-black">
-                                  រើសយក
+                                  រើសតែ #{cand.basket_no}
                                 </span>
                               </button>
                             ))}
