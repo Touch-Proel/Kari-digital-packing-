@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PickingItem } from '../../types';
 import { playPureTone, playWarningBuzzer } from '../../utils/audio';
+import { ImageZoomModal, ZoomModalItem } from './ImageZoomModal';
 
 interface PickingModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export function PickingModal({
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<PickingItem | null>(null);
   const [alsoRemoveFromBaskets, setAlsoRemoveFromBaskets] = useState(true);
   const [deletingLoading, setDeletingLoading] = useState(false);
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
 
   const fetchPickingList = useCallback(() => {
     setLoading(true);
@@ -124,29 +126,38 @@ export function PickingModal({
                 key={it.code}
                 className="bg-slate-900/80 border border-slate-800 hover:border-slate-700 p-2 rounded-xl flex justify-between items-center transition-colors shadow-sm gap-2"
               >
-                {/* Product Image & Info */}
-                <div className="flex items-center gap-2 min-w-0 flex-1">
+                {/* Product Image & Info (Click to Zoom) */}
+                <div 
+                  className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer group"
+                  onClick={() => setZoomIndex(idx)}
+                  title={`ចុចពង្រីករូបភាពកូដ [${it.code}]`}
+                >
                   <span className="text-slate-500 font-mono text-[11px] w-4 shrink-0">#{idx + 1}</span>
 
-                  {it.image_url ? (
-                    <img
-                      src={it.image_url}
-                      alt={it.code}
-                      className="w-11 h-11 rounded-lg object-cover border border-slate-700 bg-slate-800 shrink-0 shadow-sm"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-sm shrink-0">
-                      👗
+                  <div className="relative shrink-0 group-hover:scale-105 transition-transform">
+                    {it.image_url ? (
+                      <img
+                        src={it.image_url}
+                        alt={it.code}
+                        className="w-11 h-11 rounded-lg object-cover border border-slate-700 bg-slate-800 shadow-sm group-hover:border-emerald-500"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-sm group-hover:border-emerald-500">
+                        👗
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 rounded-lg flex items-center justify-center text-white text-[10px] transition-opacity">
+                      🔍
                     </div>
-                  )}
+                  </div>
 
                   <div className="flex flex-col min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="bg-blue-900/80 text-sky-300 px-1.5 py-0.5 rounded text-[11px] font-mono font-black border border-blue-600 shrink-0">
+                      <span className="bg-blue-900/80 text-sky-300 px-1.5 py-0.5 rounded text-[11px] font-mono font-black border border-blue-600 shrink-0 group-hover:border-emerald-400">
                         [{it.code}]
                       </span>
-                      <span className="font-bold text-xs text-white truncate max-w-[110px] sm:max-w-[150px]" title={it.product_name}>
+                      <span className="font-bold text-xs text-white truncate max-w-[110px] sm:max-w-[150px] group-hover:text-emerald-300 transition-colors" title={it.product_name}>
                         {it.product_name}
                       </span>
                     </div>
@@ -156,7 +167,11 @@ export function PickingModal({
 
                 {/* Remaining Quantity & Delete */}
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg font-black text-xs font-mono shadow-sm whitespace-nowrap">
+                  <span 
+                    onClick={() => setZoomIndex(idx)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg font-black text-xs font-mono shadow-sm whitespace-nowrap cursor-pointer active:scale-95 transition-transform"
+                    title="ចុចពង្រីកមើល"
+                  >
                     {it.total_qty} ឈុត
                   </span>
 
@@ -260,6 +275,29 @@ export function PickingModal({
               </div>
             </div>
           </div>
+        )}
+
+        {/* Full-screen HD Image Zoom Modal */}
+        {zoomIndex !== null && (
+          <ImageZoomModal
+            isOpen={zoomIndex !== null}
+            onClose={() => setZoomIndex(null)}
+            items={items.map(it => ({
+              code: it.code,
+              name: it.product_name,
+              imageUrl: it.image_url,
+              price: it.price,
+              quantity: it.total_qty,
+              stockQty: it.stock_qty
+            }))}
+            initialIndex={zoomIndex}
+            activeLiveId={liveId}
+            onStockUpdated={() => {
+              fetchPickingList();
+              if (onStockUpdated) onStockUpdated();
+            }}
+            onShowToast={onShowToast}
+          />
         )}
       </div>
     </div>
