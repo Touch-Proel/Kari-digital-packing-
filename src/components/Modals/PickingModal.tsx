@@ -113,28 +113,50 @@ export function PickingModal({
           {loading ? (
             <div className="text-center py-12 text-slate-400 text-sm">⏳ កំពុងទាញយក...</div>
           ) : items.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 text-sm">🎉 គ្មានទំនិញត្រូវការប្រមូលក្នុង Live នេះឡើយ។</div>
+            <div className="text-center py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-sm">
+              <span className="text-3xl">🎉</span>
+              <span className="font-bold text-emerald-400">អីវ៉ាន់ទាំងអស់ត្រូវបានរើសច្រកថង់រួចរាល់សព្វគ្រប់!</span>
+              <span className="text-xs text-slate-500">គ្មានទំនិញនៅសល់ត្រូវទៅរើសទៀតឡើយ (0 ឈុត)</span>
+            </div>
           ) : (
             items.map((it, idx) => (
               <div
                 key={it.code}
-                className="bg-slate-900/80 border border-slate-800 hover:border-slate-700 p-2.5 rounded-xl flex justify-between items-center transition-colors shadow-sm gap-2"
+                className="bg-slate-900/80 border border-slate-800 hover:border-slate-700 p-2 rounded-xl flex justify-between items-center transition-colors shadow-sm gap-2"
               >
-                {/* Item Code & Name */}
+                {/* Product Image & Info */}
                 <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className="text-slate-500 font-mono text-xs w-5 shrink-0">#{idx + 1}</span>
-                  <span className="bg-blue-900/80 text-sky-300 px-2 py-0.5 rounded text-xs font-mono font-black border border-blue-600 shrink-0">
-                    [{it.code}]
-                  </span>
-                  <span className="font-bold text-xs sm:text-sm text-white truncate max-w-[120px] sm:max-w-[160px]" title={it.product_name}>
-                    {it.product_name}
-                  </span>
+                  <span className="text-slate-500 font-mono text-[11px] w-4 shrink-0">#{idx + 1}</span>
+
+                  {it.image_url ? (
+                    <img
+                      src={it.image_url}
+                      alt={it.code}
+                      className="w-11 h-11 rounded-lg object-cover border border-slate-700 bg-slate-800 shrink-0 shadow-sm"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-sm shrink-0">
+                      👗
+                    </div>
+                  )}
+
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="bg-blue-900/80 text-sky-300 px-1.5 py-0.5 rounded text-[11px] font-mono font-black border border-blue-600 shrink-0">
+                        [{it.code}]
+                      </span>
+                      <span className="font-bold text-xs text-white truncate max-w-[110px] sm:max-w-[150px]" title={it.product_name}>
+                        {it.product_name}
+                      </span>
+                    </div>
+                    <span className="text-amber-400 font-mono text-[11px] font-bold mt-0.5">${it.price.toFixed(2)}</span>
+                  </div>
                 </div>
 
-                {/* Price, Quantity, & Delete from Stock Button */}
-                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-                  <span className="text-amber-400 font-mono text-xs font-bold">${it.price.toFixed(2)}</span>
-                  <span className="bg-emerald-700 text-white px-2 py-1 rounded-lg font-black text-xs font-mono shadow-sm whitespace-nowrap">
+                {/* Remaining Quantity & Delete */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 rounded-lg font-black text-xs font-mono shadow-sm whitespace-nowrap">
                     {it.total_qty} ឈុត
                   </span>
 

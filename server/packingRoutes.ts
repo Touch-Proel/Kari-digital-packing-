@@ -2256,10 +2256,13 @@ router.post('/clean_empty_baskets', (req: Request, res: Response) => {
   });
 });
 
-// GET /api/picking_list
+// GET /api/picking_list - Warehouse Standard (Option 1: Remaining Unpicked Items Only with Images)
 router.get('/picking_list', (req: Request, res: Response) => {
   const liveId = (req.query.live_id as string) || activeLiveId;
-  const targetInvoices = liveId ? invoices.filter(i => i.live_id === liveId && i.status !== 'Cancelled') : invoices;
+  // Only calculate items that are NOT YET picked/staged (UNPICKED baskets)
+  const targetInvoices = liveId
+    ? invoices.filter(i => i.live_id === liveId && i.status !== 'Cancelled' && i.packing_stage === 'UNPICKED' && i.status !== 'Dispatched' && i.status !== 'Packed')
+    : invoices.filter(i => i.status !== 'Cancelled' && i.packing_stage === 'UNPICKED' && i.status !== 'Dispatched' && i.status !== 'Packed');
 
   const summaryMap = new Map<string, {
     code: string;
@@ -2268,29 +2271,38 @@ router.get('/picking_list', (req: Request, res: Response) => {
     total_qty: number;
     exists_in_stock: boolean;
     stock_qty: number;
+    image_url?: string;
   }>();
 
   for (const inv of targetInvoices) {
-    for (const it of inv.items) {
-      const existing = summaryMap.get(it.product_code);
+    for (const it of inv.items || []) {
+      if (it.is_packed) continue; // Item already packed in this basket
+      if (!it.quantity || it.quantity <= 0) continue;
+
+      const cleanCode = (it.product_code || '').trim().toUpperCase();
+      if (!cleanCode) continue;
+
+      const existing = summaryMap.get(cleanCode);
       if (existing) {
         existing.total_qty += it.quantity;
       } else {
         const prod = products.find(p => {
-          if ((p.live_id || activeLiveId) !== liveId) return false;
-          const pCode = p.code.toUpperCase().trim();
-          const itCode = it.product_code.toUpperCase().trim();
-          const cleanItCode = itCode.replace(/^\[|\]$/g, '');
-          return pCode === itCode || pCode === cleanItCode || pCode.replace(/^\[|\]$/g, '') === cleanItCode;
+          if ((p.live_id || activeLiveId) !== (inv.live_id || liveId)) return false;
+          const pCode = (p.code || '').toUpperCase().trim();
+          const cleanItCode = cleanCode.replace(/^\[|\]$/g, '');
+          return pCode === cleanCode || pCode === cleanItCode || pCode.replace(/^\[|\]$/g, '') === cleanItCode;
         });
 
-        summaryMap.set(it.product_code, {
-          code: it.product_code,
-          product_name: it.product_name,
-          price: it.price,
+        const img = it.image_file || prod?.image_file;
+
+        summaryMap.set(cleanCode, {
+          code: cleanCode,
+          product_name: prod?.name || it.product_name || `កូដ ${cleanCode}`,
+          price: prod?.price || it.price,
           total_qty: it.quantity,
           exists_in_stock: !!prod,
-          stock_qty: prod ? prod.stock_qty : 0
+          stock_qty: prod ? prod.stock_qty : 0,
+          image_url: img
         });
       }
     }

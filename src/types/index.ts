@@ -126,6 +126,7 @@ export interface PickingItem {
   total_qty: number;
   exists_in_stock?: boolean;
   stock_qty?: number;
+  image_url?: string;
 }
 
 export interface Customer {
