@@ -81,6 +81,11 @@ interface BasketCardProps {
     productName?: string
   ) => void;
   onUpdateInvoice?: (inv: Invoice, revision?: number) => void;
+  onOptimisticStageTransition?: (
+    invoiceId: number,
+    targetStage: 'STAGED' | 'PAID' | 'DISPATCHED' | 'UNPICKED',
+    options?: { payment_method?: string; customSuccessMsg?: string }
+  ) => Promise<boolean>;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onUndispatch?: (inv: Invoice) => void;
   onDeleteBasket?: (invId: number) => void;
@@ -105,6 +110,7 @@ function BasketCardComponent({
   onOptimisticEditItem,
   onOptimisticZoneUpdate,
   onOptimisticAddItem,
+  onOptimisticStageTransition,
   onUpdateInvoice,
   onShowToast,
   onUndispatch,
@@ -488,7 +494,7 @@ function BasketCardComponent({
           locked_by: myPackerName
         });
       }
-      await fetch('/api/lock_invoice', {
+      const res = await fetch('/api/lock_invoice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -496,8 +502,17 @@ function BasketCardComponent({
           packer_name: myPackerName
         })
       });
-      // Do NOT call onDataChanged() here; calling onDataChanged() triggers fetchInvoices()
-      // which causes baskets to jitter and re-fetch from the network mid-click.
+      const data = await res.json();
+      if (res.status === 409 || data.locked) {
+        // Concurrency conflict: Someone else locked it!
+        if (onUpdateInvoice) {
+          onUpdateInvoice({
+            ...invoice,
+            is_locked: true,
+            locked_by: data.locked_by || 'បុគ្គលិកផ្សេង'
+          });
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -1076,12 +1091,24 @@ function BasketCardComponent({
     }
   };
 
-  // Mark Basket as Paid -> Moves to Stage 3 (បង់រួច-QC)
+  // Mark Basket as Paid -> Moves to Stage 3 (បង់រួច-QC) with 0ms Optimistic Transition
   const handleMarkAsPaid = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!checkLockGuard()) return;
     setIsMarkingPaid(true);
     playPureTone(950, 0.08);
+
+    if (onOptimisticStageTransition) {
+      const ok = await onOptimisticStageTransition(invoice.invoice_id, 'PAID', {
+        payment_method: 'ABA/Bakong',
+        customSuccessMsg: `✅ កន្ត្រក #${invoice.basket_no || invoice.invoice_id} បានបង់ប្រាក់រួចរាល់ ➔ ចូលផ្ទាំង បង់រួច-QC!`
+      });
+      setIsMarkingPaid(false);
+      if (ok) {
+        playSuccessFanfare();
+      }
+      return;
+    }
 
     try {
       const res = await fetch('/api/mark_invoice_paid', {
@@ -1094,6 +1121,11 @@ function BasketCardComponent({
         })
       });
       const data = await res.json();
+      if (res.status === 409 || data.locked) {
+        playWarningBuzzer();
+        onShowToast(data.message || data.error || `⚠️ កន្ត្រកនេះកំពុងច្រកដោយបុគ្គលិកផ្សេង!`, 'error');
+        return;
+      }
       if (data.success) {
         playSuccessFanfare();
         invoice.status = 'Paid';
@@ -1113,10 +1145,19 @@ function BasketCardComponent({
     }
   };
 
-  // Revert Paid to Unpaid (If clicked by mistake)
+  // Revert Paid to Unpaid (If clicked by mistake) with 0ms Optimistic Transition
   const handleRevertToUnpaid = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!checkLockGuard()) return;
+
+    if (onOptimisticStageTransition) {
+      const ok = await onOptimisticStageTransition(invoice.invoice_id, 'UNPICKED', {
+        customSuccessMsg: `↩️ បានប្តូរកន្ត្រក #${invoice.basket_no || invoice.invoice_id} មក «រង់ចាំបង់» វិញ!`
+      });
+      if (ok) playPureTone(600, 0.06);
+      return;
+    }
+
     try {
       const res = await fetch('/api/mark_invoice_unpaid', {
         method: 'POST',

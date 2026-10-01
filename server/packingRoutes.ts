@@ -68,12 +68,46 @@ router.get('/invoices', (req: Request, res: Response) => {
     filtered = invoices.filter(inv => inv.live_id === liveId);
   }
 
-  // Calculate live lock state and find cross-live merge candidates
+  // Pre-group active uncancelled/undispatched invoices by user_id, facebook_name, and phone_number once (O(N) lookup)
+  const userMap = new Map<string, Invoice[]>();
+  const nameMap = new Map<string, Invoice[]>();
+  const phoneMap = new Map<string, Invoice[]>();
+
+  for (const other of invoices) {
+    if (other.status === 'Dispatched' || other.status === 'Cancelled' || (other as any).is_merged) continue;
+    if (!other.items || other.items.length === 0) continue;
+
+    if (other.facebook_user_id && other.facebook_user_id !== 'FB_USER_ID_STREAM' && other.facebook_user_id !== 'FB_MANUAL_USER') {
+      const list = userMap.get(other.facebook_user_id) || [];
+      list.push(other);
+      userMap.set(other.facebook_user_id, list);
+    }
+
+    if (other.facebook_name) {
+      const fn = other.facebook_name.trim().toLowerCase();
+      if (fn) {
+        const list = nameMap.get(fn) || [];
+        list.push(other);
+        nameMap.set(fn, list);
+      }
+    }
+
+    if (other.phone_number) {
+      const pn = other.phone_number.replace(/[^0-9]/g, '');
+      if (pn.length >= 8) {
+        const list = phoneMap.get(pn) || [];
+        list.push(other);
+        phoneMap.set(pn, list);
+      }
+    }
+  }
+
+  // Calculate live lock state and find cross-live merge candidates with O(1) hash lookups
   const result = filtered.map(inv => {
     const lock = activeInvoiceLocks.get(inv.invoice_id);
     const isLocked = !!lock;
 
-    // Find cross-live merge candidates (Active baskets from previous/other lives belonging to the same customer)
+    // Find cross-live merge candidates
     let mergeCandidates: Array<{
       invoice_id: number;
       basket_no: number | string;
@@ -90,37 +124,42 @@ router.get('/invoices', (req: Request, res: Response) => {
       const fName = (inv.facebook_name || '').trim().toLowerCase();
       const pNum = (inv.phone_number || '').replace(/[^0-9]/g, '');
 
-      mergeCandidates = invoices
-        .filter(other => {
-          if (other.invoice_id === inv.invoice_id || other.status === 'Dispatched' || other.status === 'Cancelled' || (other as any).is_merged) {
-            return false;
-          }
-          if (!other.items || other.items.length === 0) return false;
+      const candidateMap = new Map<number, Invoice>();
 
-          // Match by Facebook User ID (Priority)
-          if (uId && uId !== 'FB_USER_ID_STREAM' && uId !== 'FB_MANUAL_USER' && other.facebook_user_id === uId) {
-            return true;
-          }
-          // Match by Facebook Name
-          if (fName && other.facebook_name && other.facebook_name.trim().toLowerCase() === fName) {
-            return true;
-          }
-          // Match by Valid Phone Number
-          if (pNum && pNum.length >= 8 && other.phone_number && other.phone_number.replace(/[^0-9]/g, '') === pNum) {
-            return true;
-          }
-          return false;
-        })
-        .map(other => ({
-          invoice_id: other.invoice_id,
-          basket_no: other.basket_no || other.invoice_id,
-          live_id: other.live_id,
-          total_amount: other.total_amount,
-          items_count: other.items.reduce((s, it) => s + (it.quantity || 1), 0),
-          created_at: other.created_at,
-          status: other.status,
-          staged_by: other.staged_by
-        }));
+      // 1. Match by Facebook User ID
+      if (uId && uId !== 'FB_USER_ID_STREAM' && uId !== 'FB_MANUAL_USER') {
+        const matched = userMap.get(uId) || [];
+        for (const m of matched) {
+          if (m.invoice_id !== inv.invoice_id) candidateMap.set(m.invoice_id, m);
+        }
+      }
+
+      // 2. Match by Facebook Name
+      if (fName) {
+        const matched = nameMap.get(fName) || [];
+        for (const m of matched) {
+          if (m.invoice_id !== inv.invoice_id) candidateMap.set(m.invoice_id, m);
+        }
+      }
+
+      // 3. Match by Phone
+      if (pNum && pNum.length >= 8) {
+        const matched = phoneMap.get(pNum) || [];
+        for (const m of matched) {
+          if (m.invoice_id !== inv.invoice_id) candidateMap.set(m.invoice_id, m);
+        }
+      }
+
+      mergeCandidates = Array.from(candidateMap.values()).map(other => ({
+        invoice_id: other.invoice_id,
+        basket_no: other.basket_no || other.invoice_id,
+        live_id: other.live_id,
+        total_amount: other.total_amount,
+        items_count: other.items.reduce((s, it) => s + (it.quantity || 1), 0),
+        created_at: other.created_at,
+        status: other.status,
+        staged_by: other.staged_by
+      }));
     }
 
     return {
@@ -1041,9 +1080,20 @@ router.post(['/update_invoice_shipping', '/invoices/:invoice_id/shipping', '/api
   res.json({ success: true, is_free_ship: false, shipping_fee: inv.shipping_fee, total_amount: inv.total_amount });
 });
 
-// POST /api/lock_invoice
+// Helper to check if an invoice is currently locked by a DIFFERENT packer
+function isInvoiceLockedByOther(invoiceId: number, reqPackerName?: string): { locked: boolean; lockedBy?: string } {
+  cleanExpiredLocks();
+  const lock = activeInvoiceLocks.get(invoiceId);
+  if (!lock) return { locked: false };
+  if (!reqPackerName || lock.packer_name.trim().toLowerCase() !== String(reqPackerName).trim().toLowerCase()) {
+    return { locked: true, lockedBy: lock.packer_name };
+  }
+  return { locked: false };
+}
+
+// POST /api/lock_invoice - Instant lock with race condition rejection
 router.post(['/lock_invoice', '/api/lock_invoice'], (req: Request, res: Response) => {
-  const { invoice_id, packer_name } = req.body;
+  const { invoice_id, packer_name, force } = req.body;
   const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
   const packer = String(packer_name || 'បុគ្គលិក').trim();
 
@@ -1051,11 +1101,13 @@ router.post(['/lock_invoice', '/api/lock_invoice'], (req: Request, res: Response
   const existing = activeInvoiceLocks.get(cleanId);
   const now = Date.now();
 
-  if (existing && existing.packer_name.toLowerCase() !== packer.toLowerCase()) {
+  if (!force && existing && existing.packer_name.toLowerCase() !== packer.toLowerCase()) {
     if (now - existing.timestamp < 120 * 1000) {
       return res.status(409).json({
         success: false,
-        error: `កន្ត្រកនេះកំពុងច្រកដោយ ${existing.packer_name}!`,
+        locked: true,
+        error: `កន្ត្រកនេះកំពុងច្រកដោយ «${existing.packer_name}»!`,
+        message: `កន្ត្រកនេះកំពុងច្រកដោយ «${existing.packer_name}»!`,
         locked_by: existing.packer_name
       });
     }
@@ -1067,8 +1119,8 @@ router.post(['/lock_invoice', '/api/lock_invoice'], (req: Request, res: Response
     start_time: existing?.start_time || now
   });
 
-  bumpDataRevision();
-  res.json({ success: true });
+  const rev = bumpDataRevision();
+  res.json({ success: true, locked_by: packer, revision: rev });
 });
 
 // POST /api/unlock_invoice
@@ -1082,22 +1134,35 @@ router.post(['/unlock_invoice', '/api/unlock_invoice'], (req: Request, res: Resp
     bumpDataRevision();
   }
 
-  res.json({ success: true });
+  res.json({ success: true, revision: getDataRevision() });
 });
 
-// POST /api/mark_invoice_paid
+// POST /api/mark_invoice_paid - Concurrency Guarded (No Double Action)
 router.post(['/mark_invoice_paid', '/api/mark_invoice_paid'], (req: Request, res: Response) => {
   const { invoice_id, packer_name, payment_method } = req.body;
   const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
-  const inv = invoices.find(i => i.invoice_id === cleanId);
+  const pName = String(packer_name || 'បុគ្គលិក').trim();
 
+  // 🔒 Concurrency Guard: Check if another packer is holding a lock on this basket
+  const lockCheck = isInvoiceLockedByOther(cleanId, pName);
+  if (lockCheck.locked) {
+    return res.status(409).json({
+      success: false,
+      locked: true,
+      error: `កន្ត្រកនេះត្រូវបានចាក់សោ/រើសដោយ «${lockCheck.lockedBy}» រួចហើយ!`,
+      message: `កន្ត្រកនេះត្រូវបានចាក់សោ/រើសដោយ «${lockCheck.lockedBy}» រួចហើយ!`,
+      locked_by: lockCheck.lockedBy
+    });
+  }
+
+  const inv = invoices.find(i => i.invoice_id === cleanId);
   if (!inv) {
     return res.status(404).json({ success: false, error: 'Invoice not found' });
   }
 
   inv.status = 'Paid';
   (inv as any).payment_status = 'Paid';
-  inv.paid_by = String(packer_name || 'បុគ្គលិក');
+  inv.paid_by = pName;
   inv.paid_at = new Date().toISOString();
   if (payment_method) {
     inv.payment_method = payment_method;
@@ -1105,18 +1170,19 @@ router.post(['/mark_invoice_paid', '/api/mark_invoice_paid'], (req: Request, res
   // Ensure it has entered STAGED stage so it belongs in QC workflow
   if (inv.packing_stage === 'UNPICKED') {
     inv.packing_stage = 'STAGED';
-    inv.staged_by = String(packer_name || 'បុគ្គលិក');
+    inv.staged_by = pName;
     inv.staged_at = new Date().toISOString();
   }
 
   activeInvoiceLocks.delete(cleanId);
-  bumpDataRevision();
+  const rev = bumpDataRevision();
   saveDatabaseToDisk();
 
   res.json({
     success: true,
     message: `✅ កន្ត្រក #${cleanId} បានបង់ប្រាក់រួចរាល់ ➔ បញ្ជូនទៅផ្ទាំង បង់រួច-QC ជោគជ័យ!`,
-    invoice: inv
+    invoice: inv,
+    revision: rev
   });
 });
 
@@ -1134,49 +1200,79 @@ router.post(['/mark_invoice_unpaid', '/api/mark_invoice_unpaid'], (req: Request,
   (inv as any).payment_status = 'Unpaid';
   delete inv.paid_at;
   delete inv.paid_by;
-  bumpDataRevision();
+  const rev = bumpDataRevision();
   saveDatabaseToDisk();
 
   res.json({
     success: true,
     message: `បានប្តូរកន្ត្រក #${cleanId} មកស្ថានភាព «រង់ចាំបង់» វិញ!`,
-    invoice: inv
+    invoice: inv,
+    revision: rev
   });
 });
 
-// POST /api/stage_pack
+// POST /api/stage_pack - Concurrency Guarded (UNPICKED -> STAGED)
 router.post('/stage_pack', (req: Request, res: Response) => {
   const { invoice_id, packer_name } = req.body;
   const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
-  const inv = invoices.find(i => i.invoice_id === cleanId);
+  const pName = String(packer_name || 'បុគ្គលិក').trim();
 
+  // 🔒 Concurrency Guard: Check if another packer is holding a lock on this basket
+  const lockCheck = isInvoiceLockedByOther(cleanId, pName);
+  if (lockCheck.locked) {
+    return res.status(409).json({
+      success: false,
+      locked: true,
+      error: `កន្ត្រកនេះត្រូវបានចាក់សោ/រើសដោយ «${lockCheck.lockedBy}» រួចហើយ!`,
+      message: `កន្ត្រកនេះត្រូវបានចាក់សោ/រើសដោយ «${lockCheck.lockedBy}» រួចហើយ!`,
+      locked_by: lockCheck.lockedBy
+    });
+  }
+
+  const inv = invoices.find(i => i.invoice_id === cleanId);
   if (!inv) {
     return res.status(404).json({ success: false, error: 'Invoice not found' });
   }
 
   inv.packing_stage = 'STAGED';
-  inv.staged_by = String(packer_name || 'បុគ្គលិក');
+  inv.staged_by = pName;
   inv.staged_at = new Date().toISOString();
   activeInvoiceLocks.delete(cleanId);
 
-  bumpDataRevision();
+  const rev = bumpDataRevision();
+  saveDatabaseToDisk();
+
   res.json({
     success: true,
-    message: `បានព្រីន និងដាក់កន្ត្រក #${cleanId} លើធ្នើរង់ចាំលុយ!`
+    message: `បានព្រីន និងដាក់កន្ត្រក #${cleanId} លើធ្នើរង់ចាំលុយ!`,
+    invoice: inv,
+    revision: rev
   });
 });
 
-// POST /api/dispatch_pack
+// POST /api/dispatch_pack - Concurrency Guarded (STAGED/QC -> DISPATCHED)
 router.post('/dispatch_pack', (req: Request, res: Response) => {
   const { invoice_id, packer_name } = req.body;
   const cleanId = parseInt(String(invoice_id).replace('#', '').trim(), 10);
-  const inv = invoices.find(i => i.invoice_id === cleanId);
+  const pName = String(packer_name || 'អ្នកផ្ទៀងផ្ទាត់').trim();
 
+  // 🔒 Concurrency Guard: Check if another packer is holding a lock on this basket
+  const lockCheck = isInvoiceLockedByOther(cleanId, pName);
+  if (lockCheck.locked) {
+    return res.status(409).json({
+      success: false,
+      locked: true,
+      error: `កន្ត្រកនេះត្រូវបានចាក់សោ/រើសដោយ «${lockCheck.lockedBy}» រួចហើយ!`,
+      message: `កន្ត្រកនេះត្រូវបានចាក់សោ/រើសដោយ «${lockCheck.lockedBy}» រួចហើយ!`,
+      locked_by: lockCheck.lockedBy
+    });
+  }
+
+  const inv = invoices.find(i => i.invoice_id === cleanId);
   if (!inv) {
     return res.status(404).json({ success: false, error: 'Invoice not found' });
   }
 
-  const pName = String(packer_name || 'អ្នកផ្ទៀងផ្ទាត់');
   const lock = activeInvoiceLocks.get(cleanId);
   const duration = lock ? Math.max(5, Math.round((Date.now() - lock.start_time) / 1000)) : 25;
 
@@ -1210,12 +1306,14 @@ router.post('/dispatch_pack', (req: Request, res: Response) => {
   });
 
   activeInvoiceLocks.delete(cleanId);
-  bumpDataRevision();
+  const rev = bumpDataRevision();
   saveDatabaseToDisk();
 
   res.json({
     success: true,
-    message: `កញ្ចប់ #${cleanId} ត្រូវបានផ្ទៀងផ្ទាត់ និងបញ្ចេញដឹកជោគជ័យ!`
+    message: `កញ្ចប់ #${cleanId} ត្រូវបានផ្ទៀងផ្ទាត់ និងបញ្ចេញដឹកជោគជ័យ!`,
+    invoice: inv,
+    revision: rev
   });
 });
 
@@ -1643,16 +1741,6 @@ router.post('/update_customer_contact', (req: Request, res: Response) => {
   bumpDataRevision();
   res.json({ success: true, location_zone: inv?.location_zone, location_label: inv?.location_label });
 });
-
-function isInvoiceLockedByOther(invoiceId: number, reqPackerName?: string): { locked: boolean; lockedBy?: string } {
-  cleanExpiredLocks();
-  const lock = activeInvoiceLocks.get(invoiceId);
-  if (!lock) return { locked: false };
-  if (!reqPackerName || lock.packer_name.trim().toLowerCase() !== String(reqPackerName).trim().toLowerCase()) {
-    return { locked: true, lockedBy: lock.packer_name };
-  }
-  return { locked: false };
-}
 
 // POST /api/edit_basket_item_code - Directly change product code/price/qty on a basket item
 router.post('/edit_basket_item_code', (req: Request, res: Response) => {

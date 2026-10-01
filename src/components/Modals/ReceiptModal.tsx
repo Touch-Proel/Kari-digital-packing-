@@ -31,6 +31,11 @@ interface ReceiptModalProps {
   myPackerName: string;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onStagePackSuccess?: () => void;
+  onOptimisticStageTransition?: (
+    invoiceId: number,
+    targetStage: 'STAGED' | 'PAID' | 'DISPATCHED' | 'UNPICKED',
+    options?: { payment_method?: string; customSuccessMsg?: string }
+  ) => Promise<boolean>;
 }
 
 type PrintMode = 'bluetooth' | 'rawbt' | 'browser' | 'agent' | 'lan';
@@ -41,7 +46,8 @@ export function ReceiptModal({
   invoice,
   myPackerName,
   onShowToast,
-  onStagePackSuccess
+  onStagePackSuccess,
+  onOptimisticStageTransition
 }: ReceiptModalProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const offscreenRenderRef = useRef<HTMLDivElement>(null);
@@ -321,9 +327,16 @@ export function ReceiptModal({
     hour12: true
   });
 
-  // Handle Stage Pack workflow transition (UNPICKED -> STAGED / រង់ចាំលុយ)
+  // Handle Stage Pack workflow transition (UNPICKED -> STAGED / រង់ចាំលុយ) with 0ms Optimistic Transition
   const triggerStagePack = async (source = 'RawBT') => {
     if (invoice.packing_stage === 'UNPICKED' || !invoice.packing_stage) {
+      if (onOptimisticStageTransition) {
+        await onOptimisticStageTransition(invoice.invoice_id, 'STAGED', {
+          customSuccessMsg: `បានព្រីន និងដាក់កន្ត្រក #${invoice.basket_no || invoice.invoice_id} លើធ្នើរង់ចាំលុយ!`
+        });
+        if (onStagePackSuccess) onStagePackSuccess();
+        return;
+      }
       invoice.packing_stage = 'STAGED'; // Instant optimistic update
       try {
         await fetch('/api/stage_pack', {

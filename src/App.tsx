@@ -755,6 +755,137 @@ export default function App() {
     });
   }, []);
 
+  // Immediate 0ms Optimistic Stage Transition (Zero-Lag Stage Transition with Race Revert Guard)
+  const handleOptimisticStageTransition = useCallback(async (
+    invoiceId: number,
+    targetStage: 'STAGED' | 'PAID' | 'DISPATCHED' | 'UNPICKED',
+    options?: {
+      payment_method?: string;
+      customSuccessMsg?: string;
+    }
+  ): Promise<boolean> => {
+    let previousInv: Invoice | undefined;
+    let targetInvState: Partial<Invoice> = {};
+
+    setInvoices(prev => {
+      const existing = prev.find(i => i.invoice_id === invoiceId);
+      if (!existing) return prev;
+      previousInv = { ...existing };
+
+      const nowIso = new Date().toISOString();
+      if (targetStage === 'STAGED') {
+        targetInvState = {
+          packing_stage: 'STAGED',
+          staged_by: packerName,
+          staged_at: nowIso,
+          is_locked: false,
+          locked_by: undefined
+        };
+      } else if (targetStage === 'PAID') {
+        targetInvState = {
+          status: 'Paid',
+          payment_status: 'Paid',
+          paid_by: packerName,
+          paid_at: nowIso,
+          payment_method: options?.payment_method || existing.payment_method || 'ABA/Bakong',
+          packing_stage: existing.packing_stage === 'UNPICKED' ? 'STAGED' : existing.packing_stage,
+          is_locked: false,
+          locked_by: undefined
+        };
+      } else if (targetStage === 'DISPATCHED') {
+        targetInvState = {
+          packing_stage: 'DISPATCHED',
+          status: 'Dispatched',
+          dispatched_at: nowIso,
+          dispatched_by: packerName,
+          is_locked: false,
+          locked_by: undefined
+        };
+      } else if (targetStage === 'UNPICKED') {
+        targetInvState = {
+          packing_stage: 'UNPICKED',
+          status: 'Pending',
+          payment_status: 'Unpaid',
+          is_locked: false,
+          locked_by: undefined
+        };
+      }
+
+      // Lock optimistic state for 3500ms so background polls CANNOT overwrite or resurrect the basket back to old stage!
+      pendingMutationsRef.current.set(invoiceId, {
+        timestamp: Date.now(),
+        minRevision: currentRevisionRef.current + 1,
+        ...targetInvState
+      });
+
+      return prev.map(inv => inv.invoice_id === invoiceId ? {
+        ...inv,
+        ...targetInvState,
+        updated_at: nowIso
+      } : inv);
+    });
+
+    try {
+      let endpoint = '';
+      let body: any = { invoice_id: invoiceId, packer_name: packerName };
+
+      if (targetStage === 'STAGED') {
+        endpoint = '/api/stage_pack';
+      } else if (targetStage === 'PAID') {
+        endpoint = '/api/mark_invoice_paid';
+        body.payment_method = options?.payment_method || 'ABA/Bakong';
+      } else if (targetStage === 'DISPATCHED') {
+        endpoint = '/api/dispatch_pack';
+      } else if (targetStage === 'UNPICKED') {
+        endpoint = '/api/mark_invoice_unpaid';
+      }
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+
+      if (res.status === 409 || data.locked) {
+        // Concurrency collision! Another packer already grabbed or packed this basket!
+        playWarningBuzzer();
+        showToast(data.message || data.error || `⚠️ កន្ត្រក #${invoiceId} ត្រូវបានចាក់សោ ឬរើសដោយបុគ្គលិកផ្សេងរួចហើយ!`, 'error');
+        // Revert optimistic mutation
+        if (previousInv) {
+          pendingMutationsRef.current.delete(invoiceId);
+          setInvoices(prev => prev.map(inv => inv.invoice_id === invoiceId ? (data.invoice || previousInv!) : inv));
+        }
+        return false;
+      }
+
+      if (data.success) {
+        if (data.revision && data.revision > currentRevisionRef.current) {
+          currentRevisionRef.current = data.revision;
+          setCurrentRevision(data.revision);
+        }
+        if (options?.customSuccessMsg) {
+          showToast(options.customSuccessMsg, 'success');
+        }
+        return true;
+      } else {
+        throw new Error(data.message || data.error || 'Server error');
+      }
+    } catch (err: any) {
+      if (err.message && err.message.includes('ចាក់សោ')) {
+        return false;
+      }
+      playWarningBuzzer();
+      showToast(err.message || '⚠️ មានបញ្ហាតភ្ជាប់បណ្តាញ!', 'error');
+      // Revert if error
+      if (previousInv) {
+        pendingMutationsRef.current.delete(invoiceId);
+        setInvoices(prev => prev.map(inv => inv.invoice_id === invoiceId ? previousInv! : inv));
+      }
+      return false;
+    }
+  }, [packerName, showToast]);
+
   // Data Fetching: Invoices with 0ms revision check, concurrency lock, and optimistic preservation
   const fetchInvoices = async (overrideLiveId?: string, overrideRev?: number) => {
     // Avoid piling parallel polls on slow networks
@@ -819,7 +950,14 @@ export default function App() {
                     unmatched_comments: pending.unmatched_comments !== undefined ? pending.unmatched_comments : local.unmatched_comments,
                     total_amount: pending.total_amount !== undefined ? pending.total_amount : local.total_amount,
                     location_zone: pending.location_zone || local.location_zone,
-                    shipping_fee: pending.shipping_fee !== undefined ? pending.shipping_fee : local.shipping_fee
+                    shipping_fee: pending.shipping_fee !== undefined ? pending.shipping_fee : local.shipping_fee,
+                    packing_stage: pending.packing_stage !== undefined ? pending.packing_stage : local.packing_stage,
+                    status: pending.status !== undefined ? pending.status : local.status,
+                    payment_status: pending.payment_status !== undefined ? pending.payment_status : (local as any).payment_status,
+                    paid_at: pending.paid_at !== undefined ? pending.paid_at : local.paid_at,
+                    paid_by: pending.paid_by !== undefined ? pending.paid_by : local.paid_by,
+                    dispatched_at: pending.dispatched_at !== undefined ? pending.dispatched_at : (local as any).dispatched_at,
+                    dispatched_by: pending.dispatched_by !== undefined ? pending.dispatched_by : (local as any).dispatched_by
                   };
                 }
               } else {
@@ -1866,6 +2004,7 @@ export default function App() {
                 onOptimisticEditItem={handleOptimisticEditItem}
                 onOptimisticZoneUpdate={handleOptimisticZoneUpdate}
                 onOptimisticAddItem={handleOptimisticAddItem}
+                onOptimisticStageTransition={handleOptimisticStageTransition}
                 onUpdateInvoice={handleUpdateInvoice}
                 onShowToast={showToast}
                 onUndispatch={handleUndispatch}
@@ -1926,6 +2065,7 @@ export default function App() {
         }}
         onShowToast={showToast}
         onScanPingCustomer={handleManualScanPing}
+        onOptimisticStageTransition={handleOptimisticStageTransition}
       />
 
       {/* 💬 Floating Notification: Last Pinged Customer (Direct Meta Business Suite Link) */}
@@ -2085,6 +2225,7 @@ export default function App() {
           fetchInvoices();
           fetchPackerStats();
         }}
+        onOptimisticStageTransition={handleOptimisticStageTransition}
       />
 
       <VipInvoiceModal

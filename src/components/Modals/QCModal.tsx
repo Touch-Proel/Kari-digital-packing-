@@ -23,6 +23,11 @@ interface QCModalProps {
   onDispatchSuccess: (invoiceId: number) => void;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onScanPingCustomer?: (inv: Invoice) => void;
+  onOptimisticStageTransition?: (
+    invoiceId: number,
+    targetStage: 'STAGED' | 'PAID' | 'DISPATCHED' | 'UNPICKED',
+    options?: { payment_method?: string; customSuccessMsg?: string }
+  ) => Promise<boolean>;
 }
 
 export function QCModal({
@@ -35,7 +40,8 @@ export function QCModal({
   onOpenZoomModal,
   onDispatchSuccess,
   onShowToast,
-  onScanPingCustomer
+  onScanPingCustomer,
+  onOptimisticStageTransition
 }: QCModalProps) {
   const [verifiedMap, setVerifiedMap] = useState<Record<string, boolean>>({});
 
@@ -65,6 +71,17 @@ export function QCModal({
       confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
       playSuccessFanfare();
 
+      if (onOptimisticStageTransition) {
+        const ok = await onOptimisticStageTransition(invoice.invoice_id, 'DISPATCHED', {
+          customSuccessMsg: `🚀 កញ្ចប់ #${invoice.basket_no || invoice.invoice_id} បិទស្កុតចេញដឹកជោគជ័យ!`
+        });
+        if (ok) {
+          onDispatchSuccess(invoice.invoice_id);
+          onClose();
+        }
+        return;
+      }
+
       const res = await fetch('/api/dispatch_pack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -75,6 +92,10 @@ export function QCModal({
       });
 
       const data = await res.json();
+      if (res.status === 409 || data.locked) {
+        onShowToast(data.message || data.error || 'កន្ត្រកនេះត្រូវបានចាក់សោដោយបុគ្គលិកផ្សេង!', 'error');
+        return;
+      }
       if (data.success) {
         onShowToast(`🚀 កញ្ចប់ #${invoice.basket_no || invoice.invoice_id} បិទស្កុតចេញដឹកជោគជ័យ!`);
         onDispatchSuccess(invoice.invoice_id);
