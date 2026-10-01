@@ -11,7 +11,7 @@ import {
   FacebookPage
 } from './types';
 import { persistToSqlite, loadFromSqlite } from './sqlite';
-import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment, isQuestionOrLiveChatter } from './locationHelper';
 import { extractPhoneNumber } from './parser';
 
 let dataRevision = 1;
@@ -143,6 +143,34 @@ export const products: Product[] = [
 
 // Initial Invoices (Baskets)
 export const invoices: Invoice[] = [
+  {
+    invoice_id: 860,
+    basket_no: 860,
+    live_id: '1626350178950100',
+    created_at: new Date().toISOString(),
+    facebook_user_id: 'TEST_USER_1',
+    facebook_name: 'Dany Ka',
+    phone_number: '096 442 8567',
+    address: 'ចាក់អង្រែលើ ភ្នំពេញ',
+    location_zone: 'PP',
+    location_label: '🏙️ ភ្នំពេញ',
+    total_amount: 15.50,
+    shipping_fee: 1.00,
+    is_free_ship: false,
+    status: 'Pending',
+    packing_stage: 'STAGED',
+    staged_by: 'សុខា',
+    staged_at: new Date().toISOString(),
+    msg_status: 'SENT',
+    items: [
+      { id: 10, invoice_id: 860, product_id: 4, product_code: 'B05', product_name: 'ឈុតគេងយប់សូត្រ VIP', quantity: 2, price: 5.00, is_packed: true, item_comment: 'B05=2' },
+      { id: 11, invoice_id: 860, product_id: 2, product_code: '54', product_name: 'អាវយឺតកូរ៉េដៃខ្លី', quantity: 1, price: 4.50, is_packed: true, item_comment: '54x1' }
+    ],
+    comments: [
+      'B05=2 និង 54 មួយចែ 0964428567 ចាក់អង្រែលើ ភ្នំពេញ'
+    ],
+    unmatched_comments: []
+  },
   {
     invoice_id: 101,
     basket_no: 101,
@@ -509,6 +537,38 @@ export async function loadDatabaseFromDisk() {
       console.log(`[JSON Loaded] Loaded ${invoices.length} invoices, ${products.length} products from db_store.json`);
     }
 
+    // Ensure sample basket #860 for Dany Ka exists for seamless testing
+    if (invoices.length === 0 || !invoices.some(i => i.basket_no === 860 || i.invoice_id === 860)) {
+      invoices.push({
+        invoice_id: 860,
+        basket_no: 860,
+        live_id: activeLiveId || '1626350178950100',
+        created_at: new Date().toISOString(),
+        facebook_user_id: 'TEST_USER_1',
+        facebook_name: 'Dany Ka',
+        phone_number: '096 442 8567',
+        address: 'ចាក់អង្រែលើ ភ្នំពេញ',
+        location_zone: 'PP',
+        location_label: '🏙️ ភ្នំពេញ',
+        total_amount: 15.50,
+        shipping_fee: 1.00,
+        is_free_ship: false,
+        status: 'Pending',
+        packing_stage: 'STAGED',
+        staged_by: 'សុខា',
+        staged_at: new Date().toISOString(),
+        msg_status: 'SENT',
+        items: [
+          { id: 10, invoice_id: 860, product_id: 4, product_code: 'B05', product_name: 'ឈុតគេងយប់សូត្រ VIP', quantity: 2, price: 5.00, is_packed: true, item_comment: 'B05=2' },
+          { id: 11, invoice_id: 860, product_id: 2, product_code: '54', product_name: 'អាវយឺតកូរ៉េដៃខ្លី', quantity: 1, price: 4.50, is_packed: true, item_comment: '54x1' }
+        ],
+        comments: [
+          'B05=2 និង 54 មួយចែ 0964428567 ចាក់អង្រែលើ ភ្នំពេញ'
+        ],
+        unmatched_comments: []
+      });
+    }
+
     // Strictly enforce shipping fee $2.0 flat across all orders
     settings.default_shipping_fee = 2.0;
     settings.free_ship_threshold = 0;
@@ -613,7 +673,7 @@ export async function loadDatabaseFromDisk() {
 
       // Sanitize existing address: strip accidental product codes, phone numbers, sizes, colors, or chat questions
       if (inv.address) {
-        if (/(?:ខោជើងប៉ាត|160m|ពាក់បានអត់|ពាក់បានទេ|លក់ម៉េច|ប៉ុន្មាន)/i.test(inv.address)) {
+        if (isQuestionOrLiveChatter(inv.address) || /(?:ខោជើងប៉ាត|160m|ពាក់បានអត់|ពាក់បានទេ|លក់ម៉េច|ប៉ុន្មាន|បងមាន|ចែមាន|មានសំពត់|សំពត់ក្មេង|លើកសំពត់|លើកឈុត|មានពណ៌|តើអី|បងលើក|ចែលើក)/i.test(inv.address)) {
           inv.address = '';
         } else if (/(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS)\b)|(?:ពណ៌|ពណ៍)\s*[\u1780-\u17D2]+|(?:\b0\d{8,9}\b)|(?:\*+)/i.test(inv.address)) {
           const cleaned = extractCleanAddressFromComment(inv.address);
@@ -623,35 +683,39 @@ export async function loadDatabaseFromDisk() {
         }
       }
 
-      // If address is empty or missing, search comments for clean address
-      if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត') {
+      // If address is empty or missing, search ALL comments for clean address
+      if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || isQuestionOrLiveChatter(inv.address)) {
+        let foundCleanAddr = '';
         for (const c of inv.comments || []) {
           const clean = extractCleanAddressFromComment(c);
-          if (clean) {
-            inv.address = clean;
+          if (clean && !isQuestionOrLiveChatter(clean)) {
+            foundCleanAddr = clean;
             break;
           }
+        }
+        if (foundCleanAddr) {
+          inv.address = foundCleanAddr;
         }
       }
 
       // Core Routing Rule: Accurate Phnom Penh detection, all remaining baskets are Province!
       // "ex 200 កន្រ្តក់ ប្រពន្ធ័ ចាប់ភ្នំពេញបាន 50 ក្រៅពីនឹងដាក់ចូលខេត្ត 150"
-      const zoneCheckTarget = (inv.address && !inv.address.includes('មិនទាន់មាន')) ? inv.address : (inv.comments || []).join(' ');
+      const zoneCheckTarget = (inv.address && !inv.address.includes('មិនទាន់មាន') && !isQuestionOrLiveChatter(inv.address)) ? inv.address : (inv.comments || []).join(' ');
       const zoneRes = detectDeliveryZone(zoneCheckTarget);
 
       if (zoneRes.zone === 'PP') {
         inv.location_zone = 'PP';
         inv.location_label = '🏙️ ភ្នំពេញ';
-        if (zoneRes.detectedLocation && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត')) {
+        if (zoneRes.detectedLocation && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត' || isQuestionOrLiveChatter(inv.address))) {
           inv.address = zoneRes.detectedLocation;
         }
       } else {
         inv.location_zone = 'PROVINCE';
         inv.location_label = '🏞️ តាមខេត្ត';
-        if (zoneRes.hasExplicitLocation && zoneRes.detectedLocation) {
+        if (zoneRes.hasExplicitLocation && zoneRes.detectedLocation && !isQuestionOrLiveChatter(zoneRes.detectedLocation)) {
           inv.address = zoneRes.detectedLocation;
-        } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
-          inv.address = '🏞️ តាមខេត្ត';
+        } else if (!inv.address || inv.address.includes('មិនទាន់មាន') || isQuestionOrLiveChatter(inv.address)) {
+          inv.address = '⚠️ មិនទាន់មានអាសយដ្ឋាន';
         }
       }
 

@@ -369,6 +369,12 @@ export async function processIncomingAddressText(
     return { isAddressOrPhone: false };
   }
 
+  // Guard: If customer is asking an order inquiry/tracking/status question and NOT giving a phone number, route to FAQ/Chat engine!
+  const isQuestionSentence = /(ចេញមកនៅ|ចេញនៅ|ផ្ញើនៅ|ដឹកនៅ|ដល់នៅ|នៅបង|ប៉ុន្មាន|ថ្លៃ|ពេលណា|ម៉ោង|នៅឯណា|កន្លែងណា|មិច|ម៉េច|ទេ\?|\?|បានអីខ្លះ|អាវ៉ាន់|អីវ៉ាន់)/i.test(text);
+  if (isQuestionSentence && !hasPhone) {
+    return { isAddressOrPhone: false };
+  }
+
   const ai = getGenAI();
   let extracted = { phone_number: '', full_address: '', location_zone: 'UNKNOWN' };
 
@@ -600,20 +606,27 @@ export async function processIncomingVoiceAudio(
     const cleanBase64 = audioBase64.replace(/^data:audio\/\w+;base64,/, '');
 
     const promptText = `You are an expert Khmer speech-to-text transcriber and conversational AI assistant for "${chatbotConfig.shopName}".
+Shop Details:
+- Location: ${chatbotConfig.shopLocation}
+- Working Hours: ${chatbotConfig.workingHours}
+- Delivery: Phnom Penh (${chatbotConfig.deliveryTimePP}, $${chatbotConfig.shippingRatePP.toFixed(2)}), Provinces (${chatbotConfig.deliveryTimeProvince}, $${chatbotConfig.shippingRateProvince.toFixed(2)})
+- Policy: ${chatbotConfig.exchangePolicy}
+
 Listen to this Khmer audio voice note from customer "${senderName}".
 1. Transcribe the spoken Khmer audio accurately.
-2. Determine what the customer is saying:
-   - Are they providing a phone number (e.g. 012..., 096..., 015..., 088...)?
-   - Are they providing a delivery address/location (e.g. ភ្នំពេញ, ច្បារអំពៅ, សៀមរាប, បាត់ដំបង...)?
-   - Are they asking a customer service FAQ question (e.g. shop location, working hours, shipping rate, basket status)?
+2. Determine user's real intention:
+   - "is_providing_address_phone": true ONLY if the customer is specifically providing their delivery address/phone for their order (e.g. "012345678 ផ្ទះលេខ...", "ផ្ញើមកខេត្តកណ្តាល លេខ 096..."). If they are asking a question (e.g. asking if order is sent/dispatched, asking price, asking hours, tracking), set this to false.
+   - "phone": "012345678" or null,
+   - "address": "location text" or null,
+   - "reply_khmer": "Sweet-toned, polite, and strictly 1-2 lines Khmer reply directly answering what the customer asked (e.g. 'ចាសបង [ឈ្មោះ]!... ណា៎បង 🙏✨')."
 
 Return strictly valid JSON:
 {
   "transcription": "spoken Khmer text",
-  "has_phone_or_address": true/false,
-  "phone": "012345678" or null,
-  "address": "location text" or null,
-  "reply_khmer": "Polite, direct 1-2 lines Khmer reply"
+  "is_providing_address_phone": true/false,
+  "phone": null,
+  "address": null,
+  "reply_khmer": "..."
 }
 Return ONLY pure JSON. No markdown ticks, no commentary.`;
 
@@ -653,8 +666,9 @@ Return ONLY pure JSON. No markdown ticks, no commentary.`;
     const parsed = JSON.parse(cleaned);
     const transcription = parsed.transcription || '';
 
-    // If customer spoke address or phone
-    if (parsed.has_phone_or_address || parsed.phone || parsed.address) {
+    // Check if customer is genuinely providing delivery address or phone number (not asking a question)
+    const isQuestion = /(ចេញមកនៅ|ចេញនៅ|ផ្ញើនៅ|ដឹកនៅ|ដល់នៅ|នៅបង|ប៉ុន្មាន|ថ្លៃ|ពេលណា|ម៉ោង|នៅឯណា|កន្លែងណា|មិច|ម៉េច|ទេ\?|\?)/i.test(transcription);
+    if ((parsed.is_providing_address_phone || parsed.phone) && !isQuestion) {
       const addressResult = await processIncomingAddressText(
         senderId,
         senderName,
@@ -680,9 +694,9 @@ Return ONLY pure JSON. No markdown ticks, no commentary.`;
       }
     }
 
-    // FAQ / Query reply
+    // FAQ / Query / Order Tracking reply
     const faqReply = await processCustomerFaq(senderId, senderName, transcription);
-    const finalReply = faqReply || parsed.reply_khmer || `🎙️ ចាសបង ${senderName}! ហាងបានទទួលសារជាសំឡេងរបស់បងហើយ។ អរគុណបង! 🙏`;
+    const finalReply = faqReply || parsed.reply_khmer || `🎙️ ចាសបង ${senderName}! ហាងបានទទួលសារជាសំឡេងរបស់បងហើយ។ ហាងកំពុងរៀបចំ និងឆ្លើយតបជូនបងឆាប់ៗនេះណា៎! 🙏`;
 
     addChatbotLog({
       type: 'VOICE_PROCESSED',
@@ -776,27 +790,33 @@ export async function processCustomerFaq(
 
   const displayName = senderName && !senderName.toLowerCase().includes('customer') ? senderName : 'ភ្ញៀវ';
 
-  // 1. Check if user is asking about their basket or mentioning basket number (e.g. #860, 860, អីវ៉ាន់ខ្ញុំបានអីខ្លះ)
+  // 1. Check if user is asking about their basket or mentioning basket number (e.g. #860, 860, អីវ៉ាន់ខ្ញុំបានអីខ្លះ, អាវ៉ាន់ខ្ញុំចេញនៅ, អស់ប៉ុន្មាន, សុំមើលបុង)
   const basketNumberMatch = userMessage.match(/(?:#|កន្ត្រក\s*|basket\s*|no\s*)?(\d{2,6})\b/i);
-  const isAskingBasket = /(អីវ៉ាន់|កន្ត្រក|កុម្ម៉ង់|ទិញបាន|order|basket|ទំនិញ|បានអីខ្លះ)/i.test(userMessage) || Boolean(basketNumberMatch);
+  const isAskingBasket = /(អីវ៉ាន់|អាវ៉ាន់|កន្ត្រក|កុម្ម៉ង់|ទិញបាន|order|basket|ទំនិញ|បានអីខ្លះ|បានអី|បានអ្វីខ្លះ|បានអ្វី|អស់ប៉ុន្មាន|សរុបប៉ុន្មាន|តម្លៃប៉ុន្មាន|ថ្លៃប៉ុន្មាន|ប៉ុន្មានលុយ|ចេញមកនៅ|ចេញនៅ|ផ្ញើនៅ|ដឹកនៅ|ដល់នៅ|បុង|បុងឡាន|រូបបុង|មើលបុង|សុំមើលបុង|tracking|ឡាន)/i.test(userMessage) || Boolean(basketNumberMatch);
 
   if (isAskingBasket) {
     const activeInvoices = invoices.filter(i => i.status !== 'Cancelled');
     let targetInv: Invoice | undefined;
 
+    let customerInvoices = activeInvoices.filter(i => 
+      (senderId && senderId !== 'TEST_USER_1' && i.facebook_user_id === senderId) ||
+      (displayName !== 'ភ្ញៀវ' && i.facebook_name && i.facebook_name.toLowerCase().trim() === displayName.toLowerCase().trim())
+    );
+
+    // Sort customer baskets by newest created_at / highest invoice_id first
+    customerInvoices.sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (timeB !== timeA) return timeB - timeA;
+      return (b.invoice_id || 0) - (a.invoice_id || 0);
+    });
+
     if (basketNumberMatch && basketNumberMatch[1]) {
       const bNum = basketNumberMatch[1];
       targetInv = activeInvoices.find(i => String(i.basket_no) === bNum || String(i.invoice_id) === bNum);
-    }
-
-    if (!targetInv && senderId && senderId !== 'TEST_USER_1') {
-      targetInv = activeInvoices.find(i => i.facebook_user_id === senderId);
-    }
-
-    if (!targetInv && displayName !== 'ភ្ញៀវ') {
-      targetInv = activeInvoices.find(
-        i => i.facebook_name && i.facebook_name.toLowerCase().trim() === displayName.toLowerCase().trim()
-      );
+    } else {
+      // Pick the NEWEST / MOST RECENT basket for the customer!
+      targetInv = customerInvoices[0];
     }
 
     if (targetInv) {
@@ -808,16 +828,39 @@ export async function processCustomerFaq(
       if (targetInv.status === 'Paid') {
         stageLabel = '🔍 បានបង់ប្រាក់រួចរាល់ (កំពុងរៀបចំវេចខ្ចប់ & QC)';
       } else if (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED') {
-        stageLabel = '🚚 បានចេញដឹកជញ្ជូនរួចរាល់ (DISPATCHED)';
+        stageLabel = `🚚 បានចេញដឹកជញ្ជូនរួចរាល់ [${targetInv.delivery_carrier || 'វីរៈប៊ុនថាំ (VET Express)'}]`;
       }
 
       const shipFee = targetInv.is_free_ship ? 'Free' : `$${(targetInv.shipping_fee ?? (targetInv.location_zone === 'PROVINCE' ? 1.5 : 1.0)).toFixed(2)}`;
       
-      let reply = `📦 ព័ត៌មានកន្ត្រកលេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n${itemsList}\n\n🚚 សេវាដឹក ៖ ${shipFee} (${targetInv.location_zone === 'PROVINCE' ? 'តាមខេត្ត' : 'ភ្នំពេញ'})\n💵 សរុបទឹកប្រាក់ ៖ $${targetInv.total_amount.toFixed(2)}\n📍 ស្ថានភាព ៖ ${stageLabel}`;
+      let reply = `📦 ព័ត៌មានកន្ត្រកចុងក្រោយលេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n${itemsList}\n\n🚚 សេវាដឹក ៖ ${shipFee} (${targetInv.location_zone === 'PROVINCE' ? 'តាមខេត្ត' : 'ភ្នំពេញ'})\n💵 សរុបទឹកប្រាក់ ៖ $${targetInv.total_amount.toFixed(2)}\n📍 ស្ថានភាព ៖ ${stageLabel}`;
+
+      if (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED') {
+        if (targetInv.tracking_code) {
+          reply += `\n🔖 លេខកូដតាមដាន (Tracking) ៖ ${targetInv.tracking_code}`;
+        }
+        if (targetInv.waybill_image_url) {
+          reply += `\n📸 បុងឡាន ៖ មានរូបភាពបុងកញ្ចប់អីវ៉ាន់ក្នុងប្រព័ន្ធរួចរាល់`;
+        }
+      }
+
+      // If customer specifically asks for waybill photo
+      const isAskingWaybill = /(បុង|បុងឡាន|រូបបុង|មើលបុង|សុំមើលបុង|សុំរូបបុង)/i.test(userMessage);
+      if (isAskingWaybill && (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED')) {
+        reply = `🚚 ដំណឹងបុងឡានកញ្ចប់អីវ៉ាន់លេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n🏢 ក្រុមហ៊ុនដឹក ៖ ${targetInv.delivery_carrier || 'វីរៈប៊ុនថាំ (VET Express)'}\n🔖 លេខកូដតាមដាន ៖ ${targetInv.tracking_code || 'VET Express'}\n📍 ទិសដៅ ៖ ${targetInv.address || 'តាមខេត្ត'}\n\nអ្នកដឹកនឹងទូរស័ព្ទទៅបងពេលអីវ៉ាន់ទៅដល់ណា៎បង 🙏✨`;
+      }
+
+      // If customer has other active baskets, mention them politely
+      const otherBaskets = customerInvoices
+        .filter(i => i.invoice_id !== targetInv!.invoice_id)
+        .map(i => `#${i.basket_no || i.invoice_id}`);
+      if (otherBaskets.length > 0) {
+        reply += `\n\n💡 (បងមានកន្ត្រកផ្សេងទៀត ៖ ${otherBaskets.join(', ')} អាចវាយលេខដើម្បីឆែកមើលបាន)`;
+      }
 
       if (targetInv.status !== 'Paid' && targetInv.packing_stage !== 'DISPATCHED') {
         reply += `\n\n👉 បងអាចផ្ញើវិក្កយបត្រ (Slip) បង់ប្រាក់ចូលទីនេះ ដើម្បីហាងរៀបចំច្រក និងចេញដឹកជូនបងឆាប់ៗនេះ! សូមអរគុណច្រើនបង! 🙏`;
-      } else {
+      } else if (targetInv.packing_stage !== 'DISPATCHED') {
         reply += `\n\nអរគុណច្រើនបងសម្រាប់ការគាំទ្រហាងយើងខ្ញុំ! 🙏✨`;
       }
 
@@ -833,6 +876,21 @@ export async function processCustomerFaq(
 
       return reply;
     }
+
+    // If customer explicitly typed a basket number like #860 and it was not found:
+    if (userMessage.includes('#') || /(?:កន្ត្រក|basket)/i.test(userMessage)) {
+      const bNum = basketNumberMatch ? basketNumberMatch[1] : '';
+      const notFoundReply = `ចាសជម្រាបសួរបង ${displayName}! ហាងបានឆែកមើលក្នុងប្រព័ន្ធហើយ មិនទាន់ឃើញមានកន្ត្រកលេខ #${bNum || userMessage.trim()} ឡើយបងណា៎។ សូមបងជួយផ្ញើឈ្មោះហ្វេសប៊ុក ឬលេខទូរស័ព្ទដើម្បីឱ្យប្អូនជួយស្វែងរកជូនបន្ថែមណា៎បង 🙏✨`;
+      addChatbotLog({
+        type: 'AI_FAQ',
+        customer_name: displayName,
+        customer_id: senderId,
+        incoming_message: userMessage,
+        bot_reply: notFoundReply,
+        status: 'SUCCESS'
+      });
+      return notFoundReply;
+    }
   }
 
   const ai = getGenAI();
@@ -842,20 +900,20 @@ export async function processCustomerFaq(
 
   try {
     const customerGreeting = displayName !== 'ភ្ញៀវ' ? `បង ${displayName}` : 'បង';
-    const systemInstruction = `You are a concise, polite, straight-to-the-point Khmer customer service AI for "${chatbotConfig.shopName}".
-Official Shop Knowledge:
-- Shop Location: ${chatbotConfig.shopLocation}
-- Working Hours: ${chatbotConfig.workingHours}
-- Delivery Time: Phnom Penh (${chatbotConfig.deliveryTimePP}), Provinces (${chatbotConfig.deliveryTimeProvince})
-- Shipping Rates: Phnom Penh ($${chatbotConfig.shippingRatePP.toFixed(2)}), Provinces ($${chatbotConfig.shippingRateProvince.toFixed(2)})
-- Exchange Policy: ${chatbotConfig.exchangePolicy}
-- Additional Guidelines: ${chatbotConfig.customFaqPrompt}
+    const prompt = `អ្នកជាបុគ្គលិកឆ្លើយឆាតលក់ទំនិញអនឡាញរបស់ហាង "${chatbotConfig.shopName}"។
+ចូរឆ្លើយតបសំណួររបស់អតិថិជនជាភាសាខ្មែរ ដោយផ្អែមល្ហែម ទន់ភ្លន់ គួរឱ្យចង់ស្ដាប់ ខ្លីៗត្រឹមតែ ១ ទៅ ២ ជួរ ចំសំណួរដែលគេសួរ (សន្សំសំចៃ Token)។
 
-CRITICAL RULES:
-1. STRICTLY CONCISE: Reply in maximum 1-3 short lines. Do NOT write long essays, paragraphs, or fluff.
-2. DIRECT TO THE POINT: Answer the customer's question directly (price, location, delivery, time) without unnecessary pleasantries or repeating long greetings.
-3. Natural, polite Khmer. Address customer as "${customerGreeting}".
-4. Never ask long unnecessary follow-up questions.`;
+ព័ត៌មានជាក់ស្តែងរបស់ហាង ៖
+- ទីតាំងហាង ៖ ${chatbotConfig.shopLocation}
+- ម៉ោងបើកទទួលភ្ញៀវ ៖ ${chatbotConfig.workingHours}
+- សេវាដឹកភ្នំពេញ ៖ $${chatbotConfig.shippingRatePP.toFixed(2)} (${chatbotConfig.deliveryTimePP})
+- សេវាដឹកតាមខេត្ត ៖ $${chatbotConfig.shippingRateProvince.toFixed(2)} (${chatbotConfig.deliveryTimeProvince})
+- គោលការណ៍ប្តូរទំនិញ ៖ ${chatbotConfig.exchangePolicy}
+${chatbotConfig.customFaqPrompt ? `- ចំណាំបន្ថែម ៖ ${chatbotConfig.customFaqPrompt}` : ''}
+
+សំណួរភ្ញៀវ (${customerGreeting}) ៖ "${userMessage}"
+
+ចូរឆ្លើយតបជាភាសាខ្មែរផ្អែមល្ហែម ខ្លីខ្លឹម ៖`;
 
     const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
     let faqText = '';
@@ -864,12 +922,7 @@ CRITICAL RULES:
       try {
         const response = await ai.models.generateContent({
           model,
-          contents: [
-            { role: 'user', parts: [{ text: userMessage }] }
-          ],
-          config: {
-            systemInstruction
-          }
+          contents: prompt
         });
         if (response.text) {
           faqText = response.text.trim();

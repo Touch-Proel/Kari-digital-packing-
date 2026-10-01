@@ -200,21 +200,38 @@ async function handleIncomingSlipPhoto(token: string, chatId: number | string, m
   };
 
   const textPart = {
-    text: `You are an expert at analyzing Cambodian Facebook Messenger chat screenshots with bank transfer receipts (ABA Bank, ACLEDA Bank, Canadia, TrueMoney, KHQR).
-Analyze this image carefully:
-1. Look at the Facebook Messenger chat header at the very top: What is the customer's Facebook Profile Name? (e.g. "Mak Banhapich", "Malin Mon", "Kari Arnett"). Do NOT use the page name or staff name.
-2. In the chat or on the bank slip, find the transferred amount and currency (e.g. 40,000 KHR or 10.00 USD).
-3. If the customer sent a phone number or address in the chat text (e.g. "070227974"), extract the phone number.
-4. Extract bank name (e.g. ACLEDA, ABA, TrueMoney, Wing) and reference/transaction number if visible.
+    text: `You are an expert at analyzing two types of images for Cambodian online shops:
+Type A: Delivery parcels / waybills (e.g. orange plastic parcel bags, Virak Buntham VET Express stickers, J&T, handwritten customer names, phone numbers like 015673303, and destination towns/provinces).
+Type B: Bank transfer payment receipts/slips (ABA Bank, ACLEDA, Canadia, TrueMoney, KHQR, Bakong) or Messenger chat payment screenshots.
 
-Return ONLY a JSON object with this exact structure:
+Analyze this image carefully:
+1. Determine "image_type": "DELIVERY_WAYBILL" if it is a parcel bag/waybill/VET sticker with recipient name/phone/tracking, OR "BANK_SLIP" if it is a money transfer slip.
+2. If DELIVERY_WAYBILL:
+   - "customer_name": Recipient's name written on parcel/sticker (e.g. "យ៉ាត នីតា", "Ru Ny", "ហួង មួយសៀប", "ជា ធីតា", "សារ៉េត", "ណាង").
+   - "phone_number": Recipient's phone number (e.g. "015673303", "093214087", "098668851", "0978601915").
+   - "destination": Destination address/province (e.g. "អង់តង់ស្លាប់ កំពង់ស្ពឺ", "លំដាប់បែកចាន ត្រពាំងក្រសាំង", "ផ្សារព្រៃទទឹង").
+   - "carrier_name": Delivery company (e.g. "វីរៈប៊ុនថាំ (VET Express)", "J&T Express", "Capitol", etc.).
+   - "tracking_code": Waybill barcode/QR tracking code (e.g. "pneat-angtonlob260900014/1", "230-01", or alphanumeric code on sticker).
+3. If BANK_SLIP:
+   - "customer_name": Facebook Name / sender name on slip.
+   - "paid_amount": Transferred numeric amount (e.g. 10.00).
+   - "currency": "USD" or "KHR".
+   - "phone_number": Phone number if in chat text.
+   - "bank_name": "ABA", "ACLEDA", "Wing", etc.
+   - "trans_ref": Transaction reference ID.
+
+Return ONLY pure valid JSON:
 {
-  "customer_name": "Exact Name at Top of Chat",
-  "paid_amount": 10.00,
+  "image_type": "DELIVERY_WAYBILL" | "BANK_SLIP" | "OTHER",
+  "customer_name": "...",
+  "phone_number": "...",
+  "destination": "...",
+  "carrier_name": "...",
+  "tracking_code": "...",
+  "paid_amount": 0,
   "currency": "USD",
-  "phone_number": "070227974",
-  "bank_name": "ACLEDA",
-  "trans_ref": "62616195612"
+  "bank_name": "...",
+  "trans_ref": "..."
 }`
   };
 
@@ -230,25 +247,97 @@ Return ONLY a JSON object with this exact structure:
     return;
   }
 
-  let extracted: ExtractedSlipData = {
-    customer_name: '',
-    paid_amount: 0,
-    currency: 'USD'
-  };
-
+  let parsed: any = {};
   try {
-    const parsed = JSON.parse(rawText.trim());
-    extracted = {
-      customer_name: String(parsed.customer_name || '').trim(),
-      paid_amount: Number(parsed.paid_amount) || 0,
-      currency: String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD',
-      phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
-      bank_name: parsed.bank_name ? String(parsed.bank_name).trim() : undefined,
-      trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined
-    };
+    const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+    parsed = JSON.parse(cleaned);
   } catch (err) {
     console.error('Error parsing Gemini OCR JSON:', rawText);
   }
+
+  // =========================================================================
+  // 🚚 CASE A: DELIVERY WAYBILL / PARCEL PHOTO (បុងឡាន / VET Express)
+  // =========================================================================
+  if (parsed.image_type === 'DELIVERY_WAYBILL' || (parsed.carrier_name && parsed.phone_number) || parsed.tracking_code) {
+    const cleanPhone = (parsed.phone_number || '').replace(/\D/g, '');
+    const cleanName = (parsed.customer_name || '').trim().toLowerCase();
+
+    // Match invoice by phone number first, then by customer name
+    const activeInvoices = invoices.filter(i => i.status !== 'Cancelled');
+    let matchedInv: Invoice | undefined;
+
+    if (cleanPhone && cleanPhone.length >= 8) {
+      matchedInv = activeInvoices.find(i => {
+        const invPhone = (i.phone_number || '').replace(/\D/g, '');
+        return invPhone && (invPhone.includes(cleanPhone) || cleanPhone.includes(invPhone));
+      });
+    }
+
+    if (!matchedInv && cleanName && cleanName.length >= 2) {
+      matchedInv = activeInvoices.find(i => {
+        const iName = (i.facebook_name || '').toLowerCase();
+        return iName.includes(cleanName) || cleanName.includes(iName);
+      });
+    }
+
+    if (matchedInv) {
+      matchedInv.status = 'Dispatched';
+      matchedInv.packing_stage = 'DISPATCHED';
+      matchedInv.waybill_image_url = slipUrl;
+      matchedInv.tracking_code = parsed.tracking_code || `VET-${Date.now().toString().slice(-6)}`;
+      matchedInv.delivery_carrier = parsed.carrier_name || 'វីរៈប៊ុនថាំ (VET Express)';
+      matchedInv.dispatched_at = new Date().toISOString();
+
+      if ((!matchedInv.phone_number || matchedInv.phone_number === 'គ្មានលេខ') && parsed.phone_number) {
+        matchedInv.phone_number = parsed.phone_number;
+      }
+      if ((!matchedInv.address || matchedInv.address.includes('មិនទាន់មាន')) && parsed.destination) {
+        matchedInv.address = parsed.destination;
+      }
+
+      saveDatabaseToDisk();
+      bumpDataRevision();
+
+      const basketNo = matchedInv.basket_no || matchedInv.invoice_id;
+      const waybillReply = `🚚 <b>បានកត់ត្រាបុងឡាន &amp; Dispatched ជោគជ័យ!</b> 🎉
+━━━━━━━━━━━━━━━━━━
+🛒 <b>កន្ត្រក:</b> #${basketNo} (<code>${matchedInv.facebook_name}</code>)
+👤 <b>អ្នកទទួល:</b> ${parsed.customer_name || matchedInv.facebook_name} (📞 <code>${parsed.phone_number || matchedInv.phone_number}</code>)
+🚚 <b>ក្រុមហ៊ុនដឹក:</b> ${matchedInv.delivery_carrier}
+🔖 <b>លេខកូដតាមដាន (Tracking):</b> <code>${matchedInv.tracking_code}</code>
+📍 <b>ទិសដៅដឹក:</b> ${parsed.destination || matchedInv.address || 'តាមខេត្ត'}
+💵 <b>សរុបវិក្កយបត្រ:</b> $${matchedInv.total_amount.toFixed(2)}
+📸 <b>រូបភាពបុង:</b> បានរក្សាទុកក្នុងប្រព័ន្ធរួចរាល់`;
+
+      await sendTelegramMessage(token, chatId, waybillReply, messageId);
+      return;
+    }
+
+    // If waybill was recognized but not matched to an active invoice
+    const unmatchMsg = `⚠️ <b>AI បានស្កេនបុងឡានកញ្ចប់អីវ៉ាន់ ៖</b>
+👤 <b>ឈ្មោះលើកញ្ចប់:</b> <code>${parsed.customer_name || 'មិនច្បាស់'}</code>
+📞 <b>លេខទូរស័ព្ទ:</b> <code>${parsed.phone_number || 'មិនមាន'}</code>
+🚚 <b>ក្រុមហ៊ុនដឹក:</b> ${parsed.carrier_name || 'វីរៈប៊ុនថាំ (VET Express)'}
+🔖 <b>Tracking:</b> <code>${parsed.tracking_code || 'ស្វ័យប្រវត្តិ'}</code>
+📍 <b>ទិសដៅ:</b> ${parsed.destination || 'តាមខេត្ត'}
+❌ <i>រកមិនឃើញកន្ត្រកដែលមានលេខទូរស័ព្ទ ឬឈ្មោះនេះក្នុងប្រព័ន្ធឡើយ!</i>
+💡 <i>លោកអ្នកអាចវាយ <code>/dispatch &lt;លេខកន្ត្រក&gt;</code> ដើម្បីកត់ត្រាចេញដឹកដោយផ្ទាល់ដៃបាន។</i>`;
+
+    await sendTelegramMessage(token, chatId, unmatchMsg, messageId);
+    return;
+  }
+
+  // =========================================================================
+  // 💳 CASE B: BANK TRANSFER SLIP (ABA / ACLEDA / KHQR)
+  // =========================================================================
+  const extracted: ExtractedSlipData = {
+    customer_name: String(parsed.customer_name || '').trim(),
+    paid_amount: Number(parsed.paid_amount) || 0,
+    currency: String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD',
+    phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
+    bank_name: parsed.bank_name ? String(parsed.bank_name).trim() : undefined,
+    trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined
+  };
 
   const amountDisplay = extracted.currency === 'KHR'
     ? `${extracted.paid_amount.toLocaleString()} ៛`
@@ -314,10 +403,10 @@ ${candidateList}
   // If the image is not a bank slip and has 0 amount and no customer name
   if (extracted.paid_amount <= 0 && !extracted.customer_name) {
     const nonSlipMsg = `💡 <b>ព័ត៌មានជំនួយ ៖</b>
-រូបភាពនេះមិនមានទិន្នន័យវិក្កយបត្របង់ប្រាក់ (ABA / ACLEDA / KHQR) ឡើយ។
+រូបភាពនេះមិនមានទិន្នន័យវិក្កយបត្របង់ប្រាក់ ឬបុងឡានដឹកជញ្ជូនឡើយ។
 
 • ប្រសិនបើជា<b>រូបទំនិញលក់</b> ៖ សូមសរសេរ Caption ខាងក្រោមរូប ឧទាហរណ៍ <code>A12 5$</code> ឬ <code>កូដ A01 តម្លៃ 10$</code> ដើម្បីឱ្យ Bot ដាក់បញ្ចូលស្តុក POS ដោយស្វ័យប្រវត្តិ!
-• ប្រសិនបើជា<b>វិក្កយបត្រផ្ទេរប្រាក់</b> ៖ សូមផ្ញើរូបភាព ឬ Screenshot ឱ្យបានច្បាស់។`;
+• ប្រសិនបើជា<b>វិក្កយបត្រផ្ទេរប្រាក់ ឬបុងឡាន</b> ៖ សូមផ្ញើរូបភាព ឬ Screenshot ឱ្យបានច្បាស់។`;
     await sendTelegramMessage(token, chatId, nonSlipMsg, messageId);
     return;
   }

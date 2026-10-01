@@ -9,3 +9,5 @@ coverage/
 server/db_store.json
 server/pos.db
 server/*.db
+data/
+data/*.json

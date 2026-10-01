@@ -51,6 +51,10 @@ export interface Invoice {
   paid_at?: string;
   payment_method?: string;
   payment_slip_url?: string;
+  waybill_image_url?: string;
+  tracking_code?: string;
+  delivery_carrier?: string;
+  dispatched_at?: string;
   msg_status: 'SENT' | 'UNSENT' | 'FAILED';
   msg_error?: string;
   msg_delivery_method?: 'SEND_API' | 'PRIVATE_REPLY' | 'MANUAL_COPIED';

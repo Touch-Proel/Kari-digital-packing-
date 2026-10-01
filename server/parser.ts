@@ -11,7 +11,7 @@ import {
 } from './db';
 import { sendFacebookReply } from './fbAuth';
 import { DeliveryZone, Invoice, OrderItem, CustomerComment } from './types';
-import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment, isQuestionOrLiveChatter } from './locationHelper';
 import {
   CLOTHING_SIZES,
   CLOTHING_SIZES_SET,
@@ -374,21 +374,19 @@ export function parseAndAllocateComment(
       }
 
       // If comment contains location or clean address text
-      const cleanLocationText = cleanText ? cleanText.replace(/[:=]/g, ' ').trim() : '';
-      if (hasExplicitLocation && !isQuestion) {
+      if (cleanAddrFromComment && !isQuestionOrLiveChatter(cleanAddrFromComment)) {
+        const addrZone = detectDeliveryZone(cleanAddrFromComment);
+        inv.location_zone = addrZone.zone;
+        inv.location_label = addrZone.label;
+        inv.address = cleanAddrFromComment;
+        if (cust) cust.address = cleanAddrFromComment;
+      } else if (hasExplicitLocation && !isQuestion && bestLocation && !isQuestionOrLiveChatter(bestLocation)) {
         inv.location_zone = zone;
         inv.location_label = label;
-        if (bestLocation) {
-          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || bestLocation.length > inv.address.length) {
-            inv.address = bestLocation;
-          }
-          if (cust) cust.address = inv.address;
+        if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || bestLocation.length > inv.address.length) {
+          inv.address = bestLocation;
         }
-      } else if (cleanLocationText && cleanLocationText.length >= 2 && !inv.address?.includes(cleanLocationText)) {
-        if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត' || inv.address === '🏙️ ភ្នំពេញ') {
-          inv.address = cleanLocationText;
-          if (cust) cust.address = cleanLocationText;
-        }
+        if (cust) cust.address = inv.address;
       }
 
       // If comment is purely contact info (phone/address) or general inquiry, do NOT flag as unmatched product code warning!
@@ -500,19 +498,22 @@ export function parseAndAllocateComment(
       if (cust?.is_zone_locked && cust.location_zone === 'PROVINCE' && zone === 'PP' && detectedLocation === 'ភ្នំពេញ') {
         // Keep existing PROVINCE zone
       } else {
-        inv.location_zone = zone;
-        inv.location_label = label;
-        if (bestLocation) {
+        if (cleanAddrFromComment && !isQuestionOrLiveChatter(cleanAddrFromComment)) {
+          const addrZone = detectDeliveryZone(cleanAddrFromComment);
+          inv.location_zone = addrZone.zone;
+          inv.location_label = addrZone.label;
+          inv.address = cleanAddrFromComment;
+        } else if (bestLocation && !isQuestionOrLiveChatter(bestLocation)) {
+          inv.location_zone = zone;
+          inv.location_label = label;
           if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || bestLocation.length > inv.address.length) {
             inv.address = bestLocation;
           }
-        } else if (!inv.address || inv.address.includes('មិនទាន់មាន')) {
-          inv.address = label;
         }
-        if (cust) {
-          cust.location_zone = zone;
-          cust.location_label = label;
-          if (inv.address) cust.address = inv.address;
+        if (cust && inv.address && !isQuestionOrLiveChatter(inv.address)) {
+          cust.location_zone = inv.location_zone;
+          cust.location_label = inv.location_label;
+          cust.address = inv.address;
         }
       }
     } else if (cust?.is_zone_locked && cust.location_zone && (!inv.location_zone || inv.location_zone === 'UNKNOWN')) {

@@ -84,7 +84,7 @@ export const PP_SANGKATS_AND_AREAS = [
 
   // សែនសុខ
   'ភ្នំពេញថ្មី', 'ទឹកថ្លា', 'ផ្សារទឹកថ្លា', 'ឃ្មួញ', 'ក្រាំងធ្នង់', 'អូរបែកក្អម', 'គោកឃ្លាង',
-  'ឈូកមាស', 'ផ្សារឈូកមាស',
+  'ឈូកមាស', 'ផ្សារឈូកមាស', 'ពេទ្យអយឺតសែនសុខ', 'ពេទ្យអយឺត', 'អយឺតសែនសុខ', 'អយឺត',
   'ឈូកវ៉ាទី១', 'ឈូកវ៉ាទី 1', 'ឈូកវ៉ាទី1', 'ឈូកវ៉ា១', 'ឈូកវ៉ា1',
   'ឈូកវ៉ាទី២', 'ឈូកវ៉ាទី 2', 'ឈូកវ៉ាទី2', 'ឈូកវ៉ា២', 'ឈូកវ៉ា2', 'ឈូកវ៉ា', 'ឈូករ៉ាពី', 'ឈូករា៉ពី',
   'ផ្សារដីហុយ', 'សឡា', 'ផ្សារសឡា', 'ផ្សារបឹងបៃតង',
@@ -104,11 +104,11 @@ export const PP_SANGKATS_AND_AREAS = [
   'ចោមចៅទី១', 'ចោមចៅទី 1', 'ចោមចៅទី1', 'ចោមចៅ១', 'ចោមចៅ1',
   'ចោមចៅទី២', 'ចោមចៅទី 2', 'ចោមចៅទី2', 'ចោមចៅ២', 'ចោមចៅ2',
   'ចោមចៅទី៣', 'ចោមចៅទី 3', 'ចោមចៅទី3', 'ចោមចៅ៣', 'ចោមចៅ3',
-  'ចោមចៅ', 'ចេាមចៅ',
+  'ចោមចៅ', 'ចេាមចៅ', 'ផ្សារព្រៃទា', 'ព្រៃទា',
   'កាកាបទី១', 'កាកាបទី 1', 'កាកាបទី1', 'កាកាប១', 'កាកាប1',
   'កាកាបទី២', 'កាកាបទី 2', 'កាកាបទី2', 'កាកាប២', 'កាកាប2', 'កាកាប',
   'ត្រពាំងក្រសាំង', 'សំរោងក្រោម', 'វត្តជន្លង់ម្លូ', 'ជន្លង់ម្លូ',
-  'កន្ទោក', 'ភ្លើងឆេះរទេះ', 'បឹងធំ', 'ស្នោរ',
+  'កន្ទោក', 'ភ្លើងឆេះរទេះ', 'បឹងធំ', 'ស្នោរ', 'ផ្សារកំបូល', 'កំបូល',
   'ផ្សារត្រពាំងថ្លឹង', 'ត្រពាំងថ្លឹង', 'ផ្សារកាណាឌីយ៉ា', 'កាណាឌីយ៉ា', 'canadia',
   'វេងស្រេង', 'វ៉េងស្រេង', 'veng sreng', 'vengsreng',
   'ពោធិ៍ចិនតុង', 'ពោធិចិនតុង', 'ពោចិនតុង', 'pochentong',
@@ -260,7 +260,7 @@ export const PROVINCES_MAP: Array<{
   {
     name: 'កំពត',
     aliases: ['kampot'],
-    districts: ['ក្រុងកំពត', 'ទឹកឈូ', 'ឈូក', 'ស្រុកឈូក', 'អង្គរជ័យ', 'បន្ទាយមាស', 'កំពង់ត្រាច', 'ដងទង់']
+    districts: ['ក្រុងកំពត', 'ទឹកឈូ', 'ស្រុកឈូក', 'ផ្សារឈូក', 'អង្គរជ័យ', 'បន្ទាយមាស', 'កំពង់ត្រាច', 'ដងទង់']
   },
   {
     name: 'ស្វាយរៀង',
@@ -757,26 +757,58 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
 }
 
 /**
+ * Detects if a text string is a customer question, garment chatter, or live host request
+ */
+export function isQuestionOrLiveChatter(text: string): boolean {
+  if (!text) return false;
+  const s = text.trim();
+  if (!s) return false;
+
+  // 1. Live requests / chatter patterns (e.g. "បងមានសំពត់ក្មេងអត់", "ចែលើកសំពត់ផង", "បង16មានពណ៌តើអីបង", "បងលើកឈុតគេង")
+  if (/(?:បងមាន|ចែមាន|អូនមាន|មានសំពត់|មានអាវ|មានខោ|មានឈុត|មានឆុត|មានរ៉ូប|មានពណ៌|មានពណ៍|ពណ៌អី|ពណ៍អី|ពណ៌តើអី|ពណ៍តើអី|សំពត់ក្មេង|ក្មេងអត់|សំពត់ផង|លើកសំពត់|លើកអាវ|លើកខោ|លើកឈុត|លើកឆុត|លើកមើល|សុំមើល|សុំលើក|បងលើក|ចែលើក|អូនលើក|ឈុតគេង|សាច់ស្អាត|ពាក់បាន|ស្លៀកបាន|លក់ម៉េច|ប៉ុន្មាន|ប៉ុន្មានលុយ|ថ្លៃប៉ុន្មាន|អស់នៅ|អស់ហើយ|សួស្តី|ជម្រាបសួរ|អរគុណ)/i.test(s)) {
+    return true;
+  }
+
+  // 2. Question marks or typical question endings
+  if (s.includes('?') || /(?:អត់|ទេ|នៅ\?|លក់ម៉េច|ប៉ុន្មាន|ផង|ណា៎|ណាបង|ណា\?|តើអី|អីបង|អីចែ|អត់បង|អត់ចែ)$/i.test(s)) {
+    // If it also does not contain an explicit address keyword like ផ្ទះ, ផ្លូវ, ផ្សារ, បុរី, សង្កាត់, ខណ្ឌ, ក្រុង, ស្រុក, ខេត្ត
+    if (!/(?:ផ្ទះ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ខេត្ត)\s*[\u1780-\u17D2a-zA-Z0-9]+/i.test(s)) {
+      return true;
+    }
+  }
+
+  // 3. Live host interaction commands
+  if (/^(?:បង|ចែ|អូន)\s*(?:លើក|មាន|សុំ|បង្ហាញ|សុំមើល|លក់|ជួយ)/i.test(s)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Extracts clean address text from comment by removing product codes, phone numbers, and action words
  */
 export function extractCleanAddressFromComment(rawComment: string): string | null {
   if (!rawComment || !rawComment.trim()) return null;
 
-  // Guard against questions or chatter
-  if (/(?:ពាក់បានអត់|ពាក់បានទេ|ពាក់បាន|ស្លៀកបាន|មានអត់|អស់នៅ|អស់ហើយ|លក់ម៉េច|ប៉ុន្មាន|សុំមើល|លើកអាវ|លើកខោ|សាច់ស្អាត)/i.test(rawComment)) {
+  // Strict guard: if comment is a question or garment chatter or live request, RETURN NULL IMMEDIATELY!
+  if (isQuestionOrLiveChatter(rawComment)) {
     return null;
   }
 
   const s = cleanAddressInput(rawComment);
+  if (!s || s.length < 2) return null;
 
-  // If remaining text has at least 2 characters and has an explicit location
-  if (s && s.length >= 2) {
-    const res = detectDeliveryZone(s);
-    if (res.hasExplicitLocation && res.detectedLocation) {
-      const cleanLoc = postCleanLocation(res.detectedLocation);
-      if (cleanLoc.length >= 2 && !/(?:=|\bkilo\b|\bkg\b)/i.test(cleanLoc)) {
-        return canonicalNameMap[cleanLoc] || cleanLoc;
-      }
+  // Check if cleaned string is a question or chatter
+  if (isQuestionOrLiveChatter(s)) {
+    return null;
+  }
+
+  const res = detectDeliveryZone(s);
+  if (res.hasExplicitLocation && res.detectedLocation) {
+    const cleanLoc = postCleanLocation(res.detectedLocation);
+    if (cleanLoc.length >= 2 && !isQuestionOrLiveChatter(cleanLoc) && !/(?:=|\bkilo\b|\bkg\b)/i.test(cleanLoc)) {
+      return canonicalNameMap[cleanLoc] || cleanLoc;
     }
   }
 
@@ -801,12 +833,12 @@ export function isPureContactOrInquiryComment(text: string): boolean {
     return true;
   }
 
-  // 2. Chat inquiries & questions (e.g. "ខោជើងប៉ាតនិង160mពាក់បានអត់បង", "សួស្តី", "សុំមើល", "លក់ម៉េច", "ប៉ុន្មាន")
-  if (/(?:ពាក់បានអត់|ពាក់បានទេ|ពាក់បាន|ស្លៀកបាន|មានអត់|អស់នៅ|អស់ហើយ|លក់ម៉េច|ប៉ុន្មាន|ប៉ុន្មានបង|ប៉ុន្មានចែ|សុំមើល|លើកអាវ|លើកខោ|សាច់ស្អាត|សួស្តី|ជម្រាបសួរ|អរគុណ|បងលើក)/i.test(s)) {
+  // 2. Chat inquiries & questions (e.g. "បងមានសំពត់ក្មេងអត់", "ចែលើកសំពត់ផង", "ខោជើងប៉ាតនិង160mពាក់បានអត់បង", "សួស្តី", "សុំមើល", "លក់ម៉េច", "ប៉ុន្មាន")
+  if (isQuestionOrLiveChatter(s)) {
     return true;
   }
 
-  // 3. Pure location comments without order intent (e.g. "ផ្សារព្រែកឯង", "ចោមចៅ", "បែកចាន", "ទួលគោក", "សៀមរាប", "តាកែវ")
+  // 3. Pure location comments without order intent (e.g. "ផ្សារព្រៃឯង", "ចោមចៅ", "បែកចាន", "ទួលគោក", "សៀមរាប", "តាកែវ")
   const hasOrderPattern = /(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})/i.test(s);
   if (!hasOrderPattern) {
     if (/(?:ផ្សារ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ភ្នំពេញ|ចោមចៅ|ទឹកថ្លា|បែកចាន|ទួលគោក|ដង្កោ|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|តាកែវ|កំពត|ព្រៃវែង|ស្វាយរៀង|វីរៈប៊ុនថាំ|j&t|flash|បសេដ្ឋ|បរសេដ្ឋ|ទន្លាប់)/i.test(s)) {
