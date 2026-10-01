@@ -47,3 +47,20 @@ export function playWarningBuzzer() {
   playPureTone(320, 0.12, 'sawtooth');
   setTimeout(() => playPureTone(240, 0.20, 'sawtooth'), 120);
 }
+
+// 📳 Mobile Haptic Vibration Alert (Works on Chrome/Safari/Android/PWA)
+export function triggerHapticAlert(pattern: number[] = [150, 70, 150, 70, 300]) {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(pattern);
+    }
+  } catch (e) {
+    // ignore vibration failure
+  }
+}
+
+// 🚨 High-Alert Collision Warning: Harsh Buzzer Sound + Strong Phone Vibration
+export function playCollisionAlert() {
+  playWarningBuzzer();
+  triggerHapticAlert([180, 80, 180, 80, 350]);
+}

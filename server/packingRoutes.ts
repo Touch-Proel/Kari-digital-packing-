@@ -50,6 +50,50 @@ import { aiSmartAuditFullBasket } from './aiSmartParser';
 
 const router = Router();
 
+// ==========================================
+// ⚡ SERVER-SENT EVENTS (SSE) REAL-TIME HUB
+// ==========================================
+const sseClients = new Set<Response>();
+
+export function broadcastSSE(event: string, payload: any) {
+  const message = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(message);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// GET /api/realtime_events - SSE Stream for 50ms Real-Time Push
+router.get(['/realtime_events', '/api/realtime_events'], (req: Request, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*'
+  });
+
+  res.write(`event: connected\ndata: ${JSON.stringify({ revision: getDataRevision(), time: Date.now() })}\n\n`);
+  sseClients.add(res);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
+  });
+});
+
 // GET /api/invoices
 router.get('/invoices', (req: Request, res: Response) => {
   const liveId = (req.query.live_id as string) || activeLiveId;
@@ -1120,6 +1164,11 @@ router.post(['/lock_invoice', '/api/lock_invoice'], (req: Request, res: Response
   });
 
   const rev = bumpDataRevision();
+  broadcastSSE('basket:locked', {
+    invoice_id: cleanId,
+    locked_by: packer,
+    revision: rev
+  });
   res.json({ success: true, locked_by: packer, revision: rev });
 });
 
@@ -1131,7 +1180,11 @@ router.post(['/unlock_invoice', '/api/unlock_invoice'], (req: Request, res: Resp
 
   if (lock && (force || lock.packer_name.toLowerCase() === String(packer_name || '').trim().toLowerCase())) {
     activeInvoiceLocks.delete(cleanId);
-    bumpDataRevision();
+    const rev = bumpDataRevision();
+    broadcastSSE('basket:unlocked', {
+      invoice_id: cleanId,
+      revision: rev
+    });
   }
 
   res.json({ success: true, revision: getDataRevision() });
@@ -1178,6 +1231,13 @@ router.post(['/mark_invoice_paid', '/api/mark_invoice_paid'], (req: Request, res
   const rev = bumpDataRevision();
   saveDatabaseToDisk();
 
+  broadcastSSE('basket:stage_changed', {
+    invoice_id: cleanId,
+    stage: 'PAID',
+    invoice: inv,
+    revision: rev
+  });
+
   res.json({
     success: true,
     message: `✅ កន្ត្រក #${cleanId} បានបង់ប្រាក់រួចរាល់ ➔ បញ្ជូនទៅផ្ទាំង បង់រួច-QC ជោគជ័យ!`,
@@ -1202,6 +1262,13 @@ router.post(['/mark_invoice_unpaid', '/api/mark_invoice_unpaid'], (req: Request,
   delete inv.paid_by;
   const rev = bumpDataRevision();
   saveDatabaseToDisk();
+
+  broadcastSSE('basket:stage_changed', {
+    invoice_id: cleanId,
+    stage: 'UNPICKED',
+    invoice: inv,
+    revision: rev
+  });
 
   res.json({
     success: true,
@@ -1241,6 +1308,13 @@ router.post('/stage_pack', (req: Request, res: Response) => {
 
   const rev = bumpDataRevision();
   saveDatabaseToDisk();
+
+  broadcastSSE('basket:stage_changed', {
+    invoice_id: cleanId,
+    stage: 'STAGED',
+    invoice: inv,
+    revision: rev
+  });
 
   res.json({
     success: true,
@@ -1308,6 +1382,13 @@ router.post('/dispatch_pack', (req: Request, res: Response) => {
   activeInvoiceLocks.delete(cleanId);
   const rev = bumpDataRevision();
   saveDatabaseToDisk();
+
+  broadcastSSE('basket:stage_changed', {
+    invoice_id: cleanId,
+    stage: 'DISPATCHED',
+    invoice: inv,
+    revision: rev
+  });
 
   res.json({
     success: true,

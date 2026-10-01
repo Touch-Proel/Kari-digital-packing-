@@ -35,7 +35,7 @@ import { CustomerOrderPortal } from './components/CustomerOrderPortal';
 import { AdminPinModal } from './components/Modals/AdminPinModal';
 import { CameraScannerModal, parseScannedText } from './components/Modals/CameraScannerModal';
 import { NoBasketUsersModal } from './components/Modals/NoBasketUsersModal';
-import { playSuccessFanfare, playWarningBuzzer, playPureTone } from './utils/audio';
+import { playSuccessFanfare, playWarningBuzzer, playPureTone, playCollisionAlert, triggerHapticAlert } from './utils/audio';
 
 export default function App() {
   // Check if current user is viewing as a customer via public link
@@ -849,7 +849,7 @@ export default function App() {
 
       if (res.status === 409 || data.locked) {
         // Concurrency collision! Another packer already grabbed or packed this basket!
-        playWarningBuzzer();
+        playCollisionAlert();
         showToast(data.message || data.error || `⚠️ កន្ត្រក #${invoiceId} ត្រូវបានចាក់សោ ឬរើសដោយបុគ្គលិកផ្សេងរួចហើយ!`, 'error');
         // Revert optimistic mutation
         if (previousInv) {
@@ -1255,6 +1255,85 @@ export default function App() {
       })
       .catch(() => {});
 
+    // ⚡ Real-Time Server-Sent Events (SSE) Stream (~50ms Instant Push)
+    let eventSource: EventSource | null = null;
+    let sseReconnectTimer: any = null;
+
+    const connectSSE = () => {
+      try {
+        eventSource = new EventSource('/api/realtime_events');
+
+        eventSource.addEventListener('basket:locked', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.revision && data.revision > currentRevisionRef.current) {
+              currentRevisionRef.current = data.revision;
+              setCurrentRevision(data.revision);
+            }
+            setInvoices(prev =>
+              prev.map(inv =>
+                inv.invoice_id === data.invoice_id
+                  ? { ...inv, is_locked: true, locked_by: data.locked_by }
+                  : inv
+              )
+            );
+          } catch {}
+        });
+
+        eventSource.addEventListener('basket:unlocked', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.revision && data.revision > currentRevisionRef.current) {
+              currentRevisionRef.current = data.revision;
+              setCurrentRevision(data.revision);
+            }
+            setInvoices(prev =>
+              prev.map(inv =>
+                inv.invoice_id === data.invoice_id
+                  ? { ...inv, is_locked: false, locked_by: undefined }
+                  : inv
+              )
+            );
+          } catch {}
+        });
+
+        eventSource.addEventListener('basket:stage_changed', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.revision && data.revision > currentRevisionRef.current) {
+              currentRevisionRef.current = data.revision;
+              setCurrentRevision(data.revision);
+            }
+            if (data.invoice) {
+              handleUpdateInvoice(data.invoice, data.revision);
+            } else if (data.invoice_id && data.stage) {
+              setInvoices(prev =>
+                prev.map(inv => {
+                  if (inv.invoice_id !== data.invoice_id) return inv;
+                  if (data.stage === 'STAGED') return { ...inv, packing_stage: 'STAGED', is_locked: false, locked_by: undefined };
+                  if (data.stage === 'PAID') return { ...inv, status: 'Paid', payment_status: 'Paid', is_locked: false, locked_by: undefined };
+                  if (data.stage === 'DISPATCHED') return { ...inv, packing_stage: 'DISPATCHED', status: 'Dispatched', is_locked: false, locked_by: undefined };
+                  if (data.stage === 'UNPICKED') return { ...inv, packing_stage: 'UNPICKED', status: 'Pending', is_locked: false, locked_by: undefined };
+                  return inv;
+                })
+              );
+            }
+          } catch {}
+        });
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          clearTimeout(sseReconnectTimer);
+          sseReconnectTimer = setTimeout(connectSSE, 3000);
+        };
+      } catch {}
+    };
+
+    connectSSE();
+
     // Smart adaptive polling: only poll when tab is active and visible
     const isVisible = () => typeof document === 'undefined' || !document.hidden;
 
@@ -1293,6 +1372,11 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      clearTimeout(sseReconnectTimer);
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
       clearInterval(invTimer);
       clearInterval(stockTimer);
       clearInterval(packerTimer);

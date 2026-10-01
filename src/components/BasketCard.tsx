@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Invoice, OrderItem, Product } from '../types';
-import { playPureTone, playSuccessFanfare, playWarningBuzzer } from '../utils/audio';
+import { playPureTone, playSuccessFanfare, playWarningBuzzer, playCollisionAlert } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
 import { extractCodeQtyPairsFromComment, isPureContactOrInquiryComment, extractPhoneNumber } from '../utils/commentParser';
 import { formatLiveShortBadge } from '../utils/liveUtils';
@@ -231,7 +231,7 @@ function BasketCardComponent({
   // Guard against illegal actions on baskets locked by other packers
   const checkLockGuard = (): boolean => {
     if (isLockedByOther) {
-      playWarningBuzzer();
+      playCollisionAlert();
       onShowToast(
         `🔒 កន្ត្រកនេះត្រូវបានចាក់សោដោយ «${invoice.locked_by}»! ចុច «🔓 ដោះសោរច្រកជំនួស» ដើម្បីដណ្តើមច្រកជំនួស!`,
         'error'
@@ -505,6 +505,7 @@ function BasketCardComponent({
       const data = await res.json();
       if (res.status === 409 || data.locked) {
         // Concurrency conflict: Someone else locked it!
+        playCollisionAlert();
         if (onUpdateInvoice) {
           onUpdateInvoice({
             ...invoice,
