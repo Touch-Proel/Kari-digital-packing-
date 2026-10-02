@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments } from './db';
+import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries } from './db';
 import { Invoice } from './types';
 import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
 
@@ -748,12 +748,16 @@ Return ONLY a JSON object:
           try {
             const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
             const parsed = JSON.parse(cleaned);
+            const isBank = parsed.is_bank_slip !== false && (parsed.is_bank_slip === true || parsed.bank_name || parsed.trans_ref);
             const rawCustName = String(parsed.customer_name || '').trim();
             let amt = Number(parsed.paid_amount) || 0;
             let curr: 'USD' | 'KHR' = String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD';
             if (curr === 'KHR' || amt > 500) {
               amt = Math.round((amt / 4100) * 100) / 100;
               curr = 'USD';
+            }
+            if (!isBank || amt <= 0) {
+              errorMessage = 'រូបភាពមិនមែនជា Slip ធនាគារទេ (ជារូបខោអាវ ឬរូបភាពទូទៅ)';
             }
             extracted = {
               customer_name: isReceiverAccountName(rawCustName) ? '' : rawCustName,
@@ -776,8 +780,9 @@ Return ONLY a JSON object:
         errorMessage = 'មិនទាន់កំណត់ GEMINI_API_KEY ទេ';
       }
 
-      // Match against invoices (prioritizing newest unpaid basket & exact amount)
-      const matchResult = matchInvoiceForSlip(extracted, item.name);
+      // If non-bank image, do not auto-match
+      const isGenuine = extracted.paid_amount > 0 && (extracted.bank_name || extracted.trans_ref);
+      const matchResult = isGenuine ? matchInvoiceForSlip(extracted, item.name) : { status: 'NOT_FOUND' as const, confidence: 0 };
 
       // Evaluate duplicates & fraud
       const fraudEval = evaluateSlipFraudAndDuplicates(
@@ -792,7 +797,9 @@ Return ONLY a JSON object:
         invoices
       );
 
-      const finalStatus = fraudEval.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT'
+      const finalStatus = !isGenuine
+        ? 'NOT_FOUND'
+        : fraudEval.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT'
         ? 'DUPLICATE_TXID'
         : matchResult.status;
 
@@ -1163,6 +1170,9 @@ router.get('/unpaid_baskets', (_req: Request, res: Response) => {
  */
 router.get('/messenger_slips', (req: Request, res: Response) => {
   try {
+    // Purge any lingering non-bank images (e.g. clothing photos, $0.00 items)
+    cleanupNonSlipMessengerEntries();
+
     const { since } = req.query; // 'today' | '24h' | 'all'
     const now = new Date();
     let cutoffDate: Date | null = null;
@@ -1353,6 +1363,7 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                     console.error('Image download error:', dlErr);
                   }
 
+                  let isGenuineBankSlip = false;
                   let extracted: ExtractedSlipData = {
                     customer_name: senderName,
                     paid_amount: 0,
@@ -1363,20 +1374,33 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                   if (ai && rawBase64) {
                     const imagePart = { inlineData: { mimeType, data: rawBase64 } };
                     const textPart = {
-                      text: `You are an expert at analyzing Cambodian Mobile Banking transfer slips (ABA, ACLEDA, Bakong, KHQR, Wing, Canadia, TrueMoney).
-Extract:
-1. is_bank_slip (boolean)
-2. customer_name (string: strictly the TRANSFER FROM / PAYER name. Note: The merchant receiver is "PROEL TOCH" - NEVER return "PROEL TOCH" as customer_name!)
-3. paid_amount (number)
-4. currency (USD or KHR)
-5. phone_number (string or null)
-6. bank_name (string or null)
-7. trans_date (string: Current Year is 2026. For dates like "២ តុលា ២០២៦", convert to "2026-10-02". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9)
-8. trans_ref (string or null)
-9. basket_no (number or null)
-10. remarks (string or null)
-11. fraud_suspected (boolean: true if font on amount is edited, spliced text, or fake receipt)
-12. fraud_reasons (array of strings. Do NOT flag genuine 2026 dates)
+                      text: `You are a high-precision AI image classifier & OCR analyzer for Cambodian Mobile Banking Transfer Slips (ABA Bank, ACLEDA Bank, Bakong, KHQR, Wing, Canadia, TrueMoney, Sathapana, etc.).
+
+CRITICAL TASK:
+First, determine if this image is a GENUINE digital mobile banking transfer slip / payment receipt screenshot.
+
+RULES FOR CLASSIFICATION:
+1. is_bank_slip (boolean):
+   - MUST BE true ONLY IF this image is a genuine digital bank payment confirmation, bank transfer receipt, or KHQR payment completion screenshot.
+   - MUST BE false IF this image is:
+     * A photo of clothes, clothing products, dresses, shirts, skirts, pants, fashion wear on hangers or models.
+     * A live-stream video screenshot or live sales snapshot.
+     * A screenshot of customer asking product availability or product price.
+     * A paper receipt / thermal delivery bill / packing list.
+     * A photo of parcels, packages, or bags.
+     * A selfie, person photo, or random photo.
+2. customer_name (string: strictly the TRANSFER FROM / PAYER customer name who transferred money. The store receiver is "PROEL TOCH" - NEVER return "PROEL TOCH" as customer_name!).
+3. paid_amount (number: transferred money amount. Return 0 if not a bank slip).
+4. currency (USD or KHR).
+5. phone_number (string or null).
+6. bank_name (string or null: e.g. "ABA Bank", "ACLEDA", "Bakong", "Wing").
+7. trans_date (string: Current Year is 2026. For dates like "២ តុលា ២០២៦", convert to "2026-10-02". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9).
+8. trans_ref (string or null: Transaction ID / Ref number).
+9. basket_no (number or null).
+10. remarks (string or null).
+11. fraud_suspected (boolean).
+12. fraud_reasons (array of strings).
+
 Output strictly raw JSON with these fields.`
                     };
                     const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);
@@ -1384,31 +1408,40 @@ Output strictly raw JSON with these fields.`
                       try {
                         const cleaned = geminiRes.text.replace(/```json/gi, '').replace(/```/gi, '').trim();
                         const parsed = JSON.parse(cleaned);
-                        if (parsed.is_bank_slip !== false) {
+                        if (parsed.is_bank_slip === true || (parsed.is_bank_slip !== false && (parsed.bank_name || parsed.trans_ref) && Number(parsed.paid_amount) > 0)) {
                           let amt = Number(parsed.paid_amount) || 0;
                           let curr: 'USD' | 'KHR' = String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD';
                           if (curr === 'KHR' || amt > 500) {
                             amt = Math.round((amt / 4100) * 100) / 100;
                             curr = 'USD';
                           }
-                          extracted = {
-                            customer_name: sanitizeCustomerName(parsed.customer_name, senderName),
-                            paid_amount: amt,
-                            currency: curr,
-                            phone_number: parsed.phone_number || undefined,
-                            bank_name: parsed.bank_name || undefined,
-                            trans_date: parsed.trans_date || undefined,
-                            trans_ref: parsed.trans_ref || undefined,
-                            basket_no: parsed.basket_no || undefined,
-                            remarks: parsed.remarks || undefined,
-                            fraud_suspected: Boolean(parsed.fraud_suspected),
-                            fraud_reasons: Array.isArray(parsed.fraud_reasons) ? parsed.fraud_reasons : []
-                          };
+                          if (amt > 0) {
+                            isGenuineBankSlip = true;
+                            extracted = {
+                              customer_name: sanitizeCustomerName(parsed.customer_name, senderName),
+                              paid_amount: amt,
+                              currency: curr,
+                              phone_number: parsed.phone_number || undefined,
+                              bank_name: parsed.bank_name || undefined,
+                              trans_date: parsed.trans_date || undefined,
+                              trans_ref: parsed.trans_ref || undefined,
+                              basket_no: parsed.basket_no || undefined,
+                              remarks: parsed.remarks || undefined,
+                              fraud_suspected: Boolean(parsed.fraud_suspected),
+                              fraud_reasons: Array.isArray(parsed.fraud_reasons) ? parsed.fraud_reasons : []
+                            };
+                          }
                         }
                       } catch (parseErr) {
                         console.error('Failed to parse OCR response:', parseErr);
                       }
                     }
+                  }
+
+                  // 🚫 STRICT FILTER: If not a genuine bank transfer slip or paid_amount <= 0, IGNORE completely!
+                  if (!isGenuineBankSlip || extracted.paid_amount <= 0) {
+                    console.log(`[Auto-Scan Ignored] Skipped clothing/product photo from Messenger sender: ${senderName}`);
+                    continue;
                   }
 
                   const matchRes = matchInvoiceForSlip(extracted, senderName, senderId);

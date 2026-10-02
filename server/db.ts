@@ -604,9 +604,15 @@ export async function loadDatabaseFromDisk() {
       }
       if (parsed.messengerSlips && Array.isArray(parsed.messengerSlips) && parsed.messengerSlips.length > 0) {
         messengerSlips.length = 0;
-        messengerSlips.push(...parsed.messengerSlips);
-        // Cleanse receiver names (Proel Toch / shop owner) and normalize amounts
-        for (const s of messengerSlips) {
+        // Cleanse receiver names, normalize amounts, and strictly keep ONLY genuine bank transfer slips
+        const validSlips = parsed.messengerSlips.filter((s: any) => {
+          const amt = Number(s.extracted?.paid_amount) || 0;
+          const hasBankOrRef = Boolean(s.extracted?.bank_name || s.extracted?.trans_ref);
+          // Purge non-bank images (e.g. clothing photos, live screenshots, $0.00 items)
+          return amt > 0 || hasBankOrRef;
+        });
+
+        for (const s of validSlips) {
           const raw = (s.extracted?.customer_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
           if (raw.includes('proeltoch') || raw.includes('proel') || raw.includes('toch') || !s.extracted?.customer_name) {
             if (s.extracted) {
@@ -619,6 +625,7 @@ export async function loadDatabaseFromDisk() {
             s.extracted.currency = 'USD';
           }
         }
+        messengerSlips.push(...validSlips);
       }
       if (parsed.settings) {
         Object.assign(settings, parsed.settings);
@@ -1052,6 +1059,26 @@ export function getProductsForLive(liveId?: string): Product[] {
     .sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
 }
 
+export function cleanupNonSlipMessengerEntries(): number {
+  let removed = 0;
+  for (let i = messengerSlips.length - 1; i >= 0; i--) {
+    const s = messengerSlips[i];
+    const amt = Number(s.extracted?.paid_amount) || 0;
+    const hasBankOrRef = Boolean(s.extracted?.bank_name || s.extracted?.trans_ref);
+    // Purge non-bank images (e.g. clothing photos, live screenshots, $0.00 items)
+    if (amt <= 0 && !hasBankOrRef) {
+      messengerSlips.splice(i, 1);
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    bumpDataRevision();
+    saveDatabaseToDisk();
+    console.log(`[DB Clean] Purged ${removed} non-bank clothing/product photos from messengerSlips.`);
+  }
+  return removed;
+}
+
 export function cleanupEmptyZeroItemInvoices() {
   let removed = 0;
   for (let i = invoices.length - 1; i >= 0; i--) {
@@ -1067,7 +1094,9 @@ export function cleanupEmptyZeroItemInvoices() {
 }
 
 // Load from disk on startup
-loadDatabaseFromDisk().catch(err => console.error(err));
+loadDatabaseFromDisk().then(() => {
+  cleanupNonSlipMessengerEntries();
+}).catch(err => console.error(err));
 
 // Calculate on start
 invoices.forEach(recalculateInvoice);
