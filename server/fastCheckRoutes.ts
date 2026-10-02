@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision, settings } from './db';
+import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage } from './db';
 import { Invoice } from './types';
 
 const router = Router();
@@ -106,6 +106,8 @@ export interface ExtractedSlipData {
   bank_name?: string;
   trans_date?: string;
   trans_ref?: string;
+  basket_no?: number | string;
+  remarks?: string;
 }
 
 export interface FastCheckResultItem {
@@ -113,7 +115,8 @@ export interface FastCheckResultItem {
   image_name: string;
   slip_url: string;
   extracted: ExtractedSlipData;
-  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND';
+  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED';
+  is_approved?: boolean;
   confidence: number;
   error_message?: string;
   matched_invoice?: {
@@ -154,20 +157,87 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
     inv => inv.status !== 'Cancelled' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED'
   );
 
+  // 1. DIRECT BASKET NUMBER MATCH (Highest Priority - 100% confidence)
+  if (data.basket_no) {
+    const cleanBNo = String(data.basket_no).replace(/\D/g, '');
+    if (cleanBNo) {
+      const directMatch = pool.find(
+        i => String(i.basket_no) === cleanBNo || String(i.invoice_id) === cleanBNo
+      );
+      if (directMatch) {
+        return {
+          status: 'MATCHED',
+          confidence: 100,
+          matched: directMatch
+        };
+      }
+    }
+  }
+
+  // 2. DIRECT PHONE NUMBER MATCH
+  if (data.phone_number) {
+    const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
+    if (cleanSlipPhone && cleanSlipPhone.length >= 8) {
+      const phoneMatches = pool.filter(i => {
+        const invPhone = (i.phone_number || '').replace(/\D/g, '');
+        return invPhone && (invPhone.includes(cleanSlipPhone) || cleanSlipPhone.includes(invPhone));
+      });
+      if (phoneMatches.length === 1) {
+        return {
+          status: 'MATCHED',
+          confidence: 95,
+          matched: phoneMatches[0]
+        };
+      } else if (phoneMatches.length > 1) {
+        return {
+          status: 'MULTIPLE_CANDIDATES',
+          confidence: 90,
+          candidates: phoneMatches
+        };
+      }
+    }
+  }
+
   const normExtracted = normalizeName(data.customer_name);
-  if (!normExtracted) {
-    // If name was not recognized, provide recent unpaid/staged baskets as fallback candidates
+
+  // Calculate USD equivalent
+  let paidUsd = data.paid_amount || 0;
+  if (data.currency === 'KHR' || data.paid_amount > 500) {
+    paidUsd = data.paid_amount / 4000;
+  }
+
+  // 3. Fallback when customer name was NOT recognized or very generic
+  if (!normExtracted || normExtracted === 'customer' || normExtracted === 'aba' || normExtracted === 'khqr') {
+    if (paidUsd > 0) {
+      const amountMatches = pool.filter(i => Math.abs(i.total_amount - paidUsd) < 0.25);
+      const unpaidAmountMatches = amountMatches.filter(i => i.status !== 'Paid');
+
+      if (unpaidAmountMatches.length === 1) {
+        return {
+          status: 'MATCHED',
+          confidence: 85,
+          matched: unpaidAmountMatches[0]
+        };
+      } else if (unpaidAmountMatches.length > 1) {
+        return {
+          status: 'MULTIPLE_CANDIDATES',
+          confidence: 75,
+          candidates: unpaidAmountMatches
+        };
+      }
+    }
+
     const recentUnpaid = pool.filter(i => i.status !== 'Paid').slice(0, 5);
     return { status: 'NOT_FOUND', confidence: 0, candidates: recentUnpaid };
   }
 
-  // Score candidate invoices
+  // 4. Score candidate invoices with Name Affinity
   const scored = pool.map(inv => {
     let score = 0;
     const normInv = normalizeName(inv.facebook_name);
     let hasNameAffinity = false;
 
-    // 1. Name Match (Highest priority)
+    // A. Name Match
     if (normInv === normExtracted) {
       score += 70;
       hasNameAffinity = true;
@@ -175,7 +245,6 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
       score += 50;
       hasNameAffinity = true;
     } else {
-      // Check token overlap
       const invTokens = normInv.split(' ');
       const extTokens = normExtracted.split(' ');
       const overlap = invTokens.filter(t => t.length >= 2 && extTokens.includes(t));
@@ -185,7 +254,7 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
       }
     }
 
-    // 2. Phone Match
+    // B. Phone Match
     let hasPhoneAffinity = false;
     if (data.phone_number && inv.phone_number) {
       const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
@@ -196,32 +265,28 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
       }
     }
 
-    // 3. Amount Match (Only adds value if there is name or phone affinity)
-    if (data.paid_amount > 0 && inv.total_amount > 0) {
-      let paidUsd = data.paid_amount;
-      if (data.currency === 'KHR' || data.paid_amount > 500) {
-        paidUsd = data.paid_amount / 4000;
-      }
-
+    // C. Amount Match
+    if (paidUsd > 0 && inv.total_amount > 0) {
       const diff = Math.abs(inv.total_amount - paidUsd);
       if (diff < 0.25) {
-        score += hasNameAffinity || hasPhoneAffinity ? 35 : 10;
+        score += hasNameAffinity || hasPhoneAffinity ? 35 : 20;
       } else if (diff < 1.0) {
-        score += hasNameAffinity || hasPhoneAffinity ? 20 : 5;
+        score += hasNameAffinity || hasPhoneAffinity ? 20 : 10;
       }
     }
 
-    // 4. Prefer baskets that are waiting for payment (STAGED / UNPICKED)
+    // D. Prefer baskets that are waiting for payment (STAGED / UNPICKED)
     if (inv.packing_stage === 'STAGED' && inv.status !== 'Paid') {
+      score += 15;
+    } else if (inv.status !== 'Paid') {
       score += 10;
     }
 
     return { inv, score, hasNameAffinity, hasPhoneAffinity };
   });
 
-  // Filter candidates with minimum plausible score and name/phone affinity
-  const nameOrPhoneMatches = scored.filter(item => (item.hasNameAffinity || item.hasPhoneAffinity) && item.score >= 40);
-  const validCandidates = (nameOrPhoneMatches.length > 0 ? nameOrPhoneMatches : scored.filter(item => item.score >= 50))
+  const nameOrPhoneMatches = scored.filter(item => (item.hasNameAffinity || item.hasPhoneAffinity) && item.score >= 35);
+  const validCandidates = (nameOrPhoneMatches.length > 0 ? nameOrPhoneMatches : scored.filter(item => item.score >= 45))
     .sort((a, b) => b.score - a.score);
 
   if (validCandidates.length === 0) {
@@ -229,7 +294,7 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
     return { status: 'NOT_FOUND', confidence: 0, candidates: fallbackUnpaid };
   }
 
-  // Check if top matched customer has MULTIPLE baskets across different lives
+  // Check if top matched customer has MULTIPLE baskets
   const topCandidate = validCandidates[0].inv;
   const sameCustomerBaskets = pool.filter(inv => {
     if (inv.status === 'Cancelled' || inv.status === 'Dispatched') return false;
@@ -239,7 +304,6 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
     return normalizeName(inv.facebook_name) === normalizeName(topCandidate.facebook_name);
   });
 
-  // If customer has 2 or more active baskets, return all of their baskets as candidate group!
   if (sameCustomerBaskets.length >= 2) {
     return {
       status: 'MULTIPLE_CANDIDATES',
@@ -248,8 +312,7 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
     };
   }
 
-  // If single clear match
-  if (validCandidates.length === 1 || (validCandidates[0].score >= 80 && validCandidates[0].score - (validCandidates[1]?.score || 0) >= 25)) {
+  if (validCandidates.length === 1 || (validCandidates[0].score >= 70 && validCandidates[0].score - (validCandidates[1]?.score || 0) >= 20)) {
     return {
       status: 'MATCHED',
       confidence: Math.min(100, validCandidates[0].score),
@@ -257,7 +320,6 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
     };
   }
 
-  // Ambiguous: multiple candidates
   return {
     status: 'MULTIPLE_CANDIDATES',
     confidence: validCandidates[0].score,
@@ -274,7 +336,7 @@ export async function callGeminiSlipExtraction(
   textPart: { text: string }
 ): Promise<{ text: string; error?: string }> {
   // Flagship high-accuracy model with high-throughput fallbacks
-  const modelCandidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  const modelCandidates = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-2.0-flash'];
   let lastErrorMessage = '';
 
   for (const model of modelCandidates) {
@@ -354,21 +416,28 @@ router.post('/scan_slips', async (req: Request, res: Response) => {
         };
 
         const textPart = {
-          text: `You are an expert at analyzing Cambodian Facebook Messenger chat screenshots with bank transfer receipts (ABA Bank, ACLEDA Bank, Canadia, TrueMoney, KHQR).
+          text: `You are an expert at analyzing Cambodian Mobile Banking transfer slips and Facebook Messenger chat payment screenshots (ABA Bank, ACLEDA Bank, Bakong / KHQR, Canadia, TrueMoney, Wing).
 Analyze this image carefully:
-1. Look at the Facebook Messenger chat header at the very top: What is the customer's Facebook Profile Name? (e.g. "Mak Banhapich", "Malin Mon", "Kari Arnett"). Do NOT use the page name or staff name.
-2. In the chat or on the bank slip, find the transferred amount and currency (e.g. 40,000 KHR or 10.00 USD).
-3. If the customer sent a phone number or address in the chat text (e.g. "070227974"), extract the phone number.
-4. Extract bank name (e.g. ACLEDA, ABA) and reference number if visible.
+1. If this is a Facebook Messenger chat screenshot:
+   - What is the customer's Facebook Profile Name in the header at the top?
+2. If this is a direct mobile banking slip (ABA, ACLEDA, Bakong, etc.):
+   - Extract the customer/sender name or recipient note on the slip.
+3. Look at the transfer remarks / description:
+   - Does it mention a basket number or order number (e.g. "#102", "102", "កន្ត្រក 102", "Order 102")?
+4. Find the transferred numeric amount and currency (e.g. 10.00 USD or 40,000 KHR).
+5. If the customer sent a phone number or address (e.g. "070227974"), extract it.
+6. Extract bank name (ABA, ACLEDA, Bakong, Wing) and transaction reference number (TxID / Ref).
 
-Return ONLY a JSON object with this exact structure:
+Return ONLY a JSON object:
 {
-  "customer_name": "Exact Name at Top of Chat",
+  "customer_name": "...",
+  "basket_no": null or number,
   "paid_amount": 10.00,
   "currency": "USD",
-  "phone_number": "070227974",
-  "bank_name": "ACLEDA",
-  "trans_ref": "62616195612"
+  "phone_number": "...",
+  "bank_name": "...",
+  "trans_ref": "...",
+  "remarks": "..."
 }`
         };
 
@@ -382,14 +451,17 @@ Return ONLY a JSON object with this exact structure:
 
         if (rawText) {
           try {
-            const parsed = JSON.parse(rawText.trim());
+            const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+            const parsed = JSON.parse(cleaned);
             extracted = {
               customer_name: String(parsed.customer_name || '').trim(),
               paid_amount: Number(parsed.paid_amount) || 0,
               currency: String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD',
               phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
               bank_name: parsed.bank_name ? String(parsed.bank_name).trim() : undefined,
-              trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined
+              trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined,
+              basket_no: parsed.basket_no ? String(parsed.basket_no).replace(/\D/g, '') : undefined,
+              remarks: parsed.remarks ? String(parsed.remarks).trim() : undefined
             };
           } catch {
             console.warn('Failed to parse Gemini JSON output:', rawText);
@@ -687,6 +759,358 @@ router.get('/dispatched_all_lives', (_req: Request, res: Response) => {
       today_date: todayStr,
       invoices: allDispatched,
       summary_by_live: summaryByLive
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fast_check/unpaid_baskets
+ * Returns all active unpaid invoices across all live sessions for manual basket linking / search.
+ */
+router.get('/unpaid_baskets', (_req: Request, res: Response) => {
+  try {
+    const unpaid = invoices
+      .filter(i => i.status !== 'Paid' && i.payment_status !== 'Paid' && i.status !== 'Cancelled')
+      .map(i => ({
+        invoice_id: i.invoice_id,
+        basket_no: i.basket_no,
+        live_id: i.live_id,
+        facebook_name: i.facebook_name,
+        phone_number: i.phone_number,
+        total_amount: i.total_amount,
+        created_at: i.created_at,
+        packing_stage: i.packing_stage,
+        status: i.status
+      }));
+
+    return res.json({
+      success: true,
+      count: unpaid.length,
+      baskets: unpaid
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
+});
+
+/**
+ * GET /api/fast_check/messenger_slips
+ * Returns all auto-scanned slips from Messenger with dynamic matching against active invoices
+ */
+router.get('/messenger_slips', (req: Request, res: Response) => {
+  try {
+    const { since } = req.query; // 'today' | '24h' | 'all'
+    const now = new Date();
+    let cutoffDate: Date | null = null;
+
+    if (since === 'today' || !since) {
+      // 12:00 AM Midnight today
+      cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    } else if (since === '24h') {
+      cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
+    }
+
+    // Refresh match state for each slip that is not yet approved
+    for (const slip of messengerSlips) {
+      if (slip.status !== 'APPROVED' && slip.status !== 'REJECTED') {
+        const matchRes = matchInvoiceForSlip(slip.extracted);
+        slip.status = matchRes.status;
+        slip.confidence = matchRes.confidence;
+        slip.matched_invoice = matchRes.matched ? {
+          invoice_id: matchRes.matched.invoice_id,
+          basket_no: matchRes.matched.basket_no,
+          live_id: matchRes.matched.live_id,
+          facebook_name: matchRes.matched.facebook_name,
+          phone_number: matchRes.matched.phone_number,
+          total_amount: matchRes.matched.total_amount,
+          created_at: matchRes.matched.created_at,
+          packing_stage: matchRes.matched.packing_stage,
+          status: matchRes.matched.status
+        } : undefined;
+        slip.candidates = matchRes.candidates ? matchRes.candidates.map(c => ({
+          invoice_id: c.invoice_id,
+          basket_no: c.basket_no,
+          live_id: c.live_id,
+          facebook_name: c.facebook_name,
+          phone_number: c.phone_number,
+          total_amount: c.total_amount,
+          created_at: c.created_at,
+          packing_stage: c.packing_stage,
+          status: c.status
+        })) : undefined;
+      }
+    }
+
+    let filtered = [...messengerSlips];
+    if (cutoffDate) {
+      filtered = filtered.filter(s => {
+        if (!s.received_at) return true;
+        return new Date(s.received_at) >= cutoffDate;
+      });
+    }
+
+    // Sort newest received first
+    filtered.sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
+
+    const matchedCount = filtered.filter(s => s.status === 'MATCHED' && !s.is_approved).length;
+    const approvedCount = filtered.filter(s => s.status === 'APPROVED' || s.is_approved).length;
+    const reviewCount = filtered.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND') && !s.is_approved).length;
+
+    return res.json({
+      success: true,
+      count: filtered.length,
+      slips: filtered,
+      stats: {
+        total: filtered.length,
+        matched: matchedCount,
+        review: reviewCount,
+        approved: approvedCount
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
+});
+
+/**
+ * POST /api/fast_check/sync_messenger_slips
+ * Scans Messenger conversations starting from 12:00 AM today and updates the verification queue
+ */
+router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
+  try {
+    const page = activeFacebookPage;
+    let newSlipsFound = 0;
+
+    if (page && page.access_token && page.id) {
+      // 12:00 AM Today (Local Midnight)
+      const now = new Date();
+      const cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+
+      try {
+        const fbRes = await fetch(
+          `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages{id,created_time,from,message,attachments{id,mime_type,name,size,image_data}}&limit=30&access_token=${page.access_token}`
+        );
+        const fbData = await fbRes.json();
+        if (fbData.data && Array.isArray(fbData.data)) {
+          for (const conv of fbData.data) {
+            const messages = conv.messages?.data || [];
+            for (const m of messages) {
+              if (m.from?.id === page.id) continue;
+              const msgTime = new Date(m.created_time);
+              if (msgTime < cutoffDate) continue;
+
+              const attachments = m.attachments?.data || [];
+              for (const att of attachments) {
+                const imgUrl = att.image_data?.url;
+                if (!imgUrl || att.image_data?.render_as_sticker) continue;
+
+                // Check if already in queue by URL or ID
+                const alreadyExists = messengerSlips.some(s => s.slip_url === imgUrl || s.id.includes(m.id));
+                if (!alreadyExists) {
+                  const senderName = m.from?.name || conv.participants?.data?.find((p: any) => p.id !== page.id)?.name || 'Messenger Customer';
+                  const senderId = m.from?.id || 'FB_USER';
+
+                  let savedSlipUrl = imgUrl;
+                  let rawBase64 = '';
+                  const mimeType = att.mime_type || 'image/jpeg';
+
+                  try {
+                    const imgResp = await fetch(imgUrl);
+                    const arrayBuf = await imgResp.arrayBuffer();
+                    const buf = Buffer.from(arrayBuf);
+                    rawBase64 = buf.toString('base64');
+                    const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+                    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+                    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+                    fs.writeFileSync(path.join(uploadsDir, fileName), buf);
+                    savedSlipUrl = `/uploads/${fileName}`;
+                  } catch (dlErr) {
+                    console.error('Image download error:', dlErr);
+                  }
+
+                  let extracted: ExtractedSlipData = {
+                    customer_name: senderName,
+                    paid_amount: 0,
+                    currency: 'USD'
+                  };
+
+                  const ai = getGemini();
+                  if (ai && rawBase64) {
+                    const imagePart = { inlineData: { mimeType, data: rawBase64 } };
+                    const textPart = {
+                      text: `You are an expert at analyzing Cambodian Mobile Banking transfer slips (ABA, ACLEDA, Bakong, KHQR, Wing, Canadia, TrueMoney).
+Extract:
+1. is_bank_slip (boolean)
+2. customer_name (string)
+3. paid_amount (number)
+4. currency (USD or KHR)
+5. phone_number (string or null)
+6. bank_name (string or null)
+7. trans_date (string or null)
+8. trans_ref (string or null)
+9. basket_no (number or null)
+10. remarks (string or null)
+Output strictly raw JSON with these fields.`
+                    };
+                    const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);
+                    if (geminiRes.text) {
+                      try {
+                        const cleaned = geminiRes.text.replace(/```json/gi, '').replace(/```/gi, '').trim();
+                        const parsed = JSON.parse(cleaned);
+                        if (parsed.is_bank_slip !== false) {
+                          extracted = {
+                            customer_name: parsed.customer_name || senderName,
+                            paid_amount: Number(parsed.paid_amount) || 0,
+                            currency: (parsed.currency || 'USD').toUpperCase() as any,
+                            phone_number: parsed.phone_number || undefined,
+                            bank_name: parsed.bank_name || undefined,
+                            trans_date: parsed.trans_date || undefined,
+                            trans_ref: parsed.trans_ref || undefined,
+                            basket_no: parsed.basket_no || undefined,
+                            remarks: parsed.remarks || undefined
+                          };
+                        }
+                      } catch (parseErr) {
+                        console.error('Failed to parse OCR response:', parseErr);
+                      }
+                    }
+                  }
+
+                  const matchRes = matchInvoiceForSlip(extracted);
+
+                  messengerSlips.unshift({
+                    id: `mslip_${m.id}_${Date.now()}`,
+                    source: 'MESSENGER',
+                    sender_id: senderId,
+                    sender_name: senderName,
+                    slip_url: savedSlipUrl,
+                    received_at: m.created_time || new Date().toISOString(),
+                    extracted,
+                    status: matchRes.status,
+                    confidence: matchRes.confidence,
+                    matched_invoice: matchRes.matched ? {
+                      invoice_id: matchRes.matched.invoice_id,
+                      basket_no: matchRes.matched.basket_no,
+                      live_id: matchRes.matched.live_id,
+                      facebook_name: matchRes.matched.facebook_name,
+                      phone_number: matchRes.matched.phone_number,
+                      total_amount: matchRes.matched.total_amount,
+                      created_at: matchRes.matched.created_at,
+                      packing_stage: matchRes.matched.packing_stage,
+                      status: matchRes.matched.status
+                    } : undefined,
+                    candidates: matchRes.candidates ? matchRes.candidates.map(c => ({
+                      invoice_id: c.invoice_id,
+                      basket_no: c.basket_no,
+                      live_id: c.live_id,
+                      facebook_name: c.facebook_name,
+                      phone_number: c.phone_number,
+                      total_amount: c.total_amount,
+                      created_at: c.created_at,
+                      packing_stage: c.packing_stage,
+                      status: c.status
+                    })) : undefined
+                  });
+                  newSlipsFound++;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Facebook Graph sync error:', e);
+      }
+    }
+
+    saveDatabaseToDisk();
+    bumpDataRevision();
+
+    return res.json({
+      success: true,
+      new_slips_count: newSlipsFound,
+      total_slips: messengerSlips.length,
+      message: `✅ បានទាញយក និង Auto-Scan វិក្កយបត្រថ្មីពី Messenger រួចរាល់ (${newSlipsFound} Slips ថ្មី)!`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
+});
+
+/**
+ * POST /api/fast_check/approve_slip
+ * 1-Click Approve single slip from Messenger queue
+ */
+router.post('/approve_slip', (req: Request, res: Response) => {
+  try {
+    const { slip_id, invoice_id, paid_amount, packer_name } = req.body;
+    if (!slip_id || !invoice_id) {
+      return res.status(400).json({ success: false, error: 'Missing slip_id or invoice_id' });
+    }
+
+    const slip = messengerSlips.find(s => s.id === slip_id);
+    const inv = invoices.find(i => i.invoice_id === Number(invoice_id));
+
+    if (!inv) {
+      return res.status(404).json({ success: false, error: 'រកមិនឃើញកន្ត្រកវិក្កយបត្រនេះទេ' });
+    }
+
+    const nowIso = new Date().toISOString();
+    inv.status = 'Paid';
+    inv.payment_status = 'Paid';
+    inv.paid_at = nowIso;
+    inv.paid_by = packer_name || 'Admin (Messenger Table)';
+    if (slip && slip.slip_url) {
+      inv.payment_slip_url = slip.slip_url;
+    }
+    if (paid_amount && Number(paid_amount) > 0) {
+      inv.payment_method = 'Bank Transfer (KHQR)';
+    }
+    if (inv.packing_stage === 'UNPICKED') {
+      inv.packing_stage = 'STAGED';
+    }
+
+    if (slip) {
+      slip.status = 'APPROVED';
+      slip.is_approved = true;
+    }
+
+    saveDatabaseToDisk();
+    bumpDataRevision();
+
+    return res.json({
+      success: true,
+      message: `✅ Admin បាន Approved កន្ត្រក #${inv.basket_no} ទៅជា [Paid] ជោគជ័យ!`,
+      invoice: inv
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Server error' });
+  }
+});
+
+/**
+ * POST /api/fast_check/reject_slip
+ * Discards or rejects an unneeded/invalid slip from queue
+ */
+router.post('/reject_slip', (req: Request, res: Response) => {
+  try {
+    const { slip_id } = req.body;
+    if (!slip_id) {
+      return res.status(400).json({ success: false, error: 'Missing slip_id' });
+    }
+
+    const idx = messengerSlips.findIndex(s => s.id === slip_id);
+    if (idx !== -1) {
+      messengerSlips.splice(idx, 1);
+    }
+
+    saveDatabaseToDisk();
+    bumpDataRevision();
+
+    return res.json({
+      success: true,
+      message: 'បានដក Slip ចេញពីតារាងផ្ទៀងផ្ទាត់រួចរាល់'
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err?.message || 'Server error' });

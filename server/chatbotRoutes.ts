@@ -12,6 +12,7 @@ import {
   sendFacebookMessengerReply,
   resolveCustomerFacebookName
 } from './chatbotEngine';
+import { activeFacebookPage } from './db';
 
 const router = Router();
 
@@ -112,6 +113,115 @@ router.post(['/send_payment_reminders', '/chatbot/send_payment_reminders'], asyn
     count: result.count,
     reminders: result.messages
   });
+});
+
+// POST /api/chatbot/scan_inbox_slips - Scan Messenger Inbox for customer payment slips from midnight up to now
+router.post(['/scan_inbox_slips', '/chatbot/scan_inbox_slips'], async (req: Request, res: Response) => {
+  const { since_hours } = req.body;
+  const page = activeFacebookPage;
+
+  if (!page || !page.access_token || !page.id) {
+    return res.status(400).json({
+      success: false,
+      error: 'មិនទាន់ភ្ជាប់ Facebook Page ឬគ្មាន Access Token ឡើយ!'
+    });
+  }
+
+  // Calculate cutoff timestamp: defaults to 12:00 AM today (local midnight) or since_hours
+  const now = new Date();
+  let cutoffDate: Date;
+  if (since_hours && Number(since_hours) > 0) {
+    cutoffDate = new Date(Date.now() - Number(since_hours) * 3600 * 1000);
+  } else {
+    // 12:00 AM Today (Local Midnight)
+    cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  }
+
+  const cutoffIso = cutoffDate.toISOString();
+  console.log(`🔍 [Messenger Scan] Scanning conversations since ${cutoffIso}...`);
+
+  try {
+    const fbRes = await fetch(
+      `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages{id,created_time,from,message,attachments{id,mime_type,name,size,image_data}}&limit=50&access_token=${page.access_token}`
+    );
+    const fbData = await fbRes.json();
+
+    if (!fbData.data || !Array.isArray(fbData.data)) {
+      return res.status(400).json({
+        success: false,
+        error: fbData.error?.message || 'បរាជ័យក្នុងការទាញយក Inbox ពី Facebook'
+      });
+    }
+
+    const conversations = fbData.data;
+    let imagesScanned = 0;
+    let matchedPaidCount = 0;
+    const matchedSlips: Array<{
+      customer_name: string;
+      basket_no: number | string;
+      amount: number;
+      slip_url?: string;
+      created_time: string;
+    }> = [];
+
+    for (const conv of conversations) {
+      const messages = conv.messages?.data || [];
+
+      for (const m of messages) {
+        // Skip messages sent by the page itself
+        if (m.from?.id === page.id) continue;
+
+        // Skip messages before the cutoff time
+        const msgTime = new Date(m.created_time);
+        if (msgTime < cutoffDate) continue;
+
+        const attachments = m.attachments?.data || [];
+        for (const att of attachments) {
+          const imgUrl = att.image_data?.url;
+          if (!imgUrl) continue;
+
+          // Skip stickers
+          if (att.image_data?.render_as_sticker) continue;
+
+          imagesScanned++;
+          const senderPsid = m.from?.id || conv.participants?.data?.find((p: any) => p.id !== page.id)?.id || 'UNKNOWN';
+          const customerName = m.from?.name || conv.participants?.data?.find((p: any) => p.id !== page.id)?.name || 'Facebook Customer';
+
+          try {
+            const slipRes = await processIncomingSlipImage(senderPsid, customerName, imgUrl, att.mime_type || 'image/jpeg');
+            if (slipRes.success && slipRes.invoice) {
+              matchedPaidCount++;
+              matchedSlips.push({
+                customer_name: slipRes.invoice.facebook_name || customerName,
+                basket_no: slipRes.invoice.basket_no || slipRes.invoice.invoice_id,
+                amount: slipRes.invoice.total_amount,
+                slip_url: slipRes.invoice.payment_slip_url,
+                created_time: m.created_time
+              });
+            }
+          } catch (slipErr) {
+            console.error('[Batch Slip Error]:', slipErr);
+          }
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      cutoff: cutoffIso,
+      conversationsCount: conversations.length,
+      imagesScanned,
+      matchedPaidCount,
+      matchedSlips,
+      message: `✅ បានស្កេន ${conversations.length} ការសន្ទនា, ពិនិត្យ ${imagesScanned} រូបភាព, និងបាន Tick [បង់រួច] ${matchedPaidCount} កន្ត្រក!`
+    });
+  } catch (err: any) {
+    console.error('[Scan Inbox Error]:', err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Error scanning inbox slips'
+    });
+  }
 });
 
 // -------------------------------------------------------------

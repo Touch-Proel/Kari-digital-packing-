@@ -54,16 +54,16 @@ export function GamifiedHud({
         </button>
       )}
 
-      {/* ⚡ Fast-Check (Slip scan tool) */}
+      {/* 📑 Table ផ្ទៀងផ្ទាត់ Slips (Slip Verification & Approval Table) */}
       {onOpenFastCheck && (
         <button
           type="button"
           onClick={onOpenFastCheck}
-          className="flex-1 sm:flex-none h-8 px-2.5 rounded-xl bg-gradient-to-r from-indigo-600/85 via-purple-600/85 to-indigo-600/85 hover:from-indigo-500 hover:to-purple-500 border border-indigo-400/60 hover:border-indigo-300 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all shadow-sm whitespace-nowrap"
-          title="ស្កេនរូបភាព Slips ដើម្បីផ្ទៀងផ្ទាត់បង់រួចស្វ័យប្រវត្តិ"
+          className="flex-1 sm:flex-none h-8 px-3 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 border border-indigo-400/80 hover:border-indigo-300 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all shadow-[0_0_15px_rgba(99,102,241,0.3)] whitespace-nowrap"
+          title="បើក Table ផ្ទៀងផ្ទាត់រូបវិក្កយបត្រ Slips និង 1-Click Approve"
         >
-          <span className="text-sm">⚡</span>
-          <span>Fast-Check</span>
+          <span className="text-sm">📑</span>
+          <span>Table ផ្ទៀងផ្ទាត់ Slips</span>
         </button>
       )}
 

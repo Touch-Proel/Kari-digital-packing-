@@ -1,5 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { FastCheckResultItem } from '../../../server/fastCheckRoutes';
+import React, { useState, useEffect } from 'react';
 import { playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
 
 interface FastCheckSlipsModalProps {
@@ -9,22 +8,87 @@ interface FastCheckSlipsModalProps {
   onShowToast: (msg: string, type?: 'success' | 'error' | 'warning') => void;
 }
 
+export interface MessengerSlipItem {
+  id: string;
+  source: 'MESSENGER' | 'TELEGRAM';
+  sender_id: string;
+  sender_name: string;
+  slip_url: string;
+  received_at: string;
+  extracted: {
+    customer_name: string;
+    paid_amount: number;
+    currency: 'USD' | 'KHR';
+    phone_number?: string;
+    bank_name?: string;
+    trans_ref?: string;
+    trans_date?: string;
+    basket_no?: number | string;
+    remarks?: string;
+  };
+  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED' | 'REJECTED';
+  is_approved?: boolean;
+  confidence: number;
+  matched_invoice?: {
+    invoice_id: number;
+    basket_no?: number | string;
+    live_id: string;
+    facebook_name: string;
+    phone_number: string;
+    total_amount: number;
+    created_at: string;
+    packing_stage: string;
+    status: string;
+  };
+  candidates?: Array<{
+    invoice_id: number;
+    basket_no?: number | string;
+    live_id: string;
+    facebook_name: string;
+    phone_number: string;
+    total_amount: number;
+    created_at: string;
+    packing_stage: string;
+    status: string;
+  }>;
+}
+
+interface UnpaidBasket {
+  invoice_id: number;
+  basket_no?: number | string;
+  live_id: string;
+  facebook_name: string;
+  phone_number: string;
+  total_amount: number;
+  created_at: string;
+  packing_stage: string;
+  status: string;
+}
+
 export function FastCheckSlipsModal({
   isOpen,
   onClose,
   onSuccess,
   onShowToast
 }: FastCheckSlipsModalProps) {
-  const [activeTab, setActiveTab] = useState<'SLIPS' | 'NAMES'>('SLIPS');
-  const [selectedFiles, setSelectedFiles] = useState<{ name: string; data: string; mimeType: string }[]>([]);
-  const [namesText, setNamesText] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
-  const [results, setResults] = useState<FastCheckResultItem[]>([]);
-  const [isConfirming, setIsConfirming] = useState(false);
+  const [timeFilter, setTimeFilter] = useState<'today' | '24h' | 'all'>('today');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'MATCHED' | 'REVIEW' | 'APPROVED'>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  const [slips, setSlips] = useState<MessengerSlipItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [approvingIds, setApprovingIds] = useState<Record<string, boolean>>({});
+  const [isConfirmingAll, setIsConfirmingAll] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  // Gemini API Key State for VPS / Direct UI Config
+  // Manual Basket Search Modal State
+  const [manualLinkSlip, setManualLinkSlip] = useState<MessengerSlipItem | null>(null);
+  const [unpaidBaskets, setUnpaidBaskets] = useState<UnpaidBasket[]>([]);
+  const [basketSearchTerm, setBasketSearchTerm] = useState('');
+  const [isLoadingBaskets, setIsLoadingBaskets] = useState(false);
+
+  // Gemini API Key State for VPS / Settings
   const [geminiStatus, setGeminiStatus] = useState<{
     hasKey: boolean;
     maskedKey: string;
@@ -35,9 +99,25 @@ export function FastCheckSlipsModal({
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [isSavingKey, setIsSavingKey] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Fetch Slips from Backend (Messenger Auto-Scanned)
+  const fetchMessengerSlips = async (showLoading = false) => {
+    if (showLoading) setIsLoading(true);
+    try {
+      const res = await fetch(`/api/fast_check/messenger_slips?since=${timeFilter}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.slips)) {
+          setSlips(data.slips);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching messenger slips:', err);
+    } finally {
+      if (showLoading) setIsLoading(false);
+    }
+  };
 
-  // Check Gemini Key Status on mount/open
+  // Check Gemini Key Status
   const fetchGeminiStatus = async () => {
     try {
       const res = await fetch('/api/fast_check/gemini_status');
@@ -55,11 +135,66 @@ export function FastCheckSlipsModal({
     }
   };
 
+  const fetchUnpaidBaskets = async () => {
+    setIsLoadingBaskets(true);
+    try {
+      const res = await fetch('/api/fast_check/unpaid_baskets');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.baskets)) {
+          setUnpaidBaskets(data.baskets);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching unpaid baskets:', err);
+    } finally {
+      setIsLoadingBaskets(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       fetchGeminiStatus();
+      fetchUnpaidBaskets();
+      fetchMessengerSlips(true);
     }
-  }, [isOpen]);
+  }, [isOpen, timeFilter]);
+
+  // Auto-Polling every 10 seconds silently
+  useEffect(() => {
+    if (!isOpen) return;
+    const interval = setInterval(() => {
+      fetchMessengerSlips(false);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [isOpen, timeFilter]);
+
+  if (!isOpen) return null;
+
+  // Manual Trigger to Sync from Messenger Inbox
+  const handleSyncMessengerNow = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/fast_check/sync_messenger_slips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ since: timeFilter })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast(data.message || '✅ បានទាញយក Slips ថ្មីៗពី Messenger ជោគជ័យ!', 'success');
+        fetchMessengerSlips(false);
+        fetchUnpaidBaskets();
+      } else {
+        onShowToast(data.error || 'មិនអាចទាញយកសារ Messenger បានទេ', 'error');
+      }
+    } catch {
+      onShowToast('មានបញ្ហាក្នុងការតភ្ជាប់ Messenger API', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleSaveGeminiKey = async () => {
     if (!apiKeyInput.trim() && !geminiStatus.hasKey) {
@@ -96,787 +231,853 @@ export function FastCheckSlipsModal({
     }
   };
 
-  // Handle clipboard paste (Ctrl+V / Cmd+V)
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handlePaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      const newFiles: { name: string; data: string; mimeType: string }[] = [];
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          const blob = items[i].getAsFile();
-          if (blob) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              const base64 = event.target?.result as string;
-              if (base64) {
-                setSelectedFiles(prev => [
-                  ...prev,
-                  {
-                    name: `Pasted_Slip_${Date.now()}_${prev.length + 1}.png`,
-                    data: base64,
-                    mimeType: blob.type || 'image/png'
-                  }
-                ]);
-              }
-            };
-            reader.readAsDataURL(blob);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  // File selection
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const fileList: File[] = Array.from(files);
-    let loadedCount = 0;
-    const newItems: { name: string; data: string; mimeType: string }[] = [];
-
-    fileList.forEach((file: File) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const base64 = ev.target?.result as string;
-        if (base64) {
-          newItems.push({
-            name: file.name,
-            data: base64,
-            mimeType: file.type || 'image/jpeg'
-          });
-        }
-        loadedCount++;
-        if (loadedCount === fileList.length) {
-          setSelectedFiles(prev => [...prev, ...newItems]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
-
-    // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  // Run Scan for Images (Gemini Flash Free Tier)
-  const handleScanSlips = async () => {
-    if (selectedFiles.length === 0) {
-      onShowToast('សូមជ្រើសរើសរូប Screenshot វិក្កយបត្រជាមុនសិន!', 'warning');
+  // 1-Click Approve Single Slip by Admin
+  const handleApproveSingle = async (slip: MessengerSlipItem) => {
+    if (!slip.matched_invoice) {
+      onShowToast('សូមភ្ជាប់កន្ត្រកជាមុនសិនមុននឹង Approve!', 'warning');
       return;
     }
 
-    setIsScanning(true);
-    setResults([]);
-    setScanProgress({ current: 0, total: selectedFiles.length });
+    setApprovingIds(prev => ({ ...prev, [slip.id]: true }));
 
     try {
-      // Chunk requests in batches of 5 to remain well within free tier limits
-      const batchSize = 5;
-      const allResults: FastCheckResultItem[] = [];
-
-      for (let i = 0; i < selectedFiles.length; i += batchSize) {
-        const batch = selectedFiles.slice(i, i + batchSize);
-        setScanProgress({ current: i + 1, total: selectedFiles.length });
-
-        const res = await fetch('/api/fast_check/scan_slips', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ images: batch })
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          if (json.success && Array.isArray(json.results)) {
-            allResults.push(...json.results);
-            setResults([...allResults]);
-          }
-        }
-      }
-
-      setScanProgress({ current: selectedFiles.length, total: selectedFiles.length });
-      playSuccessFanfare();
-      onShowToast(`🎉 បានស្កេនវិភាគចប់សព្វគ្រប់ ${allResults.length} រូប!`, 'success');
-    } catch (err: any) {
-      console.error('Scan error:', err);
-      playWarningBuzzer();
-      onShowToast('⚠️ មានបញ្ហាក្នុងការស្កេនរូប សូមព្យាយាមម្តងទៀត', 'error');
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  // Run Text Scan for Names (100% Free Instant Match)
-  const handleScanNames = async () => {
-    if (!namesText.trim()) {
-      onShowToast('សូម Paste បញ្ជីឈ្មោះ Facebook ជាមុនសិន!', 'warning');
-      return;
-    }
-
-    setIsScanning(true);
-    setResults([]);
-
-    try {
-      const res = await fetch('/api/fast_check/scan_names', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ namesText })
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && Array.isArray(json.results)) {
-          setResults(json.results);
-          playSuccessFanfare();
-          onShowToast(`🎉 បានផ្គូផ្គងរួចរាល់ ${json.results.length} ឈ្មោះ!`, 'success');
-        }
-      }
-    } catch (err: any) {
-      console.error('Scan names error:', err);
-      onShowToast('⚠️ មិនអាចស្វែងរកឈ្មោះបានទេ', 'error');
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  // Change candidate selection for ambiguous or not-found results
-  const handleSelectCandidate = (itemIndex: number, candidate: any) => {
-    playSuccessFanfare();
-    onShowToast(`✅ បានផ្គូផ្គងជាមួយកន្ត្រក #${candidate.basket_no} (${candidate.facebook_name})!`, 'success');
-    setResults(prev => {
-      const copy = [...prev];
-      copy[itemIndex] = {
-        ...copy[itemIndex],
-        status: 'MATCHED',
-        confidence: 100,
-        matched_invoice: candidate
-      };
-      return copy;
-    });
-  };
-
-  // Merge multiple candidate baskets for same customer directly from Fast-Check
-  const handleMergeCandidates = async (itemIndex: number, candidates: any[], paidAmount?: number) => {
-    if (!candidates || candidates.length < 2) return;
-    const target = candidates[0];
-    const sources = candidates.slice(1);
-
-    try {
-      const res = await fetch('/api/invoices/merge_baskets', {
+      const res = await fetch('/api/fast_check/approve_slip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          target_invoice_id: target.invoice_id,
-          source_invoice_ids: sources.map(s => s.invoice_id)
+          slip_id: slip.id,
+          invoice_id: slip.matched_invoice.invoice_id,
+          paid_amount: slip.extracted.paid_amount,
+          packer_name: 'Admin (Messenger Table)'
         })
-      });
-
-      const data = await res.json();
-      if (data.success && data.invoice) {
-        playSuccessFanfare();
-        const mergedBasketNos = candidates.map(c => `#${c.basket_no}`).join(' + ');
-        onShowToast(`🎉 បានច្របាច់កន្ត្រក ${mergedBasketNos} ចូលគ្នាតែ ១ កញ្ចប់ជោគជ័យ!`, 'success');
-        
-        // Update the result item to MATCHED with the newly consolidated invoice
-        setResults(prev => {
-          const copy = [...prev];
-          copy[itemIndex] = {
-            ...copy[itemIndex],
-            status: 'MATCHED',
-            confidence: 100,
-            matched_invoice: {
-              ...data.invoice,
-              total_amount: paidAmount && paidAmount > 0 ? paidAmount : data.invoice.total_amount
-            }
-          };
-          return copy;
-        });
-      } else {
-        throw new Error(data.error || 'បរាជ័យក្នុងការច្របាច់កន្ត្រក');
-      }
-    } catch (err: any) {
-      playWarningBuzzer();
-      onShowToast(err.message || '⚠️ មានបញ្ហាក្នុងការច្របាច់កន្ត្រក!', 'error');
-    }
-  };
-
-  // Confirm and mark all matched invoices as Paid
-  const handleConfirmAll = async () => {
-    const matchedItems = results.filter(r => r.status === 'MATCHED' && r.matched_invoice);
-    if (matchedItems.length === 0) {
-      onShowToast('មិនមានកន្ត្រកដែលបានផ្គូផ្គងត្រឹមត្រូវសម្រាប់បញ្ជាក់ទេ!', 'warning');
-      return;
-    }
-
-    setIsConfirming(true);
-    try {
-      const matches = matchedItems.map(item => ({
-        invoice_id: item.matched_invoice!.invoice_id,
-        slip_url: item.slip_url,
-        paid_amount: item.extracted.paid_amount,
-        paid_by: 'Fast-Check AI'
-      }));
-
-      const res = await fetch('/api/fast_check/confirm_matches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matches, packerName: 'Fast-Check AI' })
       });
 
       if (res.ok) {
         const json = await res.json();
         if (json.success) {
           playSuccessFanfare();
-          onShowToast(`✅ បានប្តូរទៅ [បង់រួច] ជោគជ័យ ${json.updated_count} កន្ត្រក!`, 'success');
+          onShowToast(`✅ Admin បាន Approved កន្ត្រក #${slip.matched_invoice.basket_no} ទៅជា [Paid] ជោគជ័យ!`, 'success');
+          
+          setSlips(prev => prev.map(s => {
+            if (s.id === slip.id) {
+              return { ...s, status: 'APPROVED', is_approved: true };
+            }
+            return s;
+          }));
+
+          onSuccess(1);
+          fetchUnpaidBaskets();
+        }
+      } else {
+        throw new Error('Failed to approve');
+      }
+    } catch {
+      playWarningBuzzer();
+      onShowToast('⚠️ មិនអាច Approve បានទេ សូមព្យាយាមម្តងទៀត', 'error');
+    } finally {
+      setApprovingIds(prev => ({ ...prev, [slip.id]: false }));
+    }
+  };
+
+  // Bulk Approve All 100% Matched Slips
+  const handleConfirmAllMatched = async () => {
+    const matchedItems = slips.filter(s => s.status === 'MATCHED' && s.matched_invoice && !s.is_approved);
+    if (matchedItems.length === 0) {
+      onShowToast('មិនមាន Slips ដែលបានផ្ទៀងផ្ទាត់ត្រូវ ១០០% សម្រាប់បញ្ជាក់ទេ!', 'warning');
+      return;
+    }
+
+    setIsConfirmingAll(true);
+    try {
+      const matches = matchedItems.map(s => ({
+        invoice_id: s.matched_invoice!.invoice_id,
+        slip_url: s.slip_url,
+        paid_amount: s.extracted.paid_amount,
+        paid_by: 'Admin Bulk Verified (Messenger)'
+      }));
+
+      const res = await fetch('/api/fast_check/confirm_matches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matches, packerName: 'Admin' })
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          playSuccessFanfare();
+          onShowToast(`✅ Admin បាន Approved ប្តូរទៅ [បង់រួច] ជោគជ័យ ${json.updated_count} កន្ត្រក!`, 'success');
+          
+          setSlips(prev => prev.map(s => {
+            if (s.status === 'MATCHED' && s.matched_invoice) {
+              return { ...s, status: 'APPROVED', is_approved: true };
+            }
+            return s;
+          }));
+
           onSuccess(json.updated_count);
-          onClose();
+          fetchUnpaidBaskets();
         }
       } else {
         throw new Error('Failed to confirm');
       }
-    } catch (err: any) {
+    } catch {
       playWarningBuzzer();
       onShowToast('⚠️ មានបញ្ហាក្នុងការបញ្ជាក់បង់រួច!', 'error');
     } finally {
-      setIsConfirming(false);
+      setIsConfirmingAll(false);
     }
   };
 
-  const matchedCount = results.filter(r => r.status === 'MATCHED').length;
-  const ambiguousCount = results.filter(r => r.status === 'MULTIPLE_CANDIDATES').length;
-  const notFoundCount = results.filter(r => r.status === 'NOT_FOUND').length;
+  // Reject or Discard a Slip
+  const handleRejectSlip = async (slipId: string) => {
+    try {
+      const res = await fetch('/api/fast_check/reject_slip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slip_id: slipId })
+      });
+      if (res.ok) {
+        setSlips(prev => prev.filter(s => s.id !== slipId));
+        onShowToast('បានដក Slip ចេញពីតារាងផ្ទៀងផ្ទាត់', 'warning');
+      }
+    } catch {
+      onShowToast('មិនអាចដក Slip បានទេ', 'error');
+    }
+  };
+
+  // Manual Bind Basket to Slip
+  const handleSelectCandidate = (basket: UnpaidBasket) => {
+    if (!manualLinkSlip) return;
+    playSuccessFanfare();
+    onShowToast(`✅ បានភ្ជាប់ជាមួយកន្ត្រក #${basket.basket_no} (${basket.facebook_name})!`, 'success');
+    
+    setSlips(prev => prev.map(s => {
+      if (s.id === manualLinkSlip.id) {
+        return {
+          ...s,
+          status: 'MATCHED',
+          confidence: 100,
+          matched_invoice: basket
+        };
+      }
+      return s;
+    }));
+    setManualLinkSlip(null);
+  };
+
+  // Filtered Slips for Table
+  const filteredSlips = slips.filter(slip => {
+    const isMatched = slip.status === 'MATCHED';
+    const isApproved = slip.status === 'APPROVED' || slip.is_approved;
+    const isReview = slip.status === 'MULTIPLE_CANDIDATES' || slip.status === 'NOT_FOUND';
+
+    if (filterStatus === 'MATCHED' && (!isMatched || isApproved)) return false;
+    if (filterStatus === 'APPROVED' && !isApproved) return false;
+    if (filterStatus === 'REVIEW' && (!isReview || isApproved)) return false;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const name = (slip.extracted.customer_name || slip.sender_name || '').toLowerCase();
+      const phone = (slip.extracted.phone_number || '').toLowerCase();
+      const basket = slip.matched_invoice ? String(slip.matched_invoice.basket_no || '').toLowerCase() : '';
+      const bank = (slip.extracted.bank_name || '').toLowerCase();
+      const ref = (slip.extracted.trans_ref || '').toLowerCase();
+      return name.includes(q) || phone.includes(q) || basket.includes(q) || bank.includes(q) || ref.includes(q);
+    }
+
+    return true;
+  });
+
+  const matchedCount = slips.filter(s => s.status === 'MATCHED' && !s.is_approved).length;
+  const approvedCount = slips.filter(s => s.status === 'APPROVED' || s.is_approved).length;
+  const reviewCount = slips.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND') && !s.is_approved).length;
+
+  const formatTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleTimeString('km-KH', { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {
+      return '';
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col bg-slate-900 border-2 border-indigo-500/70 rounded-3xl shadow-[0_0_50px_rgba(99,102,241,0.25)] overflow-hidden text-slate-100">
-        {/* Top Header */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-indigo-950 via-slate-900 to-purple-950 border-b border-indigo-500/30 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/50 flex items-center justify-center text-2xl shadow-inner flex-shrink-0">
-              ⚡
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-1.5">
-                  Fast-Check Slips & ផ្ទៀងផ្ទាត់បង់រួច
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setShowKeyConfig(!showKeyConfig)}
-                  className={`text-[10.5px] font-black px-2.5 py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1 shadow-sm active:scale-95 ${
-                    geminiStatus.hasKey
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30'
-                      : 'bg-amber-500/25 text-amber-300 border-amber-500/60 hover:bg-amber-500/35 animate-pulse'
-                  }`}
-                  title="ចុចដើម្បីកំណត់ ឬប្តូរ Gemini API Key សម្រាប់ VPS"
-                >
-                  <span>{geminiStatus.hasKey ? '✅ Gemini AI Active' : '⚠️ មិនទាន់កំណត់ API Key'}</span>
-                  <span className="text-[10px] opacity-80">⚙️ កំណត់ Key</span>
-                </button>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                ស្កេនរូបវិក្កយបត្រ (ABA/ACLEDA/KHQR) ឬ Paste ឈ្មោះ ដើម្បី Tick [បង់រួច] គ្រប់ Live ស្វ័យប្រវត្តិ
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center font-bold text-base transition-colors"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Gemini API Key Configuration Panel (For VPS / Front-end input) */}
-        {(showKeyConfig || (!geminiStatus.hasKey && activeTab === 'SLIPS')) && (
-          <div className="mx-4 mt-3 p-3.5 bg-gradient-to-r from-slate-950 via-[#0B1528] to-slate-950 border border-indigo-500/40 rounded-2xl shadow-md text-xs space-y-2.5 animate-in slide-in-from-top duration-200">
-            <div className="flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="relative w-full max-w-6xl h-[95vh] sm:h-[90vh] flex flex-col bg-[#0B1120] border-2 border-indigo-500/50 rounded-3xl shadow-[0_0_50px_rgba(99,102,241,0.25)] overflow-hidden text-slate-100">
+        
+        {/* COMPACT CLEAN HEADER (SLIM SINGLE ROW) */}
+        <div className="px-3 py-2.5 sm:px-4 sm:py-3 bg-gradient-to-r from-[#0F172A] via-[#1E1B4B] to-[#0F172A] border-b border-indigo-500/30 flex items-center justify-between gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xl flex-shrink-0">⚡</span>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-base">🔑</span>
-                <div>
-                  <span className="font-bold text-indigo-200 text-sm">កំណត់ Gemini API Key (សម្រាប់ដំណើរការលើ VPS)</span>
-                  <p className="text-[11px] text-slate-400">
-                    បញ្ចូល Google Gemini API Key ដើម្បីឱ្យប្រព័ន្ធស្កេន Slip រូបភាព AI ដំណើរការលើ VPS
-                  </p>
-                </div>
-              </div>
-              {geminiStatus.hasKey && (
-                <button
-                  type="button"
-                  onClick={() => setShowKeyConfig(false)}
-                  className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1"
-                >
-                  ✕ បិទ
-                </button>
-              )}
-            </div>
-
-            {geminiStatus.hasKey && (
-              <div className="flex items-center justify-between bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl text-[11.5px]">
-                <span className="text-slate-400">Key បច្ចុប្បន្ន ៖</span>
-                <span className="font-mono text-emerald-400 font-bold">{geminiStatus.maskedKey}</span>
-                <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">
-                  {geminiStatus.isFromEnv ? 'ENV (.env)' : 'UI Settings'}
+                <h2 className="text-xs sm:text-sm font-black text-white truncate">
+                  Auto-Scan Slips ពី Messenger
+                </h2>
+                <span className="hidden sm:inline-flex items-center gap-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9.5px] font-black px-2 py-0.5 rounded-full flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Live Webhook ON</span>
                 </span>
               </div>
-            )}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Sync Now Button */}
+            <button
+              type="button"
+              onClick={handleSyncMessengerNow}
+              disabled={isSyncing}
+              className="py-1 px-2.5 rounded-xl bg-indigo-600/90 hover:bg-indigo-500 border border-indigo-400/60 text-white font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+              title="ចុចទាញយក Slips ថ្មីៗពី Messenger ឥឡូវនេះ"
+            >
+              <span className={isSyncing ? 'animate-spin' : ''}>🔄</span>
+              <span className="hidden xs:inline">{isSyncing ? 'Syncing...' : 'Sync Messenger'}</span>
+            </button>
 
-            <div className="flex flex-col sm:flex-row gap-2">
+            {/* API Key Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowKeyConfig(!showKeyConfig)}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700"
+              title="កំណត់ Gemini API Key"
+            >
+              ⚙️
+            </button>
+
+            {/* Close Button */}
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-full bg-slate-800 hover:bg-rose-900/80 text-slate-300 hover:text-white flex items-center justify-center font-bold text-sm transition-colors cursor-pointer ml-1"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Gemini API Key Configuration Panel */}
+        {showKeyConfig && (
+          <div className="mx-3 mt-2 p-2.5 bg-slate-950 border border-indigo-500/40 rounded-xl text-xs space-y-2 animate-in slide-in-from-top duration-200 flex-shrink-0">
+            <div className="flex items-center justify-between text-indigo-200 font-bold">
+              <span>🔑 កំណត់ Google Gemini API Key សម្រាប់ Auto-Scan Slips</span>
+              <button onClick={() => setShowKeyConfig(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <div className="flex gap-2">
               <input
                 type="password"
                 value={apiKeyInput}
                 onChange={e => setApiKeyInput(e.target.value)}
-                placeholder="បិទភ្ជាប់ Gemini API Key ទីនេះ (ឧ. AIzaSy...)"
-                className="flex-1 bg-slate-900 border border-indigo-500/50 focus:border-indigo-400 rounded-xl px-3 py-2 text-xs text-indigo-100 placeholder-slate-500 outline-none font-mono"
+                placeholder="បិទភ្ជាប់ Gemini API Key (AIzaSy...)"
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-mono"
               />
               <button
                 type="button"
                 disabled={isSavingKey || !apiKeyInput.trim()}
                 onClick={handleSaveGeminiKey}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-xl text-xs transition-all active:scale-95 shadow-md flex items-center justify-center gap-1 cursor-pointer"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs"
               >
-                <span>{isSavingKey ? 'កំពុងរក្សាទុក...' : '💾 រក្សាទុក Key'}</span>
+                {isSavingKey ? '...' : '💾 រក្សាទុក'}
               </button>
-            </div>
-
-            <div className="flex items-center justify-between pt-0.5 text-[11px]">
-              <a
-                href="https://aistudio.google.com/apikey"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1"
-              >
-                <span>✨ យក Gemini API Key ឥតគិតថ្លៃ (Free 100%) ពី Google AI Studio ↗</span>
-              </a>
-              {geminiStatus.hasCustomKey && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setApiKeyInput('');
-                    const res = await fetch('/api/fast_check/save_gemini_key', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ gemini_api_key: '' })
-                    });
-                    const d = await res.json();
-                    if (d.success) {
-                      setGeminiStatus({ hasKey: false, maskedKey: '', isFromEnv: false, hasCustomKey: false });
-                      onShowToast('បានលុប Key ចេញរួចរាល់', 'warning');
-                    }
-                  }}
-                  className="text-rose-400 hover:text-rose-300 hover:underline"
-                >
-                  🗑️ លុប Key ផ្ទាល់ខ្លួន
-                </button>
-              )}
             </div>
           </div>
         )}
 
-        {/* Tab Switcher */}
-        <div className="px-4 pt-3 pb-2 bg-slate-900/90 border-b border-slate-800 flex gap-2 flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => setActiveTab('SLIPS')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all ${
-              activeTab === 'SLIPS'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'bg-slate-800/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-            }`}
-          >
-            <span>📷 ស្កេនរូបភាព Slips (Auto-Scan)</span>
-            {selectedFiles.length > 0 && (
-              <span className="bg-white/20 text-white text-[11px] px-1.5 py-0.2 rounded-full font-mono">
-                {selectedFiles.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('NAMES')}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all ${
-              activeTab === 'NAMES'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'bg-slate-800/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-            }`}
-          >
-            <span>📋 Paste បញ្ជីឈ្មោះ (Fast Match)</span>
-          </button>
+        {/* COMPACT SINGLE-ROW FILTER STRIP (SLIM & CLEAN) */}
+        <div className="px-3 py-2 bg-[#080E1B] border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap flex-shrink-0">
+          
+          {/* Time Filter Pills */}
+          <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-[11px] font-bold">
+            <button
+              type="button"
+              onClick={() => setTimeFilter('today')}
+              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                timeFilter === 'today' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              📅 ថ្ងៃនេះ (12:00 AM)
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimeFilter('24h')}
+              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                timeFilter === '24h' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              🕒 24h
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimeFilter('all')}
+              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                timeFilter === 'all' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              🌐 ទាំងអស់
+            </button>
+          </div>
+
+          {/* Status Tabs */}
+          <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-[11px] font-bold">
+            <button
+              type="button"
+              onClick={() => setFilterStatus('ALL')}
+              className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
+                filterStatus === 'ALL' ? 'bg-slate-700 text-white font-black' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              ទាំងអស់ ({slips.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterStatus('MATCHED')}
+              className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
+                filterStatus === 'MATCHED' ? 'bg-emerald-600 text-white font-black' : 'text-emerald-400 hover:text-emerald-300'
+              }`}
+            >
+              🟢 ត្រូវ ({matchedCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterStatus('REVIEW')}
+              className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
+                filterStatus === 'REVIEW' ? 'bg-amber-600 text-white font-black' : 'text-amber-400 hover:text-amber-300'
+              }`}
+            >
+              🟡 ពិនិត្យ ({reviewCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterStatus('APPROVED')}
+              className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
+                filterStatus === 'APPROVED' ? 'bg-cyan-600 text-white font-black' : 'text-cyan-400 hover:text-cyan-300'
+              }`}
+            >
+              ✨ Paid ({approvedCount})
+            </button>
+          </div>
+
+          {/* Quick Search */}
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="🔍 ស្វែងរកកន្ត្រក/ឈ្មោះ..."
+            className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1 text-[11px] text-white placeholder-slate-500 outline-none focus:border-indigo-500 w-36 sm:w-44"
+          />
         </div>
 
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {activeTab === 'SLIPS' ? (
-            <div>
-              {/* Dropzone & File Selector */}
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-indigo-500/50 hover:border-indigo-400 rounded-2xl p-5 text-center cursor-pointer bg-indigo-950/20 hover:bg-indigo-950/40 transition-all group"
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  multiple
-                  accept="image/*"
-                  className="hidden"
-                />
-                <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">
-                  📥
-                </div>
-                <div className="text-sm font-bold text-slate-200">
-                  ចុចទីនេះដើម្បីជ្រើសរើសរូប Screenshot វិក្កយបត្រ (ច្រើនសន្លឹកក្នុងពេលតែមួយ)
-                </div>
-                <div className="text-xs text-indigo-300/80 mt-1">
-                  💡 ឬអាចចុច <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 font-mono">Ctrl + V</kbd> ដើម្បី Paste រូបពី Clipboard ចូលបានភ្លាមៗ!
-                </div>
-              </div>
+        {/* MAIN CONTENT: EXPANDED SPACIOUS VIEWPORT */}
+        <div className="flex-1 overflow-y-auto p-2 sm:p-3">
+          
+          {isLoading ? (
+            <div className="text-center py-20 text-slate-400 space-y-2">
+              <span className="animate-spin text-3xl inline-block">⏳</span>
+              <div className="font-bold text-xs text-slate-300">កំពុងទាញទិន្នន័យ Slips ពី Messenger...</div>
+            </div>
+          ) : filteredSlips.length > 0 ? (
+            <>
+              {/* DESKTOP VIEW (>= 768px): Structured High-Density Table */}
+              <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/60 shadow-inner">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="sticky top-0 z-10 bg-[#0F172A] border-b border-slate-800 text-slate-400 font-bold text-[11px]">
+                    <tr>
+                      <th className="py-2.5 px-3 w-10 text-center">N</th>
+                      <th className="py-2.5 px-3 w-16 text-center">Slip Pic</th>
+                      <th className="py-2.5 px-3">FB Name / អតិថិជន</th>
+                      <th className="py-2.5 px-3">កន្ត្រក (Basket #)</th>
+                      <th className="py-2.5 px-3 text-right">Slip Amount</th>
+                      <th className="py-2.5 px-3 text-right">Invoice Total</th>
+                      <th className="py-2.5 px-3">Bank & Ref</th>
+                      <th className="py-2.5 px-3 text-center">ម៉ោងផ្ញើ</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3 text-center min-w-[130px]">Admin Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {filteredSlips.map((slip, idx) => {
+                      const isApproved = slip.status === 'APPROVED' || slip.is_approved;
+                      const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice);
+                      const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES';
+                      const isNotFound = slip.status === 'NOT_FOUND';
+                      const isApproving = Boolean(approvingIds[slip.id]);
 
-              {/* Selected Files Thumbnails Preview */}
-              {selectedFiles.length > 0 && (
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-                    <span>រូបភាពដែលបានជ្រើសរើស ({selectedFiles.length} រូប)</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedFiles([]);
-                        setResults([]);
-                      }}
-                      className="text-rose-400 hover:underline"
-                    >
-                      លុបចេញទាំងអស់
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-36 overflow-y-auto p-2 bg-slate-950/50 rounded-xl border border-slate-800">
-                    {selectedFiles.map((file, i) => (
-                      <div key={i} className="relative group rounded-lg overflow-hidden border border-slate-700 aspect-square bg-slate-800">
-                        <img
-                          src={file.data}
-                          alt={file.name}
-                          className="w-full h-full object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedFiles(prev => prev.filter((_, idx) => idx !== i));
-                          }}
-                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-600 text-white text-[10px] flex items-center justify-center opacity-80 hover:opacity-100"
+                      const invTotal = slip.matched_invoice?.total_amount || 0;
+                      const slipAmt = slip.extracted.paid_amount || 0;
+                      const isAmountEqual = Math.abs(invTotal - slipAmt) < 0.05 && slipAmt > 0;
+
+                      return (
+                        <tr
+                          key={slip.id || idx}
+                          className={`transition-colors hover:bg-slate-800/40 ${
+                            isApproved
+                              ? 'bg-cyan-950/15 text-slate-300'
+                              : isMatched
+                              ? 'bg-emerald-950/20'
+                              : isAmbiguous
+                              ? 'bg-amber-950/15'
+                              : 'bg-rose-950/10'
+                          }`}
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                          <td className="py-2 px-3 text-center font-mono font-bold text-slate-400">
+                            {idx + 1}
+                          </td>
 
-                  {/* Scan Button */}
-                  <div className="mt-3 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={handleScanSlips}
-                      disabled={isScanning}
-                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-sm shadow-lg shadow-indigo-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99] transition-all"
-                    >
-                      {isScanning ? (
-                        <>
-                          <span className="animate-spin text-base">⏳</span>
-                          <span>កំពុងស្កេនវិភាគរូបភាព ({scanProgress.current}/{scanProgress.total})...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>⚡ ចាប់ផ្តើមស្កេនវិភាគ ({selectedFiles.length} រូប)</span>
-                          <span>➔</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              {/* Names Text Area */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300">
-                  Paste បញ្ជីឈ្មោះ Facebook ភ្ញៀវ (១ បន្ទាត់ ១ ឈ្មោះ ឬកាត់ដោយសញ្ញាក្បៀស)
-                </label>
-                <textarea
-                  rows={5}
-                  value={namesText}
-                  onChange={e => setNamesText(e.target.value)}
-                  placeholder="Mak Banhapich&#10;Malin Mon&#10;Sreypov Neang..."
-                  className="w-full bg-slate-950/80 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500 font-sans"
-                />
-                <button
-                  type="button"
-                  onClick={handleScanNames}
-                  disabled={isScanning || !namesText.trim()}
-                  className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {isScanning ? 'កំពុងស្វែងរក...' : '🔍 ផ្គូផ្គងស្វែងរកកន្ត្រកភ្លាមៗ'}
-                </button>
+                          <td className="py-2 px-3 text-center">
+                            {slip.slip_url ? (
+                              <img
+                                src={slip.slip_url}
+                                alt="Slip"
+                                onClick={() => setPreviewImage(slip.slip_url)}
+                                className="w-12 h-12 object-cover rounded-xl border border-slate-700 hover:scale-105 cursor-pointer shadow-sm mx-auto"
+                                title="ចុចមើលរូបធំ"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-sm text-slate-500 mx-auto">
+                                📋
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="py-2 px-3">
+                            <div className="font-bold text-sm text-white">
+                              {slip.extracted.customer_name || slip.sender_name || 'អតិថិជន'}
+                            </div>
+                            <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                              {slip.extracted.phone_number && (
+                                <span className="text-indigo-300 font-mono">📞 {slip.extracted.phone_number}</span>
+                              )}
+                              {slip.extracted.remarks && (
+                                <span className="text-slate-400 truncate max-w-[110px]">📝 {slip.extracted.remarks}</span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="py-2 px-3">
+                            {slip.matched_invoice ? (
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-1">
+                                  <span className="font-black font-mono text-sm px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-200 border border-indigo-500/40">
+                                    #{slip.matched_invoice.basket_no || slip.matched_invoice.invoice_id}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 truncate">
+                                    {slip.matched_invoice.live_id}
+                                  </span>
+                                </div>
+                                {!isApproved && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setManualLinkSlip(slip);
+                                      setBasketSearchTerm('');
+                                    }}
+                                    className="text-[10.5px] text-indigo-400 hover:text-indigo-300 underline mt-0.5 text-left cursor-pointer"
+                                  >
+                                    🔄 ប្តូរកន្ត្រក
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setManualLinkSlip(slip);
+                                  setBasketSearchTerm('');
+                                }}
+                                className="px-2 py-1 rounded-lg bg-amber-500/20 border border-amber-500/50 hover:bg-amber-500/30 text-amber-300 font-bold text-[10.5px] cursor-pointer"
+                              >
+                                🔍 ភ្ជាប់កន្ត្រក
+                              </button>
+                            )}
+                          </td>
+
+                          <td className="py-2 px-3 text-right font-mono font-black text-sm text-amber-300">
+                            {slipAmt > 0 ? `$${slipAmt.toFixed(2)}` : '-'}
+                          </td>
+
+                          <td className="py-2 px-3 text-right">
+                            {slip.matched_invoice ? (
+                              <div>
+                                <span className={`font-mono font-bold text-sm ${isAmountEqual ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                  ${invTotal.toFixed(2)}
+                                </span>
+                                {isAmountEqual && <div className="text-[9.5px] text-emerald-400">✓ ស្មើ</div>}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </td>
+
+                          <td className="py-2 px-3 text-slate-300">
+                            <div className="font-bold text-indigo-300 text-[11.5px]">
+                              {slip.extracted.bank_name || 'Bank'}
+                            </div>
+                            {slip.extracted.trans_ref && (
+                              <div className="font-mono text-[10px] text-slate-400 truncate max-w-[110px]">
+                                {slip.extracted.trans_ref}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="py-2 px-3 text-center text-[10.5px] font-mono text-slate-400">
+                            {formatTime(slip.received_at)}
+                          </td>
+
+                          <td className="py-2 px-3 text-center">
+                            {isApproved && (
+                              <span className="bg-cyan-500/20 text-cyan-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-cyan-500/40">
+                                ✨ Paid
+                              </span>
+                            )}
+                            {!isApproved && isMatched && (
+                              <span className="bg-emerald-500/20 text-emerald-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40">
+                                🟢 ត្រូវ ១០០%
+                              </span>
+                            )}
+                            {!isApproved && isAmbiguous && (
+                              <span className="bg-amber-500/20 text-amber-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-amber-500/40 animate-pulse">
+                                🟡 ស្ទួន
+                              </span>
+                            )}
+                            {!isApproved && isNotFound && (
+                              <span className="bg-rose-500/20 text-rose-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-rose-500/40">
+                                🔴 រកមិនឃើញ
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-2 px-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {isApproved ? (
+                                <span className="text-xs text-emerald-400 font-bold">✅ បានបង់រួច</span>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={!slip.matched_invoice || isApproving}
+                                    onClick={() => handleApproveSingle(slip)}
+                                    className="py-1 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 text-slate-950 font-black text-xs shadow-md active:scale-95 transition-all cursor-pointer"
+                                  >
+                                    {isApproving ? '⏳' : '✓ Approve'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectSlip(slip.id)}
+                                    className="p-1 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 text-xs"
+                                    title="លុបចេញ"
+                                  >
+                                    ✕
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            </div>
-          )}
 
-          {/* Results Section */}
-          {results.length > 0 && (
-            <div className="space-y-3 pt-2">
-              {/* Summary Stats Header */}
-              <div className="flex items-center justify-between p-3 bg-slate-950/80 rounded-xl border border-slate-800 flex-wrap gap-2">
-                <div className="text-xs font-bold text-slate-300">
-                  លទ្ធផលស្កេនសរុប ៖ <span className="text-white font-mono">{results.length}</span> សន្លឹក
-                </div>
-                <div className="flex items-center gap-3 text-xs font-bold">
-                  <span className="text-emerald-400">🟢 ត្រូវ ១០០%: {matchedCount}</span>
-                  <span className="text-amber-400">🟡 ស្ទួន: {ambiguousCount}</span>
-                  <span className="text-rose-400">🔴 រកមិនឃើញ: {notFoundCount}</span>
-                </div>
-              </div>
+              {/* MOBILE VIEW (< 768px): Spacious Clean Touch Cards */}
+              <div className="block md:hidden space-y-2.5">
+                {filteredSlips.map((slip, idx) => {
+                  const isApproved = slip.status === 'APPROVED' || slip.is_approved;
+                  const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice);
+                  const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES';
+                  const isNotFound = slip.status === 'NOT_FOUND';
+                  const isApproving = Boolean(approvingIds[slip.id]);
 
-              {/* Scanned Cards List */}
-              <div className="space-y-2.5 max-h-[42vh] overflow-y-auto pr-1">
-                {results.map((item, idx) => {
-                  const isMatched = item.status === 'MATCHED' && item.matched_invoice;
-                  const isAmbiguous = item.status === 'MULTIPLE_CANDIDATES';
-                  const isNotFound = item.status === 'NOT_FOUND';
+                  const invTotal = slip.matched_invoice?.total_amount || 0;
+                  const slipAmt = slip.extracted.paid_amount || 0;
+                  const isAmountEqual = Math.abs(invTotal - slipAmt) < 0.05 && slipAmt > 0;
 
                   return (
                     <div
-                      key={item.id || idx}
-                      className={`p-3 rounded-xl border transition-all ${
-                        isMatched
-                          ? 'bg-emerald-950/30 border-emerald-500/50'
+                      key={slip.id || idx}
+                      className={`p-3 rounded-2xl border shadow-sm transition-all ${
+                        isApproved
+                          ? 'bg-[#0F172A]/90 border-cyan-500/40 text-slate-300'
+                          : isMatched
+                          ? 'bg-[#0E1E2E] border-emerald-500/50'
                           : isAmbiguous
-                          ? 'bg-amber-950/30 border-amber-500/60'
-                          : 'bg-rose-950/20 border-rose-800/40'
+                          ? 'bg-[#1E1A0F] border-amber-500/50'
+                          : 'bg-[#1F0F14] border-rose-800/40'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        {/* Left: Thumbnail & Extracted Info */}
-                        <div className="flex items-center gap-3 min-w-0">
-                          {item.slip_url ? (
+                      {/* Top Row: Thumbnail + Customer + Status Badge */}
+                      <div className="flex items-start gap-2.5">
+                        {slip.slip_url ? (
+                          <div
+                            onClick={() => setPreviewImage(slip.slip_url)}
+                            className="relative flex-shrink-0 cursor-pointer"
+                          >
                             <img
-                              src={item.slip_url}
+                              src={slip.slip_url}
                               alt="Slip"
-                              onClick={() => setPreviewImage(item.slip_url)}
-                              className="w-12 h-12 object-cover rounded-lg border border-slate-700 cursor-pointer hover:opacity-80 flex-shrink-0"
-                              title="ចុចមើលរូបធំ"
+                              className="w-16 h-16 object-cover rounded-xl border border-slate-700 shadow-md"
                             />
-                          ) : (
-                            <div className="w-12 h-12 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-lg flex-shrink-0">
-                              📋
-                            </div>
-                          )}
-
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-sm text-white truncate">
-                                {item.extracted.customer_name || 'មិនស្គាល់ឈ្មោះ'}
-                              </span>
-                              {item.extracted.paid_amount > 0 && (
-                                <span className="text-xs font-mono font-bold text-amber-300 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/30">
-                                  {item.extracted.paid_amount.toLocaleString()} {item.extracted.currency}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
-                              {item.extracted.bank_name && <span>🏦 {item.extracted.bank_name}</span>}
-                              {item.extracted.phone_number && <span>📞 {item.extracted.phone_number}</span>}
-                              {item.extracted.trans_ref && <span className="font-mono">Ref: {item.extracted.trans_ref}</span>}
-                            </div>
+                            <span className="absolute bottom-0 right-0 bg-black/80 text-[9px] px-1 rounded text-white">
+                              🔍
+                            </span>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="w-16 h-16 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xl flex-shrink-0">
+                            📋
+                          </div>
+                        )}
 
-                        {/* Right: Match Badge */}
-                        <div className="text-right flex-shrink-0">
-                          {isMatched && (
-                            <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-black px-2.5 py-1 rounded-full border border-emerald-500/40 flex items-center gap-1">
-                              <span>✅</span> ត្រូវកន្ត្រក #{item.matched_invoice?.basket_no || item.matched_invoice?.invoice_id}
-                            </span>
-                          )}
-                          {isAmbiguous && (
-                            <span className="bg-amber-500/20 text-amber-300 text-[11px] font-black px-2.5 py-1 rounded-full border border-amber-500/40 flex items-center gap-1 animate-pulse">
-                              <span>⚠️</span> ស្ទួន {item.candidates?.length} កន្ត្រក
-                            </span>
-                          )}
-                          {isNotFound && (
-                            <span className="bg-rose-500/20 text-rose-300 text-[11px] font-black px-2.5 py-1 rounded-full border border-rose-500/40">
-                              ❌ រកមិនឃើញកន្ត្រក
-                            </span>
-                          )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1">
+                            <h4 className="font-black text-sm text-white truncate">
+                              #{idx + 1}. {slip.extracted.customer_name || slip.sender_name || 'អតិថិជន'}
+                            </h4>
+                            {isApproved ? (
+                              <span className="bg-cyan-500/20 text-cyan-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-cyan-500/40 flex-shrink-0">
+                                ✨ Paid
+                              </span>
+                            ) : isMatched ? (
+                              <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40 flex-shrink-0">
+                                🟢 ត្រូវ ១០០%
+                              </span>
+                            ) : isAmbiguous ? (
+                              <span className="bg-amber-500/20 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-500/40 flex-shrink-0 animate-pulse">
+                                🟡 ស្ទួន
+                              </span>
+                            ) : (
+                              <span className="bg-rose-500/20 text-rose-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-500/40 flex-shrink-0">
+                                🔴 រកមិនឃើញ
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Bank & Time */}
+                          <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                            <span className="text-indigo-300 font-bold">🏦 {slip.extracted.bank_name || 'Bank'}</span>
+                            {slip.received_at && <span className="font-mono text-slate-400">🕒 {formatTime(slip.received_at)}</span>}
+                          </div>
+
+                          {/* Basket & Amount Comparison */}
+                          <div className="flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-slate-800/80">
+                            <div className="flex items-center gap-1.5">
+                              {slip.matched_invoice ? (
+                                <span className="font-black font-mono text-xs px-2 py-0.5 rounded-md bg-indigo-500/25 text-indigo-200 border border-indigo-500/40">
+                                  #{slip.matched_invoice.basket_no || slip.matched_invoice.invoice_id}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-amber-400 font-bold">⚠️ គ្មានកន្ត្រក</span>
+                              )}
+                              <span className="text-[11px] font-mono text-amber-300 font-black">
+                                Slip: ${slipAmt.toFixed(2)}
+                              </span>
+                            </div>
+
+                            {slip.matched_invoice && (
+                              <div className="text-right">
+                                <span className={`text-[11px] font-mono font-black ${isAmountEqual ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                  Inv: ${invTotal.toFixed(2)} {isAmountEqual && '✓'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      {/* Matched Details */}
-                      {isMatched && (
-                        <div className="mt-2 pt-2 border-t border-emerald-500/20 flex items-center justify-between text-xs text-emerald-200">
-                          <div>
-                            👉 កន្ត្រក: <span className="font-black text-white">#{item.matched_invoice?.basket_no}</span> (តម្លៃ: ${item.matched_invoice?.total_amount.toFixed(2)})
-                            <span className="text-slate-400 ml-2">🎥 Live: {item.matched_invoice?.live_id}</span>
+                      {/* Action Buttons Row */}
+                      <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-slate-800/80">
+                        {isApproved ? (
+                          <div className="w-full text-center py-1 text-xs text-emerald-400 font-bold bg-emerald-950/40 rounded-xl border border-emerald-800/40">
+                            ✅ បានប្តូរទៅជា [Paid / បង់រួច] រួចរាល់
                           </div>
-                          <span className="text-[11px] bg-emerald-600 text-white px-2 py-0.5 rounded font-bold">
-                            ត្រៀមប្តូរទៅ [បង់រួច]
-                          </span>
-                        </div>
-                      )}
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!slip.matched_invoice || isApproving}
+                              onClick={() => handleApproveSingle(slip)}
+                              className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 disabled:opacity-40 text-slate-950 font-black text-xs shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              {isApproving ? (
+                                <span>⏳ កំពុងកត់ត្រា...</span>
+                              ) : (
+                                <span>✓ យល់ព្រម Approve កន្ត្រក #{slip.matched_invoice?.basket_no} [Paid]</span>
+                              )}
+                            </button>
 
-                      {/* Error Message if AI experienced high demand spike */}
-                      {item.error_message && (
-                        <div className="mt-2 p-2 rounded-lg bg-amber-950/40 border border-amber-500/30 text-amber-200 text-xs flex items-center gap-1.5">
-                          <span>⚠️</span>
-                          <span>{item.error_message}</span>
-                        </div>
-                      )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setManualLinkSlip(slip);
+                                setBasketSearchTerm('');
+                              }}
+                              className="py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-xs border border-slate-700 cursor-pointer"
+                              title="ប្តូរកន្ត្រក"
+                            >
+                              🔄
+                            </button>
 
-                      {/* Candidate Selection Dropdown */}
-                      {(isAmbiguous || isNotFound) && item.candidates && item.candidates.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-amber-500/30 space-y-2">
-                          {/* 1-Click Multi-Basket Merge Option - ONLY when 2 or more baskets belong to the EXACT SAME customer */}
-                          {(() => {
-                            if (!item.candidates || item.candidates.length < 2) return null;
-
-                            // Group candidates strictly by customer identity
-                            const customerMap = new Map<string, typeof item.candidates>();
-                            for (const cand of item.candidates) {
-                              const rawName = (cand.facebook_name || '').trim();
-                              if (!rawName) continue;
-                              const key = (cand.facebook_user_id && cand.facebook_user_id !== 'FB_USER_ID_STREAM')
-                                ? cand.facebook_user_id
-                                : rawName.toLowerCase();
-
-                              if (!customerMap.has(key)) {
-                                customerMap.set(key, []);
-                              }
-                              customerMap.get(key)!.push(cand);
-                            }
-
-                            // Find if any customer has 2 or more baskets
-                            const sameCustomerGroup = Array.from(customerMap.values()).find(baskets => baskets.length >= 2);
-                            if (!sameCustomerGroup || sameCustomerGroup.length < 2) return null;
-
-                            const totalCandidatesPrice = sameCustomerGroup.reduce((sum, c) => sum + (c.total_amount || 0), 0);
-                            const mergedNames = sameCustomerGroup.map(c => `#${c.basket_no}`).join(' + ');
-                            const custName = sameCustomerGroup[0].facebook_name;
-
-                            return (
-                              <div className="bg-gradient-to-r from-amber-950/80 via-indigo-950/90 to-amber-950/80 border-2 border-amber-400/80 rounded-xl p-2.5 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-                                <div className="flex items-center justify-between text-xs font-bold text-amber-200 mb-1.5 flex-wrap gap-1">
-                                  <span className="flex items-center gap-1">
-                                    <span>📦</span>
-                                    <span>ភ្ញៀវ «{custName}» មាន {sameCustomerGroup.length} កន្ត្រក ($${totalCandidatesPrice.toFixed(2)}) ៖</span>
-                                  </span>
-                                  {item.extracted.paid_amount > 0 && (
-                                    <span className="font-mono text-emerald-400 font-black">
-                                      Slip បង់: ${item.extracted.paid_amount.toFixed(2)}
-                                    </span>
-                                  )}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMergeCandidates(idx, sameCustomerGroup, item.extracted.paid_amount)}
-                                  className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer"
-                                >
-                                  <span>🔗</span>
-                                  <span>ច្របាច់ទាំង {sameCustomerGroup.length} កន្ត្រក ({mergedNames}) ចូលគ្នាតែ ១ កញ្ចប់ (គិតថ្លៃដឹកតែម្តង) ➔ ផ្ទៀងផ្ទាត់ [បង់រួច]</span>
-                                </button>
-                              </div>
-                            );
-                          })()}
-
-                          <div className="text-[11px] text-slate-300 font-bold mb-1 flex items-center justify-between">
-                            <span>ឬរើសយកកន្ត្រកតែមួយ ៖</span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                            {item.candidates.map((cand, cIdx) => (
-                              <button
-                                key={cIdx}
-                                type="button"
-                                onClick={() => handleSelectCandidate(idx, cand)}
-                                className="text-left p-2 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-400 text-xs text-slate-200 flex items-center justify-between group transition-colors cursor-pointer"
-                              >
-                                <div>
-                                  <span className="font-bold text-white">#{cand.basket_no}</span> - {cand.facebook_name}
-                                  <div className="text-[10px] text-slate-400">
-                                    តម្លៃ: ${cand.total_amount.toFixed(2)} | Live: {cand.live_id}
-                                  </div>
-                                </div>
-                                <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-bold group-hover:bg-amber-500 group-hover:text-black">
-                                  រើសតែ #{cand.basket_no}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                            <button
+                              type="button"
+                              onClick={() => handleRejectSlip(slip.id)}
+                              className="py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 font-bold text-xs border border-slate-700 cursor-pointer"
+                              title="លុប"
+                            >
+                              ✕
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
+            </>
+          ) : (
+            <div className="text-center py-20 text-slate-400 space-y-2">
+              <div className="text-3xl">📥</div>
+              <div className="font-bold text-xs text-slate-300">
+                មិនទាន់មាន Slips ថ្មី {timeFilter === 'today' ? 'ក្នុងថ្ងៃនេះ (ចាប់ពី 12:00 AM មក)' : ''}
+              </div>
+              <button
+                type="button"
+                onClick={handleSyncMessengerNow}
+                disabled={isSyncing}
+                className="mt-2 py-1.5 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow cursor-pointer"
+              >
+                🔄 ទាញយកសារពី Messenger ម្តងទៀត
+              </button>
             </div>
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between flex-shrink-0 flex-wrap gap-2">
-          <div className="text-xs text-slate-400">
+        {/* COMPACT STICKY FOOTER */}
+        <div className="px-3 py-2 sm:px-4 sm:py-2.5 bg-[#080E1B] border-t border-slate-800 flex items-center justify-between flex-shrink-0 gap-2">
+          <div className="text-xs text-slate-400 truncate">
             {matchedCount > 0 ? (
-              <span>មាន <strong className="text-emerald-400 font-mono">{matchedCount}</strong> កន្ត្រកត្រៀមប្តូរទៅ [បង់រួច]</span>
+              <span>មាន <strong className="text-emerald-400 font-mono font-bold">{matchedCount}</strong> កន្ត្រកត្រូវ ១០០%</span>
             ) : (
-              <span>ជ្រើសរើសរូបរួចចុចស្កេន</span>
+              <span>គ្រប់ Slips ផ្ទៀងផ្ទាត់រួចរាល់</span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer"
             >
-              បោះបង់
+              បិទ
             </button>
-            <button
-              type="button"
-              onClick={handleConfirmAll}
-              disabled={isConfirming || matchedCount === 0}
-              className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-emerald-500/30 flex items-center gap-2 disabled:opacity-40 active:scale-98 transition-all"
-            >
-              {isConfirming ? (
-                <>
-                  <span className="animate-spin">⏳</span>
-                  <span>កំពុងកត់ត្រា...</span>
-                </>
-              ) : (
-                <>
-                  <span>✅ យល់ព្រមប្តូរទៅ [បង់រួច] ទាំងអស់ ({matchedCount})</span>
-                </>
-              )}
-            </button>
+
+            {matchedCount > 0 && (
+              <button
+                type="button"
+                onClick={handleConfirmAllMatched}
+                disabled={isConfirmingAll}
+                className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/30 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer disabled:opacity-40"
+              >
+                <span>{isConfirmingAll ? '⏳...' : `✅ Bulk Approve ទាំងអស់ (${matchedCount})`}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Manual Basket Linker Dialog */}
+      {manualLinkSlip && (
+        <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-3 animate-in fade-in">
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-md w-full p-4 space-y-3 shadow-2xl text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="font-bold text-sm text-white">
+                🔍 ភ្ជាប់កន្ត្រកសម្រាប់ «{manualLinkSlip.extracted.customer_name || manualLinkSlip.sender_name}»
+              </h3>
+              <button onClick={() => setManualLinkSlip(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <div className="text-xs text-slate-300">
+              ទឹកប្រាក់ Slip: <strong className="text-amber-300">${manualLinkSlip.extracted.paid_amount || 0}</strong>
+            </div>
+
+            <input
+              type="text"
+              value={basketSearchTerm}
+              onChange={e => setBasketSearchTerm(e.target.value)}
+              placeholder="វាយលេខកន្ត្រក ឬឈ្មោះ FB (ឧ. 104, Socheata)..."
+              className="w-full bg-slate-950 border border-indigo-500/50 rounded-xl px-3 py-2 text-xs text-white outline-none"
+              autoFocus
+            />
+
+            <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+              {isLoadingBaskets ? (
+                <div className="text-center py-4 text-xs text-slate-400">កំពុងទាញបញ្ជីកន្ត្រក...</div>
+              ) : (
+                (() => {
+                  const filtered = unpaidBaskets.filter(b => {
+                    if (!basketSearchTerm.trim()) return true;
+                    const t = basketSearchTerm.toLowerCase().trim();
+                    const bNo = String(b.basket_no || '').toLowerCase();
+                    const fb = (b.facebook_name || '').toLowerCase();
+                    const ph = (b.phone_number || '').toLowerCase();
+                    return bNo.includes(t) || fb.includes(t) || ph.includes(t);
+                  });
+
+                  if (filtered.length === 0) {
+                    return <div className="text-center py-4 text-xs text-slate-500">រកមិនឃើញកន្ត្រកទេ</div>;
+                  }
+
+                  return filtered.map((b, bIdx) => (
+                    <div
+                      key={b.invoice_id || bIdx}
+                      onClick={() => handleSelectCandidate(b)}
+                      className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-indigo-400 flex items-center justify-between cursor-pointer group transition-colors"
+                    >
+                      <div>
+                        <div className="font-bold text-xs text-white group-hover:text-indigo-300">
+                          #{b.basket_no} - {b.facebook_name}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {b.phone_number && `📞 ${b.phone_number} | `} Live: {b.live_id}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono font-bold text-xs text-emerald-400">
+                        ${b.total_amount.toFixed(2)}
+                      </div>
+                    </div>
+                  ));
+                })()
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setManualLinkSlip(null)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-300"
+              >
+                បោះបង់
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Zoom Preview Modal */}
       {previewImage && (
         <div
           onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 z-60 bg-black/95 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 z-70 bg-black/95 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
-          <img
-            src={previewImage}
-            alt="Preview"
-            className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
-          />
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+            <img
+              src={previewImage}
+              alt="Preview"
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl border border-slate-700"
+            />
+            <div className="text-xs text-slate-400 mt-2 bg-slate-900/90 px-3 py-1 rounded-full border border-slate-800">
+              ចុចកន្លែងណាក៏បានដើម្បីបិទរូបធំ
+            </div>
+          </div>
         </div>
       )}
     </div>

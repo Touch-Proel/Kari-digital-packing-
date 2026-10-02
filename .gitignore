@@ -11,3 +11,8 @@ server/pos.db
 server/*.db
 data/
 data/*.json
+public/uploads/slip_*
+public/uploads/*.jpg
+public/uploads/*.png
+public/uploads/*.jpeg
+!public/uploads/.gitkeep

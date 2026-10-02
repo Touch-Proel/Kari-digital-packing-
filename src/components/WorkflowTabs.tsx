@@ -31,6 +31,7 @@ interface WorkflowTabsProps {
   onSearchChange: (q: string) => void;
   totalFilteredBaskets: number;
   onOpenScanner?: () => void;
+  onOpenFastCheck?: () => void;
 }
 
 export function WorkflowTabs({
@@ -56,7 +57,8 @@ export function WorkflowTabs({
   searchQuery,
   onSearchChange,
   totalFilteredBaskets,
-  onOpenScanner
+  onOpenScanner,
+  onOpenFastCheck
 }: WorkflowTabsProps) {
   const qcDisplayCount = isAllLiveQc ? allLivePaidCount : paidQcCount;
   const dispatchedDisplayCount = isAllLiveDispatched
@@ -235,6 +237,19 @@ export function WorkflowTabs({
           >
             <span>🗑️ ទទេ ({emptyBasketsCount})</span>
           </button>
+
+          {/* 📑 Table ផ្ទៀងផ្ទាត់ Slips Action Button */}
+          {onOpenFastCheck && (
+            <button
+              type="button"
+              onClick={onOpenFastCheck}
+              className="py-1 px-3 rounded-lg text-xs font-black whitespace-nowrap transition-all active:scale-95 border bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 border-indigo-400 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)] flex items-center gap-1.5 cursor-pointer ml-auto"
+              title="បើកតារាងផ្ទៀងផ្ទាត់ Slips (Table Approval Queue)"
+            >
+              <span>📑</span>
+              <span>Table ផ្ទៀងផ្ទាត់ Slips</span>
+            </button>
+          )}
         </div>
       )}
 

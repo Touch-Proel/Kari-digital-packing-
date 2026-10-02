@@ -1980,6 +1980,7 @@ export default function App() {
           onSearchChange={setSearchQuery}
           totalFilteredBaskets={totalFilteredBaskets}
           onOpenScanner={() => setIsCameraScannerOpen(true)}
+          onOpenFastCheck={() => setIsFastCheckModalOpen(true)}
         />
 
         {/* 6. Baskets Feed */}

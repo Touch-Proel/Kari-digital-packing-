@@ -55,6 +55,7 @@ export interface Invoice {
   tracking_code?: string;
   delivery_carrier?: string;
   dispatched_at?: string;
+  dispatched_by?: string;
   msg_status: 'SENT' | 'UNSENT' | 'FAILED';
   msg_error?: string;
   msg_delivery_method?: 'SEND_API' | 'PRIVATE_REPLY' | 'MANUAL_COPIED';

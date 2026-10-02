@@ -31,7 +31,8 @@ export async function saveDatabaseToDisk(forceSync = false) {
       rawComments,
       customers,
       packerLogs,
-      activeFacebookPage
+      activeFacebookPage,
+      messengerSlips
     };
     const jsonStr = JSON.stringify(payload);
 
@@ -78,6 +79,53 @@ export function getDataRevision(): number {
 
 // Global active live session ID
 export let activeLiveId = '1626350178950100';
+
+export interface AutoScannedMessengerSlip {
+  id: string;
+  source: 'MESSENGER' | 'TELEGRAM';
+  sender_id: string;
+  sender_name: string;
+  slip_url: string;
+  received_at: string;
+  extracted: {
+    customer_name: string;
+    paid_amount: number;
+    currency: 'USD' | 'KHR';
+    phone_number?: string;
+    bank_name?: string;
+    trans_ref?: string;
+    trans_date?: string;
+    basket_no?: number | string;
+    remarks?: string;
+  };
+  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED' | 'REJECTED';
+  is_approved?: boolean;
+  confidence: number;
+  matched_invoice?: {
+    invoice_id: number;
+    basket_no?: number | string;
+    live_id: string;
+    facebook_name: string;
+    phone_number: string;
+    total_amount: number;
+    created_at: string;
+    packing_stage: string;
+    status: string;
+  };
+  candidates?: Array<{
+    invoice_id: number;
+    basket_no?: number | string;
+    live_id: string;
+    facebook_name: string;
+    phone_number: string;
+    total_amount: number;
+    created_at: string;
+    packing_stage: string;
+    status: string;
+  }>;
+}
+
+export const messengerSlips: AutoScannedMessengerSlip[] = [];
 
 export function setActiveLiveId(id: string) {
   const cleanId = id && id.includes('_') && !id.startsWith('LIVE_') ? id.split('_').pop() || id : id;
@@ -531,10 +579,113 @@ export async function loadDatabaseFromDisk() {
         packerLogs.length = 0;
         packerLogs.push(...parsed.packerLogs);
       }
+      if (parsed.messengerSlips && Array.isArray(parsed.messengerSlips) && parsed.messengerSlips.length > 0) {
+        messengerSlips.length = 0;
+        messengerSlips.push(...parsed.messengerSlips);
+      }
       if (parsed.settings) {
         Object.assign(settings, parsed.settings);
       }
-      console.log(`[JSON Loaded] Loaded ${invoices.length} invoices, ${products.length} products from db_store.json`);
+      console.log(`[JSON Loaded] Loaded ${invoices.length} invoices, ${products.length} products, ${messengerSlips.length} messenger slips from db_store.json`);
+    }
+
+    // Seed default auto-scanned slips from Messenger if empty
+    if (messengerSlips.length === 0) {
+      messengerSlips.push(
+        {
+          id: `mslip_101_${Date.now()}`,
+          source: 'MESSENGER',
+          sender_id: '100088991122334',
+          sender_name: 'សុខ ស្រីម៉ៅ (Srey Mao)',
+          slip_url: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=600&auto=format&fit=crop&q=80',
+          received_at: new Date(Date.now() - 35 * 60 * 1000).toISOString(),
+          extracted: {
+            customer_name: 'SOK SREY MAO',
+            paid_amount: 17.00,
+            currency: 'USD',
+            phone_number: '012 889 772',
+            bank_name: 'ABA Bank',
+            trans_ref: 'ABA78912345',
+            basket_no: 101,
+            remarks: '101'
+          },
+          status: 'MATCHED',
+          confidence: 100,
+          matched_invoice: {
+            invoice_id: 101,
+            basket_no: 101,
+            live_id: 'LIVE_20260913_VIP',
+            facebook_name: 'សុខ ស្រីម៉ៅ (Srey Mao)',
+            phone_number: '012 889 772',
+            total_amount: 17.00,
+            created_at: '2026-09-13T14:30:00',
+            packing_stage: 'UNPICKED',
+            status: 'Pending'
+          }
+        },
+        {
+          id: `mslip_860_${Date.now()}`,
+          source: 'MESSENGER',
+          sender_id: 'TEST_USER_1',
+          sender_name: 'Dany Ka',
+          slip_url: 'https://images.unsplash.com/photo-1580519542036-c47de6196ba5?w=600&auto=format&fit=crop&q=80',
+          received_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+          extracted: {
+            customer_name: 'DANY KA',
+            paid_amount: 15.50,
+            currency: 'USD',
+            phone_number: '096 442 8567',
+            bank_name: 'ACLEDA ToanChet',
+            trans_ref: 'ACL99887711',
+            basket_no: 860,
+            remarks: 'កន្ត្រក 860'
+          },
+          status: 'MATCHED',
+          confidence: 100,
+          matched_invoice: {
+            invoice_id: 860,
+            basket_no: 860,
+            live_id: '1626350178950100',
+            facebook_name: 'Dany Ka',
+            phone_number: '096 442 8567',
+            total_amount: 15.50,
+            created_at: new Date().toISOString(),
+            packing_stage: 'STAGED',
+            status: 'Pending'
+          }
+        },
+        {
+          id: `mslip_104_${Date.now()}`,
+          source: 'MESSENGER',
+          sender_id: '100011223344556',
+          sender_name: 'ពេជ្រ សុជាតា (Pech Socheata)',
+          slip_url: 'https://images.unsplash.com/photo-1526304640581-d334cdbbf45e?w=600&auto=format&fit=crop&q=80',
+          received_at: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+          extracted: {
+            customer_name: 'PECH SOCHEATA',
+            paid_amount: 16.00,
+            currency: 'USD',
+            phone_number: '070 998 811',
+            bank_name: 'Bakong / KHQR',
+            trans_ref: 'BKG44556677',
+            basket_no: 104,
+            remarks: '104'
+          },
+          status: 'MATCHED',
+          confidence: 100,
+          matched_invoice: {
+            invoice_id: 104,
+            basket_no: 104,
+            live_id: 'LIVE_20260913_VIP',
+            facebook_name: 'ពេជ្រ សុជាតា (Pech Socheata)',
+            phone_number: '070 998 811',
+            total_amount: 16.00,
+            created_at: '2026-09-13T14:48:22',
+            packing_stage: 'UNPICKED',
+            status: 'Pending'
+          }
+        }
+      );
     }
 
     // Ensure sample basket #860 for Dany Ka exists for seamless testing

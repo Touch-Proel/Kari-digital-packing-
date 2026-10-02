@@ -3,6 +3,7 @@ import path from 'path';
 import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision } from './db';
 import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, ExtractedSlipData } from './fastCheckRoutes';
 import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode } from './telegramSync';
+import { broadcastSSE } from './packingRoutes';
 import { Invoice, Product } from './types';
 
 // State tracker for Telegram Bot Service
@@ -20,7 +21,13 @@ if (!fs.existsSync(uploadsDir)) {
 /**
  * Send a Telegram text message
  */
-export async function sendTelegramMessage(token: string, chatId: number | string, text: string, replyToMessageId?: number) {
+export async function sendTelegramMessage(
+  token: string,
+  chatId: number | string,
+  text: string,
+  replyToMessageId?: number,
+  messageThreadId?: number
+) {
   try {
     const payload: any = {
       chat_id: chatId,
@@ -29,6 +36,9 @@ export async function sendTelegramMessage(token: string, chatId: number | string
     };
     if (replyToMessageId) {
       payload.reply_to_message_id = replyToMessageId;
+    }
+    if (messageThreadId) {
+      payload.message_thread_id = messageThreadId;
     }
 
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -219,6 +229,8 @@ Analyze this image carefully:
    - "phone_number": Phone number if in chat text.
    - "bank_name": "ABA", "ACLEDA", "Wing", etc.
    - "trans_ref": Transaction reference ID.
+   - "basket_no": order or basket number if mentioned in transfer remarks / memo (e.g. 102 or null).
+   - "remarks": transfer note / remarks text.
 
 Return ONLY pure valid JSON:
 {
@@ -231,7 +243,9 @@ Return ONLY pure valid JSON:
   "paid_amount": 0,
   "currency": "USD",
   "bank_name": "...",
-  "trans_ref": "..."
+  "trans_ref": "...",
+  "basket_no": null or number,
+  "remarks": "..."
 }`
   };
 
@@ -330,13 +344,23 @@ Return ONLY pure valid JSON:
   // =========================================================================
   // 💳 CASE B: BANK TRANSFER SLIP (ABA / ACLEDA / KHQR)
   // =========================================================================
+  let detectedBasketNo: string | undefined = parsed.basket_no ? String(parsed.basket_no).replace(/\D/g, '') : undefined;
+  if (!detectedBasketNo && caption) {
+    const matchB = caption.match(/(?:#|កន្ត្រក\s*|basket\s*|order\s*)(\d+)/i) || caption.match(/\b(\d{2,5})\b/);
+    if (matchB) {
+      detectedBasketNo = matchB[1];
+    }
+  }
+
   const extracted: ExtractedSlipData = {
     customer_name: String(parsed.customer_name || '').trim(),
     paid_amount: Number(parsed.paid_amount) || 0,
     currency: String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD',
     phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
     bank_name: parsed.bank_name ? String(parsed.bank_name).trim() : undefined,
-    trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined
+    trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined,
+    basket_no: detectedBasketNo,
+    remarks: parsed.remarks
   };
 
   const amountDisplay = extracted.currency === 'KHR'
@@ -353,6 +377,13 @@ Return ONLY pure valid JSON:
     inv.status = 'Paid';
     inv.payment_status = 'Paid';
     inv.payment_slip_url = slipUrl;
+    inv.paid_by = 'KARI AI Bot (Telegram)';
+    inv.paid_at = new Date().toISOString();
+    if (inv.packing_stage === 'UNPICKED') {
+      inv.packing_stage = 'STAGED';
+      inv.staged_by = 'KARI AI Bot';
+      inv.staged_at = new Date().toISOString();
+    }
 
     if (!inv.phone_number && extracted.phone_number) {
       inv.phone_number = extracted.phone_number;
@@ -360,6 +391,7 @@ Return ONLY pure valid JSON:
 
     saveDatabaseToDisk();
     bumpDataRevision();
+    broadcastSSE('order_updated', { invoice: inv });
 
     const basketNo = inv.basket_no || inv.invoice_id;
     const itemsSummary = inv.items.map(it => `  • ${it.product_name || it.product_code} x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`).join('\n');
@@ -663,7 +695,7 @@ async function startPollingLoop() {
     }
 
     try {
-      const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${lastUpdateOffset}&timeout=20&allowed_updates=["message","channel_post"]`;
+      const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${lastUpdateOffset}&timeout=20&allowed_updates=["message","channel_post","edited_message"]`;
       let res = await fetch(url, {
         signal: pollingAbortController.signal
       });
@@ -690,25 +722,44 @@ async function startPollingLoop() {
         for (const update of data.result) {
           lastUpdateOffset = Math.max(lastUpdateOffset, update.update_id + 1);
 
-          const msg = update.message || update.channel_post;
+          const msg = update.message || update.channel_post || update.edited_message;
           if (!msg) continue;
 
           const chatId = msg.chat?.id;
           const messageId = msg.message_id;
 
+          // Auto-record active group ID if message is from a group or supergroup
+          if (chatId && msg.chat && (msg.chat.type === 'group' || msg.chat.type === 'supergroup')) {
+            if (settings.telegram_chat_id !== String(chatId)) {
+              settings.telegram_chat_id = String(chatId);
+              saveDatabaseToDisk();
+              console.log(`[Telegram Bot] Auto-synced active Telegram Group ID: ${chatId} (${msg.chat.title || ''})`);
+            }
+          }
+
+          // Check if photo is attached (either compressed photo or uncompressed document image)
+          let photoArray = msg.photo;
+          if (!photoArray && msg.document) {
+            const isImageDoc = (msg.document.mime_type && msg.document.mime_type.startsWith('image/')) ||
+              (msg.document.file_name && /\.(jpe?g|png|webp)$/i.test(msg.document.file_name));
+            if (isImageDoc) {
+              photoArray = [{ file_id: msg.document.file_id, width: 800, height: 800 }];
+            }
+          }
+
           // Case A: Image Attached (Stock Photo or Bank Slip)
-          if (Array.isArray(msg.photo) && msg.photo.length > 0) {
+          if (Array.isArray(photoArray) && photoArray.length > 0) {
             const rawCaption = msg.caption || '';
             const stockItems = parseLinesForStockItems(rawCaption);
 
             if (stockItems.length > 0) {
               // 1. PRODUCT PHOTO & CODE -> Add to POS Product Stock!
-              handleIncomingStockItemPhoto(token, chatId, messageId, msg.photo, rawCaption, stockItems, msg.date).catch(err => {
+              handleIncomingStockItemPhoto(token, chatId, messageId, photoArray, rawCaption, stockItems, msg.date).catch(err => {
                 console.error('Error in handleIncomingStockItemPhoto:', err);
               });
             } else {
               // 2. BANK SLIP PHOTO / Chat Screenshot -> Gemini AI Slip OCR & Auto-Tick!
-              handleIncomingSlipPhoto(token, chatId, messageId, msg.photo, msg.caption).catch(err => {
+              handleIncomingSlipPhoto(token, chatId, messageId, photoArray, msg.caption).catch(err => {
                 console.error('Error in handleIncomingSlipPhoto:', err);
               });
             }

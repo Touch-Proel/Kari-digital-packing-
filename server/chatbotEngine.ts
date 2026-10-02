@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage } from './db';
+import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage, messengerSlips } from './db';
 import { broadcastSSE } from './packingRoutes';
 import { Invoice } from './types';
 import fs from 'fs';
@@ -179,7 +179,58 @@ export async function processIncomingSlipImage(
   }
 
   try {
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    let cleanBase64 = '';
+    let savedSlipUrl = '';
+
+    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    if (imageBase64.startsWith('http://') || imageBase64.startsWith('https://')) {
+      try {
+        const resp = await fetch(imageBase64);
+        const arrayBuf = await resp.arrayBuffer();
+        const buf = Buffer.from(arrayBuf);
+        cleanBase64 = buf.toString('base64');
+        const ext = (mimeType && mimeType.includes('png')) ? '.png' : '.jpg';
+        const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}${ext}`;
+        const localPath = path.join(uploadsDir, fileName);
+        fs.writeFileSync(localPath, buf);
+        savedSlipUrl = `/uploads/${fileName}`;
+
+        // Also copy to dist/uploads if dist exists
+        const distUploads = path.join(process.cwd(), 'dist', 'uploads');
+        if (fs.existsSync(distUploads)) {
+          try {
+            fs.writeFileSync(path.join(distUploads, fileName), buf);
+          } catch {}
+        }
+      } catch (dlErr) {
+        console.error('Failed to download incoming Messenger image:', dlErr);
+        return {
+          success: false,
+          reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
+        };
+      }
+    } else {
+      cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      try {
+        const buf = Buffer.from(cleanBase64, 'base64');
+        const ext = (mimeType && mimeType.includes('png')) ? '.png' : '.jpg';
+        const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}${ext}`;
+        const localPath = path.join(uploadsDir, fileName);
+        fs.writeFileSync(localPath, buf);
+        savedSlipUrl = `/uploads/${fileName}`;
+
+        const distUploads = path.join(process.cwd(), 'dist', 'uploads');
+        if (fs.existsSync(distUploads)) {
+          try {
+            fs.writeFileSync(path.join(distUploads, fileName), buf);
+          } catch {}
+        }
+      } catch {}
+    }
     
     // Strict OCR & Slip Verification using Gemini Flash
     const promptText = `You are a strict validation & OCR parser for Cambodian Mobile Banking Transfer Slips (ABA Mobile, ACLEDA ToanChet, Bakong / KHQR, Wing Bank, Canadia, TrueMoney, Chip Mong, Sathapana, FTB, etc.).
@@ -202,6 +253,7 @@ CRITICAL RULES:
    - "trans_ref": transaction reference or ID number.
    - "trans_date": date/time of transfer.
    - "basket_no_in_slip": order / basket number if mentioned in transfer remarks (e.g. 5093 or null).
+   - "phone_number": phone number if visible on slip or in chat.
 
 Return strict JSON ONLY:
 {
@@ -213,7 +265,8 @@ Return strict JSON ONLY:
   "bank_name": "...",
   "trans_ref": "...",
   "trans_date": "...",
-  "basket_no_in_slip": null or number
+  "basket_no_in_slip": null or number,
+  "phone_number": null or string
 }`;
 
     const ocrRes = await callGeminiSlipExtraction(
@@ -253,8 +306,7 @@ Return strict JSON ONLY:
       paidAmount = Math.round((paidAmount / 4100) * 100) / 100;
     }
 
-    // 1. SILENT REJECTION OF NON-BANK SLIP IMAGES (photos of clothes, products, packaging, paper receipts)
-    // Remain 100% SILENT so customers asking product questions are not spammed or disturbed by bot!
+    // 1. SILENT REJECTION OF NON-BANK SLIP IMAGES
     if (!isBankSlip || paidAmount <= 0) {
       addChatbotLog({
         type: 'SLIP_VERIFIED',
@@ -275,7 +327,7 @@ Return strict JSON ONLY:
       return { success: false, reply: dupReply };
     }
 
-    // 3. LOCATE ACTIVE INVOICE BELONGING STRICTLY TO THIS CUSTOMER
+    // 3. LOCATE ACTIVE INVOICE BELONGING TO THIS CUSTOMER
     const activeInvoices = invoices.filter(
       i => i.status !== 'Cancelled' && i.status !== 'Dispatched' && i.packing_stage !== 'DISPATCHED'
     );
@@ -301,14 +353,31 @@ Return strict JSON ONLY:
       );
     }
 
-    // D. Direct match by extracted customer name on slip IF sender is in test simulator
-    if (!matchedInv && (senderName === 'Dany Ka' || senderName === 'អតិថិជនសាកល្បង') && extracted.customer_name) {
+    // D. Direct match by extracted customer name on slip
+    if (!matchedInv && extracted.customer_name) {
+      const extNameClean = String(extracted.customer_name).toLowerCase().trim();
       matchedInv = activeInvoices.find(
-        i => i.facebook_name && i.facebook_name.toLowerCase().trim() === extracted.customer_name.toLowerCase().trim()
+        i => i.facebook_name && i.facebook_name.toLowerCase().trim().includes(extNameClean)
       );
     }
 
-    // 4. STRICT GUARD: If no basket belongs to THIS customer, DO NOT touch anyone else's basket!
+    // E. Smart Multi-Tier Match via matchInvoiceForSlip
+    if (!matchedInv) {
+      const matchRes = matchInvoiceForSlip({
+        customer_name: extracted.customer_name || senderName,
+        paid_amount: paidAmount,
+        currency: currency as any,
+        phone_number: extracted.phone_number,
+        bank_name: bankName,
+        trans_ref: transRef,
+        basket_no: basketNoInSlip || undefined
+      });
+      if (matchRes.status === 'MATCHED' && matchRes.matched) {
+        matchedInv = matchRes.matched;
+      }
+    }
+
+    // 4. If still no basket found, notify team and inform customer
     if (!matchedInv) {
       const reply = `🧾 ហាងបានស្កេនឃើញវិក្កយបត្រចំនួន $${paidAmount.toFixed(2)} (${bankName} ‧ Ref: ${transRef || 'N/A'}) ពីបង ${senderName}។\n\n⚠️ ប៉ុន្តែប្រព័ន្ធមិនទាន់រកឃើញកន្ត្រកដែលកំពុងរង់ចាំបង់ប្រាក់ត្រូវគ្នានឹងគណនីរបស់បងទេ។ បុគ្គលិកនឹងជួយពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែម! 🙏`;
       addChatbotLog({
@@ -320,6 +389,11 @@ Return strict JSON ONLY:
         status: 'WARNING',
         meta: extracted
       });
+
+      sendTelegramAlert(
+        `⚠️ <b>AI បានទទួល Slip ក្នុង Chat ប៉ុន្តែរកមិនឃើញកន្ត្រកត្រូវគ្នា:</b>\n👤 <b>ភ្ញៀវ:</b> ${senderName} (ID: <code>${senderId}</code>)\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>\n💡 <i>សូមបុគ្គលិកជួយពិនិត្យក្នុងប្រព័ន្ធ POS</i>`
+      );
+
       return { success: false, reply };
     }
 
@@ -329,6 +403,9 @@ Return strict JSON ONLY:
     matchedInv.paid_by = 'KARI AI Bot (Chat)';
     matchedInv.paid_at = new Date().toISOString();
     matchedInv.payment_method = bankName;
+    if (savedSlipUrl) {
+      matchedInv.payment_slip_url = savedSlipUrl;
+    }
     if (matchedInv.packing_stage === 'UNPICKED') {
       matchedInv.packing_stage = 'STAGED';
       matchedInv.staged_by = 'KARI AI Bot';
@@ -339,8 +416,50 @@ Return strict JSON ONLY:
       usedSlipRefs.add(transRef);
     }
 
+    // Add / update in Messenger Auto-Scan Table queue
+    const existingIndex = messengerSlips.findIndex(s => s.slip_url === savedSlipUrl || (transRef && s.extracted.trans_ref === transRef));
+    const newSlipItem: any = {
+      id: `mslip_live_${Date.now()}`,
+      source: 'MESSENGER',
+      sender_id: senderId,
+      sender_name: matchedInv.facebook_name || senderName,
+      slip_url: savedSlipUrl,
+      received_at: new Date().toISOString(),
+      extracted: {
+        customer_name: extracted.customer_name || matchedInv.facebook_name,
+        paid_amount: paidAmount,
+        currency: currency as any,
+        phone_number: extracted.phone_number || matchedInv.phone_number,
+        bank_name: bankName,
+        trans_ref: transRef,
+        basket_no: matchedInv.basket_no || matchedInv.invoice_id,
+        remarks: extracted.remarks || ''
+      },
+      status: 'APPROVED',
+      is_approved: true,
+      confidence: 100,
+      matched_invoice: {
+        invoice_id: matchedInv.invoice_id,
+        basket_no: matchedInv.basket_no,
+        live_id: matchedInv.live_id,
+        facebook_name: matchedInv.facebook_name,
+        phone_number: matchedInv.phone_number,
+        total_amount: matchedInv.total_amount,
+        created_at: matchedInv.created_at,
+        packing_stage: matchedInv.packing_stage,
+        status: matchedInv.status
+      }
+    };
+
+    if (existingIndex !== -1) {
+      messengerSlips[existingIndex] = newSlipItem;
+    } else {
+      messengerSlips.unshift(newSlipItem);
+    }
+
     bumpDataRevision();
     saveDatabaseToDisk();
+    broadcastSSE('order_updated', { invoice: matchedInv });
 
     const reply = `✅ ហាងបានទទួលការទូទាត់ប្រាក់ចំនួន $${paidAmount.toFixed(2)} (${bankName} ‧ Ref: ${transRef || 'N/A'}) ត្រឹមត្រូវ ១០០% ហើយបង ${matchedInv.facebook_name}! 🎉\n\n📦 កន្ត្រកលេខ #${matchedInv.basket_no || matchedInv.invoice_id} របស់បងត្រូវបានសម្គាល់ [បង់រួច] និងបញ្ជូនទៅកាន់បញ្ជីវេចខ្ចប់រួចរាល់។ អរគុណច្រើនបង! 🙏`;
 
@@ -354,6 +473,10 @@ Return strict JSON ONLY:
       status: 'SUCCESS',
       meta: { ...extracted, paid_amount: paidAmount }
     });
+
+    sendTelegramAlert(
+      `✅ <b>ភ្ញៀវបានផ្ញើ Slip ក្នុង Chat Messenger &amp; Tick [បង់រួច]!</b> 🎉\n━━━━━━━━━━━━━━━━━━\n🛒 <b>កន្ត្រក:</b> #${matchedInv.basket_no || matchedInv.invoice_id} (<code>${matchedInv.facebook_name}</code>)\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>`
+    );
 
     return { success: true, reply, invoice: matchedInv };
   } catch (err: any) {
