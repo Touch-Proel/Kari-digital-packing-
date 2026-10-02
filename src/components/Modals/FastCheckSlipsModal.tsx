@@ -419,10 +419,10 @@ export function FastCheckSlipsModal({
   };
 
   const getCustomerDisplayInfo = (slip: MessengerSlipItem) => {
-    const fbSender = slip.sender_name || (slip.matched_invoice && slip.matched_invoice.facebook_name) || '';
+    const fbSender = slip.sender_name || 'អតិថិជន Messenger';
     const rawBankName = slip.extracted.customer_name;
     const bankPayer = rawBankName && !isReceiverAccountName(rawBankName) ? rawBankName : '';
-    const primaryName = fbSender || bankPayer || 'អតិថិជន Facebook';
+    const primaryName = fbSender;
     const showBankPayer = Boolean(bankPayer && bankPayer.toLowerCase().trim() !== primaryName.toLowerCase().trim());
     return { primaryName, fbSender, bankPayer, showBankPayer };
   };

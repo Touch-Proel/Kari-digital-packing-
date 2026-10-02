@@ -405,6 +405,55 @@ export function evaluateSlipFraudAndDuplicates(
   return { duplicate_warning, fraud_warning, amount_mismatch };
 }
 
+
+// Generic single syllables/stop words in Cambodian names that must NOT match alone as single tokens
+const GENERIC_NAME_SYLLABLES = new Set([
+  'ah', 'ly', 'na', 'da', 'vy', 'mey', 'pov', 'toch', 'srey', 'sok', 'heng', 'chann',
+  'kim', 'lin', 'lee', 'leang', 'rith', 'rath', 'vanny', 'rithy', 'theary', 'borey',
+  'fb', 'customer', 'aba', 'khqr', 'wing', 'acleda', 'user', 'facebook'
+]);
+
+export function isCustomerNameMatch(candidateName?: string, invoiceName?: string): boolean {
+  if (!candidateName || !invoiceName) return false;
+  const normA = normalizeName(candidateName);
+  const normB = normalizeName(invoiceName);
+  if (!normA || !normB) return false;
+
+  // 1. Exact normalized match
+  if (normA === normB) return true;
+
+  // 2. Substring match only if length >= 5 and significant
+  if (normA.length >= 5 && normB.length >= 5) {
+    if (normA.includes(normB) || normB.includes(normA)) {
+      return true;
+    }
+  }
+
+  // 3. Multi-token match without generic false-positives
+  const tokensA = normA.split(' ').filter(t => t.length >= 2 && !GENERIC_NAME_SYLLABLES.has(t));
+  const tokensB = normB.split(' ').filter(t => t.length >= 2 && !GENERIC_NAME_SYLLABLES.has(t));
+
+  if (tokensA.length >= 1 && tokensB.length >= 1) {
+    const commonTokens = tokensA.filter(t => tokensB.includes(t));
+    if (commonTokens.length >= 2) return true;
+    if (commonTokens.length === 1 && commonTokens[0].length >= 4) {
+      if (tokensA.length === 1 || tokensB.length === 1) {
+        return true;
+      }
+    }
+  }
+
+  // Full token overlap check if both have multiple words
+  const allTokensA = normA.split(' ').filter(t => t.length >= 2);
+  const allTokensB = normB.split(' ').filter(t => t.length >= 2);
+  if (allTokensA.length >= 2 && allTokensB.length >= 2) {
+    const common = allTokensA.filter(t => allTokensB.includes(t));
+    if (common.length >= 2) return true;
+  }
+
+  return false;
+}
+
 function parseCreatedTime(created_at?: string): number {
   if (!created_at) return 0;
   const t = new Date(created_at).getTime();
@@ -444,6 +493,7 @@ export function sortInvoicesNewestFirst(list: Invoice[]): Invoice[] {
 /**
  * Match extracted slip data against active database invoices
  * Prioritizes the customer's LATEST / NEWEST UNPAID BASKET (e.g. #5518 over older #4981)
+ * Strictly ensures slips are ONLY matched to the genuine sender / customer and NEVER to unrelated strangers.
  */
 export function matchInvoiceForSlip(
   data: ExtractedSlipData,
@@ -469,27 +519,20 @@ export function matchInvoiceForSlip(
 
   // 1. DIRECT SENDER / CUSTOMER MATCH (Highest Priority: Strictly customer's newest unpaid basket)
   const candidateNames = [
-    data.customer_name,
     senderName,
+    data.customer_name,
     data.phone_number
   ].filter(Boolean) as string[];
 
-  // Find all baskets belonging to this customer
+  // Find all baskets strictly belonging to this customer
   const customerBaskets = pool.filter(inv => {
     if (senderId && senderId !== 'TEST_USER_1' && senderId !== 'FB_USER' && inv.facebook_user_id === senderId) {
       return true;
     }
-    const normInv = normalizeName(inv.facebook_name);
     for (const name of candidateNames) {
-      const normN = normalizeName(name);
-      if (!normN || normN === 'customer' || normN === 'aba' || normN === 'khqr' || normN === 'wing' || normN === 'acleda') continue;
-      if (normInv === normN || normInv.includes(normN) || normN.includes(normInv)) {
+      if (isCustomerNameMatch(name, inv.facebook_name)) {
         return true;
       }
-      const invTokens = normInv.split(' ');
-      const nTokens = normN.split(' ');
-      const overlap = invTokens.filter(t => t.length >= 2 && nTokens.includes(t));
-      if (overlap.length >= 1) return true;
     }
     if (data.phone_number && inv.phone_number) {
       const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
@@ -509,16 +552,14 @@ export function matchInvoiceForSlip(
       const newestUnpaid = unpaidCustomerBaskets[0];
       const otherCandidates = sortedCustomerBaskets.filter(b => b.invoice_id !== newestUnpaid.invoice_id);
 
-      // Check if amount matches or if there is another invoice matching the extracted slip customer name & amount
+      // Check if amount matches
       const isAmountMatching = paidUsd <= 0 || Math.abs(newestUnpaid.total_amount - paidUsd) < 0.25;
 
-      // If amount doesn't match AND extracted customer name belongs to a different person in the database:
-      if (!isAmountMatching && data.customer_name) {
+      // If amount doesn't match AND extracted customer name strictly belongs to a different person in the database:
+      if (!isAmountMatching && data.customer_name && !isReceiverAccountName(data.customer_name)) {
         const altMatch = pool.find(inv => {
-          if (inv.status === 'Paid') return false;
-          const normInv = normalizeName(inv.facebook_name);
-          const normExt = normalizeName(data.customer_name);
-          const nameMatches = normInv === normExt || normInv.includes(normExt) || normExt.includes(normInv);
+          if (inv.status === 'Paid' || inv.payment_status === 'Paid') return false;
+          const nameMatches = isCustomerNameMatch(data.customer_name, inv.facebook_name);
           const amtMatches = paidUsd > 0 && Math.abs(inv.total_amount - paidUsd) < 0.25;
           return nameMatches && amtMatches;
         });
@@ -539,7 +580,7 @@ export function matchInvoiceForSlip(
         candidates: otherCandidates.length > 0 ? otherCandidates : undefined
       };
     } else {
-      // All customer baskets are already paid - return the newest one
+      // All customer baskets are already paid - return the newest one for review
       const newestBasket = sortedCustomerBaskets[0];
       const otherCandidates = sortedCustomerBaskets.slice(1);
       return {
@@ -551,7 +592,7 @@ export function matchInvoiceForSlip(
     }
   }
 
-  // 2. DIRECT BASKET NUMBER MATCH (When customer name not matched, or explicit basket number on slip)
+  // 2. DIRECT BASKET NUMBER MATCH (When customer name not matched, but explicit basket number is on slip)
   if (data.basket_no) {
     const cleanBNo = String(data.basket_no).replace(/\D/g, '');
     if (cleanBNo) {
@@ -568,25 +609,7 @@ export function matchInvoiceForSlip(
     }
   }
 
-  // 3. Fallback: Match by exact unpaid amount across active pool
-  if (paidUsd > 0) {
-    const unpaidAmountMatches = pool.filter(i => i.status !== 'Paid' && i.payment_status !== 'Paid' && Math.abs(i.total_amount - paidUsd) < 0.25);
-    if (unpaidAmountMatches.length === 1) {
-      return {
-        status: 'MATCHED',
-        confidence: 85,
-        matched: unpaidAmountMatches[0]
-      };
-    } else if (unpaidAmountMatches.length > 1) {
-      return {
-        status: 'MULTIPLE_CANDIDATES',
-        confidence: 75,
-        matched: unpaidAmountMatches[0], // Pick newest
-        candidates: unpaidAmountMatches
-      };
-    }
-  }
-
+  // 3. DO NOT auto-match strangers by amount! Return NOT_FOUND so staff can verify Messenger origin
   const recentUnpaid = pool.filter(i => i.status !== 'Paid' && i.payment_status !== 'Paid').slice(0, 5);
   return { status: 'NOT_FOUND', confidence: 0, candidates: recentUnpaid };
 }

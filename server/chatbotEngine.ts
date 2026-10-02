@@ -351,11 +351,11 @@ Return strict JSON ONLY:
     const fraudEval = evaluateSlipFraudAndDuplicates(
       {
         sender_id: senderId,
-        sender_name: (targetInvoice && targetInvoice.facebook_name) || senderName,
+        sender_name: senderName || 'អតិថិជន Messenger',
         slip_url: savedSlipUrl,
         received_at: new Date().toISOString(),
         extracted: {
-          customer_name: extracted.customer_name || (targetInvoice && targetInvoice.facebook_name) || senderName,
+          customer_name: extracted.customer_name || senderName,
           paid_amount: paidAmount,
           currency: 'USD',
           phone_number: extracted.phone_number || (targetInvoice && targetInvoice.phone_number),
@@ -383,11 +383,11 @@ Return strict JSON ONLY:
       id: `mslip_live_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       source: 'MESSENGER',
       sender_id: senderId,
-      sender_name: (targetInvoice && targetInvoice.facebook_name) || senderName,
+      sender_name: senderName || 'អតិថិជន Messenger',
       slip_url: savedSlipUrl,
       received_at: new Date().toISOString(),
       extracted: {
-        customer_name: extracted.customer_name || (targetInvoice && targetInvoice.facebook_name) || senderName,
+        customer_name: extracted.customer_name || senderName,
         paid_amount: paidAmount,
         currency: 'USD',
         phone_number: extracted.phone_number || (targetInvoice && targetInvoice.phone_number),
