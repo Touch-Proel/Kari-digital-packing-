@@ -192,6 +192,51 @@ export interface FastCheckResultItem {
 }
 
 /**
+ * Parse Khmer and English banking slip dates accurately
+ * Handles Khmer numerals (០-៩), Khmer months (តុលា, កញ្ញា, etc.), and current year 2026
+ */
+export function parseKhmerSlipDate(dateStr?: string): Date | null {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  let s = dateStr.trim();
+  if (!s) return null;
+
+  // Convert Khmer numbers (០-៩) to Arabic digits (0-9)
+  const khmerDigits: Record<string, string> = {
+    '០': '0', '១': '1', '២': '2', '៣': '3', '៤': '4',
+    '៥': '5', '៦': '6', '៧': '7', '៨': '8', '៩': '9'
+  };
+  s = s.replace(/[០-៩]/g, (d) => khmerDigits[d] || d);
+
+  // Khmer & English months mapping
+  const khmerMonths: Record<string, number> = {
+    'មករា': 1, 'កុម្ភៈ': 2, 'មិនា': 3, 'មីនា': 3, 'មេសា': 4,
+    'ឧសភា': 5, 'មិថុនា': 6, 'កក្កដា': 7, 'សីហា': 8, 'កញ្ញា': 9,
+    'តុលា': 10, 'វិច្ឆិកា': 11, 'ធ្នូ': 12,
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+  };
+
+  for (const [mName, mNum] of Object.entries(khmerMonths)) {
+    if (s.toLowerCase().includes(mName)) {
+      const dayMatch = s.match(/(\d{1,2})/);
+      const yearMatch = s.match(/(202\d|203\d)/);
+      const day = dayMatch ? parseInt(dayMatch[1], 10) : 1;
+      const year = yearMatch ? parseInt(yearMatch[1], 10) : new Date().getFullYear();
+      return new Date(year, mNum - 1, day);
+    }
+  }
+
+  // Handle standard ISO or slash date formats
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    // If year was parsed as past 2022 or missing, fix to current year 2026 if month/day match
+    return parsed;
+  }
+
+  return null;
+}
+
+/**
  * High-Security Anti-Fraud & Duplicate Detection Engine
  * 1. Prevents Cross-Account Slip Reuse (1 slip used by 2-3 Facebook accounts)
  * 2. Catches Same-Account duplicate transmissions
@@ -321,20 +366,24 @@ export function evaluateSlipFraudAndDuplicates(
   // 4. FRAUD DETECTION (AI Vision Signals & Timestamp Anomalies)
   const fraudReasons: string[] = [];
   if (slip.extracted?.fraud_suspected && Array.isArray(slip.extracted.fraud_reasons)) {
-    fraudReasons.push(...slip.extracted.fraud_reasons);
+    // Exclude false positive date reasons from AI
+    const filteredAiReasons = slip.extracted.fraud_reasons.filter(
+      r => !r.toLowerCase().includes('date') && !r.toLowerCase().includes('timestamp') && !r.includes('កាលបរិច្ឆេទ')
+    );
+    fraudReasons.push(...filteredAiReasons);
   }
 
-  // Date Check: Slip date too old or in future
+  // Date Check: Slip date too old (> 30 days) or far in future
   if (slip.extracted?.trans_date) {
     try {
-      const parsedDate = new Date(slip.extracted.trans_date);
-      if (!isNaN(parsedDate.getTime())) {
+      const parsedDate = parseKhmerSlipDate(slip.extracted.trans_date);
+      if (parsedDate && !isNaN(parsedDate.getTime())) {
         const now = Date.now();
         const diffDays = (now - parsedDate.getTime()) / (1000 * 60 * 60 * 24);
-        if (diffDays > 7) {
-          fraudReasons.push(`កាលបរិច្ឆេទលើ Slip ហួសកំណត់ (${Math.round(diffDays)} ថ្ងៃមុន)`);
-        } else if (diffDays < -1) {
-          fraudReasons.push('កាលបរិច្ឆេទលើ Slip គឺនៅថ្ងៃអនាគត (មិនត្រឹមត្រូវ)');
+        if (diffDays > 30) {
+          fraudReasons.push(`កាលបរិច្ឆេទលើ Slip ចាស់ពេក (${Math.round(diffDays)} ថ្ងៃមុន)`);
+        } else if (diffDays < -3) {
+          fraudReasons.push('កាលបរិច្ឆេទលើ Slip គឺនៅថ្ងៃអនាគត');
         }
       }
     } catch {
@@ -639,9 +688,10 @@ Analyze this image carefully:
 4. Find the transferred numeric amount and currency (e.g. 10.00 USD or 40,000 KHR).
 5. If the customer sent a phone number or address (e.g. "070227974"), extract it.
 6. Extract bank name (ABA, ACLEDA, Bakong, Wing) and transaction reference number (TxID / Ref).
-7. Fraud / Forgery Inspection:
+7. Extract trans_date (Current Year is 2026. For Khmer dates like "២ តុលា ២០២៦", convert to "2026-10-02". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9).
+8. Fraud / Forgery Inspection:
    - Look for manipulated/edited fonts on amount, spliced text, mismatched font style, or edited screenshots.
-   - Set "fraud_suspected": true if visual signs of tampering or forgery exist.
+   - Set "fraud_suspected": true if visual signs of tampering or forgery exist (Do NOT flag genuine 2026 dates).
 
 Return ONLY a JSON object:
 {
@@ -652,7 +702,7 @@ Return ONLY a JSON object:
   "phone_number": "...",
   "bank_name": "...",
   "trans_ref": "...",
-  "trans_date": "...",
+  "trans_date": "2026-10-02",
   "remarks": "...",
   "fraud_suspected": false,
   "fraud_reasons": []
@@ -1271,12 +1321,12 @@ Extract:
 4. currency (USD or KHR)
 5. phone_number (string or null)
 6. bank_name (string or null)
-7. trans_date (string or null)
+7. trans_date (string: Current Year is 2026. For dates like "២ តុលា ២០២៦", convert to "2026-10-02". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9)
 8. trans_ref (string or null)
 9. basket_no (number or null)
 10. remarks (string or null)
 11. fraud_suspected (boolean: true if font on amount is edited, spliced text, or fake receipt)
-12. fraud_reasons (array of strings)
+12. fraud_reasons (array of strings. Do NOT flag genuine 2026 dates)
 Output strictly raw JSON with these fields.`
                     };
                     const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);

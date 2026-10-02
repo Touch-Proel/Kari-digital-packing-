@@ -251,11 +251,11 @@ CRITICAL RULES:
    - "currency": "USD" or "KHR".
    - "bank_name": "ABA" | "ACLEDA" | "Canadia" | "Wing" | "Bakong" | "TrueMoney" | "Chip Mong" | "Sathapana" | "Other".
    - "trans_ref": transaction reference or ID number.
-   - "trans_date": date/time of transfer.
+   - "trans_date": date/time of transfer (Current Year is 2026. For dates like "២ តុលា ២០២៦", convert to "2026-10-02". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9).
    - "basket_no_in_slip": order / basket number if mentioned in transfer remarks (e.g. 5093 or null).
    - "phone_number": phone number if visible on slip or in chat.
    - "fraud_suspected": boolean (set true if fonts look edited/manipulated, blurry spliced amount, or fake screenshot).
-   - "fraud_reasons": array of strings (e.g. ["Edited font on amount", "Mismatched timestamp"]).
+   - "fraud_reasons": array of strings (e.g. ["Edited font on amount"]). Do NOT flag legitimate 2026 dates as expired.
 
 Return strict JSON ONLY:
 {
