@@ -1,8 +1,24 @@
 import { GoogleGenAI } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage } from './db';
+import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage } from './db';
+import { broadcastSSE } from './packingRoutes';
 import { Invoice } from './types';
 import fs from 'fs';
 import path from 'path';
+
+async function sendTelegramAlert(text: string) {
+  const token = settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = settings.telegram_chat_id || process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+    });
+  } catch (err) {
+    console.error('[Telegram Alert Error]:', err);
+  }
+}
 
 export interface ChatbotConfig {
   enabled: boolean;
@@ -790,107 +806,272 @@ export async function processCustomerFaq(
 
   const displayName = senderName && !senderName.toLowerCase().includes('customer') ? senderName : 'ភ្ញៀវ';
 
-  // 1. Check if user is asking about their basket or mentioning basket number (e.g. #860, 860, អីវ៉ាន់ខ្ញុំបានអីខ្លះ, អាវ៉ាន់ខ្ញុំចេញនៅ, អស់ប៉ុន្មាន, សុំមើលបុង)
-  const basketNumberMatch = userMessage.match(/(?:#|កន្ត្រក\s*|basket\s*|no\s*)?(\d{2,6})\b/i);
-  const isAskingBasket = /(អីវ៉ាន់|អាវ៉ាន់|កន្ត្រក|កុម្ម៉ង់|ទិញបាន|order|basket|ទំនិញ|បានអីខ្លះ|បានអី|បានអ្វីខ្លះ|បានអ្វី|អស់ប៉ុន្មាន|សរុបប៉ុន្មាន|តម្លៃប៉ុន្មាន|ថ្លៃប៉ុន្មាន|ប៉ុន្មានលុយ|ចេញមកនៅ|ចេញនៅ|ផ្ញើនៅ|ដឹកនៅ|ដល់នៅ|បុង|បុងឡាន|រូបបុង|មើលបុង|សុំមើលបុង|tracking|ឡាន)/i.test(userMessage) || Boolean(basketNumberMatch);
+  const activeInvoices = invoices.filter(i => i.status !== 'Cancelled');
+  let customerInvoices = activeInvoices.filter(i => 
+    (senderId && senderId !== 'TEST_USER_1' && (
+      i.facebook_user_id === senderId ||
+      senderId === `ID_${i.basket_no}` ||
+      senderId === `ID_${i.invoice_id}`
+    )) ||
+    (displayName !== 'ភ្ញៀវ' && i.facebook_name && i.facebook_name.toLowerCase().trim() === displayName.toLowerCase().trim())
+  );
 
-  if (isAskingBasket) {
-    const activeInvoices = invoices.filter(i => i.status !== 'Cancelled');
-    let targetInv: Invoice | undefined;
-
-    let customerInvoices = activeInvoices.filter(i => 
-      (senderId && senderId !== 'TEST_USER_1' && i.facebook_user_id === senderId) ||
-      (displayName !== 'ភ្ញៀវ' && i.facebook_name && i.facebook_name.toLowerCase().trim() === displayName.toLowerCase().trim())
-    );
-
-    // Sort customer baskets by newest created_at / highest invoice_id first
-    customerInvoices.sort((a, b) => {
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-      if (timeB !== timeA) return timeB - timeA;
-      return (b.invoice_id || 0) - (a.invoice_id || 0);
+  // Loose name matching if exact match not found
+  if (customerInvoices.length === 0 && displayName !== 'ភ្ញៀវ') {
+    const normDisplay = displayName.toLowerCase().replace(/\s+/g, '');
+    customerInvoices = activeInvoices.filter(i => {
+      if (!i.facebook_name) return false;
+      const normName = i.facebook_name.toLowerCase().replace(/\s+/g, '');
+      return normName === normDisplay || normName.includes(normDisplay) || normDisplay.includes(normName);
     });
+  }
 
-    if (basketNumberMatch && basketNumberMatch[1]) {
-      const bNum = basketNumberMatch[1];
-      targetInv = activeInvoices.find(i => String(i.basket_no) === bNum || String(i.invoice_id) === bNum);
-    } else {
-      // Pick the NEWEST / MOST RECENT basket for the customer!
-      targetInv = customerInvoices[0];
+  // Also match by phone number if mentioned in user's message
+  const phoneDigitsMatch = userMessage.match(/\b(0\d{1,2}[-.\s]?\d{3}[-.\s]?\d{3,4})\b/);
+  if (phoneDigitsMatch) {
+    const rawDigits = phoneDigitsMatch[1].replace(/[-.\s]/g, '');
+    const phoneInv = activeInvoices.find(i => i.phone_number && i.phone_number.replace(/[-.\s]/g, '').includes(rawDigits));
+    if (phoneInv && !customerInvoices.some(ci => ci.invoice_id === phoneInv.invoice_id)) {
+      customerInvoices.unshift(phoneInv);
     }
+  }
+
+  // Sort customer baskets by newest created_at / highest invoice_id first
+  customerInvoices.sort((a, b) => {
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    if (timeB !== timeA) return timeB - timeA;
+    return (b.invoice_id || 0) - (a.invoice_id || 0);
+  });
+
+  const basketNumberMatch = userMessage.match(/(?:#|កន្ត្រក\s*|basket\s*|no\s+)(\d{2,6})\b/i);
+  let targetInv: Invoice | undefined;
+  if (basketNumberMatch && basketNumberMatch[1]) {
+    const bNum = basketNumberMatch[1];
+    targetInv = activeInvoices.find(i => String(i.basket_no) === bNum || String(i.invoice_id) === bNum);
+  }
+  
+  // Fall back to customer's own active basket if targetInv wasn't set or not found
+  if (!targetInv) {
+    targetInv = customerInvoices[0];
+  }
+
+  // -------------------------------------------------------------
+  // 🛡️ 1. OPTION A (HIGH SAFETY): PRODUCT CODE & PRICE INQUIRY FLOW
+  // Answers price clearly, concisely (1-2 lines), and alerts admin safely
+  // -------------------------------------------------------------
+  let matchedCode = '';
+  const codeRegexMatch = userMessage.match(/(?:កូដ|code|លេខកូដ)\s*[:#-]?\s*([a-zA-Z0-9_-]+)/i) ||
+    userMessage.match(/(?:ថែម|សុំថែម|ចង់ថែម|ដាក់ថែម|កុម្ម៉ង់ថែម|យកថែម|ចង់បាន|យក)\s*[:#-]?\s*([a-zA-Z0-9_-]+)/i);
+
+  if (codeRegexMatch && codeRegexMatch[1]) {
+    matchedCode = codeRegexMatch[1].trim();
+  } else {
+    // Check if any standalone word matches an existing catalog product code (e.g. "149 នៅអត់?")
+    const tokens = userMessage.match(/[a-zA-Z0-9_-]{1,8}/g) || [];
+    for (const t of tokens) {
+      if (products.some(p => p.code.toLowerCase() === t.toLowerCase())) {
+        matchedCode = t;
+        break;
+      }
+    }
+  }
+
+  if (matchedCode) {
+    const rawCode = matchedCode;
+    const product = products.find(p => p.code.toLowerCase().trim() === rawCode.toLowerCase());
 
     if (targetInv) {
-      const itemsList = targetInv.items.length > 0
-        ? targetInv.items.map(it => `• [${it.product_code}] x ${it.quantity} ($${(it.price * it.quantity).toFixed(2)})`).join('\n')
-        : '• មិនទាន់មានមុខទំនិញ';
+      const bNum = targetInv.basket_no || targetInv.invoice_id;
 
-      let stageLabel = '⏳ កំពុងរង់ចាំការទូទាត់ប្រាក់ (STAGED)';
-      if (targetInv.status === 'Paid') {
-        stageLabel = '🔍 បានបង់ប្រាក់រួចរាល់ (កំពុងរៀបចំវេចខ្ចប់ & QC)';
-      } else if (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED') {
-        stageLabel = `🚚 បានចេញដឹកជញ្ជូនរួចរាល់ [${targetInv.delivery_carrier || 'វីរៈប៊ុនថាំ (VET Express)'}]`;
-      }
-
-      const shipFee = targetInv.is_free_ship ? 'Free' : `$${(targetInv.shipping_fee ?? (targetInv.location_zone === 'PROVINCE' ? 1.5 : 1.0)).toFixed(2)}`;
-      
-      let reply = `📦 ព័ត៌មានកន្ត្រកចុងក្រោយលេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n${itemsList}\n\n🚚 សេវាដឹក ៖ ${shipFee} (${targetInv.location_zone === 'PROVINCE' ? 'តាមខេត្ត' : 'ភ្នំពេញ'})\n💵 សរុបទឹកប្រាក់ ៖ $${targetInv.total_amount.toFixed(2)}\n📍 ស្ថានភាព ៖ ${stageLabel}`;
-
-      if (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED') {
-        if (targetInv.tracking_code) {
-          reply += `\n🔖 លេខកូដតាមដាន (Tracking) ៖ ${targetInv.tracking_code}`;
+      // Case A1: Product in stock -> ALWAYS tell price clearly & concisely
+      if (product && (product.stock_qty === undefined || product.stock_qty > 0)) {
+        if (!targetInv.unmatched_comments) targetInv.unmatched_comments = [];
+        const reqTag = `[Messenger] ថែមកូដ ${product.code} ($${product.price.toFixed(2)})`;
+        if (!targetInv.unmatched_comments.includes(reqTag)) {
+          targetInv.unmatched_comments.push(reqTag);
+          bumpDataRevision();
+          saveDatabaseToDisk();
+          broadcastSSE('live_data_update', { invoice_id: targetInv.invoice_id });
         }
-        if (targetInv.waybill_image_url) {
-          reply += `\n📸 បុងឡាន ៖ មានរូបភាពបុងកញ្ចប់អីវ៉ាន់ក្នុងប្រព័ន្ធរួចរាល់`;
+
+        // Send Telegram alert to admin / group
+        const tgAlert = `🔔 <b>ដំណឹងភ្ញៀវសួរ/សុំថែមកូដក្នុងកន្ត្រក!</b>\n` +
+          `👤 ភ្ញៀវ ៖ <b>${displayName}</b>\n` +
+          `📦 កន្ត្រក ៖ <b>#${bNum}</b>\n` +
+          `🏷️ កូដ ៖ <b>${product.code}</b> (${product.name || 'ទំនិញ'})\n` +
+          `💵 តម្លៃ ៖ <b>$${product.price.toFixed(2)}</b> (ស្តុក: ${product.stock_qty ?? 'មាន'})\n` +
+          `💬 សារភ្ញៀវ ៖ <i>"${userMessage}"</i>`;
+        sendTelegramAlert(tgAlert).catch(() => {});
+
+        // 🎯 SHORT, CONCISE, TELLS PRICE DIRECTLY
+        const reply = `ចាសបង! កូដ [${product.code}] នៅមានស្តុក តម្លៃ $${product.price.toFixed(2)} ណា៎បង។ អូនបានជូនដំណឹង Admin ជួយថែមចូលកន្ត្រក #${bNum} ជូនបងរួចរាល់ចាស៎ 🙏✨`;
+
+        addChatbotLog({
+          type: 'AI_FAQ',
+          customer_name: displayName,
+          customer_id: senderId,
+          basket_no: bNum,
+          incoming_message: userMessage,
+          bot_reply: reply,
+          status: 'SUCCESS'
+        });
+
+        return reply;
+      } else if (product && product.stock_qty !== undefined && product.stock_qty <= 0) {
+        // Case A2: Out of stock
+        const reply = `ចាសបង! កូដ [${product.code}] តម្លៃ $${product.price.toFixed(2)} ប៉ុន្តែដាច់ស្តុកអស់ហើយបងណា៎ 🙏`;
+        addChatbotLog({
+          type: 'AI_FAQ',
+          customer_name: displayName,
+          customer_id: senderId,
+          basket_no: bNum,
+          incoming_message: userMessage,
+          bot_reply: reply,
+          status: 'SUCCESS'
+        });
+        return reply;
+      } else {
+        // Case A3: Product code not found in current products DB
+        if (!targetInv.unmatched_comments) targetInv.unmatched_comments = [];
+        const reqTag = `[Messenger] ថែមកូដ ${rawCode}`;
+        if (!targetInv.unmatched_comments.includes(reqTag)) {
+          targetInv.unmatched_comments.push(reqTag);
+          bumpDataRevision();
+          saveDatabaseToDisk();
+          broadcastSSE('live_data_update', { invoice_id: targetInv.invoice_id });
         }
+
+        const tgAlert = `🔔 <b>ដំណឹងភ្ញៀវសួរកូដ [${rawCode}]!</b>\n` +
+          `👤 ភ្ញៀវ ៖ <b>${displayName}</b> (កន្ត្រក #${bNum})\n` +
+          `💬 សារភ្ញៀវ ៖ <i>"${userMessage}"</i>`;
+        sendTelegramAlert(tgAlert).catch(() => {});
+
+        const reply = `ចាសបង! កូដ [${rawCode}] រកមិនឃើញក្នុងប្រព័ន្ធទេ ចាំអូនជួយសួរ Admin បន្ថែមជូនកន្ត្រក #${bNum} ណា៎បង 🙏✨`;
+        addChatbotLog({
+          type: 'AI_FAQ',
+          customer_name: displayName,
+          customer_id: senderId,
+          basket_no: bNum,
+          incoming_message: userMessage,
+          bot_reply: reply,
+          status: 'SUCCESS'
+        });
+        return reply;
       }
-
-      // If customer specifically asks for waybill photo
-      const isAskingWaybill = /(បុង|បុងឡាន|រូបបុង|មើលបុង|សុំមើលបុង|សុំរូបបុង)/i.test(userMessage);
-      if (isAskingWaybill && (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED')) {
-        reply = `🚚 ដំណឹងបុងឡានកញ្ចប់អីវ៉ាន់លេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n🏢 ក្រុមហ៊ុនដឹក ៖ ${targetInv.delivery_carrier || 'វីរៈប៊ុនថាំ (VET Express)'}\n🔖 លេខកូដតាមដាន ៖ ${targetInv.tracking_code || 'VET Express'}\n📍 ទិសដៅ ៖ ${targetInv.address || 'តាមខេត្ត'}\n\nអ្នកដឹកនឹងទូរស័ព្ទទៅបងពេលអីវ៉ាន់ទៅដល់ណា៎បង 🙏✨`;
+    } else {
+      // If customer doesn't have an identified basket yet
+      if (product && (product.stock_qty === undefined || product.stock_qty > 0)) {
+        const reply = `ចាសបង! កូដ [${product.code}] នៅមានស្តុក តម្លៃ $${product.price.toFixed(2)} ចាស៎ (បងអាចប្រាប់លេខកន្ត្រក ឬលេខទូរស័ព្ទដើម្បីកុម្ម៉ង់បានណា៎) 🙏✨`;
+        addChatbotLog({
+          type: 'AI_FAQ',
+          customer_name: displayName,
+          customer_id: senderId,
+          incoming_message: userMessage,
+          bot_reply: reply,
+          status: 'SUCCESS'
+        });
+        return reply;
+      } else if (product && product.stock_qty !== undefined && product.stock_qty <= 0) {
+        const reply = `ចាសបង! កូដ [${product.code}] តម្លៃ $${product.price.toFixed(2)} ប៉ុន្តែដាច់ស្តុកអស់ហើយបងណា៎ 🙏`;
+        addChatbotLog({
+          type: 'AI_FAQ',
+          customer_name: displayName,
+          customer_id: senderId,
+          incoming_message: userMessage,
+          bot_reply: reply,
+          status: 'SUCCESS'
+        });
+        return reply;
+      } else {
+        const reply = `ចាសបង! កូដ [${rawCode}] រកមិនឃើញក្នុងប្រព័ន្ធឡើយបងណា៎ 🙏`;
+        addChatbotLog({
+          type: 'AI_FAQ',
+          customer_name: displayName,
+          customer_id: senderId,
+          incoming_message: userMessage,
+          bot_reply: reply,
+          status: 'SUCCESS'
+        });
+        return reply;
       }
+    }
+  }
 
-      // If customer has other active baskets, mention them politely
-      const otherBaskets = customerInvoices
-        .filter(i => i.invoice_id !== targetInv!.invoice_id)
-        .map(i => `#${i.basket_no || i.invoice_id}`);
-      if (otherBaskets.length > 0) {
-        reply += `\n\n💡 (បងមានកន្ត្រកផ្សេងទៀត ៖ ${otherBaskets.join(', ')} អាចវាយលេខដើម្បីឆែកមើលបាន)`;
-      }
+  // 2. Check if user is asking about their basket or mentioning basket number (e.g. #860, 860, អីវ៉ាន់ខ្ញុំបានអីខ្លះ, អាវ៉ាន់ខ្ញុំចេញនៅ, អស់ប៉ុន្មាន, សុំមើលបុង)
+  const isAskingBasket = /(អីវ៉ាន់|អាវ៉ាន់|កន្ត្រក|កុម្ម៉ង់|ទិញបាន|order|basket|ទំនិញ|បានអីខ្លះ|បានអី|បានអ្វីខ្លះ|បានអ្វី|អស់ប៉ុន្មាន|សរុបប៉ុន្មាន|តម្លៃប៉ុន្មាន|ថ្លៃប៉ុន្មាន|ប៉ុន្មានលុយ|ចេញមកនៅ|ចេញនៅ|ផ្ញើនៅ|ដឹកនៅ|ដល់នៅ|បុង|បុងឡាន|រូបបុង|មើលបុង|សុំមើលបុង|tracking|ឡាន|សុំឆែក|ឆែកមើល)/i.test(userMessage) || Boolean(basketNumberMatch);
 
-      if (targetInv.status !== 'Paid' && targetInv.packing_stage !== 'DISPATCHED') {
-        reply += `\n\n👉 បងអាចផ្ញើវិក្កយបត្រ (Slip) បង់ប្រាក់ចូលទីនេះ ដើម្បីហាងរៀបចំច្រក និងចេញដឹកជូនបងឆាប់ៗនេះ! សូមអរគុណច្រើនបង! 🙏`;
-      } else if (targetInv.packing_stage !== 'DISPATCHED') {
-        reply += `\n\nអរគុណច្រើនបងសម្រាប់ការគាំទ្រហាងយើងខ្ញុំ! 🙏✨`;
-      }
+  if (isAskingBasket && targetInv) {
+    const itemsList = targetInv.items.length > 0
+      ? targetInv.items.map(it => `• [${it.product_code}] x ${it.quantity} ($${(it.price * it.quantity).toFixed(2)})`).join('\n')
+      : '• មិនទាន់មានមុខទំនិញ';
 
-      addChatbotLog({
-        type: 'AI_FAQ',
-        customer_name: targetInv.facebook_name,
-        customer_id: senderId,
-        basket_no: targetInv.basket_no || targetInv.invoice_id,
-        incoming_message: userMessage,
-        bot_reply: reply,
-        status: 'SUCCESS'
-      });
-
-      return reply;
+    let stageLabel = '⏳ កំពុងរង់ចាំការទូទាត់ប្រាក់ (STAGED)';
+    if (targetInv.status === 'Paid') {
+      stageLabel = '🔍 បានបង់ប្រាក់រួចរាល់ (កំពុងរៀបចំវេចខ្ចប់ & QC)';
+    } else if (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED') {
+      stageLabel = `🚚 បានចេញដឹកជញ្ជូនរួចរាល់ [${targetInv.delivery_carrier || 'វីរៈប៊ុនថាំ (VET Express)'}]`;
     }
 
-    // If customer explicitly typed a basket number like #860 and it was not found:
-    if (userMessage.includes('#') || /(?:កន្ត្រក|basket)/i.test(userMessage)) {
-      const bNum = basketNumberMatch ? basketNumberMatch[1] : '';
-      const notFoundReply = `ចាសជម្រាបសួរបង ${displayName}! ហាងបានឆែកមើលក្នុងប្រព័ន្ធហើយ មិនទាន់ឃើញមានកន្ត្រកលេខ #${bNum || userMessage.trim()} ឡើយបងណា៎។ សូមបងជួយផ្ញើឈ្មោះហ្វេសប៊ុក ឬលេខទូរស័ព្ទដើម្បីឱ្យប្អូនជួយស្វែងរកជូនបន្ថែមណា៎បង 🙏✨`;
-      addChatbotLog({
-        type: 'AI_FAQ',
-        customer_name: displayName,
-        customer_id: senderId,
-        incoming_message: userMessage,
-        bot_reply: notFoundReply,
-        status: 'SUCCESS'
-      });
-      return notFoundReply;
+    const shipFee = targetInv.is_free_ship ? 'Free' : `$${(targetInv.shipping_fee ?? (targetInv.location_zone === 'PROVINCE' ? 1.5 : 1.0)).toFixed(2)}`;
+    
+    let reply = `📦 ព័ត៌មានកន្ត្រកចុងក្រោយលេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n${itemsList}\n\n🚚 សេវាដឹក ៖ ${shipFee} (${targetInv.location_zone === 'PROVINCE' ? 'តាមខេត្ត' : 'ភ្នំពេញ'})\n💵 សរុបទឹកប្រាក់ ៖ $${targetInv.total_amount.toFixed(2)}\n📍 ស្ថានភាព ៖ ${stageLabel}`;
+
+    if (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED') {
+      if (targetInv.tracking_code) {
+        reply += `\n🔖 លេខកូដតាមដាន (Tracking) ៖ ${targetInv.tracking_code}`;
+      }
+      if (targetInv.waybill_image_url) {
+        reply += `\n📸 បុងឡាន ៖ មានរូបភាពបុងកញ្ចប់អីវ៉ាន់ក្នុងប្រព័ន្ធរួចរាល់`;
+      }
     }
+
+    // If customer specifically asks for waybill photo
+    const isAskingWaybill = /(បុង|បុងឡាន|រូបបុង|មើលបុង|សុំមើលបុង|សុំរូបបុង)/i.test(userMessage);
+    if (isAskingWaybill && (targetInv.status === 'Dispatched' || targetInv.packing_stage === 'DISPATCHED')) {
+      reply = `🚚 ដំណឹងបុងឡានកញ្ចប់អីវ៉ាន់លេខ #${targetInv.basket_no || targetInv.invoice_id} របស់បង ${targetInv.facebook_name} ៖\n\n🏢 ក្រុមហ៊ុនដឹក ៖ ${targetInv.delivery_carrier || 'វីរៈប៊ុនថាំ (VET Express)'}\n🔖 លេខកូដតាមដាន ៖ ${targetInv.tracking_code || 'VET Express'}\n📍 ទិសដៅ ៖ ${targetInv.address || 'តាមខេត្ត'}\n\nអ្នកដឹកនឹងទូរស័ព្ទទៅបងពេលអីវ៉ាន់ទៅដល់ណា៎បង 🙏✨`;
+    }
+
+    // If customer has other active baskets, mention them politely
+    const otherBaskets = customerInvoices
+      .filter(i => i.invoice_id !== targetInv!.invoice_id)
+      .map(i => `#${i.basket_no || i.invoice_id}`);
+    if (otherBaskets.length > 0) {
+      reply += `\n\n💡 (បងមានកន្ត្រកផ្សេងទៀត ៖ ${otherBaskets.join(', ')} អាចវាយលេខដើម្បីឆែកមើលបាន)`;
+    }
+
+    if (targetInv.status !== 'Paid' && targetInv.packing_stage !== 'DISPATCHED') {
+      reply += `\n\n👉 បងអាចផ្ញើវិក្កយបត្រ (Slip) បង់ប្រាក់ចូលទីនេះ ដើម្បីហាងរៀបចំច្រក និងចេញដឹកជូនបងឆាប់ៗនេះ! សូមអរគុណច្រើនបង! 🙏`;
+    } else if (targetInv.packing_stage !== 'DISPATCHED') {
+      reply += `\n\nអរគុណច្រើនបងសម្រាប់ការគាំទ្រហាងយើងខ្ញុំ! 🙏✨`;
+    }
+
+    addChatbotLog({
+      type: 'AI_FAQ',
+      customer_name: targetInv.facebook_name,
+      customer_id: senderId,
+      basket_no: targetInv.basket_no || targetInv.invoice_id,
+      incoming_message: userMessage,
+      bot_reply: reply,
+      status: 'SUCCESS'
+    });
+
+    return reply;
+  }
+
+  // If customer explicitly typed a basket number like #860 and it was not found:
+  if ((userMessage.includes('#') || /(?:កន្ត្រក|basket)/i.test(userMessage)) && !targetInv) {
+    const bNum = basketNumberMatch ? basketNumberMatch[1] : '';
+    const notFoundReply = `ចាសជម្រាបសួរបង ${displayName}! ហាងបានឆែកមើលក្នុងប្រព័ន្ធហើយ មិនទាន់ឃើញមានកន្ត្រកលេខ #${bNum || userMessage.trim()} ឡើយបងណា៎។ សូមបងជួយផ្ញើឈ្មោះហ្វេសប៊ុក ឬលេខទូរស័ព្ទដើម្បីឱ្យប្អូនជួយស្វែងរកជូនបន្ថែមណា៎បង 🙏✨`;
+    addChatbotLog({
+      type: 'AI_FAQ',
+      customer_name: displayName,
+      customer_id: senderId,
+      incoming_message: userMessage,
+      bot_reply: notFoundReply,
+      status: 'SUCCESS'
+    });
+    return notFoundReply;
   }
 
   const ai = getGenAI();
@@ -900,8 +1081,47 @@ export async function processCustomerFaq(
 
   try {
     const customerGreeting = displayName !== 'ភ្ញៀវ' ? `បង ${displayName}` : 'បង';
-    const prompt = `អ្នកជាបុគ្គលិកឆ្លើយឆាតលក់ទំនិញអនឡាញរបស់ហាង "${chatbotConfig.shopName}"។
-ចូរឆ្លើយតបសំណួររបស់អតិថិជនជាភាសាខ្មែរ ដោយផ្អែមល្ហែម ទន់ភ្លន់ គួរឱ្យចង់ស្ដាប់ ខ្លីៗត្រឹមតែ ១ ទៅ ២ ជួរ ចំសំណួរដែលគេសួរ (សន្សំសំចៃ Token)។
+
+    // Build context regarding the customer's existing basket so Gemini acts intelligently!
+    let basketContext = '';
+    if (targetInv) {
+      const itemsList = targetInv.items.length > 0
+        ? targetInv.items.map(it => `[${it.product_code}] x ${it.quantity}`).join(', ')
+        : 'មានទំនិញក្នុងកន្ត្រក';
+      const bNum = targetInv.basket_no || targetInv.invoice_id;
+      const statusKh = targetInv.status === 'Paid' ? 'បានបង់ប្រាក់រួច (កំពុងរៀបចំវេចខ្ចប់)' : targetInv.status === 'Dispatched' ? 'បានចេញដឹកជញ្ជូនរួចរាល់' : 'មិនទាន់បង់ប្រាក់ (រង់ចាំការទូទាត់)';
+
+      basketContext = `
+📌 ព័ត៌មានកន្ត្រកបច្ចុប្បន្នរបស់ភ្ញៀវ (${customerGreeting}) ៖
+- អតិថិជននេះបានកុម្ម៉ង់ទំនិញរួចរាល់ហើយ គឺមានកន្ត្រកលេខ #${bNum}
+- មុខទំនិញក្នុងកន្ត្រក ៖ ${itemsList}
+- ទឹកប្រាក់សរុប ៖ $${targetInv.total_amount.toFixed(2)}
+- ស្ថានភាពបច្ចុប្បន្ន ៖ ${statusKh}
+- ទីតាំងបច្ចុប្បន្ន ៖ ${targetInv.address || 'មិនទាន់មានទីតាំង'}
+- លេខទូរស័ព្ទ ៖ ${targetInv.phone_number || 'មិនទាន់មាន'}
+
+🚨 ច្បាប់សំខាន់បំផុតសម្រាប់អតិថិជននេះ (STRICT ORDER RULES) ៖
+1. ហាមដាច់ខាតកុំសួរថា "តើបងចាប់អារម្មណ៍មុខទំនិញណាដែរ?" ឬ "តើបងចង់ទិញអ្វីដែរ?" ជាដាច់ខាត! ព្រោះគាត់បានកុម្ម៉ង់ទំនិញក្នុងកន្ត្រកលេខ #${bNum} រួចរាល់ហើយ។
+2. បើភ្ញៀវសួរពីសេវាដឹក ឬទីតាំង (ដូចជា ព្រៃវែង សៀមរាប កំពង់ចាម ឬកន្លែងណាផ្សេង) ៖ ត្រូវប្រាប់តម្លៃសេវាដឹក (តាមខេត្ត $${chatbotConfig.shippingRateProvince.toFixed(2)} ឬភ្នំពេញ $${chatbotConfig.shippingRatePP.toFixed(2)}) ហើយសួរបញ្ជាក់ដោយផ្អែមល្ហែមថា "តើបងចង់ឱ្យអូនកត់ត្រាទីតាំងនេះចូលក្នុងកន្ត្រកលេខ #${bNum} របស់បងដែរឬទេចា៎ស់?" ឬប្រាប់ឱ្យគាត់ផ្ញើទីតាំង និងលេខទូរស័ព្ទលម្អិត។
+3. បើកន្ត្រកមិនទាន់បង់ប្រាក់ ៖ អាចប្រាប់គាត់យ៉ាងផ្អែមល្ហែមថា គាត់អាចផ្ញើវិក្កយបត្រ (Slip) វេលុយចូលទីនេះបាន ដើម្បីឱ្យខាងហាងរៀបចំកញ្ចប់ #${bNum} ចេញដឹកជូន។
+4. បើភ្ញៀវសួរពីការដកទំនិញ ឬកែប្រែកន្ត្រក ៖ ចូរឆ្លើយតបយ៉ាងរួសរាយថានឹងជួយកែប្រែ ឬជម្រាបជូនតាមគោលការណ៍ហាង។
+5. ចម្លើយត្រូវខ្លីខ្លឹមត្រឹម ១ ទៅ ២ ជួរ ផ្អែមល្ហែម គួរឱ្យស្រឡាញ់ និងចំសំណួរ។`;
+    } else {
+      basketContext = `
+📌 ស្ថានភាពភ្ញៀវ ៖ ភ្ញៀវមិនទាន់រកឃើញកន្ត្រកជាក់លាក់ (ឬអាចជាភ្ញៀវថ្មី)។
+🚨 ច្បាប់សំខាន់ដាច់ខាត ៖
+1. ហាមដាច់ខាតកុំសួរថា "តើបងចាប់អារម្មណ៍មុខទំនិញណាដែរ?" ឬ "តើបងស្រឡាញ់ទំនិញមួយណាដែរ?" ឬ "តើបងចង់ទិញអ្វីដែរ?" ជាដាច់ខាត!
+2. ប្រសិនបើភ្ញៀវសួរពីកញ្ចប់អីវ៉ាន់ ស្ថានភាព ឬតម្លៃ ត្រូវសួររក "លេខកន្ត្រក (#...)" ឬ "លេខទូរស័ព្ទ" ដើម្បីឱ្យប្អូនជួយឆែកមើលក្នុងប្រព័ន្ធជូនភ្លាមៗ។
+3. ឆ្លើយតបខ្លីៗត្រឹម ១ ទៅ ២ ជួរ ផ្អែមល្ហែម និងចំសំណួរ។`;
+    }
+
+    const prompt = `អ្នកជាបុគ្គលិកឆ្លើយឆាតបម្រើអតិថិជនរបស់ហាង "${chatbotConfig.shopName}" សម្រាប់ Live Stream និងការវេចខ្ចប់កញ្ចប់ទំនិញ។
+ចូរឆ្លើយតបសំណួររបស់អតិថិជនជាភាសាខ្មែរ ដោយផ្អែមល្ហែម ខ្លីៗត្រឹមតែ ១ ជួរ (យ៉ាងច្រើន ២ ជួរខ្លី) ចំសំណួរដែលគេសួរ ហាមវែងអន្លាយដាច់ខាត។
+
+⚠️ បម្រាមពិសេស (STRICT RULES) ៖
+1. ឆ្លើយខ្លីៗ ចំសំណួរ គ្មានពាក្យបន្ថែមវែងឆ្ងាយ។
+2. ហាមសួរនាំបែបផ្សព្វផ្សាយលក់ទំនិញដូចជា "តើបងចាប់អារម្មណ៍មុខទំនិញណាដែរ?" ឬ "តើថ្ងៃនេះបងចាប់អារម្មណ៍ទំនិញមួយណាដែរ?" ជាដាច់ខាត!
+3. ប្រសិនបើមានព័ត៌មានកន្ត្រកខាងក្រោម ត្រូវផ្ដោតលើការបញ្ជាក់កន្ត្រក #${targetInv ? (targetInv.basket_no || targetInv.invoice_id) : ''} នោះប៉ុណ្ណោះ។
 
 ព័ត៌មានជាក់ស្តែងរបស់ហាង ៖
 - ទីតាំងហាង ៖ ${chatbotConfig.shopLocation}
@@ -910,10 +1130,11 @@ export async function processCustomerFaq(
 - សេវាដឹកតាមខេត្ត ៖ $${chatbotConfig.shippingRateProvince.toFixed(2)} (${chatbotConfig.deliveryTimeProvince})
 - គោលការណ៍ប្តូរទំនិញ ៖ ${chatbotConfig.exchangePolicy}
 ${chatbotConfig.customFaqPrompt ? `- ចំណាំបន្ថែម ៖ ${chatbotConfig.customFaqPrompt}` : ''}
+${basketContext}
 
 សំណួរភ្ញៀវ (${customerGreeting}) ៖ "${userMessage}"
 
-ចូរឆ្លើយតបជាភាសាខ្មែរផ្អែមល្ហែម ខ្លីខ្លឹម ៖`;
+ចូរឆ្លើយតបជាភាសាខ្មែរផ្អែមល្ហែម ខ្លីចំចំណួរ (១-២ ជួរ) ៖`;
 
     const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
     let faqText = '';
@@ -940,10 +1161,32 @@ ${chatbotConfig.customFaqPrompt ? `- ចំណាំបន្ថែម ៖ ${cha
         faqText = `ចាស${customerGreeting}! ហាងអូនមានទីតាំងនៅ ៖ ${chatbotConfig.shopLocation} បងណា៎ 🙏`;
       } else if (/ម៉ោង|បើក|បិទ|working hours|time/i.test(lower)) {
         faqText = `ចាស${customerGreeting}! ហាងបើកទទួលភ្ញៀវជារៀងរាល់ថ្ងៃ ម៉ោង ${chatbotConfig.workingHours} ណា៎បង 🙏`;
-      } else if (/ថ្លៃដឹក|សេវាដឹក|ដឹកភ្នំពេញ|ដឹកខេត្ត|delivery|shipping/i.test(lower)) {
-        faqText = `ចាស${customerGreeting}! សេវាដឹកភ្នំពេញ $${chatbotConfig.shippingRatePP.toFixed(2)} (${chatbotConfig.deliveryTimePP}) និងតាមខេត្ត $${chatbotConfig.shippingRateProvince.toFixed(2)} (${chatbotConfig.deliveryTimeProvince}) បងណា៎! 🚚`;
+      } else if (/ថ្លៃដឹក|សេវាដឹក|ដឹកភ្នំពេញ|ដឹកខេត្ត|delivery|shipping|សេវាប៉ុន្មាន/i.test(lower)) {
+        if (targetInv) {
+          const bNum = targetInv.basket_no || targetInv.invoice_id;
+          const isProv = /ខេត្ត|ព្រៃវែង|សៀមរាប|កំពង់|បាត់ដំបង|បឹង|ស្ទឹង|កណ្តាល|តាកែវ|កំពត|កែប|កោះកុង|ពោធិ៍សាត់|ក្រចេះ|ស្ទឹងត្រែង|រតនគិរី|មណ្ឌលគិរី|ព្រះវិហារ|ឧត្តរមានជ័យ|ប៉ៃលិន|បន្ទាយមានជ័យ|ស្វាយរៀង/i.test(lower);
+          const zoneInfo = isProv
+            ? `សម្រាប់ទីតាំងតាមខេត្ត សេវាដឹកត្រឹមតែ $${chatbotConfig.shippingRateProvince.toFixed(2)} (${chatbotConfig.deliveryTimeProvince})`
+            : `សេវាដឹកភ្នំពេញ $${chatbotConfig.shippingRatePP.toFixed(2)} (${chatbotConfig.deliveryTimePP}) និងតាមខេត្ត $${chatbotConfig.shippingRateProvince.toFixed(2)} (${chatbotConfig.deliveryTimeProvince})`;
+          faqText = `ចាស${customerGreeting}! ${zoneInfo} ប៉ុណ្ណោះចា៎ស់។ តើបងចង់ឱ្យអូនកត់ត្រាទីតាំងនេះចូលក្នុងកន្ត្រកលេខ #${bNum} របស់បងដែរទេចា៎ស់? (បងអាចផ្ញើលេខទូរស័ព្ទ និងទីតាំងលម្អិតបានណា៎បង) 🙏✨`;
+        } else {
+          faqText = `ចាស${customerGreeting}! សេវាដឹកភ្នំពេញ $${chatbotConfig.shippingRatePP.toFixed(2)} (${chatbotConfig.deliveryTimePP}) និងតាមខេត្ត $${chatbotConfig.shippingRateProvince.toFixed(2)} (${chatbotConfig.deliveryTimeProvince}) បងណា៎! 🚚`;
+        }
       } else if (/ប្តូរ|ដូរ|ខូច|exchange|return/i.test(lower)) {
         faqText = `ចាស${customerGreeting}! គោលការណ៍ប្តូរទំនិញ ៖ ${chatbotConfig.exchangePolicy} ណា៎បង 🙏`;
+      }
+    }
+
+    // 🛡️ GUARANTEED SANITIZER: Eliminate any accidental promotional sales phrasing
+    if (faqText) {
+      const salesPattern = /(?:តើ\s*)?(?:ថ្ងៃនេះ\s*)?បង(?:ចាប់អារម្មណ៍|ស្រឡាញ់|ចង់បាន|ចង់ទិញ)(?:មុខ)?(?:ទំនិញ|អីវ៉ាន់|ឥវ៉ាន់)(?:ណា|មួយណា)(?:ដែរ)?(?:ចា៎ស់|ចាស|ទេ)?(?:\?|។|\s)*(?:អូនជួយប្រាប់ព័ត៌មានជូន\??)?/gi;
+      if (salesPattern.test(faqText)) {
+        if (targetInv) {
+          const bNum = targetInv.basket_no || targetInv.invoice_id;
+          faqText = faqText.replace(salesPattern, `តើបងចង់ឱ្យអូនកត់ត្រាទីតាំងនេះចូលក្នុងកន្ត្រកលេខ #${bNum} របស់បងដែរទេចា៎ស់?`).trim();
+        } else {
+          faqText = faqText.replace(salesPattern, 'តើបងមានលេខកន្ត្រក ឬលេខទូរស័ព្ទដែរទេ ដើម្បីឱ្យអូនជួយឆែកមើលក្នុងប្រព័ន្ធជូនណា៎បង?').trim();
+        }
       }
     }
 
