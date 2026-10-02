@@ -4,6 +4,7 @@ import path from 'path';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage } from './db';
 import { Invoice } from './types';
+import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
 
 const router = Router();
 
@@ -480,10 +481,16 @@ Return ONLY a JSON object:
             const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
             const parsed = JSON.parse(cleaned);
             const rawCustName = String(parsed.customer_name || '').trim();
+            let amt = Number(parsed.paid_amount) || 0;
+            let curr: 'USD' | 'KHR' = String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD';
+            if (curr === 'KHR' || amt > 500) {
+              amt = Math.round((amt / 4100) * 100) / 100;
+              curr = 'USD';
+            }
             extracted = {
               customer_name: isReceiverAccountName(rawCustName) ? '' : rawCustName,
-              paid_amount: Number(parsed.paid_amount) || 0,
-              currency: String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD',
+              paid_amount: amt,
+              currency: curr,
               phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
               bank_name: parsed.bank_name ? String(parsed.bank_name).trim() : undefined,
               trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined,
@@ -641,7 +648,7 @@ router.post('/confirm_matches', (req: Request, res: Response) => {
         inv.status = 'Paid';
         inv.payment_status = 'Paid';
         inv.paid_at = nowIso;
-        inv.paid_by = packerName || 'Fast-Check AI';
+        inv.paid_by = packerName || 'Admin (Bulk Approve)';
         if (match.slip_url) {
           inv.payment_slip_url = match.slip_url;
         }
@@ -653,6 +660,42 @@ router.post('/confirm_matches', (req: Request, res: Response) => {
           inv.packing_stage = 'STAGED';
         }
         updatedCount++;
+
+        // Find associated slip in messengerSlips and update
+        const slip = messengerSlips.find(
+          s => s.id === match.slip_id || s.slip_url === match.slip_url || s.matched_invoice?.invoice_id === inv.invoice_id
+        );
+        if (slip) {
+          slip.status = 'APPROVED';
+          slip.is_approved = true;
+        }
+
+        // Dispatch Messenger reply to customer
+        const targetPsid = (slip && slip.sender_id) || inv.facebook_user_id;
+        const customerName = inv.facebook_name || (slip && slip.sender_name) || 'អតិថិជន';
+        const basketNo = inv.basket_no || inv.invoice_id;
+        const finalAmount = match.paid_amount || (slip && slip.extracted?.paid_amount) || inv.total_amount;
+        const bankName = (slip && slip.extracted?.bank_name) || 'ធនាគារ';
+        const transRef = (slip && slip.extracted?.trans_ref) || '';
+
+        const replyMessage = `✅ ហាងបានទទួលការទូទាត់ប្រាក់ចំនួន $${Number(finalAmount).toFixed(2)} (${bankName}${transRef ? ' ‧ Ref: ' + transRef : ''}) ត្រឹមត្រូវ ១០០% ហើយបង ${customerName}! 🎉\n\n📦 កន្ត្រកលេខ #${basketNo} របស់បងត្រូវបាន Admin ផ្ទៀងផ្ទាត់ [បង់រួច] និងបញ្ជូនទៅកាន់បញ្ជីវេចខ្ចប់រួចរាល់។ អរគុណច្រើនបង! 🙏`;
+
+        if (targetPsid && targetPsid !== 'FB_USER' && targetPsid !== 'TEST_USER_1' && !targetPsid.startsWith('1000')) {
+          sendFacebookMessengerReply(targetPsid, replyMessage).catch(err => {
+            console.error('[Bulk Approve FB Send Error]:', err);
+          });
+        }
+
+        addChatbotLog({
+          type: 'SLIP_VERIFIED',
+          customer_name: customerName,
+          customer_id: targetPsid,
+          basket_no: basketNo,
+          incoming_message: `[Bulk Approved Slip #${basketNo} $${Number(finalAmount).toFixed(2)}]`,
+          bot_reply: replyMessage,
+          status: 'SUCCESS',
+          meta: { invoice_id: inv.invoice_id, basket_no: basketNo, amount: finalAmount }
+        });
       }
     }
 
@@ -662,7 +705,7 @@ router.post('/confirm_matches', (req: Request, res: Response) => {
     return res.json({
       success: true,
       updated_count: updatedCount,
-      message: `បានផ្ទៀងផ្ទាត់ និងសម្គាល់បង់រួចជោគជ័យ ${updatedCount} កន្ត្រក!`
+      message: `បានផ្ទៀងផ្ទាត់ និងសម្គាល់បង់រួចជោគជ័យ ${updatedCount} កន្ត្រក ព្រមទាំងបានផ្ញើសារបញ្ជាក់ទៅ Messenger!`
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err?.message || 'Server error' });
@@ -987,10 +1030,16 @@ Output strictly raw JSON with these fields.`
                         const cleaned = geminiRes.text.replace(/```json/gi, '').replace(/```/gi, '').trim();
                         const parsed = JSON.parse(cleaned);
                         if (parsed.is_bank_slip !== false) {
+                          let amt = Number(parsed.paid_amount) || 0;
+                          let curr: 'USD' | 'KHR' = String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD';
+                          if (curr === 'KHR' || amt > 500) {
+                            amt = Math.round((amt / 4100) * 100) / 100;
+                            curr = 'USD';
+                          }
                           extracted = {
                             customer_name: sanitizeCustomerName(parsed.customer_name, senderName),
-                            paid_amount: Number(parsed.paid_amount) || 0,
-                            currency: (parsed.currency || 'USD').toUpperCase() as any,
+                            paid_amount: amt,
+                            currency: curr,
                             phone_number: parsed.phone_number || undefined,
                             bank_name: parsed.bank_name || undefined,
                             trans_date: parsed.trans_date || undefined,
@@ -1103,12 +1152,39 @@ router.post('/approve_slip', (req: Request, res: Response) => {
       slip.is_approved = true;
     }
 
+    // DISPATCH MESSENGER CONFIRMATION REPLY TO CUSTOMER ON ADMIN APPROVE
+    const targetPsid = (slip && slip.sender_id) || inv.facebook_user_id;
+    const customerName = inv.facebook_name || (slip && slip.sender_name) || 'អតិថិជន';
+    const basketNo = inv.basket_no || inv.invoice_id;
+    const finalAmount = (slip && slip.extracted?.paid_amount) || inv.total_amount;
+    const bankName = (slip && slip.extracted?.bank_name) || 'ធនាគារ';
+    const transRef = (slip && slip.extracted?.trans_ref) || '';
+
+    const replyMessage = `✅ ហាងបានទទួលការទូទាត់ប្រាក់ចំនួន $${Number(finalAmount).toFixed(2)} (${bankName}${transRef ? ' ‧ Ref: ' + transRef : ''}) ត្រឹមត្រូវ ១០០% ហើយបង ${customerName}! 🎉\n\n📦 កន្ត្រកលេខ #${basketNo} របស់បងត្រូវបាន Admin ផ្ទៀងផ្ទាត់ [បង់រួច] និងបញ្ជូនទៅកាន់បញ្ជីវេចខ្ចប់រួចរាល់។ អរគុណច្រើនបង! 🙏`;
+
+    if (targetPsid && targetPsid !== 'FB_USER' && targetPsid !== 'TEST_USER_1' && !targetPsid.startsWith('1000')) {
+      sendFacebookMessengerReply(targetPsid, replyMessage).catch(err => {
+        console.error('[Admin Approve FB Send Error]:', err);
+      });
+    }
+
+    addChatbotLog({
+      type: 'SLIP_VERIFIED',
+      customer_name: customerName,
+      customer_id: targetPsid,
+      basket_no: basketNo,
+      incoming_message: `[Admin Approved Slip #${basketNo} $${Number(finalAmount).toFixed(2)}]`,
+      bot_reply: replyMessage,
+      status: 'SUCCESS',
+      meta: { invoice_id: inv.invoice_id, basket_no: basketNo, amount: finalAmount }
+    });
+
     saveDatabaseToDisk();
     bumpDataRevision();
 
     return res.json({
       success: true,
-      message: `✅ Admin បាន Approved កន្ត្រក #${inv.basket_no} ទៅជា [Paid] ជោគជ័យ!`,
+      message: `✅ Admin បាន Approved កន្ត្រក #${inv.basket_no} ទៅជា [Paid] និងបានផ្ញើសារបញ្ជាក់ទៅ Messenger រួចរាល់!`,
       invoice: inv
     });
   } catch (err: any) {

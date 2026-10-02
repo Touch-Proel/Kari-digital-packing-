@@ -256,7 +256,7 @@ export function FastCheckSlipsModal({
         const json = await res.json();
         if (json.success) {
           playSuccessFanfare();
-          onShowToast(`✅ Admin បាន Approved កន្ត្រក #${slip.matched_invoice.basket_no} ទៅជា [Paid] ជោគជ័យ!`, 'success');
+          onShowToast(`✅ Admin បាន Approved កន្ត្រក #${slip.matched_invoice.basket_no} [Paid] & ផ្ញើសារបញ្ជាក់ទៅ Messenger រួចរាល់!`, 'success');
           
           setSlips(prev => prev.map(s => {
             if (s.id === slip.id) {
@@ -291,6 +291,7 @@ export function FastCheckSlipsModal({
     try {
       const matches = matchedItems.map(s => ({
         invoice_id: s.matched_invoice!.invoice_id,
+        slip_id: s.id,
         slip_url: s.slip_url,
         paid_amount: s.extracted.paid_amount,
         paid_by: 'Admin Bulk Verified (Messenger)'
@@ -306,7 +307,7 @@ export function FastCheckSlipsModal({
         const json = await res.json();
         if (json.success) {
           playSuccessFanfare();
-          onShowToast(`✅ Admin បាន Approved ប្តូរទៅ [បង់រួច] ជោគជ័យ ${json.updated_count} កន្ត្រក!`, 'success');
+          onShowToast(`✅ Admin បាន Approved និងផ្ញើសារបញ្ជាក់ទៅ Messenger ជោគជ័យ ${json.updated_count} កន្ត្រក!`, 'success');
           
           setSlips(prev => prev.map(s => {
             if (s.status === 'MATCHED' && s.matched_invoice) {

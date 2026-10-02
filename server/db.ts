@@ -582,13 +582,18 @@ export async function loadDatabaseFromDisk() {
       if (parsed.messengerSlips && Array.isArray(parsed.messengerSlips) && parsed.messengerSlips.length > 0) {
         messengerSlips.length = 0;
         messengerSlips.push(...parsed.messengerSlips);
-        // Cleanse receiver names (Proel Toch / shop owner) from extracted customer_name
+        // Cleanse receiver names (Proel Toch / shop owner) and normalize amounts
         for (const s of messengerSlips) {
           const raw = (s.extracted?.customer_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
           if (raw.includes('proeltoch') || raw.includes('proel') || raw.includes('toch') || !s.extracted?.customer_name) {
             if (s.extracted) {
               s.extracted.customer_name = s.sender_name || (s.matched_invoice && s.matched_invoice.facebook_name) || 'អតិថិជន Facebook';
             }
+          }
+          // Normalize amounts in Riel (e.g. 19,300 KHR -> $4.71 USD)
+          if (s.extracted && (s.extracted.currency === 'KHR' || s.extracted.paid_amount > 500)) {
+            s.extracted.paid_amount = Math.round((s.extracted.paid_amount / 4100) * 100) / 100;
+            s.extracted.currency = 'USD';
           }
         }
       }

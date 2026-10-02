@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage, messengerSlips } from './db';
+import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage, messengerSlips, AutoScannedMessengerSlip } from './db';
 import { broadcastSSE } from './packingRoutes';
 import { Invoice } from './types';
 import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini } from './fastCheckRoutes';
@@ -364,129 +364,100 @@ Return strict JSON ONLY:
       );
     }
 
-    // E. Smart Multi-Tier Match via matchInvoiceForSlip
-    if (!matchedInv) {
-      const matchRes = matchInvoiceForSlip({
-        customer_name: extracted.customer_name || senderName,
-        paid_amount: paidAmount,
-        currency: currency as any,
-        phone_number: extracted.phone_number,
-        bank_name: bankName,
-        trans_ref: transRef,
-        basket_no: basketNoInSlip || undefined
-      });
-      if (matchRes.status === 'MATCHED' && matchRes.matched) {
-        matchedInv = matchRes.matched;
-      }
-    }
+    // E. Smart Multi-Tier Match via matchInvoiceForSlip (without auto-paying)
+    const matchRes = matchInvoiceForSlip({
+      customer_name: extracted.customer_name || senderName,
+      paid_amount: paidAmount,
+      currency: 'USD',
+      phone_number: extracted.phone_number,
+      bank_name: bankName,
+      trans_ref: transRef,
+      basket_no: basketNoInSlip || undefined
+    });
 
-    // 4. If still no basket found, notify team and inform customer
-    if (!matchedInv) {
-      const reply = `🧾 ហាងបានស្កេនឃើញវិក្កយបត្រចំនួន $${paidAmount.toFixed(2)} (${bankName} ‧ Ref: ${transRef || 'N/A'}) ពីបង ${senderName}។\n\n⚠️ ប៉ុន្តែប្រព័ន្ធមិនទាន់រកឃើញកន្ត្រកដែលកំពុងរង់ចាំបង់ប្រាក់ត្រូវគ្នានឹងគណនីរបស់បងទេ។ បុគ្គលិកនឹងជួយពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែម! 🙏`;
-      addChatbotLog({
-        type: 'SLIP_VERIFIED',
-        customer_name: extracted.customer_name || senderName,
-        customer_id: senderId,
-        incoming_message: `[រូបភាព Slip $${paidAmount.toFixed(2)} (${bankName})]`,
-        bot_reply: reply,
-        status: 'WARNING',
-        meta: extracted
-      });
+    const targetInvoice = matchedInv || matchRes.matched || (matchRes.candidates && matchRes.candidates[0]);
 
-      sendTelegramAlert(
-        `⚠️ <b>AI បានទទួល Slip ក្នុង Chat ប៉ុន្តែរកមិនឃើញកន្ត្រកត្រូវគ្នា:</b>\n👤 <b>ភ្ញៀវ:</b> ${senderName} (ID: <code>${senderId}</code>)\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>\n💡 <i>សូមបុគ្គលិកជួយពិនិត្យក្នុងប្រព័ន្ធ POS</i>`
-      );
-
-      return { success: false, reply };
-    }
-
-    // Auto-mark invoice as Paid in KARI OS
-    matchedInv.status = 'Paid';
-    (matchedInv as any).payment_status = 'Paid';
-    matchedInv.paid_by = 'KARI AI Bot (Chat)';
-    matchedInv.paid_at = new Date().toISOString();
-    matchedInv.payment_method = bankName;
-    if (savedSlipUrl) {
-      matchedInv.payment_slip_url = savedSlipUrl;
-    }
-    if (matchedInv.packing_stage === 'UNPICKED') {
-      matchedInv.packing_stage = 'STAGED';
-      matchedInv.staged_by = 'KARI AI Bot';
-      matchedInv.staged_at = new Date().toISOString();
-    }
-
-    if (transRef) {
-      usedSlipRefs.add(transRef);
-    }
-
-    // Add / update in Messenger Auto-Scan Table queue
+    // 4. Add / update in Messenger Auto-Scan Table queue (Status: NOT yet approved, waiting for Admin)
     const existingIndex = messengerSlips.findIndex(s => s.slip_url === savedSlipUrl || (transRef && s.extracted.trans_ref === transRef));
-    const newSlipItem: any = {
-      id: `mslip_live_${Date.now()}`,
+    const newSlipItem: AutoScannedMessengerSlip = {
+      id: `mslip_live_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       source: 'MESSENGER',
       sender_id: senderId,
-      sender_name: matchedInv.facebook_name || senderName,
+      sender_name: (targetInvoice && targetInvoice.facebook_name) || senderName,
       slip_url: savedSlipUrl,
       received_at: new Date().toISOString(),
       extracted: {
-        customer_name: extracted.customer_name || matchedInv.facebook_name,
+        customer_name: extracted.customer_name || (targetInvoice && targetInvoice.facebook_name) || senderName,
         paid_amount: paidAmount,
-        currency: currency as any,
-        phone_number: extracted.phone_number || matchedInv.phone_number,
+        currency: 'USD',
+        phone_number: extracted.phone_number || (targetInvoice && targetInvoice.phone_number),
         bank_name: bankName,
         trans_ref: transRef,
-        basket_no: matchedInv.basket_no || matchedInv.invoice_id,
+        trans_date: extracted.trans_date,
+        basket_no: basketNoInSlip || (targetInvoice && targetInvoice.basket_no) || undefined,
         remarks: extracted.remarks || ''
       },
-      status: 'APPROVED',
-      is_approved: true,
-      confidence: 100,
-      matched_invoice: {
-        invoice_id: matchedInv.invoice_id,
-        basket_no: matchedInv.basket_no,
-        live_id: matchedInv.live_id,
-        facebook_name: matchedInv.facebook_name,
-        phone_number: matchedInv.phone_number,
-        total_amount: matchedInv.total_amount,
-        created_at: matchedInv.created_at,
-        packing_stage: matchedInv.packing_stage,
-        status: matchedInv.status
-      }
+      status: matchRes.status,
+      is_approved: false, // Wait for Admin to verify and click Approve
+      confidence: matchRes.confidence,
+      matched_invoice: matchRes.matched ? {
+        invoice_id: matchRes.matched.invoice_id,
+        basket_no: matchRes.matched.basket_no,
+        live_id: matchRes.matched.live_id,
+        facebook_name: matchRes.matched.facebook_name,
+        phone_number: matchRes.matched.phone_number,
+        total_amount: matchRes.matched.total_amount,
+        created_at: matchRes.matched.created_at,
+        packing_stage: matchRes.matched.packing_stage,
+        status: matchRes.matched.status
+      } : undefined,
+      candidates: matchRes.candidates ? matchRes.candidates.map(c => ({
+        invoice_id: c.invoice_id,
+        basket_no: c.basket_no,
+        live_id: c.live_id,
+        facebook_name: c.facebook_name,
+        phone_number: c.phone_number,
+        total_amount: c.total_amount,
+        created_at: c.created_at,
+        packing_stage: c.packing_stage,
+        status: c.status
+      })) : undefined
     };
 
     if (existingIndex !== -1) {
-      messengerSlips[existingIndex] = newSlipItem;
+      if (!messengerSlips[existingIndex].is_approved) {
+        messengerSlips[existingIndex] = newSlipItem;
+      }
     } else {
       messengerSlips.unshift(newSlipItem);
     }
 
     bumpDataRevision();
     saveDatabaseToDisk();
-    broadcastSSE('order_updated', { invoice: matchedInv });
 
-    const reply = `✅ ហាងបានទទួលការទូទាត់ប្រាក់ចំនួន $${paidAmount.toFixed(2)} (${bankName} ‧ Ref: ${transRef || 'N/A'}) ត្រឹមត្រូវ ១០០% ហើយបង ${matchedInv.facebook_name}! 🎉\n\n📦 កន្ត្រកលេខ #${matchedInv.basket_no || matchedInv.invoice_id} របស់បងត្រូវបានសម្គាល់ [បង់រួច] និងបញ្ជូនទៅកាន់បញ្ជីវេចខ្ចប់រួចរាល់។ អរគុណច្រើនបង! 🙏`;
-
+    // Log the auto-scan event waiting for Admin
     addChatbotLog({
       type: 'SLIP_VERIFIED',
-      customer_name: matchedInv.facebook_name,
+      customer_name: (targetInvoice && targetInvoice.facebook_name) || senderName,
       customer_id: senderId,
-      basket_no: matchedInv.basket_no || matchedInv.invoice_id,
-      incoming_message: `[រូបភាព Slip $${paidAmount.toFixed(2)} (${bankName})]`,
-      bot_reply: reply,
+      basket_no: (targetInvoice && targetInvoice.basket_no),
+      incoming_message: `[Auto-Scanned Slip $${paidAmount.toFixed(2)} (${bankName})]`,
+      bot_reply: '[រង់ចាំ Admin ផ្ទៀងផ្ទាត់ & ចុច Approve]',
       status: 'SUCCESS',
-      meta: { ...extracted, paid_amount: paidAmount }
+      meta: { ...extracted, paid_amount: paidAmount, match_status: matchRes.status }
     });
 
     sendTelegramAlert(
-      `✅ <b>ភ្ញៀវបានផ្ញើ Slip ក្នុង Chat Messenger &amp; Tick [បង់រួច]!</b> 🎉\n━━━━━━━━━━━━━━━━━━\n🛒 <b>កន្ត្រក:</b> #${matchedInv.basket_no || matchedInv.invoice_id} (<code>${matchedInv.facebook_name}</code>)\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>`
+      `📥 <b>AI បាន Scan Slip ថ្មីពី Messenger ចូលក្នុង Table ផ្ទៀងផ្ទាត់:</b>\n👤 <b>ភ្ញៀវ:</b> ${(targetInvoice && targetInvoice.facebook_name) || senderName}\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>\n💡 <i>រង់ចាំ Admin ពិនិត្យផ្ទៀងផ្ទាត់ & ចុច [Approve]</i>`
     );
 
-    return { success: true, reply, invoice: matchedInv };
+    // SILENT: Do NOT auto-reply and do NOT auto-pay invoice until Admin clicks Approve
+    return { success: true, reply: '', invoice: targetInvoice };
   } catch (err: any) {
     console.error('Slip processing error:', err);
     return {
       success: false,
-      reply: `អរគុណបង ${senderName}! ហាងបានទទួលវិក្កយបត្រហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែម។`
+      reply: ''
     };
   }
 }
