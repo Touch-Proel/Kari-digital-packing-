@@ -92,6 +92,39 @@ async function downloadTelegramPhotoBuffer(token: string, fileId: string): Promi
   }
 }
 
+// Concurrency-controlled Queue for Telegram Media & OCR processing (prevents 6GB memory spikes & CPU lockup during 100+ bulk photo forwards)
+class TelegramTaskQueue {
+  private queue: Array<() => Promise<void>> = [];
+  private active = 0;
+  private readonly maxConcurrency = 2;
+
+  add(task: () => Promise<void>) {
+    this.queue.push(task);
+    this.processNext();
+  }
+
+  private processNext() {
+    while (this.active < this.maxConcurrency && this.queue.length > 0) {
+      const task = this.queue.shift();
+      if (!task) break;
+      this.active++;
+      task()
+        .catch(err => console.error('[Telegram Queue Task Error]:', err))
+        .finally(() => {
+          this.active--;
+          // 25ms pause between items to allow V8 GC to sweep memory
+          setTimeout(() => this.processNext(), 25);
+        });
+    }
+  }
+
+  get pending() {
+    return this.queue.length;
+  }
+}
+
+const telegramQueue = new TelegramTaskQueue();
+
 /**
  * Handle incoming Product Stock Photo & Code (Stock Sync)
  */
@@ -133,11 +166,8 @@ async function handleIncomingStockItemPhoto(
     { targetLiveId: activeLiveId }
   );
 
-  const addedDetails: string[] = [];
-
   for (const item of stockItems) {
     const upperCode = item.code.toUpperCase();
-    addedDetails.push(`• <b>[${upperCode}]</b> $${item.price.toFixed(2)}`);
 
     // Keep cachedTelegramItems in sync so Web OS StockSyncModal displays it instantly
     const existingCached = cachedTelegramItems.find(c => c.code.toUpperCase() === upperCode);
@@ -160,11 +190,9 @@ async function handleIncomingStockItemPhoto(
     }
   }
 
-  saveDatabaseToDisk();
+  // Debounced auto-save & revision bump (prevents 125 simultaneous disk writes)
   bumpDataRevision();
-
-  // 100% Silent Mode: Do not reply or send messages into the Telegram group/channel
-  console.log(`[Telegram Stock Sync] Silently added/updated ${stockItems.length} items from chat ${chatId}: ${stockItems.map(s => s.code).join(', ')}`);
+  console.log(`[Telegram Stock Sync] Recorded item ${stockItems.map(s => s.code).join(', ')} (Queue pending: ${telegramQueue.pending})`);
 }
 
 /**
@@ -753,14 +781,14 @@ async function startPollingLoop() {
             const stockItems = parseLinesForStockItems(rawCaption);
 
             if (stockItems.length > 0) {
-              // 1. PRODUCT PHOTO & CODE -> Add to POS Product Stock!
-              handleIncomingStockItemPhoto(token, chatId, messageId, photoArray, rawCaption, stockItems, msg.date).catch(err => {
-                console.error('Error in handleIncomingStockItemPhoto:', err);
+              // 1. PRODUCT PHOTO & CODE -> Add to POS Product Stock via Queue (Throttled & Low RAM)
+              telegramQueue.add(async () => {
+                await handleIncomingStockItemPhoto(token, chatId, messageId, photoArray, rawCaption, stockItems, msg.date);
               });
             } else {
-              // 2. BANK SLIP PHOTO / Chat Screenshot -> Gemini AI Slip OCR & Auto-Tick!
-              handleIncomingSlipPhoto(token, chatId, messageId, photoArray, msg.caption).catch(err => {
-                console.error('Error in handleIncomingSlipPhoto:', err);
+              // 2. BANK SLIP PHOTO / Chat Screenshot -> Gemini AI Slip OCR via Queue
+              telegramQueue.add(async () => {
+                await handleIncomingSlipPhoto(token, chatId, messageId, photoArray, msg.caption);
               });
             }
             continue;
@@ -772,8 +800,8 @@ async function startPollingLoop() {
 
             if (trimmed.startsWith('/')) {
               // Bot Command (/check, /paid, /stock, /today, etc.)
-              handleIncomingTextCommand(token, chatId, messageId, trimmed).catch(err => {
-                console.error('Error in handleIncomingTextCommand:', err);
+              telegramQueue.add(async () => {
+                await handleIncomingTextCommand(token, chatId, messageId, trimmed);
               });
             } else {
               // Check if plain text contains stock item codes (e.g. A01 5$, B02 10$)
@@ -789,11 +817,7 @@ async function startPollingLoop() {
                   'merge'
                 );
 
-                const addedCodes = stockItems.map(item => `• <b>[${item.code.toUpperCase()}]</b> $${item.price.toFixed(2)}`);
-                saveDatabaseToDisk();
                 bumpDataRevision();
-
-                // 100% Silent Mode: Do not reply or send messages into the Telegram group/channel
                 console.log(`[Telegram Stock Sync] Silently recorded text items from chat ${chatId}: ${stockItems.map(s => s.code).join(', ')}`);
               }
             }

@@ -4,6 +4,12 @@ import sharp from 'sharp';
 import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db';
 import { Product } from './types';
 
+// Optimize Sharp for low memory footprint on VPS / Cloud Run (prevents 6GB memory spikes during bulk photo sync)
+try {
+  sharp.cache(false);
+  sharp.concurrency(1);
+} catch {}
+
 export interface TelegramItemParsed {
   code: string;
   name: string;
@@ -199,14 +205,15 @@ export async function downloadTelegramPhoto(
     const filename = standardFilename;
     const localSavePath = path.join(uploadDir, filename);
 
-    // ⚡ Fast Progressive JPEG processing with Sharp (Lightweight, 500x500 HD Cover Crop)
+    // ⚡ Fast Progressive JPEG processing with Sharp (Lightweight, 500x500 HD Cover Crop with fastShrink)
     const processedBuffer = await sharp(rawBuffer)
-      .rotate() // auto-orient based on EXIF orientation
+      .rotate()
       .resize(500, 500, {
         fit: 'cover',
-        position: 'center'
+        position: 'center',
+        fastShrinkOnLoad: true
       })
-      .jpeg({ quality: 82, progressive: true })
+      .jpeg({ quality: 80, progressive: false })
       .toBuffer();
 
     fs.writeFileSync(localSavePath, processedBuffer);
@@ -635,9 +642,9 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 6. Download all required photos in parallel batches of 8
+    // 6. Download all required photos in controlled throttled batches (concurrency: 2) to protect CPU & memory
     const downloadEntries = Array.from(photoToDownloadMap.entries());
-    const concurrency = 8;
+    const concurrency = 2;
     for (let i = 0; i < downloadEntries.length; i += concurrency) {
       const chunk = downloadEntries.slice(i, i + concurrency);
       await Promise.all(
@@ -653,6 +660,9 @@ export async function fetchTelegramStockUpdates(options: {
           }
         })
       );
+      if (i + concurrency < downloadEntries.length) {
+        await new Promise(r => setTimeout(r, 20));
+      }
     }
 
     // 7. Merge with cached items (Preserves all scanned items without stale image bleed)
