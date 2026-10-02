@@ -367,6 +367,21 @@ export function FastCheckSlipsModal({
   };
 
   // Filtered Slips for Table
+  const isReceiverAccountName = (name?: string) => {
+    if (!name) return false;
+    const clean = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return clean.includes('proeltoch') || clean.includes('proel') || clean.includes('toch') || clean.includes('kari');
+  };
+
+  const getCustomerDisplayInfo = (slip: MessengerSlipItem) => {
+    const fbSender = slip.sender_name || (slip.matched_invoice && slip.matched_invoice.facebook_name) || '';
+    const rawBankName = slip.extracted.customer_name;
+    const bankPayer = rawBankName && !isReceiverAccountName(rawBankName) ? rawBankName : '';
+    const primaryName = fbSender || bankPayer || 'អតិថិជន Facebook';
+    const showBankPayer = Boolean(bankPayer && bankPayer.toLowerCase().trim() !== primaryName.toLowerCase().trim());
+    return { primaryName, fbSender, bankPayer, showBankPayer };
+  };
+
   const filteredSlips = slips.filter(slip => {
     const isMatched = slip.status === 'MATCHED';
     const isApproved = slip.status === 'APPROVED' || slip.is_approved;
@@ -378,7 +393,8 @@ export function FastCheckSlipsModal({
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      const name = (slip.extracted.customer_name || slip.sender_name || '').toLowerCase();
+      const { primaryName, fbSender, bankPayer } = getCustomerDisplayInfo(slip);
+      const name = `${primaryName} ${fbSender} ${bankPayer}`.toLowerCase();
       const phone = (slip.extracted.phone_number || '').toLowerCase();
       const basket = slip.matched_invoice ? String(slip.matched_invoice.basket_no || '').toLowerCase() : '';
       const bank = (slip.extracted.bank_name || '').toLowerCase();
@@ -585,7 +601,7 @@ export function FastCheckSlipsModal({
                     <tr>
                       <th className="py-2.5 px-3 w-10 text-center">N</th>
                       <th className="py-2.5 px-3 w-16 text-center">Slip Pic</th>
-                      <th className="py-2.5 px-3">FB Name / អតិថិជន</th>
+                      <th className="py-2.5 px-3">👤 FB Name អ្នកផ្ញើ / អតិថិជន</th>
                       <th className="py-2.5 px-3">កន្ត្រក (Basket #)</th>
                       <th className="py-2.5 px-3 text-right">Slip Amount</th>
                       <th className="py-2.5 px-3 text-right">Invoice Total</th>
@@ -606,6 +622,7 @@ export function FastCheckSlipsModal({
                       const invTotal = slip.matched_invoice?.total_amount || 0;
                       const slipAmt = slip.extracted.paid_amount || 0;
                       const isAmountEqual = Math.abs(invTotal - slipAmt) < 0.05 && slipAmt > 0;
+                      const { primaryName, bankPayer, showBankPayer } = getCustomerDisplayInfo(slip);
 
                       return (
                         <tr
@@ -641,16 +658,29 @@ export function FastCheckSlipsModal({
                           </td>
 
                           <td className="py-2 px-3">
-                            <div className="font-bold text-sm text-white">
-                              {slip.extracted.customer_name || slip.sender_name || 'អតិថិជន'}
-                            </div>
-                            <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                              {slip.extracted.phone_number && (
-                                <span className="text-indigo-300 font-mono">📞 {slip.extracted.phone_number}</span>
+                            <div>
+                              <div className="flex items-center gap-1.5 font-bold text-sm text-white">
+                                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-[10px] text-white font-black flex-shrink-0 shadow-sm" title="Facebook Messenger">
+                                  f
+                                </span>
+                                <span className="text-blue-100 font-bold truncate max-w-[170px]">
+                                  {primaryName}
+                                </span>
+                              </div>
+                              {showBankPayer && (
+                                <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                  <span>💳 លើ Slip:</span>
+                                  <span className="text-slate-300 font-semibold">{bankPayer}</span>
+                                </div>
                               )}
-                              {slip.extracted.remarks && (
-                                <span className="text-slate-400 truncate max-w-[110px]">📝 {slip.extracted.remarks}</span>
-                              )}
+                              <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                {slip.extracted.phone_number && (
+                                  <span className="text-indigo-300 font-mono">📞 {slip.extracted.phone_number}</span>
+                                )}
+                                {slip.extracted.remarks && (
+                                  <span className="text-slate-400 truncate max-w-[110px]">📝 {slip.extracted.remarks}</span>
+                                )}
+                              </div>
                             </div>
                           </td>
 
@@ -829,28 +859,46 @@ export function FastCheckSlipsModal({
                         )}
 
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1">
-                            <h4 className="font-black text-sm text-white truncate">
-                              #{idx + 1}. {slip.extracted.customer_name || slip.sender_name || 'អតិថិជន'}
-                            </h4>
-                            {isApproved ? (
-                              <span className="bg-cyan-500/20 text-cyan-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-cyan-500/40 flex-shrink-0">
-                                ✨ Paid
-                              </span>
-                            ) : isMatched ? (
-                              <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40 flex-shrink-0">
-                                🟢 ត្រូវ ១០០%
-                              </span>
-                            ) : isAmbiguous ? (
-                              <span className="bg-amber-500/20 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-500/40 flex-shrink-0 animate-pulse">
-                                🟡 ស្ទួន
-                              </span>
-                            ) : (
-                              <span className="bg-rose-500/20 text-rose-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-500/40 flex-shrink-0">
-                                🔴 រកមិនឃើញ
-                              </span>
-                            )}
-                          </div>
+                          {(() => {
+                            const { primaryName, bankPayer, showBankPayer } = getCustomerDisplayInfo(slip);
+                            return (
+                              <>
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-[10px] text-white font-black flex-shrink-0 shadow-sm" title="Facebook Messenger">
+                                      f
+                                    </span>
+                                    <h4 className="font-black text-sm text-blue-100 truncate">
+                                      #{idx + 1}. {primaryName}
+                                    </h4>
+                                  </div>
+                                  {isApproved ? (
+                                    <span className="bg-cyan-500/20 text-cyan-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-cyan-500/40 flex-shrink-0">
+                                      ✨ Paid
+                                    </span>
+                                  ) : isMatched ? (
+                                    <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40 flex-shrink-0">
+                                      🟢 ត្រូវ ១០០%
+                                    </span>
+                                  ) : isAmbiguous ? (
+                                    <span className="bg-amber-500/20 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-500/40 flex-shrink-0 animate-pulse">
+                                      🟡 ស្ទួន
+                                    </span>
+                                  ) : (
+                                    <span className="bg-rose-500/20 text-rose-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-500/40 flex-shrink-0">
+                                      🔴 រកមិនឃើញ
+                                    </span>
+                                  )}
+                                </div>
+                                {showBankPayer && (
+                                  <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                    <span>💳 លើ Slip:</span>
+                                    <span className="text-slate-300 font-semibold">{bankPayer}</span>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
 
                           {/* Bank & Time */}
                           <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
@@ -989,8 +1037,9 @@ export function FastCheckSlipsModal({
         <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-3 animate-in fade-in">
           <div className="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-md w-full p-4 space-y-3 shadow-2xl text-slate-100">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="font-bold text-sm text-white">
-                🔍 ភ្ជាប់កន្ត្រកសម្រាប់ «{manualLinkSlip.extracted.customer_name || manualLinkSlip.sender_name}»
+              <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-[10px] text-white font-black">f</span>
+                <span>🔍 ភ្ជាប់កន្ត្រកសម្រាប់ FB «{getCustomerDisplayInfo(manualLinkSlip).primaryName}»</span>
               </h3>
               <button onClick={() => setManualLinkSlip(null)} className="text-slate-400 hover:text-white">✕</button>
             </div>

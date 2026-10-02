@@ -582,6 +582,15 @@ export async function loadDatabaseFromDisk() {
       if (parsed.messengerSlips && Array.isArray(parsed.messengerSlips) && parsed.messengerSlips.length > 0) {
         messengerSlips.length = 0;
         messengerSlips.push(...parsed.messengerSlips);
+        // Cleanse receiver names (Proel Toch / shop owner) from extracted customer_name
+        for (const s of messengerSlips) {
+          const raw = (s.extracted?.customer_name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (raw.includes('proeltoch') || raw.includes('proel') || raw.includes('toch') || !s.extracted?.customer_name) {
+            if (s.extracted) {
+              s.extracted.customer_name = s.sender_name || (s.matched_invoice && s.matched_invoice.facebook_name) || 'អតិថិជន Facebook';
+            }
+          }
+        }
       }
       if (parsed.settings) {
         Object.assign(settings, parsed.settings);

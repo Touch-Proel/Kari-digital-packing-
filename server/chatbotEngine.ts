@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage, messengerSlips } from './db';
 import { broadcastSSE } from './packingRoutes';
 import { Invoice } from './types';
+import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini } from './fastCheckRoutes';
 import fs from 'fs';
 import path from 'path';
 
@@ -142,8 +143,6 @@ export function getChatbotLogs(): ChatbotLogItem[] {
   return chatbotLogs;
 }
 
-import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip } from './fastCheckRoutes';
-
 // Get GoogleGenAI Instance with Key hierarchy
 function getGenAI(): GoogleGenAI | null {
   return getGemini();
@@ -246,7 +245,8 @@ CRITICAL RULES:
      * An ABA KHQR payment code screen (asking someone to scan) rather than a completed transaction receipt.
 
 2. If is_bank_slip is true:
-   - "customer_name": payer name or sender name or recipient note on the slip.
+   - CRITICAL BENEFICIARY / RECEIVER RULE: The merchant/shop receiver receiving the money is "PROEL TOCH" or "KARI ARNETT". NEVER extract "PROEL TOCH" or "KARI ARNETT" as the customer name!
+   - "customer_name": STRICTLY the PAYER / SENDER customer name who transferred the money (e.g. "From: SOK SREY MAO", "DANY KA"). If payer name is not listed or is unclear, leave customer_name as null.
    - "paid_amount": exact transferred numeric amount (e.g. 11.20 or 45000).
    - "currency": "USD" or "KHR".
    - "bank_name": "ABA" | "ACLEDA" | "Canadia" | "Wing" | "Bakong" | "TrueMoney" | "Chip Mong" | "Sathapana" | "Other".
@@ -293,6 +293,9 @@ Return strict JSON ONLY:
         reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
       };
     }
+
+    // Sanitize customer name: Always prioritize Facebook Sender Name if AI extracted receiver name or empty
+    extracted.customer_name = sanitizeCustomerName(extracted.customer_name, senderName);
 
     const isBankSlip = Boolean(extracted.is_bank_slip);
     let paidAmount = Number(extracted.paid_amount) || 0;

@@ -82,9 +82,34 @@ router.post('/save_gemini_key', (req: Request, res: Response) => {
   });
 });
 
+// Check if extracted name is the store's receiving bank account name (e.g. Proel Toch / Kari Arnett)
+export function isReceiverAccountName(name?: string): boolean {
+  if (!name) return false;
+  const n = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return (
+    n.includes('proeltoch') ||
+    n.includes('proel') ||
+    n.includes('toch') ||
+    n.includes('kariarnett') ||
+    n.includes('kari') ||
+    n.includes('arnett') ||
+    n.includes('boutique') ||
+    n.includes('receiver') ||
+    n.includes('beneficiary')
+  );
+}
+
+export function sanitizeCustomerName(extractedName?: string, senderName?: string, fallbackName?: string): string {
+  if (!extractedName || isReceiverAccountName(extractedName)) {
+    return senderName || fallbackName || 'អតិថិជន Facebook';
+  }
+  return extractedName.trim();
+}
+
 // Utility: Normalize text for matching
 function normalizeName(name: string): string {
   if (!name) return '';
+  if (isReceiverAccountName(name)) return '';
   return name
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, '') // Keep Unicode letters and numbers
@@ -421,7 +446,8 @@ Analyze this image carefully:
 1. If this is a Facebook Messenger chat screenshot:
    - What is the customer's Facebook Profile Name in the header at the top?
 2. If this is a direct mobile banking slip (ABA, ACLEDA, Bakong, etc.):
-   - Extract the customer/sender name or recipient note on the slip.
+   - CRITICAL RECEIVER RULE: The merchant/shop receiver is "PROEL TOCH" or "KARI ARNETT". NEVER extract "PROEL TOCH" or the receiver's bank name as the customer name!
+   - Extract ONLY the actual customer/sender/payer name ("Transfer From" / "Payer"). If sender name is not visible, leave customer_name as null.
 3. Look at the transfer remarks / description:
    - Does it mention a basket number or order number (e.g. "#102", "102", "កន្ត្រក 102", "Order 102")?
 4. Find the transferred numeric amount and currency (e.g. 10.00 USD or 40,000 KHR).
@@ -453,8 +479,9 @@ Return ONLY a JSON object:
           try {
             const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
             const parsed = JSON.parse(cleaned);
+            const rawCustName = String(parsed.customer_name || '').trim();
             extracted = {
-              customer_name: String(parsed.customer_name || '').trim(),
+              customer_name: isReceiverAccountName(rawCustName) ? '' : rawCustName,
               paid_amount: Number(parsed.paid_amount) || 0,
               currency: String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD',
               phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
@@ -943,7 +970,7 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                       text: `You are an expert at analyzing Cambodian Mobile Banking transfer slips (ABA, ACLEDA, Bakong, KHQR, Wing, Canadia, TrueMoney).
 Extract:
 1. is_bank_slip (boolean)
-2. customer_name (string)
+2. customer_name (string: strictly the TRANSFER FROM / PAYER name. Note: The merchant receiver is "PROEL TOCH" - NEVER return "PROEL TOCH" as customer_name!)
 3. paid_amount (number)
 4. currency (USD or KHR)
 5. phone_number (string or null)
@@ -961,7 +988,7 @@ Output strictly raw JSON with these fields.`
                         const parsed = JSON.parse(cleaned);
                         if (parsed.is_bank_slip !== false) {
                           extracted = {
-                            customer_name: parsed.customer_name || senderName,
+                            customer_name: sanitizeCustomerName(parsed.customer_name, senderName),
                             paid_amount: Number(parsed.paid_amount) || 0,
                             currency: (parsed.currency || 'USD').toUpperCase() as any,
                             phone_number: parsed.phone_number || undefined,
