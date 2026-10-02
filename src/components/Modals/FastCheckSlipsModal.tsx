@@ -506,15 +506,16 @@ export function FastCheckSlipsModal({
   };
 
   const duplicateCount = slips.filter(s => Boolean(s.duplicate_warning?.is_duplicate || s.fraud_warning?.is_fraud || s.status === 'DUPLICATE_TXID') && !s.is_approved).length;
-  const matchedCount = slips.filter(s => s.status === 'MATCHED' && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud).length;
+  const matchedCount = slips.filter(s => s.status === 'MATCHED' && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud && !s.amount_mismatch?.is_mismatch).length;
   const approvedCount = slips.filter(s => s.status === 'APPROVED' || s.is_approved).length;
-  const reviewCount = slips.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND') && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud).length;
+  const reviewCount = slips.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND' || Boolean(s.amount_mismatch?.is_mismatch)) && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud).length;
 
   const filteredSlips = slips.filter(slip => {
     const isApproved = slip.status === 'APPROVED' || slip.is_approved;
     const isDuplicateOrFraud = Boolean(slip.duplicate_warning?.is_duplicate || slip.fraud_warning?.is_fraud || slip.status === 'DUPLICATE_TXID');
-    const isMatched = slip.status === 'MATCHED' && !isDuplicateOrFraud;
-    const isReview = (slip.status === 'MULTIPLE_CANDIDATES' || slip.status === 'NOT_FOUND') && !isDuplicateOrFraud;
+    const isAmountMismatch = Boolean(slip.amount_mismatch?.is_mismatch);
+    const isMatched = slip.status === 'MATCHED' && !isDuplicateOrFraud && !isAmountMismatch;
+    const isReview = (slip.status === 'MULTIPLE_CANDIDATES' || slip.status === 'NOT_FOUND' || isAmountMismatch) && !isDuplicateOrFraud;
 
     if (filterStatus === 'MATCHED' && (!isMatched || isApproved)) return false;
     if (filterStatus === 'DUPLICATE' && (!isDuplicateOrFraud || isApproved)) return false;
@@ -772,9 +773,10 @@ export function FastCheckSlipsModal({
                       const isAlreadyApprovedDup = slip.duplicate_warning?.duplicate_type === 'ALREADY_APPROVED';
                       const isFraud = Boolean(slip.fraud_warning?.is_fraud);
                       const isDuplicateOrFraud = Boolean(slip.duplicate_warning?.is_duplicate || isFraud || slip.status === 'DUPLICATE_TXID');
+                      const isAmountMismatch = Boolean(slip.amount_mismatch?.is_mismatch);
 
-                      const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice) && !isDuplicateOrFraud;
-                      const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES' && !isDuplicateOrFraud;
+                      const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice) && !isDuplicateOrFraud && !isAmountMismatch;
+                      const isAmbiguous = (slip.status === 'MULTIPLE_CANDIDATES' || isAmountMismatch) && !isDuplicateOrFraud;
                       const isNotFound = slip.status === 'NOT_FOUND' && !isDuplicateOrFraud;
                       const isApproving = Boolean(approvingIds[slip.id]);
 
@@ -793,6 +795,8 @@ export function FastCheckSlipsModal({
                               ? 'bg-rose-950/30 border-l-4 border-l-rose-500'
                               : isSameAccountDup || isAlreadyApprovedDup
                               ? 'bg-amber-950/20 border-l-4 border-l-amber-500'
+                              : isAmountMismatch
+                              ? 'bg-amber-950/25 border-l-4 border-l-amber-400'
                               : isMatched
                               ? 'bg-emerald-950/20'
                               : isAmbiguous
@@ -976,6 +980,10 @@ export function FastCheckSlipsModal({
                               <span className="bg-rose-700 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-400 animate-bounce">
                                 🚨 សង្ស័យបន្លំ
                               </span>
+                            ) : isAmountMismatch ? (
+                              <span className="bg-amber-500/25 text-amber-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-amber-500/50">
+                                ⚠️ ទឹកប្រាក់ខុស
+                              </span>
                             ) : isMatched ? (
                               <span className="bg-emerald-500/20 text-emerald-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40">
                                 🟢 ត្រូវ ១០០%
@@ -1038,9 +1046,10 @@ export function FastCheckSlipsModal({
                   const isAlreadyApprovedDup = slip.duplicate_warning?.duplicate_type === 'ALREADY_APPROVED';
                   const isFraud = Boolean(slip.fraud_warning?.is_fraud);
                   const isDuplicateOrFraud = Boolean(slip.duplicate_warning?.is_duplicate || isFraud || slip.status === 'DUPLICATE_TXID');
+                  const isAmountMismatch = Boolean(slip.amount_mismatch?.is_mismatch);
 
-                  const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice) && !isDuplicateOrFraud;
-                  const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES' && !isDuplicateOrFraud;
+                  const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice) && !isDuplicateOrFraud && !isAmountMismatch;
+                  const isAmbiguous = (slip.status === 'MULTIPLE_CANDIDATES' || isAmountMismatch) && !isDuplicateOrFraud;
                   const isNotFound = slip.status === 'NOT_FOUND' && !isDuplicateOrFraud;
                   const isApproving = Boolean(approvingIds[slip.id]);
 
@@ -1057,6 +1066,8 @@ export function FastCheckSlipsModal({
                           : isCrossAccountDup || isFraud
                           ? 'bg-[#2A0F15] border-rose-500 ring-1 ring-rose-500/50'
                           : isSameAccountDup || isAlreadyApprovedDup
+                          ? 'bg-[#241A0B] border-amber-500/60'
+                          : isAmountMismatch
                           ? 'bg-[#241A0B] border-amber-500/60'
                           : isMatched
                           ? 'bg-[#0E1E2E] border-emerald-500/50'
@@ -1112,6 +1123,10 @@ export function FastCheckSlipsModal({
                                   ) : isFraud ? (
                                     <span className="bg-rose-700 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-400 flex-shrink-0">
                                       🚨 សង្ស័យបន្លំ
+                                    </span>
+                                  ) : isAmountMismatch ? (
+                                    <span className="bg-amber-500/25 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-amber-500/50 flex-shrink-0">
+                                      ⚠️ ទឹកប្រាក់ខុស
                                     </span>
                                   ) : isMatched ? (
                                     <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40 flex-shrink-0">

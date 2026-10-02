@@ -506,13 +506,35 @@ export function matchInvoiceForSlip(
     const unpaidCustomerBaskets = sortedCustomerBaskets.filter(b => b.status !== 'Paid' && b.payment_status !== 'Paid');
 
     if (unpaidCustomerBaskets.length > 0) {
-      // 🚀 USER REQUIREMENT: Always match the NEWEST unpaid basket (e.g. #5518, not old #4981)
       const newestUnpaid = unpaidCustomerBaskets[0];
       const otherCandidates = sortedCustomerBaskets.filter(b => b.invoice_id !== newestUnpaid.invoice_id);
 
+      // Check if amount matches or if there is another invoice matching the extracted slip customer name & amount
+      const isAmountMatching = paidUsd <= 0 || Math.abs(newestUnpaid.total_amount - paidUsd) < 0.25;
+
+      // If amount doesn't match AND extracted customer name belongs to a different person in the database:
+      if (!isAmountMatching && data.customer_name) {
+        const altMatch = pool.find(inv => {
+          if (inv.status === 'Paid') return false;
+          const normInv = normalizeName(inv.facebook_name);
+          const normExt = normalizeName(data.customer_name);
+          const nameMatches = normInv === normExt || normInv.includes(normExt) || normExt.includes(normInv);
+          const amtMatches = paidUsd > 0 && Math.abs(inv.total_amount - paidUsd) < 0.25;
+          return nameMatches && amtMatches;
+        });
+        if (altMatch) {
+          return {
+            status: 'MATCHED',
+            confidence: 95,
+            matched: altMatch,
+            candidates: sortedCustomerBaskets
+          };
+        }
+      }
+
       return {
-        status: 'MATCHED',
-        confidence: 100,
+        status: isAmountMatching ? 'MATCHED' : 'MULTIPLE_CANDIDATES',
+        confidence: isAmountMatching ? 100 : 70,
         matched: newestUnpaid,
         candidates: otherCandidates.length > 0 ? otherCandidates : undefined
       };
@@ -522,7 +544,7 @@ export function matchInvoiceForSlip(
       const otherCandidates = sortedCustomerBaskets.slice(1);
       return {
         status: 'MATCHED',
-        confidence: 90,
+        confidence: 80,
         matched: newestBasket,
         candidates: otherCandidates.length > 0 ? otherCandidates : undefined
       };
@@ -1250,10 +1272,34 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
         );
         const fbData = await fbRes.json();
         if (fbData.data && Array.isArray(fbData.data)) {
+          const pageId = String(page.id || '');
+          const pageName = (page.name || '').toLowerCase().trim();
+
           for (const conv of fbData.data) {
+            const customerParticipant = conv.participants?.data?.find((p: any) => {
+              const pid = String(p.id || '');
+              const pname = (p.name || '').toLowerCase();
+              return pid !== pageId && !pname.includes('kari arnett') && !pname.includes('proel toch');
+            });
+
+            const senderName = customerParticipant?.name || 'Messenger Customer';
+            const senderId = customerParticipant?.id || 'FB_USER';
+
             const messages = conv.messages?.data || [];
             for (const m of messages) {
-              if (m.from?.id === page.id) continue;
+              const fromId = String(m.from?.id || '');
+              const fromName = (m.from?.name || '').toLowerCase().trim();
+
+              // Strict ignore: Any message from the Page, staff, or admin
+              if (fromId === pageId || fromName === pageName || fromName.includes('kari arnett') || fromName.includes('proel toch') || fromName.includes('staff') || fromName.includes('admin')) {
+                continue;
+              }
+
+              // Also ensure message came from the customer participant, not another admin account
+              if (customerParticipant && fromId && fromId !== String(customerParticipant.id)) {
+                continue;
+              }
+
               const msgTime = new Date(m.created_time);
               if (msgTime < cutoffDate) continue;
 
@@ -1265,8 +1311,6 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                 // Check if already in queue by URL or ID
                 const alreadyExists = messengerSlips.some(s => s.slip_url === imgUrl || s.id.includes(m.id));
                 if (!alreadyExists) {
-                  const senderName = m.from?.name || conv.participants?.data?.find((p: any) => p.id !== page.id)?.name || 'Messenger Customer';
-                  const senderId = m.from?.id || 'FB_USER';
 
                   let savedSlipUrl = imgUrl;
                   let rawBase64 = '';
