@@ -367,8 +367,8 @@ Return ONLY pure valid JSON:
     ? `${extracted.paid_amount.toLocaleString()} ៛`
     : `$${extracted.paid_amount.toFixed(2)}`;
 
-  // 4. Match against active invoices
-  const matchResult = matchInvoiceForSlip(extracted);
+  // 4. Match against active invoices (prioritizing newest unpaid basket)
+  const matchResult = matchInvoiceForSlip(extracted, extracted.customer_name);
 
   if (matchResult.status === 'MATCHED' && matchResult.matched) {
     const inv = matchResult.matched;

@@ -113,6 +113,8 @@ function normalizeName(name: string): string {
   if (isReceiverAccountName(name)) return '';
   return name
     .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Strip diacritics (ä->a, ë->e, etc.)
     .replace(/[^\p{L}\p{N}\s]/gu, '') // Keep Unicode letters and numbers
     .replace(/\s+/g, ' ')
     .trim();
@@ -403,21 +405,131 @@ export function evaluateSlipFraudAndDuplicates(
   return { duplicate_warning, fraud_warning, amount_mismatch };
 }
 
+function parseCreatedTime(created_at?: string): number {
+  if (!created_at) return 0;
+  const t = new Date(created_at).getTime();
+  if (!isNaN(t)) return t;
+  const isoLike = String(created_at).replace(' ', 'T');
+  const t2 = new Date(isoLike).getTime();
+  return isNaN(t2) ? 0 : t2;
+}
+
+function getNumericBasketNo(inv: Invoice | { basket_no?: number | string; invoice_id?: number }): number {
+  const clean = String(inv.basket_no || inv.invoice_id || '').replace(/\D/g, '');
+  return Number(clean) || (inv.invoice_id as number) || 0;
+}
+
+export function sortInvoicesNewestFirst(list: Invoice[]): Invoice[] {
+  return [...list].sort((a, b) => {
+    // 1. Highest numeric basket / invoice ID (e.g. 5518 > 4981)
+    const numB = getNumericBasketNo(b);
+    const numA = getNumericBasketNo(a);
+
+    // 2. Newest creation timestamp
+    const timeA = parseCreatedTime(a.created_at);
+    const timeB = parseCreatedTime(b.created_at);
+
+    // If one was created at a significantly different time (>1 minute), timestamp leads
+    if (Math.abs(timeB - timeA) > 60000) {
+      return timeB - timeA;
+    }
+
+    if (numB !== numA) {
+      return numB - numA;
+    }
+    return timeB - timeA;
+  });
+}
+
 /**
  * Match extracted slip data against active database invoices
+ * Prioritizes the customer's LATEST / NEWEST UNPAID BASKET (e.g. #5518 over older #4981)
  */
-export function matchInvoiceForSlip(data: ExtractedSlipData): {
+export function matchInvoiceForSlip(
+  data: ExtractedSlipData,
+  senderName?: string,
+  senderId?: string
+): {
   status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND';
   confidence: number;
   matched?: Invoice;
   candidates?: Invoice[];
 } {
   // Active invoices across all lives (exclude Cancelled & already Dispatched)
-  const pool = invoices.filter(
-    inv => inv.status !== 'Cancelled' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED'
+  // Always sorted newest first
+  const pool = sortInvoicesNewestFirst(
+    invoices.filter(inv => inv.status !== 'Cancelled' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED')
   );
 
-  // 1. DIRECT BASKET NUMBER MATCH (Highest Priority - 100% confidence)
+  // Calculate USD equivalent
+  let paidUsd = data.paid_amount || 0;
+  if (data.currency === 'KHR' || data.paid_amount > 500) {
+    paidUsd = data.paid_amount / 4000;
+  }
+
+  // 1. DIRECT SENDER / CUSTOMER MATCH (Highest Priority: Strictly customer's newest unpaid basket)
+  const candidateNames = [
+    data.customer_name,
+    senderName,
+    data.phone_number
+  ].filter(Boolean) as string[];
+
+  // Find all baskets belonging to this customer
+  const customerBaskets = pool.filter(inv => {
+    if (senderId && senderId !== 'TEST_USER_1' && senderId !== 'FB_USER' && inv.facebook_user_id === senderId) {
+      return true;
+    }
+    const normInv = normalizeName(inv.facebook_name);
+    for (const name of candidateNames) {
+      const normN = normalizeName(name);
+      if (!normN || normN === 'customer' || normN === 'aba' || normN === 'khqr' || normN === 'wing' || normN === 'acleda') continue;
+      if (normInv === normN || normInv.includes(normN) || normN.includes(normInv)) {
+        return true;
+      }
+      const invTokens = normInv.split(' ');
+      const nTokens = normN.split(' ');
+      const overlap = invTokens.filter(t => t.length >= 2 && nTokens.includes(t));
+      if (overlap.length >= 1) return true;
+    }
+    if (data.phone_number && inv.phone_number) {
+      const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
+      const cleanInvPhone = inv.phone_number.replace(/\D/g, '');
+      if (cleanSlipPhone.length >= 8 && cleanInvPhone.length >= 8 && (cleanSlipPhone.includes(cleanInvPhone) || cleanInvPhone.includes(cleanSlipPhone))) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  if (customerBaskets.length > 0) {
+    const sortedCustomerBaskets = sortInvoicesNewestFirst(customerBaskets);
+    const unpaidCustomerBaskets = sortedCustomerBaskets.filter(b => b.status !== 'Paid' && b.payment_status !== 'Paid');
+
+    if (unpaidCustomerBaskets.length > 0) {
+      // 🚀 USER REQUIREMENT: Always match the NEWEST unpaid basket (e.g. #5518, not old #4981)
+      const newestUnpaid = unpaidCustomerBaskets[0];
+      const otherCandidates = sortedCustomerBaskets.filter(b => b.invoice_id !== newestUnpaid.invoice_id);
+
+      return {
+        status: 'MATCHED',
+        confidence: 100,
+        matched: newestUnpaid,
+        candidates: otherCandidates.length > 0 ? otherCandidates : undefined
+      };
+    } else {
+      // All customer baskets are already paid - return the newest one
+      const newestBasket = sortedCustomerBaskets[0];
+      const otherCandidates = sortedCustomerBaskets.slice(1);
+      return {
+        status: 'MATCHED',
+        confidence: 90,
+        matched: newestBasket,
+        candidates: otherCandidates.length > 0 ? otherCandidates : undefined
+      };
+    }
+  }
+
+  // 2. DIRECT BASKET NUMBER MATCH (When customer name not matched, or explicit basket number on slip)
   if (data.basket_no) {
     const cleanBNo = String(data.basket_no).replace(/\D/g, '');
     if (cleanBNo) {
@@ -434,157 +546,27 @@ export function matchInvoiceForSlip(data: ExtractedSlipData): {
     }
   }
 
-  // 2. DIRECT PHONE NUMBER MATCH
-  if (data.phone_number) {
-    const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
-    if (cleanSlipPhone && cleanSlipPhone.length >= 8) {
-      const phoneMatches = pool.filter(i => {
-        const invPhone = (i.phone_number || '').replace(/\D/g, '');
-        return invPhone && (invPhone.includes(cleanSlipPhone) || cleanSlipPhone.includes(invPhone));
-      });
-      if (phoneMatches.length === 1) {
-        return {
-          status: 'MATCHED',
-          confidence: 95,
-          matched: phoneMatches[0]
-        };
-      } else if (phoneMatches.length > 1) {
-        return {
-          status: 'MULTIPLE_CANDIDATES',
-          confidence: 90,
-          candidates: phoneMatches
-        };
-      }
+  // 3. Fallback: Match by exact unpaid amount across active pool
+  if (paidUsd > 0) {
+    const unpaidAmountMatches = pool.filter(i => i.status !== 'Paid' && i.payment_status !== 'Paid' && Math.abs(i.total_amount - paidUsd) < 0.25);
+    if (unpaidAmountMatches.length === 1) {
+      return {
+        status: 'MATCHED',
+        confidence: 85,
+        matched: unpaidAmountMatches[0]
+      };
+    } else if (unpaidAmountMatches.length > 1) {
+      return {
+        status: 'MULTIPLE_CANDIDATES',
+        confidence: 75,
+        matched: unpaidAmountMatches[0], // Pick newest
+        candidates: unpaidAmountMatches
+      };
     }
   }
 
-  const normExtracted = normalizeName(data.customer_name);
-
-  // Calculate USD equivalent
-  let paidUsd = data.paid_amount || 0;
-  if (data.currency === 'KHR' || data.paid_amount > 500) {
-    paidUsd = data.paid_amount / 4000;
-  }
-
-  // 3. Fallback when customer name was NOT recognized or very generic
-  if (!normExtracted || normExtracted === 'customer' || normExtracted === 'aba' || normExtracted === 'khqr') {
-    if (paidUsd > 0) {
-      const amountMatches = pool.filter(i => Math.abs(i.total_amount - paidUsd) < 0.25);
-      const unpaidAmountMatches = amountMatches.filter(i => i.status !== 'Paid');
-
-      if (unpaidAmountMatches.length === 1) {
-        return {
-          status: 'MATCHED',
-          confidence: 85,
-          matched: unpaidAmountMatches[0]
-        };
-      } else if (unpaidAmountMatches.length > 1) {
-        return {
-          status: 'MULTIPLE_CANDIDATES',
-          confidence: 75,
-          candidates: unpaidAmountMatches
-        };
-      }
-    }
-
-    const recentUnpaid = pool.filter(i => i.status !== 'Paid').slice(0, 5);
-    return { status: 'NOT_FOUND', confidence: 0, candidates: recentUnpaid };
-  }
-
-  // 4. Score candidate invoices with Name Affinity
-  const scored = pool.map(inv => {
-    let score = 0;
-    const normInv = normalizeName(inv.facebook_name);
-    let hasNameAffinity = false;
-
-    // A. Name Match
-    if (normInv === normExtracted) {
-      score += 70;
-      hasNameAffinity = true;
-    } else if (normInv.includes(normExtracted) || normExtracted.includes(normInv)) {
-      score += 50;
-      hasNameAffinity = true;
-    } else {
-      const invTokens = normInv.split(' ');
-      const extTokens = normExtracted.split(' ');
-      const overlap = invTokens.filter(t => t.length >= 2 && extTokens.includes(t));
-      if (overlap.length > 0) {
-        score += 30 * overlap.length;
-        hasNameAffinity = true;
-      }
-    }
-
-    // B. Phone Match
-    let hasPhoneAffinity = false;
-    if (data.phone_number && inv.phone_number) {
-      const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
-      const cleanInvPhone = inv.phone_number.replace(/\D/g, '');
-      if (cleanSlipPhone && cleanInvPhone && (cleanSlipPhone.includes(cleanInvPhone) || cleanInvPhone.includes(cleanSlipPhone))) {
-        score += 40;
-        hasPhoneAffinity = true;
-      }
-    }
-
-    // C. Amount Match
-    if (paidUsd > 0 && inv.total_amount > 0) {
-      const diff = Math.abs(inv.total_amount - paidUsd);
-      if (diff < 0.25) {
-        score += hasNameAffinity || hasPhoneAffinity ? 35 : 20;
-      } else if (diff < 1.0) {
-        score += hasNameAffinity || hasPhoneAffinity ? 20 : 10;
-      }
-    }
-
-    // D. Prefer baskets that are waiting for payment (STAGED / UNPICKED)
-    if (inv.packing_stage === 'STAGED' && inv.status !== 'Paid') {
-      score += 15;
-    } else if (inv.status !== 'Paid') {
-      score += 10;
-    }
-
-    return { inv, score, hasNameAffinity, hasPhoneAffinity };
-  });
-
-  const nameOrPhoneMatches = scored.filter(item => (item.hasNameAffinity || item.hasPhoneAffinity) && item.score >= 35);
-  const validCandidates = (nameOrPhoneMatches.length > 0 ? nameOrPhoneMatches : scored.filter(item => item.score >= 45))
-    .sort((a, b) => b.score - a.score);
-
-  if (validCandidates.length === 0) {
-    const fallbackUnpaid = pool.filter(i => i.status !== 'Paid').slice(0, 5);
-    return { status: 'NOT_FOUND', confidence: 0, candidates: fallbackUnpaid };
-  }
-
-  // Check if top matched customer has MULTIPLE baskets
-  const topCandidate = validCandidates[0].inv;
-  const sameCustomerBaskets = pool.filter(inv => {
-    if (inv.status === 'Cancelled' || inv.status === 'Dispatched') return false;
-    if (topCandidate.facebook_user_id && topCandidate.facebook_user_id !== 'FB_USER_ID_STREAM' && inv.facebook_user_id === topCandidate.facebook_user_id) {
-      return true;
-    }
-    return normalizeName(inv.facebook_name) === normalizeName(topCandidate.facebook_name);
-  });
-
-  if (sameCustomerBaskets.length >= 2) {
-    return {
-      status: 'MULTIPLE_CANDIDATES',
-      confidence: 90,
-      candidates: sameCustomerBaskets
-    };
-  }
-
-  if (validCandidates.length === 1 || (validCandidates[0].score >= 70 && validCandidates[0].score - (validCandidates[1]?.score || 0) >= 20)) {
-    return {
-      status: 'MATCHED',
-      confidence: Math.min(100, validCandidates[0].score),
-      matched: validCandidates[0].inv
-    };
-  }
-
-  return {
-    status: 'MULTIPLE_CANDIDATES',
-    confidence: validCandidates[0].score,
-    candidates: validCandidates.slice(0, 5).map(c => c.inv)
-  };
+  const recentUnpaid = pool.filter(i => i.status !== 'Paid' && i.payment_status !== 'Paid').slice(0, 5);
+  return { status: 'NOT_FOUND', confidence: 0, candidates: recentUnpaid };
 }
 
 /**
@@ -749,8 +731,8 @@ Return ONLY a JSON object:
         errorMessage = 'មិនទាន់កំណត់ GEMINI_API_KEY ទេ';
       }
 
-      // Match against invoices
-      const matchResult = matchInvoiceForSlip(extracted);
+      // Match against invoices (prioritizing newest unpaid basket & exact amount)
+      const matchResult = matchInvoiceForSlip(extracted, item.name);
 
       // Evaluate duplicates & fraud
       const fraudEval = evaluateSlipFraudAndDuplicates(
@@ -1105,19 +1087,20 @@ router.get('/dispatched_all_lives', (_req: Request, res: Response) => {
  */
 router.get('/unpaid_baskets', (_req: Request, res: Response) => {
   try {
-    const unpaid = invoices
-      .filter(i => i.status !== 'Paid' && i.payment_status !== 'Paid' && i.status !== 'Cancelled')
-      .map(i => ({
-        invoice_id: i.invoice_id,
-        basket_no: i.basket_no,
-        live_id: i.live_id,
-        facebook_name: i.facebook_name,
-        phone_number: i.phone_number,
-        total_amount: i.total_amount,
-        created_at: i.created_at,
-        packing_stage: i.packing_stage,
-        status: i.status
-      }));
+    const unpaidInvoices = sortInvoicesNewestFirst(
+      invoices.filter(i => i.status !== 'Paid' && i.payment_status !== 'Paid' && i.status !== 'Cancelled')
+    );
+    const unpaid = unpaidInvoices.map(i => ({
+      invoice_id: i.invoice_id,
+      basket_no: i.basket_no,
+      live_id: i.live_id,
+      facebook_name: i.facebook_name,
+      phone_number: i.phone_number,
+      total_amount: i.total_amount,
+      created_at: i.created_at,
+      packing_stage: i.packing_stage,
+      status: i.status
+    }));
 
     return res.json({
       success: true,
@@ -1149,7 +1132,7 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
     // Refresh match state for each slip that is not yet approved
     for (const slip of messengerSlips) {
       if (slip.status !== 'APPROVED' && slip.status !== 'REJECTED') {
-        const matchRes = matchInvoiceForSlip(slip.extracted);
+        const matchRes = matchInvoiceForSlip(slip.extracted, slip.sender_name, slip.sender_id);
         slip.status = matchRes.status;
         slip.confidence = matchRes.confidence;
         slip.matched_invoice = matchRes.matched ? {
@@ -1361,7 +1344,7 @@ Output strictly raw JSON with these fields.`
                     }
                   }
 
-                  const matchRes = matchInvoiceForSlip(extracted);
+                  const matchRes = matchInvoiceForSlip(extracted, senderName, senderId);
 
                   const fraudEval = evaluateSlipFraudAndDuplicates(
                     {

@@ -328,54 +328,24 @@ Return strict JSON ONLY:
       return { success: false, reply: '' };
     }
 
-    // 2. LOCATE ACTIVE INVOICE BELONGING TO THIS CUSTOMER
-    const activeInvoices = invoices.filter(
-      i => i.status !== 'Cancelled' && i.status !== 'Dispatched' && i.packing_stage !== 'DISPATCHED'
+    // 2. LOCATE ACTIVE INVOICE BELONGING TO THIS CUSTOMER (Prioritizing Newest Unpaid Basket & Amount Match)
+    const matchRes = matchInvoiceForSlip(
+      {
+        customer_name: extracted.customer_name || senderName,
+        paid_amount: paidAmount,
+        currency: 'USD',
+        phone_number: extracted.phone_number,
+        bank_name: bankName,
+        trans_ref: transRef,
+        basket_no: basketNoInSlip || undefined,
+        fraud_suspected: extracted.fraud_suspected,
+        fraud_reasons: extracted.fraud_reasons
+      },
+      senderName,
+      senderId
     );
 
-    let matchedInv: Invoice | undefined;
-
-    // A. Match if basket number is explicitly mentioned in slip remarks (e.g. #5093)
-    if (basketNoInSlip) {
-      matchedInv = activeInvoices.find(
-        i => i.basket_no === basketNoInSlip || i.invoice_id === basketNoInSlip
-      );
-    }
-
-    // B. Direct match by Facebook sender ID
-    if (!matchedInv && senderId && senderId !== 'TEST_USER_1') {
-      matchedInv = activeInvoices.find(i => i.facebook_user_id === senderId);
-    }
-
-    // C. Direct match by Facebook sender Name
-    if (!matchedInv && senderName && senderName !== 'Dany Ka' && senderName !== 'អតិថិជនសាកល្បង' && senderName !== 'Facebook Customer') {
-      matchedInv = activeInvoices.find(
-        i => i.facebook_name && i.facebook_name.toLowerCase().trim() === senderName.toLowerCase().trim()
-      );
-    }
-
-    // D. Direct match by extracted customer name on slip
-    if (!matchedInv && extracted.customer_name) {
-      const extNameClean = String(extracted.customer_name).toLowerCase().trim();
-      matchedInv = activeInvoices.find(
-        i => i.facebook_name && i.facebook_name.toLowerCase().trim().includes(extNameClean)
-      );
-    }
-
-    // E. Smart Multi-Tier Match via matchInvoiceForSlip (without auto-paying)
-    const matchRes = matchInvoiceForSlip({
-      customer_name: extracted.customer_name || senderName,
-      paid_amount: paidAmount,
-      currency: 'USD',
-      phone_number: extracted.phone_number,
-      bank_name: bankName,
-      trans_ref: transRef,
-      basket_no: basketNoInSlip || undefined,
-      fraud_suspected: extracted.fraud_suspected,
-      fraud_reasons: extracted.fraud_reasons
-    });
-
-    const targetInvoice = matchedInv || matchRes.matched || (matchRes.candidates && matchRes.candidates[0]);
+    const targetInvoice = matchRes.matched || (matchRes.candidates && matchRes.candidates[0]);
 
     // 3. RUN HIGH-SECURITY ANTI-FRAUD & DUPLICATE DETECTION ENGINE
     const fraudEval = evaluateSlipFraudAndDuplicates(
