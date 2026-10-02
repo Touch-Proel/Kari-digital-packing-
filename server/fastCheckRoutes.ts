@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage } from './db';
+import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments } from './db';
 import { Invoice } from './types';
 import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
 
@@ -134,6 +134,8 @@ export interface ExtractedSlipData {
   trans_ref?: string;
   basket_no?: number | string;
   remarks?: string;
+  fraud_suspected?: boolean;
+  fraud_reasons?: string[];
 }
 
 export interface FastCheckResultItem {
@@ -141,10 +143,30 @@ export interface FastCheckResultItem {
   image_name: string;
   slip_url: string;
   extracted: ExtractedSlipData;
-  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED';
+  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED' | 'DUPLICATE_TXID' | 'REJECTED';
   is_approved?: boolean;
   confidence: number;
   error_message?: string;
+  duplicate_warning?: {
+    is_duplicate: boolean;
+    duplicate_type: 'SAME_ACCOUNT' | 'CROSS_ACCOUNT' | 'ALREADY_APPROVED';
+    original_sender_name: string;
+    original_basket_no?: number | string;
+    trans_ref?: string;
+    message: string;
+  };
+  fraud_warning?: {
+    is_fraud: boolean;
+    severity: 'HIGH' | 'MEDIUM';
+    reasons: string[];
+    message: string;
+  };
+  amount_mismatch?: {
+    is_mismatch: boolean;
+    slip_amount: number;
+    invoice_amount: number;
+    difference: number;
+  };
   matched_invoice?: {
     invoice_id: number;
     basket_no?: number | string;
@@ -167,6 +189,169 @@ export interface FastCheckResultItem {
     packing_stage: string;
     status: string;
   }>;
+}
+
+/**
+ * High-Security Anti-Fraud & Duplicate Detection Engine
+ * 1. Prevents Cross-Account Slip Reuse (1 slip used by 2-3 Facebook accounts)
+ * 2. Catches Same-Account duplicate transmissions
+ * 3. Checks against already paid/dispatched invoices in POS database
+ * 4. Detects fake/forged slips (mismatched fonts, manipulated amounts, expired dates)
+ */
+export function evaluateSlipFraudAndDuplicates(
+  slip: {
+    id?: string;
+    sender_id?: string;
+    sender_name?: string;
+    slip_url?: string;
+    received_at?: string;
+    extracted: ExtractedSlipData;
+    matched_invoice?: any;
+  },
+  allSlips: AutoScannedMessengerSlip[],
+  allInvoices: Invoice[]
+) {
+  let duplicate_warning: {
+    is_duplicate: boolean;
+    duplicate_type: 'SAME_ACCOUNT' | 'CROSS_ACCOUNT' | 'ALREADY_APPROVED';
+    original_sender_name: string;
+    original_basket_no?: number | string;
+    trans_ref?: string;
+    message: string;
+  } | undefined = undefined;
+
+  let fraud_warning: {
+    is_fraud: boolean;
+    severity: 'HIGH' | 'MEDIUM';
+    reasons: string[];
+    message: string;
+  } | undefined = undefined;
+
+  let amount_mismatch: {
+    is_mismatch: boolean;
+    slip_amount: number;
+    invoice_amount: number;
+    difference: number;
+  } | undefined = undefined;
+
+  const rawRef = slip.extracted?.trans_ref || '';
+  const cleanRef = rawRef.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const slipUrl = (slip.slip_url || '').trim();
+
+  // 1. AMOUNT MISMATCH CHECK (e.g. Slip pays $1.00 for $15.50 invoice)
+  if (slip.matched_invoice && slip.extracted?.paid_amount > 0) {
+    const invTotal = Number(slip.matched_invoice.total_amount) || 0;
+    const slipAmt = Number(slip.extracted.paid_amount) || 0;
+    const diff = Math.round((slipAmt - invTotal) * 100) / 100;
+    if (Math.abs(diff) >= 0.25) {
+      amount_mismatch = {
+        is_mismatch: true,
+        slip_amount: slipAmt,
+        invoice_amount: invTotal,
+        difference: diff
+      };
+    }
+  }
+
+  // 2. CHECK AGAINST PAID INVOICES IN DB (TxID already approved/marked Paid for an existing order)
+  if (cleanRef && cleanRef.length >= 5) {
+    const alreadyPaidInv = allInvoices.find(
+      inv => (inv.status === 'Paid' || inv.payment_status === 'Paid') &&
+             inv.invoice_id !== slip.matched_invoice?.invoice_id &&
+             (
+               (inv.payment_slip_url && slipUrl && inv.payment_slip_url === slipUrl) ||
+               (inv.comments && inv.comments.some(c => c.toUpperCase().includes(cleanRef))) ||
+               (inv.notes && inv.notes.some(n => n.toUpperCase().includes(cleanRef)))
+             )
+    );
+
+    if (alreadyPaidInv) {
+      duplicate_warning = {
+        is_duplicate: true,
+        duplicate_type: 'ALREADY_APPROVED',
+        original_sender_name: alreadyPaidInv.facebook_name || 'អតិថិជនផ្សេង',
+        original_basket_no: alreadyPaidInv.basket_no || alreadyPaidInv.invoice_id,
+        trans_ref: cleanRef,
+        message: `🚨 ការព្រមានក្លែងបន្លំ: លេខប្រតិបត្តិការ (TxID: ${cleanRef}) ឬ Slip នេះ ធ្លាប់បានកាត់បង់រួចហើយលើកន្ត្រក #${alreadyPaidInv.basket_no || alreadyPaidInv.invoice_id} របស់ FB «${alreadyPaidInv.facebook_name}»! មិនអាចយកមកប្រើស្ទួនឆ្លង Account បានទេ!`
+      };
+    }
+  }
+
+  // 3. CHECK AGAINST ALL MESSENGER SLIPS (Cross-Account vs Same-Account Reuse)
+  if (!duplicate_warning && (cleanRef.length >= 5 || (slipUrl && !slipUrl.includes('unsplash')))) {
+    const prior = allSlips.find(s => {
+      if (s.id === slip.id) return false;
+      const otherRef = (s.extracted?.trans_ref || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      const hasSameRef = cleanRef.length >= 5 && otherRef === cleanRef;
+      const hasSameUrl = slipUrl && s.slip_url && !slipUrl.includes('unsplash') && s.slip_url === slipUrl;
+      return hasSameRef || hasSameUrl;
+    });
+
+    if (prior) {
+      const currentSenderId = slip.sender_id || '';
+      const priorSenderId = prior.sender_id || '';
+      const currentSenderName = (slip.sender_name || '').trim().toLowerCase();
+      const priorSenderName = (prior.sender_name || '').trim().toLowerCase();
+
+      const isCrossAccount = (currentSenderId && priorSenderId && currentSenderId !== priorSenderId) ||
+                            (currentSenderName && priorSenderName && currentSenderName !== priorSenderName && !currentSenderName.includes('facebook customer') && !currentSenderName.includes('អតិថិជន facebook'));
+
+      if (isCrossAccount) {
+        duplicate_warning = {
+          is_duplicate: true,
+          duplicate_type: 'CROSS_ACCOUNT',
+          original_sender_name: prior.sender_name,
+          original_basket_no: prior.matched_invoice?.basket_no || prior.extracted?.basket_no,
+          trans_ref: cleanRef || 'រូបភាពដដែល',
+          message: `🚨 ការព្រមានក្លែងបន្លំ: Slip / TxID: ${cleanRef || 'រូបភាពដដែល'} នេះ ត្រូវបានផ្ញើដោយគណនី FB «${prior.sender_name}» (កន្ត្រក #${prior.matched_invoice?.basket_no || prior.extracted?.basket_no || 'N/A'}) រួចហើយ! សង្ស័យយក Slip គេមកប្រើបន្លំ (Cross-Account Abuse)!`
+        };
+      } else {
+        duplicate_warning = {
+          is_duplicate: true,
+          duplicate_type: 'SAME_ACCOUNT',
+          original_sender_name: prior.sender_name,
+          original_basket_no: prior.matched_invoice?.basket_no || prior.extracted?.basket_no,
+          trans_ref: cleanRef,
+          message: `⚠️ Slip ស្ទួន: ភ្ញៀវបានផ្ញើវិក្កយបត្រ (TxID: ${cleanRef || 'រូបភាពនេះ'}) ម្តងរួចមកហើយ`
+        };
+      }
+    }
+  }
+
+  // 4. FRAUD DETECTION (AI Vision Signals & Timestamp Anomalies)
+  const fraudReasons: string[] = [];
+  if (slip.extracted?.fraud_suspected && Array.isArray(slip.extracted.fraud_reasons)) {
+    fraudReasons.push(...slip.extracted.fraud_reasons);
+  }
+
+  // Date Check: Slip date too old or in future
+  if (slip.extracted?.trans_date) {
+    try {
+      const parsedDate = new Date(slip.extracted.trans_date);
+      if (!isNaN(parsedDate.getTime())) {
+        const now = Date.now();
+        const diffDays = (now - parsedDate.getTime()) / (1000 * 60 * 60 * 24);
+        if (diffDays > 7) {
+          fraudReasons.push(`កាលបរិច្ឆេទលើ Slip ហួសកំណត់ (${Math.round(diffDays)} ថ្ងៃមុន)`);
+        } else if (diffDays < -1) {
+          fraudReasons.push('កាលបរិច្ឆេទលើ Slip គឺនៅថ្ងៃអនាគត (មិនត្រឹមត្រូវ)');
+        }
+      }
+    } catch {
+      // Ignore date parse errors
+    }
+  }
+
+  if (fraudReasons.length > 0) {
+    fraud_warning = {
+      is_fraud: true,
+      severity: 'HIGH',
+      reasons: fraudReasons,
+      message: `🚨 សង្ស័យ Slip ក្លែងបន្លំ: ${fraudReasons.join(' ‧ ')}`
+    };
+  }
+
+  return { duplicate_warning, fraud_warning, amount_mismatch };
 }
 
 /**
@@ -454,6 +639,9 @@ Analyze this image carefully:
 4. Find the transferred numeric amount and currency (e.g. 10.00 USD or 40,000 KHR).
 5. If the customer sent a phone number or address (e.g. "070227974"), extract it.
 6. Extract bank name (ABA, ACLEDA, Bakong, Wing) and transaction reference number (TxID / Ref).
+7. Fraud / Forgery Inspection:
+   - Look for manipulated/edited fonts on amount, spliced text, mismatched font style, or edited screenshots.
+   - Set "fraud_suspected": true if visual signs of tampering or forgery exist.
 
 Return ONLY a JSON object:
 {
@@ -464,7 +652,10 @@ Return ONLY a JSON object:
   "phone_number": "...",
   "bank_name": "...",
   "trans_ref": "...",
-  "remarks": "..."
+  "trans_date": "...",
+  "remarks": "...",
+  "fraud_suspected": false,
+  "fraud_reasons": []
 }`
         };
 
@@ -494,8 +685,11 @@ Return ONLY a JSON object:
               phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
               bank_name: parsed.bank_name ? String(parsed.bank_name).trim() : undefined,
               trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined,
+              trans_date: parsed.trans_date ? String(parsed.trans_date).trim() : undefined,
               basket_no: parsed.basket_no ? String(parsed.basket_no).replace(/\D/g, '') : undefined,
-              remarks: parsed.remarks ? String(parsed.remarks).trim() : undefined
+              remarks: parsed.remarks ? String(parsed.remarks).trim() : undefined,
+              fraud_suspected: Boolean(parsed.fraud_suspected),
+              fraud_reasons: Array.isArray(parsed.fraud_reasons) ? parsed.fraud_reasons : []
             };
           } catch {
             console.warn('Failed to parse Gemini JSON output:', rawText);
@@ -508,14 +702,34 @@ Return ONLY a JSON object:
       // Match against invoices
       const matchResult = matchInvoiceForSlip(extracted);
 
+      // Evaluate duplicates & fraud
+      const fraudEval = evaluateSlipFraudAndDuplicates(
+        {
+          id: `slip_${idx}_${Date.now()}`,
+          sender_name: extracted.customer_name || (matchResult.matched && matchResult.matched.facebook_name) || item.name || 'Customer',
+          slip_url: slipUrl,
+          extracted,
+          matched_invoice: matchResult.matched
+        },
+        messengerSlips,
+        invoices
+      );
+
+      const finalStatus = fraudEval.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT'
+        ? 'DUPLICATE_TXID'
+        : matchResult.status;
+
       results.push({
         id: `slip_${idx}_${Date.now()}`,
         image_name: item.name || `Slip #${idx + 1}`,
         slip_url: slipUrl,
         extracted,
-        status: matchResult.status,
+        status: finalStatus,
         confidence: matchResult.confidence,
         error_message: errorMessage || undefined,
+        duplicate_warning: fraudEval.duplicate_warning,
+        fraud_warning: fraudEval.fraud_warning,
+        amount_mismatch: fraudEval.amount_mismatch,
         matched_invoice: matchResult.matched ? {
           invoice_id: matchResult.matched.invoice_id,
           basket_no: matchResult.matched.basket_no,
@@ -924,9 +1138,47 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
     // Sort newest received first
     filtered.sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
 
-    const matchedCount = filtered.filter(s => s.status === 'MATCHED' && !s.is_approved).length;
+    // -------------------------------------------------------------
+    // 🛡️ ANTI-FRAUD & DUPLICATE TxID DETECTION ENGINE & AVATARS
+    // -------------------------------------------------------------
+    for (const slip of filtered) {
+      // Resolve sender profile picture if available from database or FB Graph
+      if (!slip.sender_avatar_url) {
+        const matchingCustomer = customers.find(c => c.facebook_user_id === slip.sender_id || (slip.sender_name && c.facebook_name && c.facebook_name.toLowerCase().trim() === slip.sender_name.toLowerCase().trim()));
+        const matchingInv = invoices.find(i => i.facebook_user_id === slip.sender_id || (slip.sender_name && i.facebook_name && i.facebook_name.toLowerCase().trim() === slip.sender_name.toLowerCase().trim()));
+        const matchingComment = rawComments.find(rc => rc.facebook_user_id === slip.sender_id || (slip.sender_name && rc.facebook_name && rc.facebook_name.toLowerCase().trim() === slip.sender_name.toLowerCase().trim()));
+
+        slip.sender_avatar_url = matchingCustomer?.picture_url || matchingInv?.picture_url || matchingComment?.picture_url;
+        if (!slip.sender_avatar_url && slip.sender_id && !slip.sender_id.startsWith('TEST') && !slip.sender_id.startsWith('FB_USER') && !slip.sender_id.startsWith('mslip')) {
+          slip.sender_avatar_url = `https://graph.facebook.com/v21.0/${slip.sender_id}/picture?type=square&width=120&height=120`;
+        }
+      }
+
+      if (slip.matched_invoice && !slip.matched_invoice.picture_url) {
+        const matchingInv = invoices.find(i => i.invoice_id === slip.matched_invoice?.invoice_id);
+        slip.matched_invoice.picture_url = matchingInv?.picture_url || slip.sender_avatar_url;
+        slip.matched_invoice.facebook_user_id = matchingInv?.facebook_user_id || slip.sender_id;
+      }
+
+      const fraudEval = evaluateSlipFraudAndDuplicates(
+        slip,
+        filtered,
+        invoices
+      );
+
+      slip.duplicate_warning = fraudEval.duplicate_warning;
+      slip.fraud_warning = fraudEval.fraud_warning;
+      slip.amount_mismatch = fraudEval.amount_mismatch;
+
+      if (fraudEval.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT' && !slip.is_approved) {
+        slip.status = 'DUPLICATE_TXID';
+      }
+    }
+
+    const matchedCount = filtered.filter(s => s.status === 'MATCHED' && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud).length;
     const approvedCount = filtered.filter(s => s.status === 'APPROVED' || s.is_approved).length;
-    const reviewCount = filtered.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND') && !s.is_approved).length;
+    const reviewCount = filtered.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND') && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud).length;
+    const duplicateCount = filtered.filter(s => (s.duplicate_warning?.is_duplicate || s.fraud_warning?.is_fraud || s.status === 'DUPLICATE_TXID') && !s.is_approved).length;
 
     return res.json({
       success: true,
@@ -936,7 +1188,8 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
         total: filtered.length,
         matched: matchedCount,
         review: reviewCount,
-        approved: approvedCount
+        approved: approvedCount,
+        duplicate: duplicateCount
       }
     });
   } catch (err: any) {
@@ -1022,6 +1275,8 @@ Extract:
 8. trans_ref (string or null)
 9. basket_no (number or null)
 10. remarks (string or null)
+11. fraud_suspected (boolean: true if font on amount is edited, spliced text, or fake receipt)
+12. fraud_reasons (array of strings)
 Output strictly raw JSON with these fields.`
                     };
                     const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);
@@ -1045,7 +1300,9 @@ Output strictly raw JSON with these fields.`
                             trans_date: parsed.trans_date || undefined,
                             trans_ref: parsed.trans_ref || undefined,
                             basket_no: parsed.basket_no || undefined,
-                            remarks: parsed.remarks || undefined
+                            remarks: parsed.remarks || undefined,
+                            fraud_suspected: Boolean(parsed.fraud_suspected),
+                            fraud_reasons: Array.isArray(parsed.fraud_reasons) ? parsed.fraud_reasons : []
                           };
                         }
                       } catch (parseErr) {
@@ -1056,6 +1313,24 @@ Output strictly raw JSON with these fields.`
 
                   const matchRes = matchInvoiceForSlip(extracted);
 
+                  const fraudEval = evaluateSlipFraudAndDuplicates(
+                    {
+                      id: `mslip_${m.id}_${Date.now()}`,
+                      sender_id: senderId,
+                      sender_name: senderName,
+                      slip_url: savedSlipUrl,
+                      received_at: m.created_time || new Date().toISOString(),
+                      extracted,
+                      matched_invoice: matchRes.matched
+                    },
+                    messengerSlips,
+                    invoices
+                  );
+
+                  const statusFinal = fraudEval.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT'
+                    ? 'DUPLICATE_TXID'
+                    : matchRes.status;
+
                   messengerSlips.unshift({
                     id: `mslip_${m.id}_${Date.now()}`,
                     source: 'MESSENGER',
@@ -1064,8 +1339,11 @@ Output strictly raw JSON with these fields.`
                     slip_url: savedSlipUrl,
                     received_at: m.created_time || new Date().toISOString(),
                     extracted,
-                    status: matchRes.status,
+                    status: statusFinal,
                     confidence: matchRes.confidence,
+                    duplicate_warning: fraudEval.duplicate_warning,
+                    fraud_warning: fraudEval.fraud_warning,
+                    amount_mismatch: fraudEval.amount_mismatch,
                     matched_invoice: matchRes.matched ? {
                       invoice_id: matchRes.matched.invoice_id,
                       basket_no: matchRes.matched.basket_no,
@@ -1120,7 +1398,7 @@ Output strictly raw JSON with these fields.`
  */
 router.post('/approve_slip', (req: Request, res: Response) => {
   try {
-    const { slip_id, invoice_id, paid_amount, packer_name } = req.body;
+    const { slip_id, invoice_id, paid_amount, packer_name, allow_duplicate_override } = req.body;
     if (!slip_id || !invoice_id) {
       return res.status(400).json({ success: false, error: 'Missing slip_id or invoice_id' });
     }
@@ -1130,6 +1408,13 @@ router.post('/approve_slip', (req: Request, res: Response) => {
 
     if (!inv) {
       return res.status(404).json({ success: false, error: 'រកមិនឃើញកន្ត្រកវិក្កយបត្រនេះទេ' });
+    }
+
+    if (slip?.duplicate_warning?.is_duplicate && slip.duplicate_warning.duplicate_type === 'CROSS_ACCOUNT' && !allow_duplicate_override) {
+      return res.status(400).json({
+        success: false,
+        error: `⛔ មិនអាច Approve បានទេ! ${slip.duplicate_warning.message} (ប្រសិនបើចង់ Approve ដោយបង្ខំ សូមបញ្ជាក់ក្នុងប្រអប់ Confirmation)`
+      });
     }
 
     const nowIso = new Date().toISOString();
@@ -1147,6 +1432,16 @@ router.post('/approve_slip', (req: Request, res: Response) => {
       inv.packing_stage = 'STAGED';
     }
 
+    // Permanently record the TxID into invoice notes/comments to lock against future cross-account reuse
+    const transRef = (slip && slip.extracted?.trans_ref) || '';
+    if (transRef) {
+      inv.notes = inv.notes || [];
+      const noteEntry = `[TxID: ${transRef.toUpperCase()}]`;
+      if (!inv.notes.includes(noteEntry)) {
+        inv.notes.push(noteEntry);
+      }
+    }
+
     if (slip) {
       slip.status = 'APPROVED';
       slip.is_approved = true;
@@ -1158,7 +1453,6 @@ router.post('/approve_slip', (req: Request, res: Response) => {
     const basketNo = inv.basket_no || inv.invoice_id;
     const finalAmount = (slip && slip.extracted?.paid_amount) || inv.total_amount;
     const bankName = (slip && slip.extracted?.bank_name) || 'ធនាគារ';
-    const transRef = (slip && slip.extracted?.trans_ref) || '';
 
     const replyMessage = `✅ ហាងបានទទួលការទូទាត់ប្រាក់ចំនួន $${Number(finalAmount).toFixed(2)} (${bankName}${transRef ? ' ‧ Ref: ' + transRef : ''}) ត្រឹមត្រូវ ១០០% ហើយបង ${customerName}! 🎉\n\n📦 កន្ត្រកលេខ #${basketNo} របស់បងត្រូវបាន Admin ផ្ទៀងផ្ទាត់ [បង់រួច] និងបញ្ជូនទៅកាន់បញ្ជីវេចខ្ចប់រួចរាល់។ អរគុណច្រើនបង! 🙏`;
 

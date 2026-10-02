@@ -13,6 +13,7 @@ export interface MessengerSlipItem {
   source: 'MESSENGER' | 'TELEGRAM';
   sender_id: string;
   sender_name: string;
+  sender_avatar_url?: string;
   slip_url: string;
   received_at: string;
   extracted: {
@@ -25,15 +26,39 @@ export interface MessengerSlipItem {
     trans_date?: string;
     basket_no?: number | string;
     remarks?: string;
+    fraud_suspected?: boolean;
+    fraud_reasons?: string[];
   };
-  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED' | 'REJECTED';
+  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED' | 'REJECTED' | 'DUPLICATE_TXID';
   is_approved?: boolean;
   confidence: number;
+  duplicate_warning?: {
+    is_duplicate: boolean;
+    duplicate_type: 'SAME_ACCOUNT' | 'CROSS_ACCOUNT' | 'ALREADY_APPROVED';
+    original_sender_name: string;
+    original_basket_no?: number | string;
+    trans_ref?: string;
+    message: string;
+  };
+  fraud_warning?: {
+    is_fraud: boolean;
+    severity: 'HIGH' | 'MEDIUM';
+    reasons: string[];
+    message: string;
+  };
+  amount_mismatch?: {
+    is_mismatch: boolean;
+    slip_amount: number;
+    invoice_amount: number;
+    difference: number;
+  };
   matched_invoice?: {
     invoice_id: number;
     basket_no?: number | string;
     live_id: string;
     facebook_name: string;
+    facebook_user_id?: string;
+    picture_url?: string;
     phone_number: string;
     total_amount: number;
     created_at: string;
@@ -72,7 +97,7 @@ export function FastCheckSlipsModal({
   onShowToast
 }: FastCheckSlipsModalProps) {
   const [timeFilter, setTimeFilter] = useState<'today' | '24h' | 'all'>('today');
-  const [filterStatus, setFilterStatus] = useState<'ALL' | 'MATCHED' | 'REVIEW' | 'APPROVED'>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'MATCHED' | 'REVIEW' | 'DUPLICATE' | 'APPROVED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   
   const [slips, setSlips] = useState<MessengerSlipItem[]>([]);
@@ -81,6 +106,10 @@ export function FastCheckSlipsModal({
   const [approvingIds, setApprovingIds] = useState<Record<string, boolean>>({});
   const [isConfirmingAll, setIsConfirmingAll] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // High-Security Anti-Fraud / Duplicate Override Confirmation Modal
+  const [overrideConfirmSlip, setOverrideConfirmSlip] = useState<MessengerSlipItem | null>(null);
+  const [showFraudInfoModal, setShowFraudInfoModal] = useState(false);
 
   // Manual Basket Search Modal State
   const [manualLinkSlip, setManualLinkSlip] = useState<MessengerSlipItem | null>(null);
@@ -231,10 +260,16 @@ export function FastCheckSlipsModal({
     }
   };
 
-  // 1-Click Approve Single Slip by Admin
-  const handleApproveSingle = async (slip: MessengerSlipItem) => {
+  // 1-Click Approve Single Slip by Admin (with High-Security Fraud & Duplicate Intercept)
+  const handleApproveSingle = async (slip: MessengerSlipItem, forceOverride = false) => {
     if (!slip.matched_invoice) {
       onShowToast('សូមភ្ជាប់កន្ត្រកជាមុនសិនមុននឹង Approve!', 'warning');
+      return;
+    }
+
+    // Intercept if Cross-Account Reuse, Duplicate TxID, or Fraud detected unless explicitly confirmed by Admin
+    if (!forceOverride && (slip.duplicate_warning?.is_duplicate || slip.fraud_warning?.is_fraud || slip.status === 'DUPLICATE_TXID')) {
+      setOverrideConfirmSlip(slip);
       return;
     }
 
@@ -248,7 +283,8 @@ export function FastCheckSlipsModal({
           slip_id: slip.id,
           invoice_id: slip.matched_invoice.invoice_id,
           paid_amount: slip.extracted.paid_amount,
-          packer_name: 'Admin (Messenger Table)'
+          packer_name: 'Admin (Messenger Table)',
+          allow_duplicate_override: forceOverride
         })
       });
 
@@ -265,25 +301,33 @@ export function FastCheckSlipsModal({
             return s;
           }));
 
+          setOverrideConfirmSlip(null);
           onSuccess(1);
           fetchUnpaidBaskets();
         }
       } else {
-        throw new Error('Failed to approve');
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to approve');
       }
-    } catch {
+    } catch (err: any) {
       playWarningBuzzer();
-      onShowToast('⚠️ មិនអាច Approve បានទេ សូមព្យាយាមម្តងទៀត', 'error');
+      onShowToast(`⚠️ ${err?.message || 'មិនអាច Approve បានទេ'}`, 'error');
     } finally {
       setApprovingIds(prev => ({ ...prev, [slip.id]: false }));
     }
   };
 
-  // Bulk Approve All 100% Matched Slips
+  // Bulk Approve All 100% Matched Slips (Strictly Excludes Duplicates & Fraud Slips)
   const handleConfirmAllMatched = async () => {
-    const matchedItems = slips.filter(s => s.status === 'MATCHED' && s.matched_invoice && !s.is_approved);
+    const matchedItems = slips.filter(
+      s => s.status === 'MATCHED' &&
+           s.matched_invoice &&
+           !s.is_approved &&
+           !s.duplicate_warning?.is_duplicate &&
+           !s.fraud_warning?.is_fraud
+    );
     if (matchedItems.length === 0) {
-      onShowToast('មិនមាន Slips ដែលបានផ្ទៀងផ្ទាត់ត្រូវ ១០០% សម្រាប់បញ្ជាក់ទេ!', 'warning');
+      onShowToast('មិនមាន Slips ដែលបានផ្ទៀងផ្ទាត់ត្រូវ ១០០% (និងគ្មានហានិភ័យស្ទួន) សម្រាប់បញ្ជាក់ទេ!', 'warning');
       return;
     }
 
@@ -310,7 +354,7 @@ export function FastCheckSlipsModal({
           onShowToast(`✅ Admin បាន Approved និងផ្ញើសារបញ្ជាក់ទៅ Messenger ជោគជ័យ ${json.updated_count} កន្ត្រក!`, 'success');
           
           setSlips(prev => prev.map(s => {
-            if (s.status === 'MATCHED' && s.matched_invoice) {
+            if (s.status === 'MATCHED' && s.matched_invoice && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud) {
               return { ...s, status: 'APPROVED', is_approved: true };
             }
             return s;
@@ -383,12 +427,97 @@ export function FastCheckSlipsModal({
     return { primaryName, fbSender, bankPayer, showBankPayer };
   };
 
+  const resolveSenderAvatar = (slip: MessengerSlipItem): string | null => {
+    if (slip.sender_avatar_url) return slip.sender_avatar_url;
+    if (slip.matched_invoice?.picture_url) return slip.matched_invoice.picture_url;
+    
+    const psid = slip.sender_id || slip.matched_invoice?.facebook_user_id;
+    if (psid && !psid.startsWith('TEST') && !psid.startsWith('FB_USER') && !psid.startsWith('mslip') && !psid.startsWith('NONE')) {
+      return `https://graph.facebook.com/v21.0/${psid}/picture?type=square&width=120&height=120`;
+    }
+    return null;
+  };
+
+  const SenderAvatarBadge = ({
+    slip,
+    size = 'md',
+    onZoom
+  }: {
+    slip: MessengerSlipItem;
+    size?: 'sm' | 'md' | 'lg';
+    onZoom?: (url: string) => void;
+  }) => {
+    const [hasError, setHasError] = useState(false);
+    const avatarUrl = resolveSenderAvatar(slip);
+    const { primaryName } = getCustomerDisplayInfo(slip);
+    const initial = (primaryName || 'F').trim().charAt(0).toUpperCase();
+
+    const sizeClasses = {
+      sm: 'w-7 h-7 text-[10px]',
+      md: 'w-9 h-9 text-xs',
+      lg: 'w-11 h-11 text-sm'
+    }[size];
+
+    const badgeSizeClasses = {
+      sm: 'w-3 h-3 text-[7.5px]',
+      md: 'w-3.5 h-3.5 text-[8.5px]',
+      lg: 'w-4 h-4 text-[9.5px]'
+    }[size];
+
+    const hasRealImage = Boolean(avatarUrl && !hasError);
+
+    return (
+      <div
+        className={`relative inline-block flex-shrink-0 group ${sizeClasses} cursor-pointer`}
+        title={`Facebook Profile: ${primaryName}${hasRealImage ? ' (ចុចមើលរូប Profile ធំ)' : ''}`}
+        onClick={(e) => {
+          if (hasRealImage && avatarUrl && onZoom) {
+            e.stopPropagation();
+            onZoom(avatarUrl);
+          }
+        }}
+      >
+        <div className={`w-full h-full rounded-full border-2 ${hasRealImage ? 'border-blue-400/80 hover:border-blue-300' : 'border-indigo-500/50'} overflow-hidden bg-gradient-to-tr from-blue-950 via-indigo-950 to-slate-900 flex items-center justify-center shadow-md relative ring-1 ring-blue-500/30 group-hover:scale-105 transition-all`}>
+          {hasRealImage && avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={primaryName}
+              referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
+              onError={() => setHasError(true)}
+              className="w-full h-full object-cover relative z-10"
+            />
+          ) : (
+            <span className="font-black text-blue-200 uppercase select-none z-0">
+              {initial}
+            </span>
+          )}
+        </div>
+
+        {/* Small Blue Facebook 'f' Badge on bottom right corner */}
+        <span
+          className={`absolute -bottom-0.5 -right-0.5 rounded-full bg-[#1877F2] text-white font-black flex items-center justify-center shadow-sm border border-slate-950 z-20 ${badgeSizeClasses}`}
+          title="Facebook Messenger"
+        >
+          f
+        </span>
+      </div>
+    );
+  };
+
+  const duplicateCount = slips.filter(s => Boolean(s.duplicate_warning?.is_duplicate || s.fraud_warning?.is_fraud || s.status === 'DUPLICATE_TXID') && !s.is_approved).length;
+  const matchedCount = slips.filter(s => s.status === 'MATCHED' && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud).length;
+  const approvedCount = slips.filter(s => s.status === 'APPROVED' || s.is_approved).length;
+  const reviewCount = slips.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND') && !s.is_approved && !s.duplicate_warning?.is_duplicate && !s.fraud_warning?.is_fraud).length;
+
   const filteredSlips = slips.filter(slip => {
-    const isMatched = slip.status === 'MATCHED';
     const isApproved = slip.status === 'APPROVED' || slip.is_approved;
-    const isReview = slip.status === 'MULTIPLE_CANDIDATES' || slip.status === 'NOT_FOUND';
+    const isDuplicateOrFraud = Boolean(slip.duplicate_warning?.is_duplicate || slip.fraud_warning?.is_fraud || slip.status === 'DUPLICATE_TXID');
+    const isMatched = slip.status === 'MATCHED' && !isDuplicateOrFraud;
+    const isReview = (slip.status === 'MULTIPLE_CANDIDATES' || slip.status === 'NOT_FOUND') && !isDuplicateOrFraud;
 
     if (filterStatus === 'MATCHED' && (!isMatched || isApproved)) return false;
+    if (filterStatus === 'DUPLICATE' && (!isDuplicateOrFraud || isApproved)) return false;
     if (filterStatus === 'APPROVED' && !isApproved) return false;
     if (filterStatus === 'REVIEW' && (!isReview || isApproved)) return false;
 
@@ -400,15 +529,12 @@ export function FastCheckSlipsModal({
       const basket = slip.matched_invoice ? String(slip.matched_invoice.basket_no || '').toLowerCase() : '';
       const bank = (slip.extracted.bank_name || '').toLowerCase();
       const ref = (slip.extracted.trans_ref || '').toLowerCase();
-      return name.includes(q) || phone.includes(q) || basket.includes(q) || bank.includes(q) || ref.includes(q);
+      const warn = `${slip.duplicate_warning?.message || ''} ${slip.fraud_warning?.message || ''}`.toLowerCase();
+      return name.includes(q) || phone.includes(q) || basket.includes(q) || bank.includes(q) || ref.includes(q) || warn.includes(q);
     }
 
     return true;
   });
-
-  const matchedCount = slips.filter(s => s.status === 'MATCHED' && !s.is_approved).length;
-  const approvedCount = slips.filter(s => s.status === 'APPROVED' || s.is_approved).length;
-  const reviewCount = slips.filter(s => (s.status === 'MULTIPLE_CANDIDATES' || s.status === 'NOT_FOUND') && !s.is_approved).length;
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '';
@@ -442,6 +568,16 @@ export function FastCheckSlipsModal({
           </div>
           
           <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Security & Fraud Info Guide Button */}
+            <button
+              type="button"
+              onClick={() => setShowFraudInfoModal(true)}
+              className="py-1 px-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm"
+              title="ស្វែងយល់ពីរបៀបដែលប្រព័ន្ធការពារ Slip ស្ទួន & ក្លែងបន្លំ"
+            >
+              <span>🛡️ ការពារ Slip ស្ទួន</span>
+            </button>
+
             {/* Sync Now Button */}
             <button
               type="button"
@@ -566,6 +702,22 @@ export function FastCheckSlipsModal({
             </button>
             <button
               type="button"
+              onClick={() => setFilterStatus('DUPLICATE')}
+              className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                filterStatus === 'DUPLICATE'
+                  ? 'bg-rose-600 text-white font-black shadow-md'
+                  : duplicateCount > 0
+                  ? 'text-rose-400 hover:text-rose-300 animate-pulse font-bold'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>🚨 ស្ទួន/សង្ស័យ</span>
+              <span className={`px-1 py-0.2 rounded-full text-[9px] ${duplicateCount > 0 ? 'bg-rose-500/40 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                {duplicateCount}
+              </span>
+            </button>
+            <button
+              type="button"
               onClick={() => setFilterStatus('APPROVED')}
               className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
                 filterStatus === 'APPROVED' ? 'bg-cyan-600 text-white font-black' : 'text-cyan-400 hover:text-cyan-300'
@@ -615,9 +767,15 @@ export function FastCheckSlipsModal({
                   <tbody className="divide-y divide-slate-800/70">
                     {filteredSlips.map((slip, idx) => {
                       const isApproved = slip.status === 'APPROVED' || slip.is_approved;
-                      const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice);
-                      const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES';
-                      const isNotFound = slip.status === 'NOT_FOUND';
+                      const isCrossAccountDup = slip.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT';
+                      const isSameAccountDup = slip.duplicate_warning?.duplicate_type === 'SAME_ACCOUNT';
+                      const isAlreadyApprovedDup = slip.duplicate_warning?.duplicate_type === 'ALREADY_APPROVED';
+                      const isFraud = Boolean(slip.fraud_warning?.is_fraud);
+                      const isDuplicateOrFraud = Boolean(slip.duplicate_warning?.is_duplicate || isFraud || slip.status === 'DUPLICATE_TXID');
+
+                      const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice) && !isDuplicateOrFraud;
+                      const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES' && !isDuplicateOrFraud;
+                      const isNotFound = slip.status === 'NOT_FOUND' && !isDuplicateOrFraud;
                       const isApproving = Boolean(approvingIds[slip.id]);
 
                       const invTotal = slip.matched_invoice?.total_amount || 0;
@@ -631,6 +789,10 @@ export function FastCheckSlipsModal({
                           className={`transition-colors hover:bg-slate-800/40 ${
                             isApproved
                               ? 'bg-cyan-950/15 text-slate-300'
+                              : isCrossAccountDup || isFraud
+                              ? 'bg-rose-950/30 border-l-4 border-l-rose-500'
+                              : isSameAccountDup || isAlreadyApprovedDup
+                              ? 'bg-amber-950/20 border-l-4 border-l-amber-500'
                               : isMatched
                               ? 'bg-emerald-950/20'
                               : isAmbiguous
@@ -644,13 +806,22 @@ export function FastCheckSlipsModal({
 
                           <td className="py-2 px-3 text-center">
                             {slip.slip_url ? (
-                              <img
-                                src={slip.slip_url}
-                                alt="Slip"
-                                onClick={() => setPreviewImage(slip.slip_url)}
-                                className="w-12 h-12 object-cover rounded-xl border border-slate-700 hover:scale-105 cursor-pointer shadow-sm mx-auto"
-                                title="ចុចមើលរូបធំ"
-                              />
+                              <div className="relative inline-block">
+                                <img
+                                  src={slip.slip_url}
+                                  alt="Slip"
+                                  onClick={() => setPreviewImage(slip.slip_url)}
+                                  className={`w-12 h-12 object-cover rounded-xl border hover:scale-105 cursor-pointer shadow-sm mx-auto ${
+                                    isCrossAccountDup || isFraud ? 'border-rose-500 ring-2 ring-rose-500/40' : 'border-slate-700'
+                                  }`}
+                                  title="ចុចមើលរូបធំ"
+                                />
+                                {(isCrossAccountDup || isFraud) && (
+                                  <span className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black shadow animate-pulse">
+                                    !
+                                  </span>
+                                )}
+                              </div>
                             ) : (
                               <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-sm text-slate-500 mx-auto">
                                 📋
@@ -659,21 +830,41 @@ export function FastCheckSlipsModal({
                           </td>
 
                           <td className="py-2 px-3">
-                            <div>
-                              <div className="flex items-center gap-1.5 font-bold text-sm text-white">
-                                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-[10px] text-white font-black flex-shrink-0 shadow-sm" title="Facebook Messenger">
-                                  f
-                                </span>
-                                <span className="text-blue-100 font-bold truncate max-w-[170px]">
+                            <div className="flex items-center gap-2.5">
+                              <SenderAvatarBadge slip={slip} size="md" onZoom={setPreviewImage} />
+                              <div className="min-w-0">
+                                <div className="font-bold text-sm text-blue-100 truncate max-w-[160px]" title={primaryName}>
                                   {primaryName}
-                                </span>
-                              </div>
-                              {showBankPayer && (
-                                <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                                  <span>💳 លើ Slip:</span>
-                                  <span className="text-slate-300 font-semibold">{bankPayer}</span>
+                                </div>
+                                {showBankPayer && (
+                                  <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                    <span>💳 លើ Slip:</span>
+                                    <span className="text-slate-300 font-semibold">{bankPayer}</span>
+                                  </div>
+                                )}
+                              
+                              {/* Prominent Duplicate / Fraud Warnings */}
+                              {isCrossAccountDup && slip.duplicate_warning && (
+                                <div className="mt-1 px-2 py-0.5 rounded-lg bg-rose-500/20 border border-rose-500/50 text-rose-300 text-[10px] font-bold flex items-center gap-1">
+                                  <span className="text-rose-400 font-black">🚨 ស្ទួនឆ្លង FB:</span>
+                                  <span className="text-white truncate max-w-[130px]" title={slip.duplicate_warning.message}>
+                                    ធ្លាប់ផ្ញើដោយ «{slip.duplicate_warning.original_sender_name}»
+                                  </span>
                                 </div>
                               )}
+
+                              {isSameAccountDup && (
+                                <div className="mt-1 px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold">
+                                  ⚠️ ភ្ញៀវផ្ញើវិក្កយបត្រនេះស្ទួន
+                                </div>
+                              )}
+
+                              {isFraud && slip.fraud_warning && (
+                                <div className="mt-1 px-2 py-0.5 rounded-lg bg-rose-600/30 border border-rose-500 text-rose-200 text-[10px] font-black animate-pulse">
+                                  🚨 សង្ស័យបន្លំ ({slip.fraud_warning.reasons?.[0] || 'កែ Font'})
+                                </div>
+                              )}
+
                               <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
                                 {slip.extracted.phone_number && (
                                   <span className="text-indigo-300 font-mono">📞 {slip.extracted.phone_number}</span>
@@ -683,7 +874,8 @@ export function FastCheckSlipsModal({
                                 )}
                               </div>
                             </div>
-                          </td>
+                          </div>
+                        </td>
 
                           <td className="py-2 px-3">
                             {slip.matched_invoice ? (
@@ -733,7 +925,13 @@ export function FastCheckSlipsModal({
                                 <span className={`font-mono font-bold text-sm ${isAmountEqual ? 'text-emerald-400' : 'text-amber-400'}`}>
                                   ${invTotal.toFixed(2)}
                                 </span>
-                                {isAmountEqual && <div className="text-[9.5px] text-emerald-400">✓ ស្មើ</div>}
+                                {isAmountEqual ? (
+                                  <div className="text-[9.5px] text-emerald-400">✓ ស្មើ</div>
+                                ) : slip.amount_mismatch?.is_mismatch ? (
+                                  <div className="text-[9.5px] text-rose-400 font-bold font-mono">
+                                    {slip.amount_mismatch.difference > 0 ? `+${slip.amount_mismatch.difference}` : `${slip.amount_mismatch.difference}`}
+                                  </div>
+                                ) : null}
                               </div>
                             ) : (
                               <span className="text-slate-500">-</span>
@@ -745,7 +943,7 @@ export function FastCheckSlipsModal({
                               {slip.extracted.bank_name || 'Bank'}
                             </div>
                             {slip.extracted.trans_ref && (
-                              <div className="font-mono text-[10px] text-slate-400 truncate max-w-[110px]">
+                              <div className="font-mono text-[10px] text-slate-400 truncate max-w-[110px]" title={slip.extracted.trans_ref}>
                                 {slip.extracted.trans_ref}
                               </div>
                             )}
@@ -756,22 +954,37 @@ export function FastCheckSlipsModal({
                           </td>
 
                           <td className="py-2 px-3 text-center">
-                            {isApproved && (
+                            {isApproved ? (
                               <span className="bg-cyan-500/20 text-cyan-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-cyan-500/40">
                                 ✨ Paid
                               </span>
-                            )}
-                            {!isApproved && isMatched && (
+                            ) : isCrossAccountDup ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-400 animate-pulse shadow-md">
+                                  🚨 ស្ទួនឆ្លង FB
+                                </span>
+                              </div>
+                            ) : isSameAccountDup ? (
+                              <span className="bg-amber-500/20 text-amber-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-amber-500/40">
+                                ⚠️ ផ្ញើស្ទួន
+                              </span>
+                            ) : isAlreadyApprovedDup ? (
+                              <span className="bg-rose-500/20 text-rose-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-rose-500/40">
+                                🚫 កាត់រួច
+                              </span>
+                            ) : isFraud ? (
+                              <span className="bg-rose-700 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-400 animate-bounce">
+                                🚨 សង្ស័យបន្លំ
+                              </span>
+                            ) : isMatched ? (
                               <span className="bg-emerald-500/20 text-emerald-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40">
                                 🟢 ត្រូវ ១០០%
                               </span>
-                            )}
-                            {!isApproved && isAmbiguous && (
+                            ) : isAmbiguous ? (
                               <span className="bg-amber-500/20 text-amber-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-amber-500/40 animate-pulse">
                                 🟡 ស្ទួន
                               </span>
-                            )}
-                            {!isApproved && isNotFound && (
+                            ) : (
                               <span className="bg-rose-500/20 text-rose-300 text-[10.5px] font-black px-2 py-0.5 rounded-full border border-rose-500/40">
                                 🔴 រកមិនឃើញ
                               </span>
@@ -788,15 +1001,20 @@ export function FastCheckSlipsModal({
                                     type="button"
                                     disabled={!slip.matched_invoice || isApproving}
                                     onClick={() => handleApproveSingle(slip)}
-                                    className="py-1 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 text-slate-950 font-black text-xs shadow-md active:scale-95 transition-all cursor-pointer"
+                                    className={`py-1 px-3 rounded-xl font-black text-xs shadow-md active:scale-95 transition-all cursor-pointer ${
+                                      isCrossAccountDup || isFraud
+                                        ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse'
+                                        : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 disabled:opacity-30'
+                                    }`}
+                                    title={isCrossAccountDup || isFraud ? 'ពិនិត្យការព្រមានស្ទួន / បង្ខំ Approve' : 'Approve វិក្កយបត្រ'}
                                   >
-                                    {isApproving ? '⏳' : '✓ Approve'}
+                                    {isApproving ? '⏳' : isCrossAccountDup || isFraud ? '⚠️ Approve' : '✓ Approve'}
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleRejectSlip(slip.id)}
                                     className="p-1 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 text-xs"
-                                    title="លុបចេញ"
+                                    title="ច្រានចោល Slip នេះ"
                                   >
                                     ✕
                                   </button>
@@ -811,13 +1029,19 @@ export function FastCheckSlipsModal({
                 </table>
               </div>
 
-              {/* MOBILE VIEW (< 768px): Spacious Clean Touch Cards */}
+              {/* MOBILE VIEW (< 768px): Spacious Clean Touch Cards with Fraud Indicators */}
               <div className="block md:hidden space-y-2.5">
                 {filteredSlips.map((slip, idx) => {
                   const isApproved = slip.status === 'APPROVED' || slip.is_approved;
-                  const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice);
-                  const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES';
-                  const isNotFound = slip.status === 'NOT_FOUND';
+                  const isCrossAccountDup = slip.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT';
+                  const isSameAccountDup = slip.duplicate_warning?.duplicate_type === 'SAME_ACCOUNT';
+                  const isAlreadyApprovedDup = slip.duplicate_warning?.duplicate_type === 'ALREADY_APPROVED';
+                  const isFraud = Boolean(slip.fraud_warning?.is_fraud);
+                  const isDuplicateOrFraud = Boolean(slip.duplicate_warning?.is_duplicate || isFraud || slip.status === 'DUPLICATE_TXID');
+
+                  const isMatched = slip.status === 'MATCHED' && Boolean(slip.matched_invoice) && !isDuplicateOrFraud;
+                  const isAmbiguous = slip.status === 'MULTIPLE_CANDIDATES' && !isDuplicateOrFraud;
+                  const isNotFound = slip.status === 'NOT_FOUND' && !isDuplicateOrFraud;
                   const isApproving = Boolean(approvingIds[slip.id]);
 
                   const invTotal = slip.matched_invoice?.total_amount || 0;
@@ -830,6 +1054,10 @@ export function FastCheckSlipsModal({
                       className={`p-3 rounded-2xl border shadow-sm transition-all ${
                         isApproved
                           ? 'bg-[#0F172A]/90 border-cyan-500/40 text-slate-300'
+                          : isCrossAccountDup || isFraud
+                          ? 'bg-[#2A0F15] border-rose-500 ring-1 ring-rose-500/50'
+                          : isSameAccountDup || isAlreadyApprovedDup
+                          ? 'bg-[#241A0B] border-amber-500/60'
                           : isMatched
                           ? 'bg-[#0E1E2E] border-emerald-500/50'
                           : isAmbiguous
@@ -847,7 +1075,9 @@ export function FastCheckSlipsModal({
                             <img
                               src={slip.slip_url}
                               alt="Slip"
-                              className="w-16 h-16 object-cover rounded-xl border border-slate-700 shadow-md"
+                              className={`w-16 h-16 object-cover rounded-xl border shadow-md ${
+                                isCrossAccountDup || isFraud ? 'border-rose-500 ring-2 ring-rose-500/40' : 'border-slate-700'
+                              }`}
                             />
                             <span className="absolute bottom-0 right-0 bg-black/80 text-[9px] px-1 rounded text-white">
                               🔍
@@ -865,10 +1095,8 @@ export function FastCheckSlipsModal({
                             return (
                               <>
                                 <div className="flex items-center justify-between gap-1">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-[10px] text-white font-black flex-shrink-0 shadow-sm" title="Facebook Messenger">
-                                      f
-                                    </span>
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <SenderAvatarBadge slip={slip} size="sm" onZoom={setPreviewImage} />
                                     <h4 className="font-black text-sm text-blue-100 truncate">
                                       #{idx + 1}. {primaryName}
                                     </h4>
@@ -876,6 +1104,14 @@ export function FastCheckSlipsModal({
                                   {isApproved ? (
                                     <span className="bg-cyan-500/20 text-cyan-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-cyan-500/40 flex-shrink-0">
                                       ✨ Paid
+                                    </span>
+                                  ) : isCrossAccountDup ? (
+                                    <span className="bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-400 flex-shrink-0 animate-pulse">
+                                      🚨 ស្ទួនឆ្លង FB
+                                    </span>
+                                  ) : isFraud ? (
+                                    <span className="bg-rose-700 text-white text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-400 flex-shrink-0">
+                                      🚨 សង្ស័យបន្លំ
                                     </span>
                                   ) : isMatched ? (
                                     <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-500/40 flex-shrink-0">
@@ -900,6 +1136,19 @@ export function FastCheckSlipsModal({
                               </>
                             );
                           })()}
+
+                          {/* Warning message box if fraud or duplicate */}
+                          {isCrossAccountDup && slip.duplicate_warning && (
+                            <div className="mt-1 p-1.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-[10px] text-rose-200 font-bold">
+                              🚨 ធ្លាប់ផ្ញើដោយ FB «{slip.duplicate_warning.original_sender_name}»
+                            </div>
+                          )}
+
+                          {isFraud && slip.fraud_warning && (
+                            <div className="mt-1 p-1.5 rounded-lg bg-rose-600/30 border border-rose-500 text-[10px] text-rose-100 font-bold">
+                              🚨 សង្ស័យ Slip ក្លែងបន្លំ: {slip.fraud_warning.reasons?.join(', ')}
+                            </div>
+                          )}
 
                           {/* Bank & Time */}
                           <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
@@ -945,10 +1194,16 @@ export function FastCheckSlipsModal({
                               type="button"
                               disabled={!slip.matched_invoice || isApproving}
                               onClick={() => handleApproveSingle(slip)}
-                              className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 disabled:opacity-40 text-slate-950 font-black text-xs shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              className={`flex-1 py-2 px-3 rounded-xl font-black text-xs shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                isCrossAccountDup || isFraud
+                                  ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse'
+                                  : 'bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 disabled:opacity-40'
+                              }`}
                             >
                               {isApproving ? (
                                 <span>⏳ កំពុងកត់ត្រា...</span>
+                              ) : isCrossAccountDup || isFraud ? (
+                                <span>⚠️ ពិនិត្យ / Approve បង្ខំ #{slip.matched_invoice?.basket_no}</span>
                               ) : (
                                 <span>✓ យល់ព្រម Approve កន្ត្រក #{slip.matched_invoice?.basket_no} [Paid]</span>
                               )}
@@ -1038,11 +1293,11 @@ export function FastCheckSlipsModal({
         <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-3 animate-in fade-in">
           <div className="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-md w-full p-4 space-y-3 shadow-2xl text-slate-100">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
-                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-600 text-[10px] text-white font-black">f</span>
+              <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <SenderAvatarBadge slip={manualLinkSlip} size="sm" onZoom={setPreviewImage} />
                 <span>🔍 ភ្ជាប់កន្ត្រកសម្រាប់ FB «{getCustomerDisplayInfo(manualLinkSlip).primaryName}»</span>
               </h3>
-              <button onClick={() => setManualLinkSlip(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setManualLinkSlip(null)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
             </div>
 
             <div className="text-xs text-slate-300">
@@ -1103,9 +1358,151 @@ export function FastCheckSlipsModal({
               <button
                 type="button"
                 onClick={() => setManualLinkSlip(null)}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-300"
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-300 cursor-pointer"
               >
                 បោះបង់
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🛡️ Anti-Fraud & Cross-Account Duplicate Protection Info Modal */}
+      {showFraudInfoModal && (
+        <div className="fixed inset-0 z-70 bg-black/85 flex items-center justify-center p-3 animate-in fade-in">
+          <div className="bg-[#0B132B] border border-amber-500/50 rounded-3xl max-w-lg w-full p-5 space-y-4 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-lg">🛡️</span>
+                <div>
+                  <h3 className="font-black text-sm text-white">ប្រព័ន្ធការពារ Slip ស្ទួន & ក្លែងបន្លំ</h3>
+                  <p className="text-[11px] text-amber-300/80 font-medium">Smart Anti-Fraud & Cross-Account Duplicate Shield</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowFraudInfoModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-rose-900/80 text-slate-300 hover:text-white flex items-center justify-center font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs leading-relaxed">
+              {/* Feature 1: Cross-Account Protection */}
+              <div className="p-3 rounded-2xl bg-rose-950/40 border border-rose-500/40 space-y-1.5">
+                <div className="font-black text-rose-300 flex items-center gap-1.5 text-xs">
+                  <span>🚨</span>
+                  <span>1. ការពារ Slip មួយផ្ញើឆ្លង 2 ឬ 3 អាខោន Facebook (Cross-Account Abuse)</span>
+                </div>
+                <p className="text-slate-300 text-[11.5px]">
+                  ប្រព័ន្ធធ្វើការកត់ត្រា <strong>Transaction Ref (TxID)</strong> និង <strong>រូបភាព Slip</strong> ទាំងអស់ទៅក្នុង Permanent Ledger។ ប្រសិនបើមាន Facebook ផ្សេងយក Slip ដែលធ្លាប់ផ្ញើដោយ Facebook ដទៃមកផ្ញើម្ដងទៀត ប្រព័ន្ធនឹងលោតស្លាក <strong>«🚨 ស្ទួនឆ្លង FB»</strong> ភ្លាមៗ ហើយបង្ហាញឈ្មោះ FB ដើម។
+                </p>
+              </div>
+
+              {/* Feature 2: Anti-Photoshop & Fake Detection */}
+              <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/40 space-y-1.5">
+                <div className="font-black text-amber-300 flex items-center gap-1.5 text-xs">
+                  <span>🔍</span>
+                  <span>2. ពិនិត្យ Slip ក្លែងបន្លំ / កាត់តរូបភាព (AI Photoshop & Tampering Detection)</span>
+                </div>
+                <p className="text-slate-300 text-[11.5px]">
+                  Google Gemini Flash AI ពិនិត្យភាពមិនប្រក្រតីនៃ Slip ដូចជា៖ Font លេខទឹកប្រាក់ខុសទំហំ, កាលបរិច្ឆេទខុសពីបច្ចុប្បន្ន, បាំងបិទព័ត៌មាន ឬ Slip QR Code បង្ហាញតែ QR មិនមែនជាវិក្កយបត្រជោគជ័យ។
+                </p>
+              </div>
+
+              {/* Feature 3: Live Verification */}
+              <div className="p-3 rounded-2xl bg-indigo-950/40 border border-indigo-500/40 space-y-1.5">
+                <div className="font-black text-indigo-300 flex items-center gap-1.5 text-xs">
+                  <span>⚖️</span>
+                  <span>3. ផ្ទៀងផ្ទាត់ទឹកប្រាក់ & បិទ Auto-Approve</span>
+                </div>
+                <p className="text-slate-300 text-[11.5px]">
+                  ពេល Bot ស្កេនឃើញ Slip ប្រព័ន្ធនឹង <strong>មិន Auto-Approve ឬ Auto-Paid ដោយស្វ័យប្រវត្តិទេ</strong> ដើម្បីការពារការបន្លំ។ Admin ត្រូវចុច <strong>Approve</strong> ដោយផ្ទាល់ទើបប្រព័ន្ធផ្ញើសារបញ្ជាក់ទៅកាន់អតិថិជន។
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowFraudInfoModal(false)}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-md"
+              >
+                យល់ហើយ (Close)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ⚠️ High-Security Override Confirmation Modal */}
+      {overrideConfirmSlip && (
+        <div className="fixed inset-0 z-75 bg-black/90 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-[#1C0D12] border-2 border-rose-500/80 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-slate-100 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 border-b border-rose-900/60 pb-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500 flex items-center justify-center text-xl text-rose-400">
+                🚨
+              </div>
+              <div>
+                <h3 className="font-black text-sm text-rose-200">
+                  {overrideConfirmSlip.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT'
+                    ? 'ការព្រមាន៖ Slip ស្ទួនឆ្លងអាខោន FB!'
+                    : overrideConfirmSlip.fraud_warning?.is_fraud
+                    ? 'ការព្រមាន៖ Slip សង្ស័យថាក្លែងបន្លំ!'
+                    : 'ការព្រមាន៖ Slip នេះស្ទួន!'}
+                </h3>
+                <p className="text-[11px] text-rose-300/80">សូមផ្ទៀងផ្ទាត់យ៉ាងម៉ត់ចត់មុននឹងយល់ព្រម</p>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-200 bg-slate-950/80 p-3.5 rounded-2xl border border-rose-900/40">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">👤 FB បច្ចុប្បន្ន:</span>
+                <div className="flex items-center gap-1.5 font-bold text-white">
+                  <SenderAvatarBadge slip={overrideConfirmSlip} size="sm" onZoom={setPreviewImage} />
+                  <span>{getCustomerDisplayInfo(overrideConfirmSlip).primaryName}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">📦 ភ្ជាប់ទៅកន្ត្រក:</span>
+                <span className="font-bold font-mono text-indigo-300">#{overrideConfirmSlip.matched_invoice?.basket_no} (${overrideConfirmSlip.matched_invoice?.total_amount.toFixed(2)})</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">💵 ទឹកប្រាក់ Slip:</span>
+                <span className="font-mono font-bold text-amber-300">${overrideConfirmSlip.extracted.paid_amount || 0}</span>
+              </div>
+
+              {overrideConfirmSlip.duplicate_warning && (
+                <div className="mt-2 pt-2 border-t border-slate-800 text-[11.5px] text-rose-300">
+                  <strong>🚨 ព័ត៌មានលម្អិត៖</strong> {overrideConfirmSlip.duplicate_warning.message}
+                </div>
+              )}
+
+              {overrideConfirmSlip.fraud_warning?.is_fraud && (
+                <div className="mt-2 pt-2 border-t border-slate-800 text-[11.5px] text-rose-300">
+                  <strong>🚨 មូលហេតុសង្ស័យបន្លំ៖</strong> {overrideConfirmSlip.fraud_warning.reasons?.join(', ')}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setOverrideConfirmSlip(null)}
+                className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+              >
+                បោះបង់ (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const slipToApprove = overrideConfirmSlip;
+                  setOverrideConfirmSlip(null);
+                  handleApproveSingle(slipToApprove, true);
+                }}
+                className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-lg shadow-rose-600/30 cursor-pointer active:scale-95"
+              >
+                ⚠️ បង្ខំ Approve (Override)
               </button>
             </div>
           </div>
@@ -1116,7 +1513,7 @@ export function FastCheckSlipsModal({
       {previewImage && (
         <div
           onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 z-70 bg-black/95 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+          className="fixed inset-0 z-80 bg-black/95 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
           <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
             <img

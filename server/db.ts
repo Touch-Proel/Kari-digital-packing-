@@ -85,6 +85,7 @@ export interface AutoScannedMessengerSlip {
   source: 'MESSENGER' | 'TELEGRAM';
   sender_id: string;
   sender_name: string;
+  sender_avatar_url?: string;
   slip_url: string;
   received_at: string;
   extracted: {
@@ -98,14 +99,36 @@ export interface AutoScannedMessengerSlip {
     basket_no?: number | string;
     remarks?: string;
   };
-  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED' | 'REJECTED';
+  status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND' | 'APPROVED' | 'REJECTED' | 'DUPLICATE_TXID';
   is_approved?: boolean;
   confidence: number;
+  duplicate_warning?: {
+    is_duplicate: boolean;
+    duplicate_type: 'SAME_ACCOUNT' | 'CROSS_ACCOUNT' | 'ALREADY_APPROVED';
+    original_sender_name: string;
+    original_basket_no?: number | string;
+    trans_ref?: string;
+    message: string;
+  };
+  fraud_warning?: {
+    is_fraud: boolean;
+    severity: 'HIGH' | 'MEDIUM';
+    reasons: string[];
+    message: string;
+  };
+  amount_mismatch?: {
+    is_mismatch: boolean;
+    slip_amount: number;
+    invoice_amount: number;
+    difference: number;
+  };
   matched_invoice?: {
     invoice_id: number;
     basket_no?: number | string;
     live_id: string;
     facebook_name: string;
+    facebook_user_id?: string;
+    picture_url?: string;
     phone_number: string;
     total_amount: number;
     created_at: string;

@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage, messengerSlips, AutoScannedMessengerSlip } from './db';
 import { broadcastSSE } from './packingRoutes';
 import { Invoice } from './types';
-import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini } from './fastCheckRoutes';
+import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini, evaluateSlipFraudAndDuplicates } from './fastCheckRoutes';
 import fs from 'fs';
 import path from 'path';
 
@@ -254,6 +254,8 @@ CRITICAL RULES:
    - "trans_date": date/time of transfer.
    - "basket_no_in_slip": order / basket number if mentioned in transfer remarks (e.g. 5093 or null).
    - "phone_number": phone number if visible on slip or in chat.
+   - "fraud_suspected": boolean (set true if fonts look edited/manipulated, blurry spliced amount, or fake screenshot).
+   - "fraud_reasons": array of strings (e.g. ["Edited font on amount", "Mismatched timestamp"]).
 
 Return strict JSON ONLY:
 {
@@ -266,7 +268,9 @@ Return strict JSON ONLY:
   "trans_ref": "...",
   "trans_date": "...",
   "basket_no_in_slip": null or number,
-  "phone_number": null or string
+  "phone_number": null or string,
+  "fraud_suspected": false,
+  "fraud_reasons": []
 }`;
 
     const ocrRes = await callGeminiSlipExtraction(
@@ -324,13 +328,7 @@ Return strict JSON ONLY:
       return { success: false, reply: '' };
     }
 
-    // 2. REJECT DUPLICATE SLIPS (Anti-Replay Attack)
-    if (transRef && usedSlipRefs.has(transRef)) {
-      const dupReply = `⚠️ វិក្កយបត្រនេះ (Ref: ${transRef}) ត្រូវបានប្រើប្រាស់កាត់បង់រួចម្តងរួចមកហើយ។ សូមកុំផ្ញើវិក្កយបត្រដដែលៗ! អរគុណច្រើនបង! 🙏`;
-      return { success: false, reply: dupReply };
-    }
-
-    // 3. LOCATE ACTIVE INVOICE BELONGING TO THIS CUSTOMER
+    // 2. LOCATE ACTIVE INVOICE BELONGING TO THIS CUSTOMER
     const activeInvoices = invoices.filter(
       i => i.status !== 'Cancelled' && i.status !== 'Dispatched' && i.packing_stage !== 'DISPATCHED'
     );
@@ -372,10 +370,42 @@ Return strict JSON ONLY:
       phone_number: extracted.phone_number,
       bank_name: bankName,
       trans_ref: transRef,
-      basket_no: basketNoInSlip || undefined
+      basket_no: basketNoInSlip || undefined,
+      fraud_suspected: extracted.fraud_suspected,
+      fraud_reasons: extracted.fraud_reasons
     });
 
     const targetInvoice = matchedInv || matchRes.matched || (matchRes.candidates && matchRes.candidates[0]);
+
+    // 3. RUN HIGH-SECURITY ANTI-FRAUD & DUPLICATE DETECTION ENGINE
+    const fraudEval = evaluateSlipFraudAndDuplicates(
+      {
+        sender_id: senderId,
+        sender_name: (targetInvoice && targetInvoice.facebook_name) || senderName,
+        slip_url: savedSlipUrl,
+        received_at: new Date().toISOString(),
+        extracted: {
+          customer_name: extracted.customer_name || (targetInvoice && targetInvoice.facebook_name) || senderName,
+          paid_amount: paidAmount,
+          currency: 'USD',
+          phone_number: extracted.phone_number || (targetInvoice && targetInvoice.phone_number),
+          bank_name: bankName,
+          trans_ref: transRef,
+          trans_date: extracted.trans_date,
+          basket_no: basketNoInSlip || (targetInvoice && targetInvoice.basket_no) || undefined,
+          remarks: extracted.remarks || '',
+          fraud_suspected: extracted.fraud_suspected,
+          fraud_reasons: extracted.fraud_reasons
+        },
+        matched_invoice: targetInvoice
+      },
+      messengerSlips,
+      invoices
+    );
+
+    const initialStatus = fraudEval.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT'
+      ? 'DUPLICATE_TXID'
+      : matchRes.status;
 
     // 4. Add / update in Messenger Auto-Scan Table queue (Status: NOT yet approved, waiting for Admin)
     const existingIndex = messengerSlips.findIndex(s => s.slip_url === savedSlipUrl || (transRef && s.extracted.trans_ref === transRef));
@@ -397,9 +427,12 @@ Return strict JSON ONLY:
         basket_no: basketNoInSlip || (targetInvoice && targetInvoice.basket_no) || undefined,
         remarks: extracted.remarks || ''
       },
-      status: matchRes.status,
+      status: initialStatus,
       is_approved: false, // Wait for Admin to verify and click Approve
       confidence: matchRes.confidence,
+      duplicate_warning: fraudEval.duplicate_warning,
+      fraud_warning: fraudEval.fraud_warning,
+      amount_mismatch: fraudEval.amount_mismatch,
       matched_invoice: matchRes.matched ? {
         invoice_id: matchRes.matched.invoice_id,
         basket_no: matchRes.matched.basket_no,
@@ -442,14 +475,25 @@ Return strict JSON ONLY:
       customer_id: senderId,
       basket_no: (targetInvoice && targetInvoice.basket_no),
       incoming_message: `[Auto-Scanned Slip $${paidAmount.toFixed(2)} (${bankName})]`,
-      bot_reply: '[រង់ចាំ Admin ផ្ទៀងផ្ទាត់ & ចុច Approve]',
-      status: 'SUCCESS',
-      meta: { ...extracted, paid_amount: paidAmount, match_status: matchRes.status }
+      bot_reply: fraudEval.duplicate_warning ? `[⚠️ ការព្រមាន: ${fraudEval.duplicate_warning.message}]` : '[រង់ចាំ Admin ផ្ទៀងផ្ទាត់ & ចុច Approve]',
+      status: fraudEval.duplicate_warning || fraudEval.fraud_warning ? 'WARNING' : 'SUCCESS',
+      meta: { ...extracted, paid_amount: paidAmount, match_status: matchRes.status, fraudEval }
     });
 
-    sendTelegramAlert(
-      `📥 <b>AI បាន Scan Slip ថ្មីពី Messenger ចូលក្នុង Table ផ្ទៀងផ្ទាត់:</b>\n👤 <b>ភ្ញៀវ:</b> ${(targetInvoice && targetInvoice.facebook_name) || senderName}\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>\n💡 <i>រង់ចាំ Admin ពិនិត្យផ្ទៀងផ្ទាត់ & ចុច [Approve]</i>`
-    );
+    // Alert with Fraud / Duplicate warning in Telegram if suspicious!
+    if (fraudEval.duplicate_warning) {
+      sendTelegramAlert(
+        `🚨 <b>ការព្រមាន SLIP ស្ទួន / សង្ស័យក្លែងបន្លំ:</b>\n👤 <b>FB:</b> ${(targetInvoice && targetInvoice.facebook_name) || senderName}\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>\n⚠️ <b>ព័ត៌មាន:</b> ${fraudEval.duplicate_warning.message}`
+      );
+    } else if (fraudEval.fraud_warning) {
+      sendTelegramAlert(
+        `🚨 <b>ការព្រមាន SLIP សង្ស័យកែបន្លំ (Fraud Alert):</b>\n👤 <b>FB:</b> ${(targetInvoice && targetInvoice.facebook_name) || senderName}\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>\n⚠️ <b>មូលហេតុ:</b> ${fraudEval.fraud_warning.message}`
+      );
+    } else {
+      sendTelegramAlert(
+        `📥 <b>AI បាន Scan Slip ថ្មីពី Messenger ចូលក្នុង Table ផ្ទៀងផ្ទាត់:</b>\n👤 <b>ភ្ញៀវ:</b> ${(targetInvoice && targetInvoice.facebook_name) || senderName}\n💵 <b>ទឹកប្រាក់:</b> $${paidAmount.toFixed(2)} (${bankName})\n💳 <b>TxID:</b> <code>${transRef || 'N/A'}</code>\n💡 <i>រង់ចាំ Admin ពិនិត្យផ្ទៀងផ្ទាត់ & ចុច [Approve]</i>`
+      );
+    }
 
     // SILENT: Do NOT auto-reply and do NOT auto-pay invoice until Admin clicks Approve
     return { success: true, reply: '', invoice: targetInvoice };
