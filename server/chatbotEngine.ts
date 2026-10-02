@@ -515,12 +515,11 @@ Extract in strict JSON:
   "is_delivery_info": true or false,
   "phone_number": "standard Cambodian phone format e.g. 0964428567",
   "full_address": "clean structured address in Khmer/English",
-  "location_zone": "PHNOM_PENH" or "PROVINCE"
 }
 If this is just a general question or not delivery info, return "is_delivery_info": false.
 Return ONLY valid JSON.`;
 
-      const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+      const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest'];
       let rawResponseText = '';
 
       for (const model of modelsToTry) {
@@ -1247,7 +1246,7 @@ ${basketContext}
 
 ចូរឆ្លើយតបជាភាសាខ្មែរផ្អែមល្ហែម ខ្លីចំចំណួរ (១-២ ជួរ) ៖`;
 
-    const modelsToTry = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    const modelsToTry = ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest'];
     let faqText = '';
 
     for (const model of modelsToTry) {
