@@ -1326,47 +1326,72 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
     const page = activeFacebookPage;
     let newSlipsFound = 0;
 
-    if (page && page.access_token && page.id) {
+    const { since } = req.body || {};
+    const now = new Date();
+    let cutoffDate: Date | null = null;
+
+    if (since === 'all') {
+      cutoffDate = null; // Scan all conversations without date limit
+    } else if (since === '7d') {
+      cutoffDate = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    } else if (since === '24h') {
+      cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
+    } else {
       // 12:00 AM Today (Local Midnight)
-      const now = new Date();
-      const cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    }
 
+    if (page && page.access_token && page.id) {
       try {
-        const fbRes = await fetch(
-          `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages{id,created_time,from,message,attachments{id,mime_type,name,size,image_data}}&limit=30&access_token=${page.access_token}`
-        );
-        const fbData = await fbRes.json();
-        if (fbData.data && Array.isArray(fbData.data)) {
-          const pageId = String(page.id || '');
-          const pageName = (page.name || '').toLowerCase().trim();
+        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(40){id,created_time,from,message,attachments{id,mime_type,name,size,image_data}}&limit=50&access_token=${page.access_token}`;
+        let pageCount = 0;
+        const maxPages = since === 'all' ? 5 : 3;
 
-          for (const conv of fbData.data) {
-            const customerParticipant = conv.participants?.data?.find((p: any) => {
-              const pid = String(p.id || '');
-              const pname = (p.name || '').toLowerCase();
-              return pid !== pageId && !pname.includes('kari arnett') && !pname.includes('proel toch');
-            });
+        while (nextUrl && pageCount < maxPages) {
+          pageCount++;
+          const fbRes = await fetch(nextUrl);
+          const fbData = await fbRes.json();
+          nextUrl = fbData.paging?.next || null;
 
-            const senderName = customerParticipant?.name || 'Messenger Customer';
-            const senderId = customerParticipant?.id || 'FB_USER';
+          if (fbData.data && Array.isArray(fbData.data)) {
+            const pageId = String(page.id || '');
+            const pageName = (page.name || '').toLowerCase().trim();
 
-            const messages = conv.messages?.data || [];
-            for (const m of messages) {
-              const fromId = String(m.from?.id || '');
-              const fromName = (m.from?.name || '').toLowerCase().trim();
-
-              // Strict ignore: Any message from the Page, staff, or admin
-              if (fromId === pageId || fromName === pageName || fromName.includes('kari arnett') || fromName.includes('proel toch') || fromName.includes('staff') || fromName.includes('admin')) {
-                continue;
+            for (const conv of fbData.data) {
+              // If conversation is older than cutoff, we can skip further pages if sorted by updated_time
+              if (cutoffDate && conv.updated_time) {
+                const convUpdated = new Date(conv.updated_time);
+                if (convUpdated < cutoffDate) {
+                  continue;
+                }
               }
 
-              // Also ensure message came from the customer participant, not another admin account
-              if (customerParticipant && fromId && fromId !== String(customerParticipant.id)) {
-                continue;
-              }
+              const customerParticipant = conv.participants?.data?.find((p: any) => {
+                const pid = String(p.id || '');
+                const pname = (p.name || '').toLowerCase();
+                return pid !== pageId && !pname.includes('kari arnett') && !pname.includes('proel toch');
+              });
 
-              const msgTime = new Date(m.created_time);
-              if (msgTime < cutoffDate) continue;
+              const senderName = customerParticipant?.name || 'Messenger Customer';
+              const senderId = customerParticipant?.id || 'FB_USER';
+
+              const messages = conv.messages?.data || [];
+              for (const m of messages) {
+                const fromId = String(m.from?.id || '');
+                const fromName = (m.from?.name || '').toLowerCase().trim();
+
+                // Strict ignore: Any message from the Page, staff, or admin
+                if (fromId === pageId || fromName === pageName || fromName.includes('kari arnett') || fromName.includes('proel toch') || fromName.includes('staff') || fromName.includes('admin')) {
+                  continue;
+                }
+
+                // Also ensure message came from the customer participant, not another admin account
+                if (customerParticipant && fromId && fromId !== String(customerParticipant.id)) {
+                  continue;
+                }
+
+                const msgTime = new Date(m.created_time);
+                if (cutoffDate && msgTime < cutoffDate) continue;
 
               const attachments = m.attachments?.data || [];
               for (const att of attachments) {
@@ -1574,6 +1599,7 @@ Output strictly raw JSON with these fields.`
             }
           }
         }
+      }
       } catch (e) {
         console.error('Facebook Graph sync error:', e);
       }
