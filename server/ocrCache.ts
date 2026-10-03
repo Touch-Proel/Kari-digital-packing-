@@ -72,31 +72,17 @@ export function setCachedOcr(keyOrHash: string, data: Omit<CachedSlipData, 'cach
   }
 
   isDirty = true;
-  scheduleCacheDiskSave();
-}
-
-function scheduleCacheDiskSave() {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveOcrCacheToDisk();
-  }, 1000);
+  saveOcrCacheToDisk(true);
 }
 
 export function saveOcrCacheToDisk(forceSync = false) {
-  if (!isDirty && !forceSync) return;
   try {
     const obj: Record<string, CachedSlipData> = {};
     for (const [k, v] of ocrMemoryCache.entries()) {
       obj[k] = v;
     }
     const jsonStr = JSON.stringify(obj, null, 2);
-    if (forceSync) {
-      fs.writeFileSync(OCR_CACHE_PATH, jsonStr, 'utf8');
-    } else {
-      fs.promises.writeFile(OCR_CACHE_PATH, jsonStr, 'utf8').catch(err => {
-        console.error('[OCR Cache] Error saving to disk:', err);
-      });
-    }
+    fs.writeFileSync(OCR_CACHE_PATH, jsonStr, 'utf8');
     isDirty = false;
   } catch (err) {
     console.error('[OCR Cache] Failed to write ocr_cache.json:', err);
