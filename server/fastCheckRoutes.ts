@@ -213,29 +213,55 @@ export function parseKhmerSlipDate(dateStr?: string): Date | null {
   // Common OCR typo fixes on Khmer digits (e.g. 2022/2020 due to OCR misreading ២០២៦)
   s = s.replace(/\b202[0-5]\b/g, '2026');
 
-  // Khmer & English months mapping
+  const currentYear = new Date().getFullYear() || 2026;
+
+  // 1. Khmer & English months mapping
   const khmerMonths: Record<string, number> = {
-    'មករា': 1, 'កុម្ភៈ': 2, 'មិនា': 3, 'មីនា': 3, 'មេសា': 4,
+    'មករា': 1, 'កុម្ភៈ': 2, 'កុម្ភះ': 2, 'កុម្ភ': 2, 'មិនា': 3, 'មីនា': 3, 'មេសា': 4,
     'ឧសភា': 5, 'មិថុនា': 6, 'កក្កដា': 7, 'សីហា': 8, 'កញ្ញា': 9,
     'តុលា': 10, 'វិច្ឆិកា': 11, 'ធ្នូ': 12,
     'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
     'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
   };
 
-  const currentYear = new Date().getFullYear() || 2026;
-
+  const lower = s.toLowerCase();
   for (const [mName, mNum] of Object.entries(khmerMonths)) {
-    if (s.toLowerCase().includes(mName)) {
-      const dayMatch = s.match(/(\d{1,2})/);
+    if (lower.includes(mName)) {
+      const dayMatch = s.match(/\b(\d{1,2})\b/);
       const day = dayMatch ? parseInt(dayMatch[1], 10) : 1;
-      return new Date(currentYear, mNum - 1, day);
+      const yearMatch = s.match(/\b(20\d{2})\b/);
+      const year = yearMatch ? parseInt(yearMatch[1], 10) : currentYear;
+      return new Date(year, mNum - 1, day);
     }
   }
 
-  // Handle standard ISO or slash date formats
+  // 2. Standard Cambodian Banking format: DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const ddmmyyyy = s.match(/\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/);
+  if (ddmmyyyy) {
+    let day = parseInt(ddmmyyyy[1], 10);
+    let month = parseInt(ddmmyyyy[2], 10);
+    const year = parseInt(ddmmyyyy[3], 10);
+    // If month > 12 and day <= 12, swap
+    if (month > 12 && day <= 12) {
+      const temp = day;
+      day = month;
+      month = temp;
+    }
+    return new Date(year, month - 1, day);
+  }
+
+  // 3. ISO format: YYYY-MM-DD or YYYY/MM/DD
+  const yyyymmdd = s.match(/\b(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})\b/);
+  if (yyyymmdd) {
+    const year = parseInt(yyyymmdd[1], 10);
+    const month = parseInt(yyyymmdd[2], 10);
+    const day = parseInt(yyyymmdd[3], 10);
+    return new Date(year, month - 1, day);
+  }
+
+  // Fallback
   const parsed = new Date(s);
   if (!isNaN(parsed.getTime())) {
-    // If year was parsed before current year (e.g. 2022) due to OCR hallucination of ៦, fix to current year
     if (parsed.getFullYear() < currentYear) {
       parsed.setFullYear(currentYear);
     }
