@@ -209,6 +209,9 @@ export function parseKhmerSlipDate(dateStr?: string): Date | null {
   };
   s = s.replace(/[០-៩]/g, (d) => khmerDigits[d] || d);
 
+  // Common OCR typo fixes on Khmer digits (e.g. 2022/2020 due to OCR misreading ២០២៦)
+  s = s.replace(/\b202[0-5]\b/g, '2026');
+
   // Khmer & English months mapping
   const khmerMonths: Record<string, number> = {
     'មករា': 1, 'កុម្ភៈ': 2, 'មិនា': 3, 'មីនា': 3, 'មេសា': 4,
@@ -218,20 +221,23 @@ export function parseKhmerSlipDate(dateStr?: string): Date | null {
     'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
   };
 
+  const currentYear = new Date().getFullYear() || 2026;
+
   for (const [mName, mNum] of Object.entries(khmerMonths)) {
     if (s.toLowerCase().includes(mName)) {
       const dayMatch = s.match(/(\d{1,2})/);
-      const yearMatch = s.match(/(202\d|203\d)/);
       const day = dayMatch ? parseInt(dayMatch[1], 10) : 1;
-      const year = yearMatch ? parseInt(yearMatch[1], 10) : new Date().getFullYear();
-      return new Date(year, mNum - 1, day);
+      return new Date(currentYear, mNum - 1, day);
     }
   }
 
   // Handle standard ISO or slash date formats
   const parsed = new Date(s);
   if (!isNaN(parsed.getTime())) {
-    // If year was parsed as past 2022 or missing, fix to current year 2026 if month/day match
+    // If year was parsed before current year (e.g. 2022) due to OCR hallucination of ៦, fix to current year
+    if (parsed.getFullYear() < currentYear) {
+      parsed.setFullYear(currentYear);
+    }
     return parsed;
   }
 
@@ -375,16 +381,16 @@ export function evaluateSlipFraudAndDuplicates(
     fraudReasons.push(...filteredAiReasons);
   }
 
-  // Date Check: Slip date too old (> 30 days) or far in future
+  // Date Check: Slip date too old (> 45 days) or far in future (> 7 days)
   if (slip.extracted?.trans_date) {
     try {
       const parsedDate = parseKhmerSlipDate(slip.extracted.trans_date);
       if (parsedDate && !isNaN(parsedDate.getTime())) {
         const now = Date.now();
         const diffDays = (now - parsedDate.getTime()) / (1000 * 60 * 60 * 24);
-        if (diffDays > 30) {
+        if (diffDays > 45) {
           fraudReasons.push(`កាលបរិច្ឆេទលើ Slip ចាស់ពេក (${Math.round(diffDays)} ថ្ងៃមុន)`);
-        } else if (diffDays < -3) {
+        } else if (diffDays < -7) {
           fraudReasons.push('កាលបរិច្ឆេទលើ Slip គឺនៅថ្ងៃអនាគត');
         }
       }
@@ -1394,7 +1400,7 @@ RULES FOR CLASSIFICATION:
 4. currency (USD or KHR).
 5. phone_number (string or null).
 6. bank_name (string or null: e.g. "ABA Bank", "ACLEDA", "Bakong", "Wing").
-7. trans_date (string: Current Year is 2026. For dates like "២ តុលា ២០២៦", convert to "2026-10-02". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9).
+7. trans_date (string: Current Year is strictly 2026. For dates like "៣ តុលា ២០២៦", convert to "2026-10-03". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9. Khmer six is ៦ - NEVER transcribe ២០២៦ as 2022! Year is strictly 2026).
 8. trans_ref (string or null: Transaction ID / Ref number).
 9. basket_no (number or null).
 10. remarks (string or null).
