@@ -44,6 +44,15 @@ export async function saveDatabaseToDisk(forceSync = false) {
       });
     }
 
+    const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
+    if (messengerSlips && messengerSlips.length > 0) {
+      try {
+        fs.writeFileSync(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8');
+      } catch (bkErr) {
+        console.error('[DB] Slips backup error:', bkErr);
+      }
+    }
+
     // Persist to binary SQLite database pos.db with 4-second throttle to save CPU
     const now = Date.now();
     if (now - lastSqlitePersistTime > 4000 || forceSync) {
@@ -56,7 +65,8 @@ export async function saveDatabaseToDisk(forceSync = false) {
         rawComments,
         customers,
         packerLogs,
-        activeFacebookPage
+        activeFacebookPage,
+        messengerSlips
       }).catch(err => console.error('[SQLite] Persist error:', err));
     }
   } catch (err) {
@@ -542,8 +552,8 @@ export async function loadDatabaseFromDisk() {
   try {
     // 1. Try loading from SQLite pos.db first
     const sqliteData = await loadFromSqlite();
-    if (sqliteData && sqliteData.invoices && sqliteData.invoices.length > 0) {
-      if (sqliteData.invoices) {
+    if (sqliteData) {
+      if (sqliteData.invoices && sqliteData.invoices.length > 0) {
         invoices.length = 0;
         invoices.push(...sqliteData.invoices);
       }
@@ -572,43 +582,48 @@ export async function loadDatabaseFromDisk() {
       if (sqliteData.settings) {
         Object.assign(settings, sqliteData.settings);
       }
+      if (sqliteData.messengerSlips && Array.isArray(sqliteData.messengerSlips) && sqliteData.messengerSlips.length > 0) {
+        messengerSlips.length = 0;
+        messengerSlips.push(...sqliteData.messengerSlips);
+        console.log(`[SQLite Loaded] Restored ${messengerSlips.length} messenger slips from SQLite pos.db`);
+      }
       console.log(`[SQLite Loaded] Loaded ${invoices.length} invoices, ${products.length} products from pos.db`);
-    } else if (fs.existsSync(DB_FILE_PATH)) {
-      const raw = fs.readFileSync(DB_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (parsed.invoices && Array.isArray(parsed.invoices) && parsed.invoices.length > 0) {
-        invoices.length = 0;
-        invoices.push(...parsed.invoices);
+    }
+
+    // 2. Load / supplement messengerSlips from db_store.json or backup file if empty
+    const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
+    if (messengerSlips.length === 0) {
+      let candidateSlips: any[] = [];
+      if (fs.existsSync(DB_FILE_PATH)) {
+        try {
+          const raw = fs.readFileSync(DB_FILE_PATH, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (parsed.messengerSlips && Array.isArray(parsed.messengerSlips) && parsed.messengerSlips.length > 0) {
+            candidateSlips = parsed.messengerSlips;
+          }
+        } catch (err) {
+          console.error('Error reading messengerSlips from db_store.json:', err);
+        }
       }
-      if (parsed.products && Array.isArray(parsed.products) && parsed.products.length > 0) {
-        products.length = 0;
-        products.push(...parsed.products);
+
+      if (candidateSlips.length === 0 && fs.existsSync(BACKUP_SLIPS_PATH)) {
+        try {
+          const raw = fs.readFileSync(BACKUP_SLIPS_PATH, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            candidateSlips = parsed;
+          }
+        } catch (bkErr) {
+          console.error('Error reading from backup slips file:', bkErr);
+        }
       }
-      if (parsed.activeLiveId) {
-        activeLiveId = parsed.activeLiveId;
-      }
-      if (parsed.activeFacebookPage) {
-        activeFacebookPage = parsed.activeFacebookPage;
-      }
-      if (parsed.rawComments && Array.isArray(parsed.rawComments) && parsed.rawComments.length > 0) {
-        rawComments.length = 0;
-        rawComments.push(...parsed.rawComments);
-      }
-      if (parsed.customers && Array.isArray(parsed.customers) && parsed.customers.length > 0) {
-        customers.length = 0;
-        customers.push(...parsed.customers);
-      }
-      if (parsed.packerLogs && Array.isArray(parsed.packerLogs) && parsed.packerLogs.length > 0) {
-        packerLogs.length = 0;
-        packerLogs.push(...parsed.packerLogs);
-      }
-      if (parsed.messengerSlips && Array.isArray(parsed.messengerSlips) && parsed.messengerSlips.length > 0) {
+
+      if (candidateSlips.length > 0) {
         messengerSlips.length = 0;
         // Cleanse receiver names, normalize amounts, and strictly keep ONLY genuine bank transfer slips
-        const validSlips = parsed.messengerSlips.filter((s: any) => {
+        const validSlips = candidateSlips.filter((s: any) => {
           const amt = Number(s.extracted?.paid_amount) || 0;
           const hasBankOrRef = Boolean(s.extracted?.bank_name || s.extracted?.trans_ref);
-          // Purge non-bank images (e.g. clothing photos, live screenshots, $0.00 items)
           return amt > 0 || hasBankOrRef;
         });
 
@@ -626,15 +641,12 @@ export async function loadDatabaseFromDisk() {
           }
         }
         messengerSlips.push(...validSlips);
+        console.log(`[Slips Loaded] Restored ${messengerSlips.length} messenger slips from persistent storage.`);
       }
-      if (parsed.settings) {
-        Object.assign(settings, parsed.settings);
-      }
-      console.log(`[JSON Loaded] Loaded ${invoices.length} invoices, ${products.length} products, ${messengerSlips.length} messenger slips from db_store.json`);
     }
 
-    // Seed default auto-scanned slips from Messenger if empty
-    if (messengerSlips.length === 0) {
+    // Seed default auto-scanned slips ONLY for empty virgin brand new instance
+    if (messengerSlips.length === 0 && invoices.length === 0 && !fs.existsSync(BACKUP_SLIPS_PATH)) {
       messengerSlips.push(
         {
           id: `mslip_101_${Date.now()}`,

@@ -137,6 +137,24 @@ function initTables(db: Database) {
       created_at TEXT,
       picture_url TEXT,
       is_matched INTEGER DEFAULT 0
+    );`,
+    `CREATE TABLE IF NOT EXISTS messenger_slips (
+      id TEXT PRIMARY KEY,
+      source TEXT,
+      sender_id TEXT,
+      sender_name TEXT,
+      sender_avatar_url TEXT,
+      slip_url TEXT,
+      received_at TEXT,
+      extracted_json TEXT,
+      status TEXT,
+      is_approved INTEGER DEFAULT 0,
+      confidence REAL DEFAULT 100,
+      matched_invoice_json TEXT,
+      candidates_json TEXT,
+      duplicate_warning_json TEXT,
+      fraud_warning_json TEXT,
+      amount_mismatch_json TEXT
     );`
   ];
 
@@ -290,6 +308,7 @@ export async function persistToSqlite(data: {
   packerLogs: PackerLog[];
   activeFacebookPage: FacebookPage | null;
   rawComments?: any[];
+  messengerSlips?: any[];
 }) {
   if (isPersisting) {
     pendingPersistData = data;
@@ -471,7 +490,36 @@ export async function persistToSqlite(data: {
         stmtRaw.free();
       }
 
-      // 7. Live sessions
+      // 7. Messenger Slips
+      if (data.messengerSlips && Array.isArray(data.messengerSlips)) {
+        db.run('DELETE FROM messenger_slips;');
+        const stmtSlip = db.prepare('INSERT OR REPLACE INTO messenger_slips (id, source, sender_id, sender_name, sender_avatar_url, slip_url, received_at, extracted_json, status, is_approved, confidence, matched_invoice_json, candidates_json, duplicate_warning_json, fraud_warning_json, amount_mismatch_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
+        for (const s of data.messengerSlips) {
+          if (s && s.id) {
+            stmtSlip.run([
+              String(s.id),
+              String(s.source || 'MESSENGER'),
+              String(s.sender_id || ''),
+              String(s.sender_name || ''),
+              String(s.sender_avatar_url || ''),
+              String(s.slip_url || ''),
+              String(s.received_at || ''),
+              JSON.stringify(s.extracted || {}),
+              String(s.status || 'MATCHED'),
+              s.is_approved ? 1 : 0,
+              Number(s.confidence || 100),
+              s.matched_invoice ? JSON.stringify(s.matched_invoice) : null,
+              s.candidates ? JSON.stringify(s.candidates) : null,
+              s.duplicate_warning ? JSON.stringify(s.duplicate_warning) : null,
+              s.fraud_warning ? JSON.stringify(s.fraud_warning) : null,
+              s.amount_mismatch ? JSON.stringify(s.amount_mismatch) : null
+            ]);
+          }
+        }
+        stmtSlip.free();
+      }
+
+      // 8. Live sessions
       db.run('DELETE FROM live_sessions;');
       const stmtLive = db.prepare('INSERT INTO live_sessions (live_id, title, live_date, created_at, total_baskets, total_revenue) VALUES (?, ?, ?, ?, ?, ?);');
       for (const [liveId, stat] of liveStats.entries()) {
@@ -527,6 +575,7 @@ export async function loadFromSqlite(): Promise<{
   packerLogs?: PackerLog[];
   activeFacebookPage?: FacebookPage;
   rawComments?: any[];
+  messengerSlips?: any[];
 } | null> {
   if (!fs.existsSync(SQLITE_DB_PATH)) {
     return null;
@@ -669,6 +718,7 @@ export async function loadFromSqlite(): Promise<{
     }
 
     // 6. Raw Comments
+    // 6. Raw Comments
     try {
       const rawRows = db.exec('SELECT comment_id, live_id, invoice_id, facebook_user_id, facebook_name, comment_text, created_at, picture_url, is_matched FROM raw_comments ORDER BY created_at ASC;');
       if (rawRows.length > 0 && rawRows[0].values) {
@@ -683,6 +733,47 @@ export async function loadFromSqlite(): Promise<{
           picture_url: String(r[7] || ''),
           is_matched: Boolean(r[8])
         }));
+      }
+    } catch {}
+
+    // 7. Messenger Slips
+    try {
+      const slipRows = db.exec('SELECT id, source, sender_id, sender_name, sender_avatar_url, slip_url, received_at, extracted_json, status, is_approved, confidence, matched_invoice_json, candidates_json, duplicate_warning_json, fraud_warning_json, amount_mismatch_json FROM messenger_slips ORDER BY received_at DESC;');
+      if (slipRows.length > 0 && slipRows[0].values) {
+        result.messengerSlips = slipRows[0].values.map((r: any) => {
+          let extracted = {};
+          let matched_invoice = undefined;
+          let candidates = undefined;
+          let duplicate_warning = undefined;
+          let fraud_warning = undefined;
+          let amount_mismatch = undefined;
+
+          try { if (r[7]) extracted = JSON.parse(r[7]); } catch {}
+          try { if (r[11]) matched_invoice = JSON.parse(r[11]); } catch {}
+          try { if (r[12]) candidates = JSON.parse(r[12]); } catch {}
+          try { if (r[13]) duplicate_warning = JSON.parse(r[13]); } catch {}
+          try { if (r[14]) fraud_warning = JSON.parse(r[14]); } catch {}
+          try { if (r[15]) amount_mismatch = JSON.parse(r[15]); } catch {}
+
+          return {
+            id: String(r[0]),
+            source: String(r[1] || 'MESSENGER'),
+            sender_id: String(r[2] || ''),
+            sender_name: String(r[3] || ''),
+            sender_avatar_url: String(r[4] || ''),
+            slip_url: String(r[5] || ''),
+            received_at: String(r[6] || ''),
+            extracted,
+            status: String(r[8] || 'MATCHED'),
+            is_approved: Boolean(r[9]),
+            confidence: Number(r[10] || 100),
+            matched_invoice,
+            candidates,
+            duplicate_warning,
+            fraud_warning,
+            amount_mismatch
+          };
+        });
       }
     } catch {}
 

@@ -5,6 +5,7 @@ import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries } from './db';
 import { Invoice } from './types';
 import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
+import { computeImageHash, getCachedOcr, setCachedOcr } from './ocrCache';
 
 const router = Router();
 
@@ -700,7 +701,27 @@ router.post('/scan_slips', async (req: Request, res: Response) => {
       };
       let errorMessage = '';
 
-      if (ai && rawBase64) {
+      const imgHash = rawBase64 ? computeImageHash(Buffer.from(rawBase64, 'base64')) : '';
+      const cachedHit = (imgHash && getCachedOcr(imgHash)) || (item.data_url && getCachedOcr(item.data_url));
+
+      if (cachedHit) {
+        extracted = {
+          customer_name: cachedHit.customer_name || '',
+          paid_amount: cachedHit.paid_amount || 0,
+          currency: cachedHit.currency || 'USD',
+          phone_number: cachedHit.phone_number,
+          bank_name: cachedHit.bank_name,
+          trans_ref: cachedHit.trans_ref,
+          trans_date: cachedHit.trans_date,
+          basket_no: cachedHit.basket_no,
+          remarks: cachedHit.remarks,
+          fraud_suspected: cachedHit.fraud_suspected,
+          fraud_reasons: cachedHit.fraud_reasons
+        };
+        if (extracted.paid_amount <= 0 && !extracted.bank_name && !extracted.trans_ref) {
+          errorMessage = 'រូបភាពមិនមែនជា Slip ធនាគារទេ (ជារូបខោអាវ ឬរូបភាពទូទៅ)';
+        }
+      } else if (ai && rawBase64) {
         const imagePart = {
           inlineData: {
             mimeType,
@@ -778,6 +799,11 @@ Return ONLY a JSON object:
               fraud_suspected: Boolean(parsed.fraud_suspected),
               fraud_reasons: Array.isArray(parsed.fraud_reasons) ? parsed.fraud_reasons : []
             };
+
+            // Save to persistent OCR cache
+            if (imgHash) {
+              setCachedOcr(imgHash, extracted, [item.data_url || '', slipUrl]);
+            }
           } catch {
             console.warn('Failed to parse Gemini JSON output:', rawText);
           }
@@ -1376,11 +1402,32 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                     currency: 'USD'
                   };
 
-                  const ai = getGemini();
-                  if (ai && rawBase64) {
-                    const imagePart = { inlineData: { mimeType, data: rawBase64 } };
-                    const textPart = {
-                      text: `You are a high-precision AI image classifier & OCR analyzer for Cambodian Mobile Banking Transfer Slips (ABA Bank, ACLEDA Bank, Bakong, KHQR, Wing, Canadia, TrueMoney, Sathapana, etc.).
+                  const imgHash = rawBase64 ? computeImageHash(Buffer.from(rawBase64, 'base64')) : '';
+                  const cachedHit = (imgHash && getCachedOcr(imgHash)) || getCachedOcr(imgUrl) || getCachedOcr(m.id);
+
+                  if (cachedHit) {
+                    if (cachedHit.paid_amount > 0 && (cachedHit.bank_name || cachedHit.trans_ref || cachedHit.is_bank_slip !== false)) {
+                      isGenuineBankSlip = true;
+                      extracted = {
+                        customer_name: sanitizeCustomerName(cachedHit.customer_name, senderName),
+                        paid_amount: cachedHit.paid_amount,
+                        currency: cachedHit.currency || 'USD',
+                        phone_number: cachedHit.phone_number,
+                        bank_name: cachedHit.bank_name,
+                        trans_date: cachedHit.trans_date,
+                        trans_ref: cachedHit.trans_ref,
+                        basket_no: cachedHit.basket_no,
+                        remarks: cachedHit.remarks,
+                        fraud_suspected: cachedHit.fraud_suspected,
+                        fraud_reasons: cachedHit.fraud_reasons
+                      };
+                    }
+                  } else {
+                    const ai = getGemini();
+                    if (ai && rawBase64) {
+                      const imagePart = { inlineData: { mimeType, data: rawBase64 } };
+                      const textPart = {
+                        text: `You are a high-precision AI image classifier & OCR analyzer for Cambodian Mobile Banking Transfer Slips (ABA Bank, ACLEDA Bank, Bakong, KHQR, Wing, Canadia, TrueMoney, Sathapana, etc.).
 
 CRITICAL TASK:
 First, determine if this image is a GENUINE digital mobile banking transfer slip / payment receipt screenshot.
@@ -1408,38 +1455,53 @@ RULES FOR CLASSIFICATION:
 12. fraud_reasons (array of strings).
 
 Output strictly raw JSON with these fields.`
-                    };
-                    const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);
-                    if (geminiRes.text) {
-                      try {
-                        const cleaned = geminiRes.text.replace(/```json/gi, '').replace(/```/gi, '').trim();
-                        const parsed = JSON.parse(cleaned);
-                        if (parsed.is_bank_slip === true || (parsed.is_bank_slip !== false && (parsed.bank_name || parsed.trans_ref) && Number(parsed.paid_amount) > 0)) {
-                          let amt = Number(parsed.paid_amount) || 0;
-                          let curr: 'USD' | 'KHR' = String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD';
-                          if (curr === 'KHR' || amt > 500) {
-                            amt = Math.round((amt / 4100) * 100) / 100;
-                            curr = 'USD';
+                      };
+                      const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);
+                      if (geminiRes.text) {
+                        try {
+                          const cleaned = geminiRes.text.replace(/```json/gi, '').replace(/```/gi, '').trim();
+                          const parsed = JSON.parse(cleaned);
+                          if (parsed.is_bank_slip === true || (parsed.is_bank_slip !== false && (parsed.bank_name || parsed.trans_ref) && Number(parsed.paid_amount) > 0)) {
+                            let amt = Number(parsed.paid_amount) || 0;
+                            let curr: 'USD' | 'KHR' = String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD';
+                            if (curr === 'KHR' || amt > 500) {
+                              amt = Math.round((amt / 4100) * 100) / 100;
+                              curr = 'USD';
+                            }
+                            if (amt > 0) {
+                              isGenuineBankSlip = true;
+                              extracted = {
+                                customer_name: sanitizeCustomerName(parsed.customer_name, senderName),
+                                paid_amount: amt,
+                                currency: curr,
+                                phone_number: parsed.phone_number || undefined,
+                                bank_name: parsed.bank_name || undefined,
+                                trans_date: parsed.trans_date || undefined,
+                                trans_ref: parsed.trans_ref || undefined,
+                                basket_no: parsed.basket_no || undefined,
+                                remarks: parsed.remarks || undefined,
+                                fraud_suspected: Boolean(parsed.fraud_suspected),
+                                fraud_reasons: Array.isArray(parsed.fraud_reasons) ? parsed.fraud_reasons : []
+                              };
+
+                              if (imgHash) {
+                                setCachedOcr(imgHash, extracted, [imgUrl, m.id, savedSlipUrl]);
+                              }
+                            }
+                          } else {
+                            // Cache negative/non-bank result too so clothing photos never consume tokens again!
+                            if (imgHash) {
+                              setCachedOcr(imgHash, {
+                                customer_name: '',
+                                paid_amount: 0,
+                                currency: 'USD',
+                                is_bank_slip: false
+                              }, [imgUrl, m.id, savedSlipUrl]);
+                            }
                           }
-                          if (amt > 0) {
-                            isGenuineBankSlip = true;
-                            extracted = {
-                              customer_name: sanitizeCustomerName(parsed.customer_name, senderName),
-                              paid_amount: amt,
-                              currency: curr,
-                              phone_number: parsed.phone_number || undefined,
-                              bank_name: parsed.bank_name || undefined,
-                              trans_date: parsed.trans_date || undefined,
-                              trans_ref: parsed.trans_ref || undefined,
-                              basket_no: parsed.basket_no || undefined,
-                              remarks: parsed.remarks || undefined,
-                              fraud_suspected: Boolean(parsed.fraud_suspected),
-                              fraud_reasons: Array.isArray(parsed.fraud_reasons) ? parsed.fraud_reasons : []
-                            };
-                          }
+                        } catch (parseErr) {
+                          console.error('Failed to parse OCR response:', parseErr);
                         }
-                      } catch (parseErr) {
-                        console.error('Failed to parse OCR response:', parseErr);
                       }
                     }
                   }

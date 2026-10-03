@@ -3,6 +3,7 @@ import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, act
 import { broadcastSSE } from './packingRoutes';
 import { Invoice } from './types';
 import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini, evaluateSlipFraudAndDuplicates } from './fastCheckRoutes';
+import { computeImageHash, getCachedOcr, setCachedOcr } from './ocrCache';
 import fs from 'fs';
 import path from 'path';
 
@@ -231,8 +232,28 @@ export async function processIncomingSlipImage(
       } catch {}
     }
     
-    // Strict OCR & Slip Verification using Gemini Flash
-    const promptText = `You are a strict validation & OCR parser for Cambodian Mobile Banking Transfer Slips (ABA Mobile, ACLEDA ToanChet, Bakong / KHQR, Wing Bank, Canadia, TrueMoney, Chip Mong, Sathapana, FTB, etc.).
+    const imgHash = cleanBase64 ? computeImageHash(Buffer.from(cleanBase64, 'base64')) : '';
+    const cachedHit = imgHash ? getCachedOcr(imgHash) : null;
+
+    let extracted: any = {};
+
+    if (cachedHit) {
+      extracted = {
+        is_bank_slip: cachedHit.is_bank_slip !== false && cachedHit.paid_amount > 0,
+        customer_name: cachedHit.customer_name,
+        paid_amount: cachedHit.paid_amount,
+        currency: cachedHit.currency,
+        bank_name: cachedHit.bank_name,
+        trans_ref: cachedHit.trans_ref,
+        trans_date: cachedHit.trans_date,
+        basket_no_in_slip: cachedHit.basket_no,
+        phone_number: cachedHit.phone_number,
+        fraud_suspected: cachedHit.fraud_suspected,
+        fraud_reasons: cachedHit.fraud_reasons
+      };
+    } else {
+      // Strict OCR & Slip Verification using Gemini Flash
+      const promptText = `You are a strict validation & OCR parser for Cambodian Mobile Banking Transfer Slips (ABA Mobile, ACLEDA ToanChet, Bakong / KHQR, Wing Bank, Canadia, TrueMoney, Chip Mong, Sathapana, FTB, etc.).
 
 CRITICAL RULES:
 1. First, verify whether the image is a REAL digital mobile banking transfer slip / receipt screenshot.
@@ -273,29 +294,45 @@ Return strict JSON ONLY:
   "fraud_reasons": []
 }`;
 
-    const ocrRes = await callGeminiSlipExtraction(
-      ai,
-      { inlineData: { mimeType, data: cleanBase64 } },
-      { text: promptText }
-    );
+      const ocrRes = await callGeminiSlipExtraction(
+        ai,
+        { inlineData: { mimeType, data: cleanBase64 } },
+        { text: promptText }
+      );
 
-    const rawText = ocrRes.text || '';
-    if (!rawText.trim()) {
-      return {
-        success: false,
-        reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
-      };
-    }
+      const rawText = ocrRes.text || '';
+      if (!rawText.trim()) {
+        return {
+          success: false,
+          reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
+        };
+      }
 
-    let extracted: any = {};
-    try {
-      const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
-      extracted = JSON.parse(cleaned);
-    } catch {
-      return {
-        success: false,
-        reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
-      };
+      try {
+        const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+        extracted = JSON.parse(cleaned);
+
+        if (imgHash) {
+          setCachedOcr(imgHash, {
+            customer_name: extracted.customer_name || '',
+            paid_amount: Number(extracted.paid_amount) || 0,
+            currency: extracted.currency || 'USD',
+            phone_number: extracted.phone_number,
+            bank_name: extracted.bank_name,
+            trans_ref: extracted.trans_ref,
+            trans_date: extracted.trans_date,
+            basket_no: extracted.basket_no_in_slip,
+            fraud_suspected: extracted.fraud_suspected,
+            fraud_reasons: extracted.fraud_reasons,
+            is_bank_slip: extracted.is_bank_slip
+          }, [savedSlipUrl]);
+        }
+      } catch {
+        return {
+          success: false,
+          reply: `អរគុណបង ${senderName}! ហាងបានទទួលរូបភាពហើយ បុគ្គលិកនឹងពិនិត្យផ្ទៀងផ្ទាត់ជូនបងបន្ថែមណា៎។ 🙏`
+        };
+      }
     }
 
     // Sanitize customer name: Always prioritize Facebook Sender Name if AI extracted receiver name or empty

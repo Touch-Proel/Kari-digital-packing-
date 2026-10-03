@@ -564,6 +564,9 @@ export function FastCheckSlipsModal({
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   <span>Live Webhook ON</span>
                 </span>
+                <span className="hidden md:inline-flex items-center gap-1 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9.5px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" title="រូបភាពដែលធ្លាប់ស្កេនរួច នឹងទាញយកពី Local Cache ភ្លាមៗ (ចំណាយ 0 Token មិនខាតប្រាក់)">
+                  <span>⚡ 0-Token Cache Active</span>
+                </span>
               </div>
             </div>
           </div>
