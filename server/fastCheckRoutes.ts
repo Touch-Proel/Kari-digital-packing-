@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries } from './db';
+import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db';
 import { Invoice } from './types';
 import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
 import { computeImageHash, getCachedOcr, setCachedOcr } from './ocrCache';
@@ -1202,8 +1202,8 @@ router.get('/unpaid_baskets', (_req: Request, res: Response) => {
  */
 router.get('/messenger_slips', (req: Request, res: Response) => {
   try {
-    // Purge any lingering non-bank images (e.g. clothing photos, $0.00 items)
-    cleanupNonSlipMessengerEntries();
+    // Purge any lingering non-bank images and duplicate slips
+    deduplicateAndSanitizeMessengerSlips();
 
     const { since } = req.query; // 'today' | '24h' | 'all'
     const now = new Date();
@@ -1604,6 +1604,9 @@ Output strictly raw JSON with these fields.`
         console.error('Facebook Graph sync error:', e);
       }
     }
+
+    // Auto-clean any duplicate slips
+    deduplicateAndSanitizeMessengerSlips();
 
     saveDatabaseToDisk();
     bumpDataRevision();

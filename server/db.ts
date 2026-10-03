@@ -1071,24 +1071,86 @@ export function getProductsForLive(liveId?: string): Product[] {
     .sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
 }
 
-export function cleanupNonSlipMessengerEntries(): number {
+export function deduplicateAndSanitizeMessengerSlips(): number {
   let removed = 0;
+  const seenTxRefs = new Set<string>();
+  const seenUrls = new Set<string>();
+  const seenCompositeKeys = new Set<string>();
+
   for (let i = messengerSlips.length - 1; i >= 0; i--) {
     const s = messengerSlips[i];
-    const amt = Number(s.extracted?.paid_amount) || 0;
-    const hasBankOrRef = Boolean(s.extracted?.bank_name || s.extracted?.trans_ref);
-    // Purge non-bank images (e.g. clothing photos, live screenshots, $0.00 items)
+    if (!s || !s.extracted) {
+      messengerSlips.splice(i, 1);
+      removed++;
+      continue;
+    }
+
+    // 1. Force Riel to USD conversion (e.g. 512,623 KHR -> $125.03)
+    let amt = Number(s.extracted.paid_amount) || 0;
+    const curr = String(s.extracted.currency || 'USD').toUpperCase();
+    if (curr === 'KHR' || amt > 500) {
+      amt = Math.round((amt / 4100) * 100) / 100;
+      s.extracted.paid_amount = amt;
+      s.extracted.currency = 'USD';
+    }
+
+    // 2. Filter non-bank photos
+    const hasBankOrRef = Boolean(s.extracted.bank_name || s.extracted.trans_ref);
     if (amt <= 0 && !hasBankOrRef) {
+      messengerSlips.splice(i, 1);
+      removed++;
+      continue;
+    }
+
+    // 3. Deduplication checks
+    const cleanRef = (s.extracted.trans_ref || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const cleanUrl = (s.slip_url || '').split('?')[0].trim();
+    const sender = (s.sender_id || s.sender_name || '').trim();
+    const compositeKey = `${sender}_${amt.toFixed(2)}_${(s.extracted.bank_name || '').toUpperCase()}_${cleanRef}`;
+
+    let isDuplicate = false;
+
+    if (cleanRef && cleanRef.length >= 4) {
+      if (seenTxRefs.has(cleanRef)) {
+        isDuplicate = true;
+      } else {
+        seenTxRefs.add(cleanRef);
+      }
+    }
+
+    if (cleanUrl && cleanUrl.length > 5) {
+      if (seenUrls.has(cleanUrl)) {
+        isDuplicate = true;
+      } else {
+        seenUrls.add(cleanUrl);
+      }
+    }
+
+    if (compositeKey) {
+      if (seenCompositeKeys.has(compositeKey)) {
+        isDuplicate = true;
+      } else {
+        seenCompositeKeys.add(compositeKey);
+      }
+    }
+
+    if (isDuplicate) {
       messengerSlips.splice(i, 1);
       removed++;
     }
   }
+
   if (removed > 0) {
     bumpDataRevision();
     saveDatabaseToDisk();
-    console.log(`[DB Clean] Purged ${removed} non-bank clothing/product photos from messengerSlips.`);
+    console.log(`[DB Deduplicate] Removed ${removed} duplicate/invalid slips from queue.`);
   }
+
   return removed;
+}
+
+export function cleanupNonSlipMessengerEntries(): number {
+  return deduplicateAndSanitizeMessengerSlips();
 }
 
 export function cleanupEmptyZeroItemInvoices() {
@@ -1107,7 +1169,7 @@ export function cleanupEmptyZeroItemInvoices() {
 
 // Load from disk on startup
 loadDatabaseFromDisk().then(() => {
-  cleanupNonSlipMessengerEntries();
+  deduplicateAndSanitizeMessengerSlips();
 }).catch(err => console.error(err));
 
 // Calculate on start
