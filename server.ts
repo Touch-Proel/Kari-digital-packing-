@@ -4,6 +4,7 @@ process.env.TZ = 'Asia/Phnom_Penh';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import packingRoutes from './server/packingRoutes';
@@ -38,8 +39,223 @@ const PORT = 3000;
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-// ⚡ High-speed image serving for /uploads with multi-folder resolution and browser caching
-app.get('/uploads/:filename', (req: Request, res: Response) => {
+import sharp from 'sharp';
+
+// ⚡ In-Memory High Speed Buffer Cache for instant 0ms responses
+interface MemoryImageCacheItem {
+  buffer: Buffer;
+  contentType: string;
+  etag: string;
+  timestamp: number;
+}
+const memoryImageCache = new Map<string, MemoryImageCacheItem>();
+const MAX_MEMORY_CACHE_ITEMS = 400;
+
+function setMemoryCache(key: string, buffer: Buffer, contentType: string, etag: string) {
+  if (memoryImageCache.size >= MAX_MEMORY_CACHE_ITEMS) {
+    // Evict oldest 50 items
+    const keys = Array.from(memoryImageCache.keys()).slice(0, 50);
+    for (const k of keys) memoryImageCache.delete(k);
+  }
+  memoryImageCache.set(key, { buffer, contentType, etag, timestamp: Date.now() });
+}
+
+// In-flight deduplication to avoid redundant parallel network fetches
+const inFlightFetches = new Map<string, Promise<{ buffer: Buffer; contentType: string } | null>>();
+
+// ⚡ Ultra-Fast Cached Image Proxy (Fixes slow loading, CDN throttling & mobile lag)
+app.get('/api/image_proxy', async (req: Request, res: Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+
+  const targetUrl = String(req.query.url || '').trim();
+  const widthParam = parseInt(String(req.query.w || '0'), 10);
+  const targetWidth = !isNaN(widthParam) && widthParam > 0 ? Math.min(widthParam, 1800) : 0;
+
+  if (!targetUrl) {
+    return res.status(400).send('Missing url');
+  }
+
+  const cacheKey = `${targetUrl}_w${targetWidth}`;
+
+  // 1. Check ultra-fast In-Memory RAM Cache (0ms latency)
+  const memHit = memoryImageCache.get(cacheKey);
+  if (memHit) {
+    if (req.headers['if-none-match'] === memHit.etag) {
+      return res.status(304).end();
+    }
+    res.setHeader('Content-Type', memHit.contentType);
+    res.setHeader('ETag', memHit.etag);
+    res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+    return res.end(memHit.buffer);
+  }
+
+  // 2. Handle Local /uploads/ files
+  if (targetUrl.startsWith('/uploads/')) {
+    const filename = path.basename(targetUrl);
+    const cwd = process.cwd();
+    const possibleDirs = [
+      path.join(cwd, 'public', 'uploads'),
+      path.join(cwd, 'dist', 'uploads'),
+      path.join(cwd, 'uploads')
+    ];
+    let localPath = '';
+    for (const dir of possibleDirs) {
+      const p = path.join(dir, filename);
+      if (fs.existsSync(p)) {
+        localPath = p;
+        break;
+      }
+    }
+
+    if (localPath) {
+      try {
+        let fileBuf = fs.readFileSync(localPath);
+        let contentType = 'image/jpeg';
+        const ext = path.extname(filename).toLowerCase();
+        if (ext === '.png') contentType = 'image/png';
+        else if (ext === '.webp') contentType = 'image/webp';
+        else if (ext === '.svg') contentType = 'image/svg+xml';
+
+        // If thumbnail width is requested and image is raster, resize with Sharp
+        if (targetWidth > 0 && ext !== '.svg') {
+          try {
+            fileBuf = await sharp(fileBuf)
+              .rotate()
+              .resize({ width: targetWidth, fit: 'inside', withoutEnlargement: true })
+              .webp({ quality: 80, effort: 3 })
+              .toBuffer();
+            contentType = 'image/webp';
+          } catch {
+            // fallback to original buffer if sharp fails
+          }
+        }
+
+        const etag = `"${crypto.createHash('md5').update(fileBuf).digest('hex')}"`;
+        setMemoryCache(cacheKey, fileBuf, contentType, etag);
+
+        if (req.headers['if-none-match'] === etag) {
+          return res.status(304).end();
+        }
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+        return res.end(fileBuf);
+      } catch (err) {
+        console.error('Local image read error:', err);
+      }
+    }
+  }
+
+  // 3. Check On-Disk Cache for Remote URLs
+  const urlHash = crypto.createHash('md5').update(cacheKey).digest('hex');
+  const cacheDir = path.join(process.cwd(), 'public', 'uploads', 'cache');
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+  const cachedFile = path.join(cacheDir, `${urlHash}.webp`);
+
+  if (fs.existsSync(cachedFile)) {
+    try {
+      const buf = fs.readFileSync(cachedFile);
+      const etag = `"${crypto.createHash('md5').update(buf).digest('hex')}"`;
+      setMemoryCache(cacheKey, buf, 'image/webp', etag);
+
+      if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
+      }
+
+      res.setHeader('Content-Type', 'image/webp');
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+      return res.end(buf);
+    } catch {
+      // ignore and refetch
+    }
+  }
+
+  // 4. Remote Fetch with In-Flight Deduplication
+  try {
+    let fetchPromise = inFlightFetches.get(cacheKey);
+    if (!fetchPromise) {
+      fetchPromise = (async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        try {
+          const remoteRes = await fetch(targetUrl, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+            }
+          });
+          clearTimeout(timeoutId);
+
+          if (!remoteRes.ok) return null;
+
+          const arrayBuf = await remoteRes.arrayBuffer();
+          const rawBuf = Buffer.from(arrayBuf);
+
+          // Optimize & compress with Sharp
+          let optimizedBuf: Buffer;
+          let outContentType = 'image/webp';
+          try {
+            let sharpPipeline = sharp(rawBuf).rotate();
+            if (targetWidth > 0) {
+              sharpPipeline = sharpPipeline.resize({ width: targetWidth, fit: 'inside', withoutEnlargement: true });
+            } else {
+              sharpPipeline = sharpPipeline.resize({ width: 1400, fit: 'inside', withoutEnlargement: true });
+            }
+            optimizedBuf = await sharpPipeline.webp({ quality: 80, effort: 3 }).toBuffer();
+          } catch {
+            optimizedBuf = rawBuf;
+            outContentType = remoteRes.headers.get('content-type') || 'image/jpeg';
+          }
+
+          try {
+            fs.writeFileSync(cachedFile, optimizedBuf);
+          } catch {}
+
+          return { buffer: optimizedBuf, contentType: outContentType };
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+          return null;
+        } finally {
+          inFlightFetches.delete(cacheKey);
+        }
+      })();
+      inFlightFetches.set(cacheKey, fetchPromise);
+    }
+
+    const result = await fetchPromise;
+    if (!result) {
+      // Return subtle fallback SVG placeholder
+      const fallbackSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1E293B"/><text x="50" y="55" font-size="28" text-anchor="middle" fill="#64748B">🖼️</text></svg>`;
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.send(fallbackSvg);
+    }
+
+    const etag = `"${crypto.createHash('md5').update(result.buffer).digest('hex')}"`;
+    setMemoryCache(cacheKey, result.buffer, result.contentType, etag);
+
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+    return res.end(result.buffer);
+  } catch {
+    return res.status(502).send('Proxy error');
+  }
+});
+
+// ⚡ High-speed image serving for /uploads with multi-folder resolution, ETag, CORS, and browser caching
+app.get('/uploads/:filename', async (req: Request, res: Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+
   const rawFilename = req.params.filename;
   const filename = path.basename(rawFilename);
   if (!filename) {
@@ -56,8 +272,7 @@ app.get('/uploads/:filename', (req: Request, res: Response) => {
   for (const dir of possibleDirs) {
     const fullPath = path.join(dir, filename);
     if (fs.existsSync(fullPath)) {
-      // Fast image serving with fresh revalidation so manual updates reflect instantly
-      res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
       const ext = path.extname(filename).toLowerCase();
       if (ext === '.png') res.setHeader('Content-Type', 'image/png');
       else if (ext === '.webp') res.setHeader('Content-Type', 'image/webp');
@@ -68,12 +283,15 @@ app.get('/uploads/:filename', (req: Request, res: Response) => {
     }
   }
 
-  // If missing, return 404 image status so browser doesn't receive SPA HTML bundle (index.html)
+  // If missing, return 404 image status so browser doesn't receive SPA HTML bundle
   return res.status(404).json({ error: 'Image not found' });
 });
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads'), {
-  maxAge: '1h'
+  maxAge: '30d',
+  setHeaders: (res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
 }));
 
 // -------------------------------------------------------------

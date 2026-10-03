@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db';
 import { Invoice } from './types';
@@ -707,13 +708,24 @@ router.post('/scan_slips', async (req: Request, res: Response) => {
       const item = images[idx];
       const rawBase64 = item.data ? item.data.replace(/^data:image\/\w+;base64,/, '') : '';
       const mimeType = item.mimeType || 'image/jpeg';
-      const fileName = `slip_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+      const fileName = `slip_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}.webp`;
       const filePath = path.join(uploadsDir, fileName);
 
       let slipUrl = '';
       if (rawBase64) {
         try {
-          fs.writeFileSync(filePath, Buffer.from(rawBase64, 'base64'));
+          const rawBuf = Buffer.from(rawBase64, 'base64');
+          let optBuf = rawBuf;
+          try {
+            optBuf = await sharp(rawBuf)
+              .rotate()
+              .resize({ width: 1400, fit: 'inside', withoutEnlargement: true })
+              .webp({ quality: 82, effort: 3 })
+              .toBuffer();
+          } catch {
+            optBuf = rawBuf;
+          }
+          fs.writeFileSync(filePath, optBuf);
           slipUrl = `/uploads/${fileName}`;
         } catch (err) {
           console.error('Failed to save slip image:', err);
@@ -1296,7 +1308,7 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
 
         slip.sender_avatar_url = matchingCustomer?.picture_url || matchingInv?.picture_url || matchingComment?.picture_url;
         if (!slip.sender_avatar_url && slip.sender_id && !slip.sender_id.startsWith('TEST') && !slip.sender_id.startsWith('FB_USER') && !slip.sender_id.startsWith('mslip')) {
-          slip.sender_avatar_url = `https://graph.facebook.com/v21.0/${slip.sender_id}/picture?type=square&width=120&height=120`;
+          slip.sender_avatar_url = `/api/fb/avatar/${slip.sender_id}?name=${encodeURIComponent(slip.sender_name || '')}`;
         }
       }
 
@@ -1436,11 +1448,21 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                     const imgResp = await fetch(imgUrl);
                     const arrayBuf = await imgResp.arrayBuffer();
                     const buf = Buffer.from(arrayBuf);
-                    rawBase64 = buf.toString('base64');
-                    const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
+                    let optBuf = buf;
+                    try {
+                      optBuf = await sharp(buf)
+                        .rotate()
+                        .resize({ width: 1400, fit: 'inside', withoutEnlargement: true })
+                        .webp({ quality: 82, effort: 3 })
+                        .toBuffer();
+                    } catch {
+                      optBuf = buf;
+                    }
+                    rawBase64 = optBuf.toString('base64');
+                    const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`;
                     const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
                     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-                    fs.writeFileSync(path.join(uploadsDir, fileName), buf);
+                    fs.writeFileSync(path.join(uploadsDir, fileName), optBuf);
                     savedSlipUrl = `/uploads/${fileName}`;
                   } catch (dlErr) {
                     console.error('Image download error:', dlErr);

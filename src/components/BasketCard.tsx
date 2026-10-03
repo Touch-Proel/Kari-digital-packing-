@@ -1207,12 +1207,16 @@ function BasketCardComponent({
               {invoice.picture_url || invoice.facebook_user_id ? (
                 <img
                   src={
-                    invoice.picture_url ||
-                    `/api/fb/avatar/${invoice.facebook_user_id}?name=${encodeURIComponent(invoice.facebook_name || '')}`
+                    invoice.picture_url
+                      ? (invoice.picture_url.startsWith('http://') || invoice.picture_url.startsWith('https://'))
+                        ? `/api/image_proxy?url=${encodeURIComponent(invoice.picture_url)}&w=80`
+                        : invoice.picture_url
+                      : `/api/fb/avatar/${invoice.facebook_user_id}?name=${encodeURIComponent(invoice.facebook_name || '')}`
                   }
                   alt={invoice.facebook_name}
+                  loading="lazy"
+                  decoding="async"
                   referrerPolicy="no-referrer"
-                  crossOrigin="anonymous"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = 'none';
                   }}

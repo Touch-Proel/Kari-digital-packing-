@@ -455,7 +455,21 @@ export function NoBasketUsersModal({
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex-shrink-0 shadow">
                         {user.picture_url ? (
-                          <img src={user.picture_url} alt={user.facebook_name} className="w-full h-full object-cover rounded-[10px]" />
+                          <img
+                            src={
+                              user.picture_url.startsWith('http://') || user.picture_url.startsWith('https://')
+                                ? `/api/image_proxy?url=${encodeURIComponent(user.picture_url)}&w=96`
+                                : user.picture_url
+                            }
+                            alt={user.facebook_name}
+                            loading="lazy"
+                            decoding="async"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                            className="w-full h-full object-cover rounded-[10px]"
+                          />
                         ) : (
                           <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center font-bold text-xs text-cyan-300">
                             {user.facebook_name.slice(0, 2).toUpperCase()}
@@ -588,7 +602,21 @@ export function NoBasketUsersModal({
             <div className="flex items-center gap-3 bg-slate-900/90 p-3 rounded-2xl border border-slate-800">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex-shrink-0">
                 {creatingUser.picture_url ? (
-                  <img src={creatingUser.picture_url} alt="" className="w-full h-full object-cover rounded-[10px]" />
+                  <img
+                    src={
+                      creatingUser.picture_url.startsWith('http://') || creatingUser.picture_url.startsWith('https://')
+                        ? `/api/image_proxy?url=${encodeURIComponent(creatingUser.picture_url)}&w=96`
+                        : creatingUser.picture_url
+                    }
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                    className="w-full h-full object-cover rounded-[10px]"
+                  />
                 ) : (
                   <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center font-bold text-xs text-cyan-300">
                     FB

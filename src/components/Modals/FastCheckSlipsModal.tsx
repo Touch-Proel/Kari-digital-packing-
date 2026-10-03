@@ -99,6 +99,7 @@ export function FastCheckSlipsModal({
   const [timeFilter, setTimeFilter] = useState<'today' | '24h' | 'all'>('today');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'MATCHED' | 'REVIEW' | 'DUPLICATE' | 'APPROVED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [displayLimit, setDisplayLimit] = useState(35);
   
   const [slips, setSlips] = useState<MessengerSlipItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -433,7 +434,8 @@ export function FastCheckSlipsModal({
     
     const psid = slip.sender_id || slip.matched_invoice?.facebook_user_id;
     if (psid && !psid.startsWith('TEST') && !psid.startsWith('FB_USER') && !psid.startsWith('mslip') && !psid.startsWith('NONE')) {
-      return `https://graph.facebook.com/v21.0/${psid}/picture?type=square&width=120&height=120`;
+      const name = slip.sender_name || slip.matched_invoice?.facebook_name || '';
+      return `/api/fb/avatar/${psid}?name=${encodeURIComponent(name)}`;
     }
     return null;
   };
@@ -447,8 +449,25 @@ export function FastCheckSlipsModal({
     size?: 'sm' | 'md' | 'lg';
     onZoom?: (url: string) => void;
   }) => {
+    const rawAvatarUrl = resolveSenderAvatar(slip);
+    const optimizedAvatarUrl = rawAvatarUrl
+      ? rawAvatarUrl.startsWith('http://') || rawAvatarUrl.startsWith('https://')
+        ? `/api/image_proxy?url=${encodeURIComponent(rawAvatarUrl)}&w=96`
+        : rawAvatarUrl
+      : '';
+    const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string>(optimizedAvatarUrl);
     const [hasError, setHasError] = useState(false);
-    const avatarUrl = resolveSenderAvatar(slip);
+
+    useEffect(() => {
+      const opt = rawAvatarUrl
+        ? rawAvatarUrl.startsWith('http://') || rawAvatarUrl.startsWith('https://')
+          ? `/api/image_proxy?url=${encodeURIComponent(rawAvatarUrl)}&w=96`
+          : rawAvatarUrl
+        : '';
+      setCurrentAvatarUrl(opt);
+      setHasError(false);
+    }, [rawAvatarUrl]);
+
     const { primaryName } = getCustomerDisplayInfo(slip);
     const initial = (primaryName || 'F').trim().charAt(0).toUpperCase();
 
@@ -464,26 +483,27 @@ export function FastCheckSlipsModal({
       lg: 'w-4 h-4 text-[9.5px]'
     }[size];
 
-    const hasRealImage = Boolean(avatarUrl && !hasError);
+    const hasRealImage = Boolean(currentAvatarUrl && !hasError);
 
     return (
       <div
         className={`relative inline-block flex-shrink-0 group ${sizeClasses} cursor-pointer`}
         title={`Facebook Profile: ${primaryName}${hasRealImage ? ' (ចុចមើលរូប Profile ធំ)' : ''}`}
         onClick={(e) => {
-          if (hasRealImage && avatarUrl && onZoom) {
+          if (hasRealImage && currentAvatarUrl && onZoom) {
             e.stopPropagation();
-            onZoom(avatarUrl);
+            onZoom(currentAvatarUrl);
           }
         }}
       >
         <div className={`w-full h-full rounded-full border-2 ${hasRealImage ? 'border-blue-400/80 hover:border-blue-300' : 'border-indigo-500/50'} overflow-hidden bg-gradient-to-tr from-blue-950 via-indigo-950 to-slate-900 flex items-center justify-center shadow-md relative ring-1 ring-blue-500/30 group-hover:scale-105 transition-all`}>
-          {hasRealImage && avatarUrl ? (
+          {hasRealImage ? (
             <img
-              src={avatarUrl}
+              src={currentAvatarUrl}
               alt={primaryName}
+              loading="lazy"
+              decoding="async"
               referrerPolicy="no-referrer"
-              crossOrigin="anonymous"
               onError={() => setHasError(true)}
               className="w-full h-full object-cover relative z-10"
             />
@@ -500,6 +520,113 @@ export function FastCheckSlipsModal({
           title="Facebook Messenger"
         >
           f
+        </span>
+      </div>
+    );
+  };
+
+  // ⚡ High-Speed Slip Thumbnail with Shimmer Skeleton, Lazy Loading, and Auto-Proxy Fallback
+  const FastSlipThumbnail = ({
+    slip,
+    size = 'md',
+    isAlert = false,
+    onZoom
+  }: {
+    slip: MessengerSlipItem;
+    size?: 'sm' | 'md' | 'lg';
+    isAlert?: boolean;
+    onZoom?: (url: string) => void;
+  }) => {
+    const rawUrl = slip.slip_url;
+    // Serve high-speed 240px WebP thumbnail with proxy caching
+    const thumbUrl = rawUrl
+      ? rawUrl.startsWith('/uploads/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
+        ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=240`
+        : rawUrl
+      : '';
+    const [imgSrc, setImgSrc] = useState<string>(thumbUrl || rawUrl || '');
+    const [isLoaded, setIsLoaded] = useState(false);
+    const [hasError, setHasError] = useState(false);
+
+    useEffect(() => {
+      const opt = rawUrl
+        ? rawUrl.startsWith('/uploads/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
+          ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=240`
+          : rawUrl
+        : '';
+      setImgSrc(opt || rawUrl || '');
+      setIsLoaded(false);
+      setHasError(false);
+    }, [rawUrl]);
+
+    const sizeClass = size === 'sm' ? 'w-12 h-12' : size === 'lg' ? 'w-20 h-20' : 'w-16 h-16';
+
+    const handleImgError = () => {
+      // If optimized thumbnail fails, try rawUrl once, otherwise show error fallback
+      if (imgSrc !== rawUrl && rawUrl) {
+        setImgSrc(rawUrl);
+      } else {
+        setHasError(true);
+        setIsLoaded(true);
+      }
+    };
+
+    const bankName = (slip.extracted?.bank_name || '').toLowerCase();
+    const bankTag = bankName.includes('aba') ? 'ABA' : bankName.includes('wing') ? 'WING' : bankName.includes('acleda') ? 'ACL' : bankName.includes('bakong') ? 'KHQR' : 'SLIP';
+
+    if (!rawUrl || hasError) {
+      return (
+        <div
+          className={`relative ${sizeClass} rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border ${
+            isAlert ? 'border-rose-500/80 ring-2 ring-rose-500/40' : 'border-slate-800'
+          } flex flex-col items-center justify-center p-1 shadow-md flex-shrink-0 select-none`}
+        >
+          <span className="text-[10px] font-black text-amber-300 bg-amber-950/80 px-1 py-0.5 rounded border border-amber-500/30 mb-0.5">
+            {bankTag}
+          </span>
+          <span className="text-[9px] text-slate-400 font-bold">📄 Slip</span>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        onClick={() => {
+          if (onZoom && rawUrl) {
+            // High-res zoom (1400px)
+            const zoomUrl = rawUrl.startsWith('/uploads/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
+              ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=1400`
+              : rawUrl;
+            onZoom(zoomUrl);
+          }
+        }}
+        className={`relative ${sizeClass} rounded-xl overflow-hidden border shadow-md flex-shrink-0 cursor-pointer group bg-slate-950 ${
+          isAlert ? 'border-rose-500 ring-2 ring-rose-500/40' : 'border-slate-700/80 hover:border-blue-400'
+        }`}
+        title="ចុចមើលរូបភាព Slip ធំ"
+      >
+        {/* Shimmer loading skeleton */}
+        {!isLoaded && (
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 animate-pulse flex items-center justify-center z-0">
+            <span className="text-[10px] font-bold text-slate-500">...</span>
+          </div>
+        )}
+
+        <img
+          src={imgSrc}
+          alt="Slip"
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onLoad={() => setIsLoaded(true)}
+          onError={handleImgError}
+          className={`w-full h-full object-cover transition-opacity duration-200 relative z-10 ${
+            isLoaded ? 'opacity-100' : 'opacity-0'
+          } group-hover:scale-105 transition-transform`}
+        />
+
+        <span className="absolute bottom-0 right-0 bg-black/80 text-[8.5px] px-1 py-0.2 rounded-tl text-white z-20 pointer-events-none">
+          🔍
         </span>
       </div>
     );
@@ -769,7 +896,7 @@ export function FastCheckSlipsModal({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {filteredSlips.map((slip, idx) => {
+                    {filteredSlips.slice(0, displayLimit).map((slip, idx) => {
                       const isApproved = slip.status === 'APPROVED' || slip.is_approved;
                       const isCrossAccountDup = slip.duplicate_warning?.duplicate_type === 'CROSS_ACCOUNT';
                       const isSameAccountDup = slip.duplicate_warning?.duplicate_type === 'SAME_ACCOUNT';
@@ -812,28 +939,12 @@ export function FastCheckSlipsModal({
                           </td>
 
                           <td className="py-2 px-3 text-center">
-                            {slip.slip_url ? (
-                              <div className="relative inline-block">
-                                <img
-                                  src={slip.slip_url}
-                                  alt="Slip"
-                                  onClick={() => setPreviewImage(slip.slip_url)}
-                                  className={`w-12 h-12 object-cover rounded-xl border hover:scale-105 cursor-pointer shadow-sm mx-auto ${
-                                    isCrossAccountDup || isFraud ? 'border-rose-500 ring-2 ring-rose-500/40' : 'border-slate-700'
-                                  }`}
-                                  title="ចុចមើលរូបធំ"
-                                />
-                                {(isCrossAccountDup || isFraud) && (
-                                  <span className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black shadow animate-pulse">
-                                    !
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-sm text-slate-500 mx-auto">
-                                📋
-                              </div>
-                            )}
+                            <FastSlipThumbnail
+                              slip={slip}
+                              size="sm"
+                              isAlert={isCrossAccountDup || isFraud}
+                              onZoom={setPreviewImage}
+                            />
                           </td>
 
                           <td className="py-2 px-3">
@@ -1081,27 +1192,12 @@ export function FastCheckSlipsModal({
                     >
                       {/* Top Row: Thumbnail + Customer + Status Badge */}
                       <div className="flex items-start gap-2.5">
-                        {slip.slip_url ? (
-                          <div
-                            onClick={() => setPreviewImage(slip.slip_url)}
-                            className="relative flex-shrink-0 cursor-pointer"
-                          >
-                            <img
-                              src={slip.slip_url}
-                              alt="Slip"
-                              className={`w-16 h-16 object-cover rounded-xl border shadow-md ${
-                                isCrossAccountDup || isFraud ? 'border-rose-500 ring-2 ring-rose-500/40' : 'border-slate-700'
-                              }`}
-                            />
-                            <span className="absolute bottom-0 right-0 bg-black/80 text-[9px] px-1 rounded text-white">
-                              🔍
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="w-16 h-16 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xl flex-shrink-0">
-                            📋
-                          </div>
-                        )}
+                        <FastSlipThumbnail
+                          slip={slip}
+                          size="md"
+                          isAlert={isCrossAccountDup || isFraud}
+                          onZoom={setPreviewImage}
+                        />
 
                         <div className="flex-1 min-w-0">
                           {(() => {

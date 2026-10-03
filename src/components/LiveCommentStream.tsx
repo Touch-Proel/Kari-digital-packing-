@@ -396,7 +396,21 @@ export function LiveCommentStream({
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 overflow-hidden flex-shrink-0 flex items-center justify-center text-xs font-bold text-sky-300">
                       {order.picture_url ? (
-                        <img src={order.picture_url} alt="" className="w-full h-full object-cover" />
+                        <img
+                          src={
+                            order.picture_url.startsWith('http://') || order.picture_url.startsWith('https://')
+                              ? `/api/image_proxy?url=${encodeURIComponent(order.picture_url)}&w=80`
+                              : order.picture_url
+                          }
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
                         <span>{order.customer_name?.charAt(0) || '👤'}</span>
                       )}
