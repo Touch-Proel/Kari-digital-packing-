@@ -1600,9 +1600,15 @@ export function FastCheckSlipsModal({
         >
           <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
             <img
-              src={previewImage}
+              src={
+                previewImage.startsWith('http://') || previewImage.startsWith('https://')
+                  ? `/api/image_proxy?url=${encodeURIComponent(previewImage)}&w=1600`
+                  : previewImage
+              }
               alt="Preview"
-              className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl border border-slate-700"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl border border-slate-700 bg-slate-900"
             />
             <div className="text-xs text-slate-400 mt-2 bg-slate-900/90 px-3 py-1 rounded-full border border-slate-800">
               ចុចកន្លែងណាក៏បានដើម្បីបិទរូបធំ

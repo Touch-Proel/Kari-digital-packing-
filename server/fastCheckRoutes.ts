@@ -1443,7 +1443,7 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
 
     if (page && page.access_token && page.id) {
       try {
-        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(40){id,created_time,from,message,attachments{id,mime_type,name,size,image_data}}&limit=50&access_token=${page.access_token}`;
+        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(40){id,created_time,from,message,attachments{id,mime_type,name,size,file_url,image_data}}&limit=50&access_token=${page.access_token}`;
         let pageCount = 0;
         const maxPages = since === 'all' ? 5 : 3;
 
@@ -1495,7 +1495,7 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
 
               const attachments = m.attachments?.data || [];
               for (const att of attachments) {
-                const imgUrl = att.image_data?.url;
+                const imgUrl = att.image_data?.url || att.file_url || att.image_data?.preview_url || att.payload?.url || att.url;
                 if (!imgUrl || att.image_data?.render_as_sticker) continue;
 
                 // Check if already in queue by URL or ID
