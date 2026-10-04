@@ -307,6 +307,7 @@ export async function persistToSqlite(data: {
   customers: Customer[];
   packerLogs: PackerLog[];
   activeFacebookPage: FacebookPage | null;
+  connectedFacebookPages?: FacebookPage[];
   rawComments?: any[];
   messengerSlips?: any[];
 }) {
@@ -335,6 +336,9 @@ export async function persistToSqlite(data: {
       db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);', ['settings', JSON.stringify(data.settings)]);
       if (data.activeFacebookPage) {
         db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);', ['active_facebook_page', JSON.stringify(data.activeFacebookPage)]);
+      }
+      if (data.connectedFacebookPages && Array.isArray(data.connectedFacebookPages)) {
+        db.run('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?);', ['connected_facebook_pages', JSON.stringify(data.connectedFacebookPages)]);
       }
 
       // 2. Products
@@ -574,6 +578,7 @@ export async function loadFromSqlite(): Promise<{
   customers?: Customer[];
   packerLogs?: PackerLog[];
   activeFacebookPage?: FacebookPage;
+  connectedFacebookPages?: FacebookPage[];
   rawComments?: any[];
   messengerSlips?: any[];
 } | null> {
@@ -598,6 +603,9 @@ export async function loadFromSqlite(): Promise<{
         }
         if (key === 'active_facebook_page') {
           try { result.activeFacebookPage = JSON.parse(val); } catch {}
+        }
+        if (key === 'connected_facebook_pages') {
+          try { result.connectedFacebookPages = JSON.parse(val); } catch {}
         }
       }
     }

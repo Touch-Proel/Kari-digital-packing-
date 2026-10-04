@@ -35,6 +35,7 @@ export function FacebookAuthModal({
   const [customPostId, setCustomPostId] = useState('');
   const [showManualForm, setShowManualForm] = useState(() => isHttpInsecure);
   const [callbackUrl, setCallbackUrl] = useState('');
+  const [isRefreshingPages, setIsRefreshingPages] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -161,9 +162,34 @@ export function FacebookAuthModal({
     }
   };
 
+  const handleRefreshPages = async () => {
+    setIsRefreshingPages(true);
+    onShowToast('⏳ កំពុងទាញយកបញ្ជី Facebook Pages ទាំងអស់...');
+    try {
+      const res = await fetch('/api/fb/refresh_pages', { method: 'POST' });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.pages) && data.pages.length > 0) {
+        setPages(data.pages);
+        if (data.activePage) {
+          onPageSelected(data.activePage);
+        }
+        playSuccessFanfare();
+        onShowToast(`🎉 បានទាញយកទំព័រ Facebook សរុប ${data.pages.length} ដោយជោគជ័យ!`);
+        fetchPosts();
+      } else {
+        await fetchFbStatus();
+        onShowToast('✅ បានធ្វើបច្ចុប្បន្នភាពបញ្ជីទំព័រ Facebook រួចរាល់');
+      }
+    } catch {
+      await fetchFbStatus();
+    } finally {
+      setIsRefreshingPages(false);
+    }
+  };
+
   const handleManualConnect = async () => {
     if (!manualToken.trim()) {
-      alert('សូមបញ្ចូល Page Access Token!');
+      alert('សូមបញ្ចូល Page Access Token ឬបញ្ជី Tokens!');
       return;
     }
     try {
@@ -177,9 +203,18 @@ export function FacebookAuthModal({
       });
       const data = await res.json();
       if (data.success) {
-        onPageSelected(data.activePage);
-        onShowToast(`✅ បានភ្ជាប់ទំព័រ ${data.activePage.name} (ID: ${data.activePage.id}) ដោយជោគជ័យ!`);
+        if (data.pages && Array.isArray(data.pages)) {
+          setPages(data.pages);
+        }
+        if (data.activePage) {
+          onPageSelected(data.activePage);
+        }
+        const count = data.imported_count || data.pages?.length || 1;
+        playSuccessFanfare();
+        onShowToast(`🎉 បានភ្ជាប់ & នាំចូល Facebook Pages សរុប ${count} ដោយជោគជ័យ!`);
         setShowManualForm(false);
+        setManualToken('');
+        setManualPageName('');
         fetchFbStatus();
         fetchPosts();
       } else {
@@ -329,17 +364,27 @@ export function FacebookAuthModal({
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setShowManualForm(true)}
-                  className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2.5 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all flex items-center gap-1 active:scale-95"
+                  onClick={handleRefreshPages}
+                  disabled={isRefreshingPages}
+                  className="bg-slate-800 hover:bg-slate-700 text-teal-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all flex items-center gap-1 active:scale-95 disabled:opacity-60"
+                  title="ទាញយកបញ្ជី Facebook Pages ទាំងអស់ពីគណនីឡើងវិញ"
                 >
-                  <span>➕ បន្ថែមផេក</span>
+                  <span className={isRefreshingPages ? 'animate-spin' : ''}>🔄</span>
+                  <span>{isRefreshingPages ? 'កំពុងទាញ...' : 'Refresh'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowManualForm(true)}
+                  className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all flex items-center gap-1 active:scale-95"
+                >
+                  <span>➕ បន្ថែម / Import</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleConnectFacebook}
                   className="bg-gradient-to-r from-[#1877F2] to-[#0A60D4] hover:from-blue-600 hover:to-blue-700 text-white px-2.5 py-1 rounded-lg text-[10.5px] font-black flex items-center gap-1 shadow transition-all active:scale-95 border border-blue-400/30"
                 >
-                  <span>🔄 ចូល FB</span>
+                  <span>⚡ ចូល FB</span>
                 </button>
               </div>
             </div>
@@ -653,34 +698,36 @@ export function FacebookAuthModal({
 
             {showManualForm && (
               <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 flex flex-col gap-2.5 shadow-inner">
-                <div className="text-[11px] text-slate-300 bg-blue-950/60 p-2 rounded-xl border border-blue-500/30">
-                  💡 ប្រសិនបើចុច «ចូលគណនី FB» ចេញផ្ទាំង Error ឬប្លុក URL សូមគ្រាន់តែយក <strong>Page Access Token</strong> ពី Meta Developer / Graph API Explorer មក Paste ត្រង់នេះ គឺដំណើរការភ្លាមៗ 100%!
+                <div className="text-[11px] text-slate-300 bg-blue-950/60 p-2.5 rounded-xl border border-blue-500/30 leading-relaxed">
+                  💡 <strong>គាំទ្រ Import ច្រើនផេកក្នុងពេលតែមួយ ៖</strong><br/>
+                  • បើអ្នក Paste <strong>User Access Token</strong> ប្រព័ន្ធនឹងទាញយក <strong>Facebook Pages ទាំងអស់</strong> ដែលអ្នកគ្រប់គ្រងដោយស្វ័យប្រវត្តិ!<br/>
+                  • ឬអាច Paste <strong>បញ្ជី Page Access Tokens ច្រើន</strong> (ចុះបន្ទាត់មួយ Token មួយ ឬទម្រង់ JSON) ដើម្បី Import ចូលទាំងអស់តែម្ដង។
                 </div>
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">ឈ្មោះ Facebook Page (ជម្រើសបន្ថែម) ៖</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">ឈ្មោះ Facebook Page (ជម្រើសបន្ថែម / ទុកទំនេរបាន) ៖</label>
                   <input
                     type="text"
                     value={manualPageName}
                     onChange={e => setManualPageName(e.target.value)}
-                    placeholder="e.g. ChatbotKH"
+                    placeholder="e.g. ChatbotKH Store (ទុកទំនេរដើម្បីឱ្យប្រព័ន្ធស្វែងរកឈ្មោះពិត)"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">Page Access Token (EAAR...) ៖</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">Access Token (EAAB... / EAAR...) ៖</label>
                   <textarea
-                    rows={2}
+                    rows={3}
                     value={manualToken}
                     onChange={e => setManualToken(e.target.value)}
-                    placeholder="Paste Page Access Token (EAAR...) ពី Meta..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-300 font-mono outline-none focus:border-cyan-400"
+                    placeholder="Paste Page Access Token (EAAB...) ឬ User Token ឬចុះបន្ទាត់ដាក់ច្រើន Token..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-300 font-mono outline-none focus:border-cyan-400 leading-tight"
                   />
                 </div>
                 <button
                   onClick={handleManualConnect}
-                  className="w-full py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-xl text-xs font-bold shadow transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+                  className="w-full py-2.5 bg-gradient-to-r from-blue-600 via-cyan-600 to-teal-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-xl text-xs font-black shadow transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  <span>💾 រក្សាទុក & ភ្ជាប់ទំព័រភ្លាមៗ</span>
+                  <span>💾 រក្សាទុក & នាំចូល Facebook Pages ទាំងអស់</span>
                 </button>
               </div>
             )}

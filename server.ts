@@ -16,6 +16,7 @@ import {
   handleOAuthCallback,
   getAvailablePages,
   selectPageById,
+  refreshFacebookAccounts,
   fetchPageVideosAndPosts,
   fetchFacebookComments
 } from './server/fbAuth';
@@ -27,6 +28,7 @@ import {
   bumpDataRevision,
   invoices,
   addOrUpdateConnectedPage,
+  batchAddConnectedPages,
   removeConnectedPage,
   getConnectedFacebookPages
 } from './server/db';
@@ -347,44 +349,125 @@ app.post('/api/fb/page/select', (req: Request, res: Response) => {
   }
 });
 
-// 5. Manual Page Token Connect (Auto-detect real Page ID and Name from Graph API)
-app.post('/api/fb/manual_connect', async (req: Request, res: Response) => {
-  const { page_id, page_name, access_token } = req.body;
-  if (!access_token) {
-    return res.status(400).json({ success: false, error: 'Page Access Token is required' });
+// 5. Manual Page Token & Multi-Page Batch Connect (Supports single page token, multi-line tokens, JSON, and User Access Token with /me/accounts)
+app.post(['/api/fb/manual_connect', '/api/fb/import_pages'], async (req: Request, res: Response) => {
+  const { page_id, page_name, access_token, tokens } = req.body;
+  const rawInput = String(access_token || tokens || '').trim();
+  if (!rawInput) {
+    return res.status(400).json({ success: false, error: 'សូមបញ្ចូល Access Token ឬបញ្ជី Page Tokens!' });
   }
 
-  const tokenStr = String(access_token).trim();
-  let verifiedId = page_id || '';
-  let verifiedName = String(page_name || '').trim();
-  let pagePicture: any = undefined;
+  const collectedPages: any[] = [];
+  const candidateTokenList: string[] = [];
 
-  // Query /me on Facebook Graph API to get the real Page ID and official name
-  try {
-    const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,picture&access_token=${tokenStr}`);
-    const meData = await meRes.json();
-    if (meData.id) {
-      verifiedId = meData.id;
-      verifiedName = meData.name || verifiedName;
-      pagePicture = meData.picture;
-    } else if (meData.error) {
-      console.warn('Facebook token validation warning:', meData.error);
+  // Check if JSON array was pasted
+  if (rawInput.startsWith('[') && rawInput.endsWith(']')) {
+    try {
+      const parsedArray = JSON.parse(rawInput);
+      if (Array.isArray(parsedArray)) {
+        for (const item of parsedArray) {
+          if (typeof item === 'string' && item.trim()) {
+            candidateTokenList.push(item.trim());
+          } else if (item && typeof item === 'object') {
+            if (item.access_token) {
+              candidateTokenList.push(String(item.access_token).trim());
+            } else if (item.token) {
+              candidateTokenList.push(String(item.token).trim());
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // If not JSON array, parse line by line or comma-separated
+  if (candidateTokenList.length === 0) {
+    const lines = rawInput.split(/[\r\n,]+/).map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      // If formatted as "Page Name: EAAB..." or "ID: EAAB...", extract token part
+      const tokenMatch = line.match(/(EA[A-Za-z0-9_-]{30,})/);
+      if (tokenMatch && tokenMatch[1]) {
+        candidateTokenList.push(tokenMatch[1]);
+      } else if (line.length > 20) {
+        candidateTokenList.push(line);
+      }
     }
-  } catch (err) {
-    console.warn('Failed to verify token with Facebook /me:', err);
   }
 
-  const newPage = {
-    id: verifiedId || `manual_page_${Date.now()}`,
-    name: verifiedName || 'Facebook Page',
-    access_token: tokenStr,
-    picture: pagePicture
-  };
+  // Deduplicate tokens
+  const uniqueTokens = Array.from(new Set(candidateTokenList));
 
-  addOrUpdateConnectedPage(newPage);
-  setActiveFacebookPage(newPage);
+  for (const token of uniqueTokens) {
+    try {
+      // 1. First test if token is a User/System Token that can access /me/accounts (returns ALL managed pages)
+      const accountsRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,category,picture,tasks&limit=100&access_token=${token}`);
+      const accountsData = await accountsRes.json();
+
+      if (accountsData.data && Array.isArray(accountsData.data) && accountsData.data.length > 0) {
+        for (const page of accountsData.data) {
+          if (page.id && (page.access_token || token)) {
+            collectedPages.push({
+              id: page.id,
+              name: page.name || 'Facebook Page',
+              access_token: page.access_token || token,
+              category: page.category,
+              picture: page.picture
+            });
+          }
+        }
+        continue;
+      }
+
+      // 2. If not a user accounts token, test if it is a single Page Access Token via /me
+      const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,picture,category&access_token=${token}`);
+      const meData = await meRes.json();
+      if (meData.id) {
+        collectedPages.push({
+          id: meData.id,
+          name: meData.name || page_name || 'Facebook Page',
+          access_token: token,
+          category: meData.category,
+          picture: meData.picture
+        });
+      } else {
+        // Fallback for custom/simulated or direct page entry
+        collectedPages.push({
+          id: page_id || `manual_page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          name: page_name || `Facebook Page ${collectedPages.length + 1}`,
+          access_token: token
+        });
+      }
+    } catch (err) {
+      console.warn('Facebook token validation error for token:', err);
+      collectedPages.push({
+        id: page_id || `manual_page_${Date.now()}`,
+        name: page_name || 'Facebook Page',
+        access_token: token
+      });
+    }
+  }
+
+  // Deduplicate collected pages by ID
+  const pageMap = new Map<string, any>();
+  for (const p of collectedPages) {
+    if (p.id) pageMap.set(p.id, p);
+  }
+  const finalPages = Array.from(pageMap.values());
+
+  if (finalPages.length === 0) {
+    return res.status(400).json({ success: false, error: 'មិនអាចទាញយកទំព័រ Facebook ពី Token នេះបានទេ។ សូមពិនិត្យមើល Token ម្តងទៀត!' });
+  }
+
+  batchAddConnectedPages(finalPages, true);
   bumpDataRevision();
-  res.json({ success: true, activePage: newPage, pages: getAvailablePages() });
+
+  res.json({
+    success: true,
+    imported_count: finalPages.length,
+    activePage: activeFacebookPage,
+    pages: getAvailablePages(),
+    message: `បានភ្ជាប់ Facebook Pages សរុប ${finalPages.length} ដោយជោគជ័យ!`
+  });
 });
 
 // 5.1 Remove / Disconnect a Facebook Page
@@ -392,6 +475,16 @@ app.delete('/api/fb/page/:page_id', (req: Request, res: Response) => {
   const { page_id } = req.params;
   removeConnectedPage(page_id);
   res.json({ success: true, activePage: activeFacebookPage, pages: getAvailablePages() });
+});
+
+// 5.2 Force Refresh All Managed Pages from Facebook
+app.post(['/api/fb/refresh_pages', '/api/fb/pages/refresh'], async (_req: Request, res: Response) => {
+  try {
+    const pages = await refreshFacebookAccounts();
+    res.json({ success: true, activePage: activeFacebookPage, pages });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Failed to refresh pages' });
+  }
 });
 
 // 5.5 Set Active Live ID

@@ -78,6 +78,7 @@ export async function saveDatabaseToDisk(forceSync = false) {
         customers,
         packerLogs,
         activeFacebookPage,
+        connectedFacebookPages,
         messengerSlips
       }).catch(err => console.error('[SQLite] Persist error:', err));
     }
@@ -498,14 +499,36 @@ export function setActiveFacebookPage(page: FacebookPage | null) {
   saveDatabaseToDisk();
 }
 
-export function addOrUpdateConnectedPage(page: FacebookPage) {
+export function addOrUpdateConnectedPage(page: FacebookPage, makeActive = true) {
   const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
   if (existingIdx >= 0) {
     connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
   } else {
     connectedFacebookPages.push(page);
   }
-  activeFacebookPage = page;
+  if (makeActive || !activeFacebookPage) {
+    activeFacebookPage = page;
+  }
+  bumpDataRevision();
+  saveDatabaseToDisk();
+}
+
+export function batchAddConnectedPages(pages: FacebookPage[], selectFirstAsActive = true) {
+  if (!pages || pages.length === 0) return;
+  for (const page of pages) {
+    const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
+    if (existingIdx >= 0) {
+      connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
+    } else {
+      connectedFacebookPages.push(page);
+    }
+  }
+  if (selectFirstAsActive && pages.length > 0) {
+    const existingActive = connectedFacebookPages.find(p => p.id === activeFacebookPage?.id);
+    if (!existingActive) {
+      activeFacebookPage = pages[0];
+    }
+  }
   bumpDataRevision();
   saveDatabaseToDisk();
 }
@@ -620,6 +643,11 @@ export async function loadDatabaseFromDisk() {
       }
       if (sqliteData.activeFacebookPage) {
         activeFacebookPage = sqliteData.activeFacebookPage;
+      }
+      if (sqliteData.connectedFacebookPages && Array.isArray(sqliteData.connectedFacebookPages) && sqliteData.connectedFacebookPages.length > 0) {
+        connectedFacebookPages.length = 0;
+        connectedFacebookPages.push(...sqliteData.connectedFacebookPages);
+        console.log(`[SQLite Loaded] Restored ${connectedFacebookPages.length} connected Facebook pages.`);
       }
       if (sqliteData.rawComments && sqliteData.rawComments.length > 0) {
         rawComments.length = 0;
