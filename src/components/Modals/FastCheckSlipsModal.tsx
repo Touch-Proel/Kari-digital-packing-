@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
 
 interface FastCheckSlipsModalProps {
@@ -129,11 +129,20 @@ export function FastCheckSlipsModal({
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [isSavingKey, setIsSavingKey] = useState(false);
 
+  const isFetchingRef = useRef(false);
+
   // Fetch Slips from Backend (Messenger Auto-Scanned)
   const fetchMessengerSlips = async (showLoading = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     if (showLoading) setIsLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
     try {
-      const res = await fetch(`/api/fast_check/messenger_slips?since=${timeFilter}`);
+      const res = await fetch(`/api/fast_check/messenger_slips?since=${timeFilter}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.slips)) {
@@ -143,6 +152,8 @@ export function FastCheckSlipsModal({
     } catch (err) {
       console.error('Error fetching messenger slips:', err);
     } finally {
+      clearTimeout(timeoutId);
+      isFetchingRef.current = false;
       if (showLoading) setIsLoading(false);
     }
   };
@@ -190,12 +201,12 @@ export function FastCheckSlipsModal({
     }
   }, [isOpen, timeFilter]);
 
-  // Auto-Polling every 10 seconds silently
+  // Auto-Polling every 15 seconds silently with guard
   useEffect(() => {
     if (!isOpen) return;
     const interval = setInterval(() => {
       fetchMessengerSlips(false);
-    }, 10000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [isOpen, timeFilter]);
 
@@ -450,21 +461,9 @@ export function FastCheckSlipsModal({
     onZoom?: (url: string) => void;
   }) => {
     const rawAvatarUrl = resolveSenderAvatar(slip);
-    const optimizedAvatarUrl = rawAvatarUrl
-      ? rawAvatarUrl.startsWith('http://') || rawAvatarUrl.startsWith('https://')
-        ? `/api/image_proxy?url=${encodeURIComponent(rawAvatarUrl)}&w=96`
-        : rawAvatarUrl
-      : '';
-    const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string>(optimizedAvatarUrl);
     const [hasError, setHasError] = useState(false);
 
     useEffect(() => {
-      const opt = rawAvatarUrl
-        ? rawAvatarUrl.startsWith('http://') || rawAvatarUrl.startsWith('https://')
-          ? `/api/image_proxy?url=${encodeURIComponent(rawAvatarUrl)}&w=96`
-          : rawAvatarUrl
-        : '';
-      setCurrentAvatarUrl(opt);
       setHasError(false);
     }, [rawAvatarUrl]);
 
@@ -483,25 +482,30 @@ export function FastCheckSlipsModal({
       lg: 'w-4 h-4 text-[9.5px]'
     }[size];
 
-    const hasRealImage = Boolean(currentAvatarUrl && !hasError);
+    const avatarSrc = rawAvatarUrl
+      ? rawAvatarUrl.startsWith('http://') || rawAvatarUrl.startsWith('https://')
+        ? `/api/image_proxy?url=${encodeURIComponent(rawAvatarUrl)}&w=96`
+        : rawAvatarUrl
+      : '';
+
+    const showImg = Boolean(avatarSrc && !hasError);
 
     return (
       <div
         className={`relative inline-block flex-shrink-0 group ${sizeClasses} cursor-pointer`}
-        title={`Facebook Profile: ${primaryName}${hasRealImage ? ' (ចុចមើលរូប Profile ធំ)' : ''}`}
+        title={`Facebook Profile: ${primaryName}${showImg ? ' (ចុចមើលរូប Profile ធំ)' : ''}`}
         onClick={(e) => {
-          if (hasRealImage && currentAvatarUrl && onZoom) {
+          if (showImg && avatarSrc && onZoom) {
             e.stopPropagation();
-            onZoom(currentAvatarUrl);
+            onZoom(avatarSrc);
           }
         }}
       >
-        <div className={`w-full h-full rounded-full border-2 ${hasRealImage ? 'border-blue-400/80 hover:border-blue-300' : 'border-indigo-500/50'} overflow-hidden bg-gradient-to-tr from-blue-950 via-indigo-950 to-slate-900 flex items-center justify-center shadow-md relative ring-1 ring-blue-500/30 group-hover:scale-105 transition-all`}>
-          {hasRealImage ? (
+        <div className={`w-full h-full rounded-full border-2 ${showImg ? 'border-blue-400/80 hover:border-blue-300' : 'border-indigo-500/50'} overflow-hidden bg-gradient-to-tr from-blue-950 via-indigo-950 to-slate-900 flex items-center justify-center shadow-md relative ring-1 ring-blue-500/30 group-hover:scale-105 transition-all`}>
+          {showImg ? (
             <img
-              src={currentAvatarUrl}
+              src={avatarSrc}
               alt={primaryName}
-              loading="lazy"
               decoding="async"
               referrerPolicy="no-referrer"
               onError={() => setHasError(true)}
@@ -525,7 +529,7 @@ export function FastCheckSlipsModal({
     );
   };
 
-  // ⚡ High-Speed Slip Thumbnail with Shimmer Skeleton, Lazy Loading, and Auto-Proxy Fallback
+  // ⚡ High-Speed Slip Thumbnail with Direct & Cached WebP Serving
   const FastSlipThumbnail = ({
     slip,
     size = 'md',
@@ -538,38 +542,13 @@ export function FastCheckSlipsModal({
     onZoom?: (url: string) => void;
   }) => {
     const rawUrl = slip.slip_url;
-    // Serve high-speed 240px WebP thumbnail with proxy caching
-    const thumbUrl = rawUrl
-      ? rawUrl.startsWith('/uploads/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
-        ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=240`
-        : rawUrl
-      : '';
-    const [imgSrc, setImgSrc] = useState<string>(thumbUrl || rawUrl || '');
-    const [isLoaded, setIsLoaded] = useState(false);
     const [hasError, setHasError] = useState(false);
 
     useEffect(() => {
-      const opt = rawUrl
-        ? rawUrl.startsWith('/uploads/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
-          ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=240`
-          : rawUrl
-        : '';
-      setImgSrc(opt || rawUrl || '');
-      setIsLoaded(false);
       setHasError(false);
     }, [rawUrl]);
 
     const sizeClass = size === 'sm' ? 'w-12 h-12' : size === 'lg' ? 'w-20 h-20' : 'w-16 h-16';
-
-    const handleImgError = () => {
-      // If optimized thumbnail fails, try rawUrl once, otherwise show error fallback
-      if (imgSrc !== rawUrl && rawUrl) {
-        setImgSrc(rawUrl);
-      } else {
-        setHasError(true);
-        setIsLoaded(true);
-      }
-    };
 
     const bankName = (slip.extracted?.bank_name || '').toLowerCase();
     const bankTag = bankName.includes('aba') ? 'ABA' : bankName.includes('wing') ? 'WING' : bankName.includes('acleda') ? 'ACL' : bankName.includes('bakong') ? 'KHQR' : 'SLIP';
@@ -589,15 +568,16 @@ export function FastCheckSlipsModal({
       );
     }
 
+    // Direct path for uploads, proxy for external URLs
+    const displaySrc = rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
+      ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=240`
+      : rawUrl;
+
     return (
       <div
         onClick={() => {
           if (onZoom && rawUrl) {
-            // High-res zoom (1400px)
-            const zoomUrl = rawUrl.startsWith('/uploads/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
-              ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=1400`
-              : rawUrl;
-            onZoom(zoomUrl);
+            onZoom(rawUrl);
           }
         }}
         className={`relative ${sizeClass} rounded-xl overflow-hidden border shadow-md flex-shrink-0 cursor-pointer group bg-slate-950 ${
@@ -605,24 +585,13 @@ export function FastCheckSlipsModal({
         }`}
         title="ចុចមើលរូបភាព Slip ធំ"
       >
-        {/* Shimmer loading skeleton */}
-        {!isLoaded && (
-          <div className="absolute inset-0 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 animate-pulse flex items-center justify-center z-0">
-            <span className="text-[10px] font-bold text-slate-500">...</span>
-          </div>
-        )}
-
         <img
-          src={imgSrc}
+          src={displaySrc}
           alt="Slip"
-          loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"
-          onLoad={() => setIsLoaded(true)}
-          onError={handleImgError}
-          className={`w-full h-full object-cover transition-opacity duration-200 relative z-10 ${
-            isLoaded ? 'opacity-100' : 'opacity-0'
-          } group-hover:scale-105 transition-transform`}
+          onError={() => setHasError(true)}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform bg-slate-900"
         />
 
         <span className="absolute bottom-0 right-0 bg-black/80 text-[8.5px] px-1 py-0.2 rounded-tl text-white z-20 pointer-events-none">

@@ -723,22 +723,35 @@ async function startPollingLoop() {
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 28000);
       const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${lastUpdateOffset}&timeout=20&allowed_updates=["message","channel_post","edited_message"]`;
-      let res = await fetch(url, {
-        signal: pollingAbortController.signal
-      });
+      
+      let res: any;
+      try {
+        res = await fetch(url, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!res.ok) {
+        if (res.status === 409) {
+          // 409 Conflict: Another instance or hook is polling with this token. Back off to prevent high CPU loop.
+          consecutiveErrors++;
+          await new Promise(r => setTimeout(r, 15000));
+          continue;
+        }
+
         const errData = await res.json().catch(() => null);
         if (errData?.description && (errData.description.includes('webhook is active') || errData.description.includes('deleteWebhook'))) {
           console.log('⚡ Telegram Bot Service: Detected active webhook, auto-deleting webhook...');
           await deleteTelegramWebhook(token);
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 2000));
           continue;
         }
 
         consecutiveErrors++;
-        const sleepMs = Math.min(30000, 2000 * Math.pow(1.5, consecutiveErrors));
+        const sleepMs = Math.min(30000, 3000 * Math.pow(1.5, consecutiveErrors));
         await new Promise(r => setTimeout(r, sleepMs));
         continue;
       }
@@ -747,6 +760,12 @@ async function startPollingLoop() {
       consecutiveErrors = 0;
 
       if (data.ok && Array.isArray(data.result)) {
+        if (data.result.length === 0) {
+          // Graceful sleep when no new messages to prevent CPU busy-loop
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
+        }
+
         for (const update of data.result) {
           lastUpdateOffset = Math.max(lastUpdateOffset, update.update_id + 1);
 

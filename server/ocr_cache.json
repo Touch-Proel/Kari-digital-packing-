@@ -1,0 +1,654 @@
+{
+  "1d41ac8a2f9b05a6708e9529bc2d48cd": {
+    "customer_name": "សុធី កំពត",
+    "paid_amount": 12.93,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62484789413",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:20.242Z"
+  },
+  "https://scontent-sin2-1.xx.fbcdn.net/v/t1.15752-9/828450110_1083524214300691_5182036666670524193_n.jpg?_nc_cat=100&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFsto27opVMRTIr5PH4M0dscaK0SZI9h29xorRJkj2Hb58YBh9CH5gbNjZ2kCsJxHxmWbAzlqluupIbS_XiqURh&_nc_ohc=CXz2jLyPCpAQ7kNvwFCwA2N&_nc_oc=AdoFVUa64I-OPSyTVCubt5cmhB6IaJSac8CS_xv1szZQH95Q2H8086TH1uRNhojHRX-DgXDO_IzW1nu5mdnb1Xp2&_nc_zt=23&_nc_ht=scontent-sin2-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQI19e802wQP6XLQDqUQA4sJpiCj49UzDZYm_wBt2D0A9xeiRDlo_-drWIYsEb4ttlFZMillA9shzg&oh=03_Q7cD6gHDzBw8LB35vfXh6nNTrSpJH24lQp2q84jmLDMr4JrBRQ&oe=6AE98697": {
+    "customer_name": "សុធី កំពត",
+    "paid_amount": 12.93,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62484789413",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:20.242Z"
+  },
+  "m_1mHDQme4OGLsnjnyUaSNzih4HhKrWLc1cb25hO6A_zsaPQ5QBM4dxZ2yw-7X3fEmyhrQKyfBt3wrpm0UWFwhVg": {
+    "customer_name": "សុធី កំពត",
+    "paid_amount": 12.93,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62484789413",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:20.242Z"
+  },
+  "/uploads/slip_fb_1791103098138_ofbbn.webp": {
+    "customer_name": "សុធី កំពត",
+    "paid_amount": 12.93,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62484789413",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:20.242Z"
+  },
+  "9fc63eff4520a65f908ee3f9073de593": {
+    "customer_name": "រុន ស្រីត្ន័",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "087 252 552",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771215698",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:23.069Z"
+  },
+  "https://scontent-sin2-1.xx.fbcdn.net/v/t1.15752-9/833603012_1120125250363177_6559734505276814444_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeEghjSLEVHM9ldUKFEG0iIkw2LZJ4QJesTDYtknhAl6xHSElyl9TnhVUaEGyHd-ynzWIAL4gKi7coSGxM1lg04-&_nc_ohc=81dUD74HwFcQ7kNvwEC5ofZ&_nc_oc=AdogoAwCNRNieLMeLq5gPFs4VAt3IFRtDCwuH7H86Qo76dJTVru613Kri6vLMm2p7v0x2lTGr2M5-gNh0U_to2f6&_nc_zt=23&_nc_ht=scontent-sin2-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQLEP1uzfXaME0w0mix145Y--UupMBz3iRcWSSoZichv19RkwwtHdVNhJbAL1TLwpaVgQGK6aux1zQ&oh=03_Q7cD6gEvj8hHmMOrgrcszkLnxrlECxTYKS6vXYpG6PEkQ5p_0w&oe=6AE97536": {
+    "customer_name": "រុន ស្រីត្ន័",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "087 252 552",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771215698",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:23.069Z"
+  },
+  "m_TKgF2n1UQIpW_vMQAfHMGZqyg9d8kOzdIND2WsdksZcwzKXt_Pv8jG-wioydWHPGkLf1S5Yz6H23I4o83DWCmA": {
+    "customer_name": "រុន ស្រីត្ន័",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "087 252 552",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771215698",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:23.069Z"
+  },
+  "/uploads/slip_fb_1791103100618_i6zur.webp": {
+    "customer_name": "រុន ស្រីត្ន័",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "087 252 552",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771215698",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:23.069Z"
+  },
+  "55b4b1a08caf552107b01ead692e6ce7": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:25.799Z"
+  },
+  "https://scontent-sin6-1.xx.fbcdn.net/v/t1.15752-9/808123277_1770911533954059_1854500136867118376_n.jpg?_nc_cat=111&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeE9UhW0IkVCaSnZhP39Cz8t-A7R7tZV8HX4DtHu1lXwdU09jPoQa42523BsDAxF7CP2rszd2cpj0DA7yZouVA9z&_nc_ohc=XavCLUMg8MEQ7kNvwGz8ULQ&_nc_oc=AdofIBU0A8Zdg4bTECNfDXiOi60C_qU64TqlpaMIMhyeFXVI9iCeTGnwWEkMZ8GYpvP5Xf9JYi0gEPQYb3JioQWd&_nc_zt=23&_nc_ht=scontent-sin6-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQJN7NvrJhf5eB1oizESxLhyoXE4mCv0SqdtgMB6i7_f0slGjjsg8VjCRTSYYIWYGPW_X0gIrjjQ1w&oh=03_Q7cD6gGVZrhHJhOb6Rc3UqFdhl1e1lqR4rCLkOU4jbntc54-gw&oe=6AE96EF6": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:25.799Z"
+  },
+  "m_UattVcs-aNgc_GJGbmkGbWIjRor-3OjhQ73RzdACelnDzweFZ3Aae1GQGMFN8_qNQhI42RbMuy_B-Yi7Ul33Yw": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:25.799Z"
+  },
+  "/uploads/slip_fb_1791103103468_pt7rk.webp": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:25.799Z"
+  },
+  "5c65c6655e25b30b793db05763a3b1aa": {
+    "customer_name": "THORN KOLYAN",
+    "paid_amount": 20.39,
+    "currency": "USD",
+    "phone_number": "017 897 727",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771274830",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:28.422Z"
+  },
+  "https://scontent-sin2-1.xx.fbcdn.net/v/t1.15752-9/825311358_975822495552668_1999054401036579656_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeEwo3lEmi-35h0-0-w2uvHtRHGf381JJ7tEcZ_fzUknu5CXBFr5lfap00QkQocH8thWsFdi_CZiue7VXBuSFqaB&_nc_ohc=GK9tCAL-MR4Q7kNvwFztb-N&_nc_oc=Adp2teCMzKpCCWmA5tBqm5BzA1EJ7wAtbf965vjvsA2ULOfB9vLmYyyzqtrmnkCP_JHKgihH78BxAQJOXb_BZPbh&_nc_zt=23&_nc_ht=scontent-sin2-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQKEsJLFd7s2j_BuorZfkS46_kUlAXt-E6iz4x7EFB3wsocc_lJUdMDOijbOZU6pQ1X4wi_5q_neFg&oh=03_Q7cD6gGQxMdr_OthPUGTne9SSXK9c-qApEtdaxvjnjRLpyLayg&oe=6AE96E8E": {
+    "customer_name": "THORN KOLYAN",
+    "paid_amount": 20.39,
+    "currency": "USD",
+    "phone_number": "017 897 727",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771274830",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:28.422Z"
+  },
+  "m_vdPlpX1tADpT9QBhZyS4uWET1iKe4KEGmNYxMELwmpyMwr4AglM0yKjBFV2xKsXSKNJPi-T_yvCDQxfrzWRPQA": {
+    "customer_name": "THORN KOLYAN",
+    "paid_amount": 20.39,
+    "currency": "USD",
+    "phone_number": "017 897 727",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771274830",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:28.422Z"
+  },
+  "/uploads/slip_fb_1791103106217_k41mi.webp": {
+    "customer_name": "THORN KOLYAN",
+    "paid_amount": 20.39,
+    "currency": "USD",
+    "phone_number": "017 897 727",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771274830",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:28.422Z"
+  },
+  "073f5dd1cbd435a3c496c0f805d6bdc9": {
+    "customer_name": "Suong Kanha",
+    "paid_amount": 15.26,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771137836",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:30.992Z"
+  },
+  "https://scontent-sin6-3.xx.fbcdn.net/v/t1.15752-9/831422617_1401966322129937_2886327186938314509_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFhSUj1qoWBDDapKdegnrGZ8ZRnIx6PD63xlGcjHo8PrdN8VvFe88PbiBvKcVCOoqCr3r5uKF0Mxpn4jFPKGslE&_nc_ohc=eB72LoJZeFEQ7kNvwFQnuP5&_nc_oc=AdqeJOkzGCqg0mVamHIKM4JigjBTnbgnAKKeA0KZprZZyKuIbu15VveMIOqSfrInS3UZHLfY6f6nXoIENVpkpQUM&_nc_zt=23&_nc_ht=scontent-sin6-3.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQL0U5JSMLWpGmcxiWW5KQGAzTaxy8XfN7dVlfjYe5zob9mLZOQpi1Q-9UW6fVqe9ERO9vXDKB1mQQ&oh=03_Q7cD6gFk6Q3rMLE5ph-uy4n96qbat3J6_8_X7mxl8A7DVGcXxQ&oe=6AE99BC2": {
+    "customer_name": "Suong Kanha",
+    "paid_amount": 15.26,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771137836",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:30.992Z"
+  },
+  "m_6DndW3QMGd899seO6TiXm1c3RHIMx9ucmi_eaSwuNoLfObIPVA6eFpUyAR0N2JTOEvdHDPbyWknB8Vj4gtQmlQ": {
+    "customer_name": "Suong Kanha",
+    "paid_amount": 15.26,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771137836",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:30.992Z"
+  },
+  "/uploads/slip_fb_1791103108597_zj1m6.webp": {
+    "customer_name": "Suong Kanha",
+    "paid_amount": 15.26,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771137836",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:30.992Z"
+  },
+  "63320e4a6d43bfa831f770b727dcd833": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:33.799Z"
+  },
+  "https://scontent-sin2-3.xx.fbcdn.net/v/t1.15752-9/829647122_2164027797830146_7913502494342460388_n.jpg?_nc_cat=107&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeGqDKhBa5skyKA-tytJrg_bjPOLqtU5x7WM84uq1TnHtUJAxj-_thqL1JYczyquN3c0bxQoa96b2aMNy1iqJJeA&_nc_ohc=uCN9K6J2-7AQ7kNvwFxO_sw&_nc_oc=AdrtFkSWYvXsG8HgdVJ78Mcz-Z5Z2-PtXv8fof2WWxVmwbaGhDtBvDed_Mw-Ccoa0mSE90IyxlUpqkMwrtPZ3BSX&_nc_zt=23&_nc_ht=scontent-sin2-3.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQIHOKEt-A0dxwpr7YMz3pJDhyG5u4pAIhKc3zVpBl22f7prnPMmVzGTW0BWrAIoPDNSCNgkdc5ebg&oh=03_Q7cD6gH-wLI25GmqKQgXRlSGXK2P_HyOMQMot2gYsqwGEInO6Q&oe=6AE97229": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:33.799Z"
+  },
+  "m_XUtHRIuO2-YvaatNzJlOiul_5cYYi_7U0BOl-RJcjosi3BTq-0NblkbdzKzaRlIJ7JrrbYTD1slazuwN00OSNg": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:33.799Z"
+  },
+  "/uploads/slip_fb_1791103111301_gw7pg.webp": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:33.799Z"
+  },
+  "04caa569dbbaaedeeb80d5ee613ebfab": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:36.922Z"
+  },
+  "https://scontent-sin6-2.xx.fbcdn.net/v/t1.15752-9/833386545_1123973296645123_7842295663872614836_n.jpg?_nc_cat=109&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeGAunR2XUURCh5UtPlhh6xry2AC1v_GG97LYALW_8Yb3qXNctcC1Xpb2PWTWpg18d8m3l2NQSZZTGn0jfzdchZU&_nc_ohc=ujfFLC3YhIYQ7kNvwHDaKMy&_nc_oc=Adr4lSmsgKiVacuFnbbYzhISqLbLBhzL8I1XxdcCRmnODN2VE5Lz5wnVZ_Nj7IsMetz7Ie2W0iGSLOPC-ZyNJ26A&_nc_zt=23&_nc_ht=scontent-sin6-2.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQKT6heksXVr_9F3G-O1iqyGxwOCyra87UmHJTOrLTACVhlcsHWn2B0eDGoXcd8NAbofscAqzpBhdA&oh=03_Q7cD6gFmWBINB9Od1RXENJM_moP9wne43xd7y7M1iZrt05rdGA&oe=6AE96751": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:36.922Z"
+  },
+  "m_ex6E3SiL7FPSDxP4bUuPnul_5cYYi_7U0BOl-RJcjotJD6GbK7qvdoIuxYTTZaA1MPdHDxoF-Cohw63we_JGjg": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:36.922Z"
+  },
+  "/uploads/slip_fb_1791103114385_c1sy2.webp": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:36.922Z"
+  },
+  "07eeea86256b1b96b1c21d209e1ee816": {
+    "customer_name": "ទំនួលខុសត្រូវ ជីវិត",
+    "paid_amount": 8.5,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62475158388",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:39.370Z"
+  },
+  "https://scontent-sin6-3.xx.fbcdn.net/v/t1.15752-9/837657991_3451246075056292_7263312971174399270_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeEaKYvYr3ZdwGrxkuzOolIs372XHu1GEy7fvZce7UYTLrmPCES79VBKAeSblxEISfx8M_MgBxCD_ZykvqjHauOd&_nc_ohc=GBnm1MgeT5kQ7kNvwGOUm_m&_nc_oc=AdqhDL4kMeXAzsq5GDsi9_Vs5PVNdo0C9XQg7rAk9kASZ7kNt5oZAM_fjwjDKXpOmzwD4of6Q8UFDnNQbAOPX6i2&_nc_zt=23&_nc_ht=scontent-sin6-3.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQKM74dvgJ-h4XLcEFl0B2v7wfuxoP3yVJR0kMSvoHNeE0D_7bmWHCXCWrCsUHAT0G69qLLFsbrhAw&oh=03_Q7cD6gFXtRqJIuBd9_8taqWVayHp-g2ZqpgNJWJmpO3l5kAIVQ&oe=6AE975E4": {
+    "customer_name": "ទំនួលខុសត្រូវ ជីវិត",
+    "paid_amount": 8.5,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62475158388",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:39.370Z"
+  },
+  "m_ucMdYC1V7aQ_s60Dr8kqaKsMJQ1eMg-91-mF-m0Pp0x9fdCRC_-jsm4HdbL0A4DaSmGDcGcozP8txLsfcIfNaw": {
+    "customer_name": "ទំនួលខុសត្រូវ ជីវិត",
+    "paid_amount": 8.5,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62475158388",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:39.370Z"
+  },
+  "/uploads/slip_fb_1791103117130_jzktv.webp": {
+    "customer_name": "ទំនួលខុសត្រូវ ជីវិត",
+    "paid_amount": 8.5,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62475158388",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:39.370Z"
+  },
+  "b92df2d8c52964aed1e7466183bd2373": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:42.066Z"
+  },
+  "https://scontent-sin2-1.xx.fbcdn.net/v/t1.15752-9/831183308_918274174479801_1056138227840554473_n.jpg?_nc_cat=100&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFqSLpu9YtG4dbt0tfPDb9trAI4wE_OcvasAjjAT85y9hALG-D0aRBwrFmTnSl2FjYc4iZOAhXLqoqQqAFL7P8y&_nc_ohc=wuabPi7u_3cQ7kNvwF7_vJz&_nc_oc=AdoJ3f_0U8UZMLX21C2NLRrdt0tUD1Y0ZvPCskdFgX2MzwAEtlyxS7Z2gPbjz2ofbpwzTCrblPz1oM1qLkcYhnbz&_nc_zt=23&_nc_ht=scontent-sin2-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQIUgSkqF-XEGFpOZ7ODDcZFCWHXRwcBuNLADghYgbhjNBD93EbX6bvM25_oZnc5CatGvJAOE39OqA&oh=03_Q7cD6gH_YFYnK9VWKTjNVKqgXdq-vUwps0Ee3q32aCxBOA3VUw&oe=6AE979F3": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:42.066Z"
+  },
+  "m_Rtx4ovgE43RvSq0uLDoAaFSzU5Euixc59bAACjAJbbAzNyxORZSR9jX9waOA5WBi7w8tlKgegALeDUQKpf6UEA": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:42.066Z"
+  },
+  "/uploads/slip_fb_1791103119669_1uc0j.webp": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:42.066Z"
+  },
+  "c260953b013c4e307862febcaffc7b2d": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:45.548Z"
+  },
+  "https://scontent-sin11-2.xx.fbcdn.net/v/t1.15752-9/830159870_2054451042624733_5006445840520037744_n.jpg?_nc_cat=101&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeGgv4w2yA7VWb_lzMgCXDA9PHc_7NIYSII8dz_s0hhIgp2oHuWW-fa-KtqzoGu8pcQTK3AYjVA19PnogrHDIcUe&_nc_ohc=7sQspDkMBP8Q7kNvwEgGZy9&_nc_oc=AdrXeIhgxTxratRtTQ_KUv6tagHCwzadUNckIpSLIu9YMV1wLZAcV939EgO4jvh-0XE5JFUP1DCicKC1jplbx6ho&_nc_zt=23&_nc_ht=scontent-sin11-2.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQJNR0W6afgE96zlG2UETlQf6rYWBzpHAGVEvRHlEwEgoxrq7cX1MqgQtcWiFkNEFcY-91aMW0Z4Eg&oh=03_Q7cD6gHFUTp41Xgu6fV9qdlDIH9nVa0XWJR_VUmDxDpKc56JRw&oe=6AE981D6": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:45.548Z"
+  },
+  "m_SUpgbswnyi229JQ5yDBWE21XcP8z42LfxFxcX-aXbN5OwxPpZu6yUf1QJ6ykzIqZBoTQzpabOhVw57D6sFMTRw": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:45.548Z"
+  },
+  "/uploads/slip_fb_1791103122438_jozkr.webp": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:45.548Z"
+  },
+  "f056d6ccc66128797b509f4d33ef1e8f": {
+    "customer_name": "Lean Sorphea",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "080 *** 220",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771876735",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:48.206Z"
+  },
+  "https://scontent-sin2-2.xx.fbcdn.net/v/t1.15752-9/833197270_1111044754621375_4898680225980818237_n.jpg?stp=dst-jpg_s1080x2048_tt6&_nc_cat=103&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFd_vfnA6Bcy-8_72bRBX3WUbppz5HK-bBRumnPkcr5sJL8hPnudyiQ4lDRKC2Xp-8uNmGc2cLKStGLQPwgBvYN&_nc_ohc=3Pyu8kjTKw0Q7kNvwFBU6TP&_nc_oc=AdpyJ6wSEJJmbTTYTW_-EEbpQqFz5dWrnl32dZXc6wSAWxLNnVQF987Nud80WYXHNJh0yLGA8cxD9qtUXtZrwYbV&_nc_zt=23&_nc_ht=scontent-sin2-2.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQIKhykwCQkeJ0-W5ubJ8_rVUkMwfWXf6S7RsHdHE5poxXB9heUJJIiJFN2_AweAi7ii3gMzvZegEQ&oh=03_Q7cD6gFZFuMe5YpW8Yzoe7dXfyqshb-IG6IBvBVAS3ynVDCGww&oe=6AE9715D": {
+    "customer_name": "Lean Sorphea",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "080 *** 220",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771876735",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:48.206Z"
+  },
+  "m_wKQ9QHSA9a_d8hM-EtIn6DICNBQ7722Z7OCM655hJQvgc9EmuzC4-touTHXXdExb3zO0GCj6gKlxX55-SGDpxA": {
+    "customer_name": "Lean Sorphea",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "080 *** 220",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771876735",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:48.206Z"
+  },
+  "/uploads/slip_fb_1791103125994_aypmi.webp": {
+    "customer_name": "Lean Sorphea",
+    "paid_amount": 10,
+    "currency": "USD",
+    "phone_number": "080 *** 220",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771876735",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:48.206Z"
+  },
+  "e00b481eec7ef7a8bbd2f6eb58ae5af5": {
+    "customer_name": "La Sophanna",
+    "paid_amount": 4.76,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "FT26278HS027",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:50.767Z"
+  },
+  "https://scontent-sin2-1.xx.fbcdn.net/v/t1.15752-9/831353052_1079399048138195_381708923723274213_n.jpg?_nc_cat=102&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFlPMHdXSgvEx1p-bJ3nOR8dR9gqEO2ufl1H2CoQ7a5-XAoy_EnZlQC2Av-yaLVp8pcZGqSE6FDYG4paoLiQZ4m&_nc_ohc=TjzxHWVnFKcQ7kNvwGvDTk7&_nc_oc=Ados0uHYH3kEmWR2460ouuQNeaDRkdsCERRxtC5LcVNqYXgH1h5co0QZOzgwu60FkI0IL88N2t92nZJMBw8PiaHJ&_nc_zt=23&_nc_ht=scontent-sin2-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQLKPpFhey1WXbhIDlqf66iDbBBBh5nOMxP6Pcs0feHcFVSctsVnx7nQ8DqZnnjnwaMn5SrXSvW0gQ&oh=03_Q7cD6gE-BJfumnktUTI0v_F93bOHcA2HQOxNIdUCVsEtfsiByw&oe=6AE98559": {
+    "customer_name": "La Sophanna",
+    "paid_amount": 4.76,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "FT26278HS027",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:50.767Z"
+  },
+  "m_LexTviHHeocF7EyTWtsTbZ365TOaZVnE_vj2YgdUcMu82zoWMHpa7A1dQIhFPwwp3TkI_SvTJ7RJcGnDHBPxiQ": {
+    "customer_name": "La Sophanna",
+    "paid_amount": 4.76,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "FT26278HS027",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:50.767Z"
+  },
+  "/uploads/slip_fb_1791103128577_tf35b.webp": {
+    "customer_name": "La Sophanna",
+    "paid_amount": 4.76,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "FT26278HS027",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:50.767Z"
+  },
+  "3737d4925101f44b666f8be86f9cbb5f": {
+    "customer_name": "Jèë Čhêãt",
+    "paid_amount": 7.2,
+    "currency": "USD",
+    "phone_number": "012 481 153",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62473447221",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:53.738Z"
+  },
+  "https://scontent-sin6-2.xx.fbcdn.net/v/t1.15752-9/829016129_2014976442512886_47784219724968143_n.jpg?_nc_cat=109&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeH1TaZdM1HruqRlbhgy1_-WboeBXWnKBHJuh4FdacoEcgGG1hbmSC71kCar-bosAJ2K6vzIdYxczDb4ZzkSp33c&_nc_ohc=G5OkhAAYcT0Q7kNvwFxhbKJ&_nc_oc=AdoHbmUNTeiPGEl0YvhitTWrZ8ALpQ7lBFgT5cXWh79GmDp1pqWFG_rZbezEGmFQTrAktqDYWfHTNL_FLFDmG4eA&_nc_zt=23&_nc_ht=scontent-sin6-2.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQLSCSXI2JTGEb71tOwe8LRQnk5qHq0-Wl2og4ZB3lNWsX1oiWMmCvmI_nRgCZQI9NadMnxRxQt3LA&oh=03_Q7cD6gHk5gNxVtiQG7RCmw1n_loNVb7ypg0c46214xdA3m40bg&oe=6AE96FD1": {
+    "customer_name": "Jèë Čhêãt",
+    "paid_amount": 7.2,
+    "currency": "USD",
+    "phone_number": "012 481 153",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62473447221",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:53.738Z"
+  },
+  "m_MyMcE1_pqGbO2tk_8_zxfjPT_fYEcP6DtfrnflbxxMi3q2yTz1fwNUSvHyBYbkaEo8Amyd6jRVeWNLI7YkTxgA": {
+    "customer_name": "Jèë Čhêãt",
+    "paid_amount": 7.2,
+    "currency": "USD",
+    "phone_number": "012 481 153",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62473447221",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:53.738Z"
+  },
+  "/uploads/slip_fb_1791103131368_1wbve.webp": {
+    "customer_name": "Jèë Čhêãt",
+    "paid_amount": 7.2,
+    "currency": "USD",
+    "phone_number": "012 481 153",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62473447221",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:53.738Z"
+  },
+  "2bebbdfaa0bdbfc4f7f1fbff068f0902": {
+    "customer_name": "DOEURM PISEY",
+    "paid_amount": 10.88,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62770877365",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:56.751Z"
+  },
+  "https://scontent-sin11-1.xx.fbcdn.net/v/t1.15752-9/830539636_1077329581798269_1272568474506196583_n.jpg?_nc_cat=105&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFJ_i2ieB0cwqn1QjG_bk4JIJUTUsiiIy8glRNSyKIjL6ELMGbU1RoSKd82P8vpi7S5JTdQaOaMvdNaSi5NwdYL&_nc_ohc=N_6BThYRVhEQ7kNvwFqgemF&_nc_oc=AdpaWLwa9zFyOFb_rATbpgx1T9ysAKoeazxMPIHBG6vjPHkru31WIYsN7zIgrMSjlnELx3ABJ9IGaptiTHQH-wqE&_nc_zt=23&_nc_ht=scontent-sin11-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQIzXxi-Ja5xeUjje7y_b2AXUMhuGdwSFQKoGrBFSRnfZhu-fIuWte_eNDasYPfOpjGYj0yIA4asBA&oh=03_Q7cD6gFbLAQA53aFoXF6lNapFp3kvX0ATfI4o5TzK3iwha-s9g&oe=6AE98E29": {
+    "customer_name": "DOEURM PISEY",
+    "paid_amount": 10.88,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62770877365",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:56.751Z"
+  },
+  "m_NNVu0ittRva9M7Re4N9MMVn4CrSHhEJ4Yff0Y4Q6-5vCaKTaoG824HX2DiM8owTgwVoH0DYQa_OZAD7Xfh2BCg": {
+    "customer_name": "DOEURM PISEY",
+    "paid_amount": 10.88,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62770877365",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:56.751Z"
+  },
+  "/uploads/slip_fb_1791103134271_s0rfc.webp": {
+    "customer_name": "DOEURM PISEY",
+    "paid_amount": 10.88,
+    "currency": "USD",
+    "bank_name": "ACLEDA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62770877365",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:38:56.751Z"
+  },
+  "b4bf25255feda69ab3d03a469405fb1d": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:59.303Z"
+  },
+  "https://scontent-sin6-1.xx.fbcdn.net/v/t1.15752-9/828909998_2153044798667410_4752981051981504579_n.jpg?_nc_cat=111&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFanpGbqsQHWVxlO8RSX0s3c5NS7Kn84YBzk1LsqfzhgD6OfK_MFxIAluRBuPyUPBxXlmRu3gJiTReNQxy3-xeJ&_nc_ohc=aUTveEfJaFAQ7kNvwEwscfC&_nc_oc=AdqNB88p7SmTmJeBTKOC3UzL5ZTV56hFS0RuJb14FnpAZyrI6goiON99PcA7qtYNx2r2vhxmqIASJNnrYRdr_b7i&_nc_zt=23&_nc_ht=scontent-sin6-1.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQK3R4yMLtrwS2BhsjYmnbof6w34kEllpF5SlLrKuOq4B6ulUcU8YhS6cxW-AGRD-2jCB93Nk99dJQ&oh=03_Q7cD6gFVAvBkvsZKwuFme2uyCri6B7l4si9AR-83riSjYp-_lw&oe=6AE9723A": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:59.303Z"
+  },
+  "m_zbdD5ml1xl4vK0Ci3PiDCqHIafRwt2FYGs9gX0FWYzaupfcQ4EcaSGh13wKJR_y9gyCUOn9S7JLqrghimhprUA": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:59.303Z"
+  },
+  "/uploads/slip_fb_1791103136869_xr77j.webp": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:38:59.303Z"
+  },
+  "b216ecf51d4a14f20d3cc9963a63869c": {
+    "customer_name": "Mîî KäŽä",
+    "paid_amount": 6.83,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771938534",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:39:02.297Z"
+  },
+  "https://scontent-sin6-2.xx.fbcdn.net/v/t1.15752-9/831491468_1093889520026832_3346545177104837224_n.jpg?_nc_cat=109&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeFGnedUh7k-tyM7So0v3c1siPVkFBB1HGaI9WQUEHUcZkFGNWRf_YhjBagjZTDXN9pNsjJOsUdc_4LSCAD5fwfS&_nc_ohc=QDjf6fP56PYQ7kNvwGpdZWe&_nc_oc=Adp683mD42fLiirQUunOC8fRB9enp3FVJT99gc3_tI0Q-pI45WoGl2Do0_P0qWgIcjS8688lpqV3463IH-jCtXuo&_nc_zt=23&_nc_ht=scontent-sin6-2.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQJfIYbC4I-odQHlp2Lpr-4R5-Yuqs5RBFMQaMzCsJztY8GXCMGkRXotnRIgiipNtnZLB8dtk5N1nQ&oh=03_Q7cD6gGymO_W6xU0fHyzjgRiO38XZiXn0VGk61OHJt88nRvsaw&oe=6AE99352": {
+    "customer_name": "Mîî KäŽä",
+    "paid_amount": 6.83,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771938534",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:39:02.297Z"
+  },
+  "m_g8azBQZdGy5iadhoqLp0TqHIafRwt2FYGs9gX0FWYzaySmR2mci7ikdC1EDM0b9cdo9KiYa_rMyYbJlJX03n0w": {
+    "customer_name": "Mîî KäŽä",
+    "paid_amount": 6.83,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771938534",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:39:02.297Z"
+  },
+  "/uploads/slip_fb_1791103139700_6vipm.webp": {
+    "customer_name": "Mîî KäŽä",
+    "paid_amount": 6.83,
+    "currency": "USD",
+    "bank_name": "ABA Bank",
+    "trans_date": "2026-10-04",
+    "trans_ref": "62771938534",
+    "fraud_suspected": false,
+    "fraud_reasons": [],
+    "cached_at": "2026-10-04T08:39:02.297Z"
+  },
+  "eb439fa86e65a5779d25d338fff1a99f": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:39:05.374Z"
+  },
+  "https://scontent-sin6-3.xx.fbcdn.net/v/t1.15752-9/830700111_860409693760205_7198875515855709328_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=fc17b8&_nc_eui2=AeE__Iy-sY0VaaxgnPuosyWaXrUb3U1j3K9etRvdTWPcrz7OMweyJnm-KO9X21b75NboVH5ENq9tb43cEpj9NvHu&_nc_ohc=lL7A0K09V_0Q7kNvwGXzw7a&_nc_oc=AdpAM0AhSRXv9YPF2CPbqeuJnTYcZ10n9H6W-ejaiDTwiADqpsKPrw19ixugJjqJ9Hq_grmz4nh-y5V9irfhEU2I&_nc_zt=23&_nc_ht=scontent-sin6-3.xx&edm=AB0BvfgEAAAA&_nc_tpa=Q5bMBQJy-cRNj02tZ2yGJyH9969hxhV3Fu7J6h61MmCTsnumCloGgprMgUep7ewckYvRkkvOIyJLybebzA&oh=03_Q7cD6gFlo6tpqB9YxwVUFHUz9h1wQMgx2DzYSIawNVelpJVaHw&oe=6AE99465": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:39:05.374Z"
+  },
+  "m_-9T_8mvpTSTgrQfmiOWWC6Ft48UJV4Uu1rr2H00isIlfxGifhIKzP0ZYVdPoKCuOkjlkiqS_6pI7-0nockKSNA": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:39:05.374Z"
+  },
+  "/uploads/slip_fb_1791103142710_vlrd4.webp": {
+    "customer_name": "",
+    "paid_amount": 0,
+    "currency": "USD",
+    "is_bank_slip": false,
+    "cached_at": "2026-10-04T08:39:05.374Z"
+  }
+}

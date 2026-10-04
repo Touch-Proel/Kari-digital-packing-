@@ -290,7 +290,13 @@ export function evaluateSlipFraudAndDuplicates(
     matched_invoice?: any;
   },
   allSlips: AutoScannedMessengerSlip[],
-  allInvoices: Invoice[]
+  allInvoices: Invoice[],
+  prebuiltIndices?: {
+    paidTxIdMap?: Map<string, Invoice>;
+    paidUrlMap?: Map<string, Invoice>;
+    slipTxIdMap?: Map<string, AutoScannedMessengerSlip>;
+    slipUrlMap?: Map<string, AutoScannedMessengerSlip>;
+  }
 ) {
   let duplicate_warning: {
     is_duplicate: boolean;
@@ -319,7 +325,7 @@ export function evaluateSlipFraudAndDuplicates(
   const cleanRef = rawRef.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const slipUrl = (slip.slip_url || '').trim();
 
-  // 1. AMOUNT MISMATCH CHECK (e.g. Slip pays $1.00 for $15.50 invoice)
+  // 1. AMOUNT MISMATCH CHECK
   if (slip.matched_invoice && slip.extracted?.paid_amount > 0) {
     const invTotal = Number(slip.matched_invoice.total_amount) || 0;
     const slipAmt = Number(slip.extracted.paid_amount) || 0;
@@ -334,17 +340,25 @@ export function evaluateSlipFraudAndDuplicates(
     }
   }
 
-  // 2. CHECK AGAINST PAID INVOICES IN DB (TxID already approved/marked Paid for an existing order)
+  // 2. CHECK AGAINST PAID INVOICES IN DB (Fast Indexed Lookup)
   if (cleanRef && cleanRef.length >= 5) {
-    const alreadyPaidInv = allInvoices.find(
-      inv => (inv.status === 'Paid' || inv.payment_status === 'Paid') &&
-             inv.invoice_id !== slip.matched_invoice?.invoice_id &&
-             (
-               (inv.payment_slip_url && slipUrl && inv.payment_slip_url === slipUrl) ||
-               (inv.comments && inv.comments.some(c => c.toUpperCase().includes(cleanRef))) ||
-               (inv.notes && inv.notes.some(n => n.toUpperCase().includes(cleanRef)))
-             )
-    );
+    let alreadyPaidInv: Invoice | undefined = undefined;
+    if (prebuiltIndices?.paidTxIdMap) {
+      const found = prebuiltIndices.paidTxIdMap.get(cleanRef);
+      if (found && found.invoice_id !== slip.matched_invoice?.invoice_id) {
+        alreadyPaidInv = found;
+      }
+    } else {
+      alreadyPaidInv = allInvoices.find(
+        inv => (inv.status === 'Paid' || inv.payment_status === 'Paid') &&
+               inv.invoice_id !== slip.matched_invoice?.invoice_id &&
+               (
+                 (inv.payment_slip_url && slipUrl && inv.payment_slip_url === slipUrl) ||
+                 (inv.comments && inv.comments.some(c => c.toUpperCase().includes(cleanRef))) ||
+                 (inv.notes && inv.notes.some(n => n.toUpperCase().includes(cleanRef)))
+               )
+      );
+    }
 
     if (alreadyPaidInv) {
       duplicate_warning = {
@@ -358,15 +372,26 @@ export function evaluateSlipFraudAndDuplicates(
     }
   }
 
-  // 3. CHECK AGAINST ALL MESSENGER SLIPS (Cross-Account vs Same-Account Reuse)
+  // 3. CHECK AGAINST ALL MESSENGER SLIPS (Fast Indexed Cross-Account vs Same-Account Reuse)
   if (!duplicate_warning && (cleanRef.length >= 5 || (slipUrl && !slipUrl.includes('unsplash')))) {
-    const prior = allSlips.find(s => {
-      if (s.id === slip.id) return false;
-      const otherRef = (s.extracted?.trans_ref || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      const hasSameRef = cleanRef.length >= 5 && otherRef === cleanRef;
-      const hasSameUrl = slipUrl && s.slip_url && !slipUrl.includes('unsplash') && s.slip_url === slipUrl;
-      return hasSameRef || hasSameUrl;
-    });
+    let prior: AutoScannedMessengerSlip | undefined = undefined;
+    if (prebuiltIndices?.slipTxIdMap && cleanRef.length >= 5) {
+      const found = prebuiltIndices.slipTxIdMap.get(cleanRef);
+      if (found && found.id !== slip.id) prior = found;
+    }
+    if (!prior && prebuiltIndices?.slipUrlMap && slipUrl && !slipUrl.includes('unsplash')) {
+      const found = prebuiltIndices.slipUrlMap.get(slipUrl);
+      if (found && found.id !== slip.id) prior = found;
+    }
+    if (!prior && !prebuiltIndices) {
+      prior = allSlips.find(s => {
+        if (s.id === slip.id) return false;
+        const otherRef = (s.extracted?.trans_ref || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+        const hasSameRef = cleanRef.length >= 5 && otherRef === cleanRef;
+        const hasSameUrl = slipUrl && s.slip_url && !slipUrl.includes('unsplash') && s.slip_url === slipUrl;
+        return hasSameRef || hasSameUrl;
+      });
+    }
 
     if (prior) {
       const currentSenderId = slip.sender_id || '';
@@ -1254,8 +1279,58 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
       cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
     }
 
-    // Refresh match state for each slip that is not yet approved
-    for (const slip of messengerSlips) {
+    let filtered = [...messengerSlips];
+    if (cutoffDate) {
+      filtered = filtered.filter(s => {
+        if (!s.received_at) return true;
+        return new Date(s.received_at) >= cutoffDate;
+      });
+    }
+
+    // Sort newest received first
+    filtered.sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
+
+    // ⚡ Build O(1) fast-lookup index maps once
+    const custByUid = new Map<string, string>();
+    const custByName = new Map<string, string>();
+    for (const c of customers) {
+      if (c.facebook_user_id && c.picture_url) custByUid.set(c.facebook_user_id, c.picture_url);
+      if (c.facebook_name && c.picture_url) custByName.set(c.facebook_name.toLowerCase().trim(), c.picture_url);
+    }
+
+    const invById = new Map<number, Invoice>();
+    const invByUid = new Map<string, Invoice>();
+    const invByName = new Map<string, Invoice>();
+    const paidTxIdMap = new Map<string, Invoice>();
+
+    for (const i of invoices) {
+      invById.set(i.invoice_id, i);
+      if (i.facebook_user_id) invByUid.set(i.facebook_user_id, i);
+      if (i.facebook_name) invByName.set(i.facebook_name.toLowerCase().trim(), i);
+
+      if (i.status === 'Paid' || i.payment_status === 'Paid') {
+        const notesAndComments = [...(i.notes || []), ...(i.comments || [])];
+        for (const text of notesAndComments) {
+          const m = text.match(/\[TxID:\s*([A-Za-z0-9]+)\]/i) || text.match(/TxID[:\s]+([A-Za-z0-9]+)/i);
+          if (m && m[1]) {
+            paidTxIdMap.set(m[1].toUpperCase(), i);
+          }
+        }
+      }
+    }
+
+    const slipTxIdMap = new Map<string, AutoScannedMessengerSlip>();
+    const slipUrlMap = new Map<string, AutoScannedMessengerSlip>();
+    for (const s of messengerSlips) {
+      const ref = (s.extracted?.trans_ref || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      if (ref && ref.length >= 5) slipTxIdMap.set(ref, s);
+      if (s.slip_url && !s.slip_url.includes('unsplash')) slipUrlMap.set(s.slip_url, s);
+    }
+
+    const prebuiltIndices = { paidTxIdMap, slipTxIdMap, slipUrlMap };
+
+    // Refresh match state for filtered subset
+    for (const slip of filtered) {
       if (slip.status !== 'APPROVED' && slip.status !== 'REJECTED') {
         const matchRes = matchInvoiceForSlip(slip.extracted, slip.sender_name, slip.sender_id);
         slip.status = matchRes.status;
@@ -1283,37 +1358,23 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
           status: c.status
         })) : undefined;
       }
-    }
 
-    let filtered = [...messengerSlips];
-    if (cutoffDate) {
-      filtered = filtered.filter(s => {
-        if (!s.received_at) return true;
-        return new Date(s.received_at) >= cutoffDate;
-      });
-    }
-
-    // Sort newest received first
-    filtered.sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
-
-    // -------------------------------------------------------------
-    // 🛡️ ANTI-FRAUD & DUPLICATE TxID DETECTION ENGINE & AVATARS
-    // -------------------------------------------------------------
-    for (const slip of filtered) {
-      // Resolve sender profile picture if available from database or FB Graph
+      // Fast avatar resolution via Maps
       if (!slip.sender_avatar_url) {
-        const matchingCustomer = customers.find(c => c.facebook_user_id === slip.sender_id || (slip.sender_name && c.facebook_name && c.facebook_name.toLowerCase().trim() === slip.sender_name.toLowerCase().trim()));
-        const matchingInv = invoices.find(i => i.facebook_user_id === slip.sender_id || (slip.sender_name && i.facebook_name && i.facebook_name.toLowerCase().trim() === slip.sender_name.toLowerCase().trim()));
-        const matchingComment = rawComments.find(rc => rc.facebook_user_id === slip.sender_id || (slip.sender_name && rc.facebook_name && rc.facebook_name.toLowerCase().trim() === slip.sender_name.toLowerCase().trim()));
+        const cleanName = (slip.sender_name || '').toLowerCase().trim();
+        const pic = (slip.sender_id && custByUid.get(slip.sender_id)) ||
+                    (cleanName && custByName.get(cleanName)) ||
+                    (slip.sender_id && invByUid.get(slip.sender_id)?.picture_url) ||
+                    (cleanName && invByName.get(cleanName)?.picture_url);
 
-        slip.sender_avatar_url = matchingCustomer?.picture_url || matchingInv?.picture_url || matchingComment?.picture_url;
+        slip.sender_avatar_url = pic;
         if (!slip.sender_avatar_url && slip.sender_id && !slip.sender_id.startsWith('TEST') && !slip.sender_id.startsWith('FB_USER') && !slip.sender_id.startsWith('mslip')) {
           slip.sender_avatar_url = `/api/fb/avatar/${slip.sender_id}?name=${encodeURIComponent(slip.sender_name || '')}`;
         }
       }
 
       if (slip.matched_invoice && !slip.matched_invoice.picture_url) {
-        const matchingInv = invoices.find(i => i.invoice_id === slip.matched_invoice?.invoice_id);
+        const matchingInv = invById.get(slip.matched_invoice.invoice_id);
         slip.matched_invoice.picture_url = matchingInv?.picture_url || slip.sender_avatar_url;
         slip.matched_invoice.facebook_user_id = matchingInv?.facebook_user_id || slip.sender_id;
       }
@@ -1321,7 +1382,8 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
       const fraudEval = evaluateSlipFraudAndDuplicates(
         slip,
         filtered,
-        invoices
+        invoices,
+        prebuiltIndices
       );
 
       slip.duplicate_warning = fraudEval.duplicate_warning;

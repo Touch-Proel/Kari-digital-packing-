@@ -1339,27 +1339,27 @@ export default function App() {
 
     const invTimer = setInterval(() => {
       if (isVisible()) fetchInvoices();
-    }, 3500);
+    }, 15000);
 
     const stockTimer = setInterval(() => {
       if (isVisible()) fetchStock();
-    }, 15000);
+    }, 30000);
 
     const packerTimer = setInterval(() => {
       if (isVisible()) fetchPackerStats();
-    }, 15000);
+    }, 30000);
 
     const backlogTimer = setInterval(() => {
       if (isVisible()) fetchBacklogCount(selectedLiveIdRef.current);
-    }, 15000);
+    }, 30000);
 
     const allLiveQcTimer = setInterval(() => {
       if (isVisible()) fetchAllLivePaidInvoices();
-    }, 15000);
+    }, 30000);
 
     const allLiveDispatchedTimer = setInterval(() => {
       if (isVisible()) fetchAllLiveDispatchedInvoices();
-    }, 15000);
+    }, 30000);
 
     // Immediate refresh when tab becomes active again
     const handleVisibilityChange = () => {
