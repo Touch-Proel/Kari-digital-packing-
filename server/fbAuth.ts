@@ -60,12 +60,16 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
     'pages_messaging'
   ].join(',');
 
+  // Store client redirectUri in base64url encoded state parameter to guarantee 100% exact match in code exchange
+  const statePayload = Buffer.from(JSON.stringify({ redirectUri, ts: Date.now() })).toString('base64url');
+
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: redirectUri,
     scope: scopes,
     response_type: 'code',
-    auth_type: 'rerequest'
+    auth_type: 'rerequest',
+    state: statePayload
   });
 
   const url = `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
@@ -75,7 +79,20 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
 // Helper to safely parse JSON from Facebook Graph API responses without throwing SyntaxError on HTML/error pages
 async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<any> {
   try {
-    const res = await fetch(url, options);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'ChatbotKH-POS/2.0',
+        ...(options?.headers || {})
+      }
+    });
+    clearTimeout(timeoutId);
+
     const text = await res.text();
     try {
       const parsed = JSON.parse(text);
@@ -94,7 +111,7 @@ async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<an
   } catch (netErr: any) {
     return {
       error: {
-        message: (netErr?.message || 'Network error connecting to Facebook API').replace(/access_token=[a-zA-Z0-9_-]+/gi, 'access_token=[REDACTED]')
+        message: (netErr?.name === 'AbortError' ? 'Connection timeout to Facebook API (8s)' : netErr?.message || 'Network error connecting to Facebook API').replace(/access_token=[a-zA-Z0-9_-]+/gi, 'access_token=[REDACTED]')
       }
     };
   }
@@ -241,7 +258,23 @@ export async function handleOAuthCallback(req: Request, res: Response) {
     `);
   }
 
-  const redirectUri = getRedirectUri(req);
+  let redirectUri = getRedirectUri(req);
+  if (req.query.state && typeof req.query.state === 'string') {
+    try {
+      const decoded = JSON.parse(Buffer.from(req.query.state, 'base64url').toString('utf8'));
+      if (decoded?.redirectUri) {
+        redirectUri = decoded.redirectUri;
+      }
+    } catch {
+      try {
+        const decoded = JSON.parse(Buffer.from(req.query.state, 'base64').toString('utf8'));
+        if (decoded?.redirectUri) {
+          redirectUri = decoded.redirectUri;
+        }
+      } catch {}
+    }
+  }
+
   const tokenUrl = 'https://graph.facebook.com/v21.0/oauth/access_token';
 
   try {

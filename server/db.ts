@@ -515,6 +515,15 @@ export function addOrUpdateConnectedPage(page: FacebookPage, makeActive = true) 
 
 export function batchAddConnectedPages(pages: FacebookPage[], selectFirstAsActive = true) {
   if (!pages || pages.length === 0) return;
+  
+  // If only had the simulated placeholder page, replace it
+  if (connectedFacebookPages.length === 1 && connectedFacebookPages[0].id === '102094263212256') {
+    const hasDifferent = pages.some(p => p.id !== '102094263212256');
+    if (hasDifferent) {
+      connectedFacebookPages.length = 0;
+    }
+  }
+
   for (const page of pages) {
     const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
     if (existingIdx >= 0) {
@@ -524,10 +533,7 @@ export function batchAddConnectedPages(pages: FacebookPage[], selectFirstAsActiv
     }
   }
   if (selectFirstAsActive && pages.length > 0) {
-    const existingActive = connectedFacebookPages.find(p => p.id === activeFacebookPage?.id);
-    if (!existingActive) {
-      activeFacebookPage = pages[0];
-    }
+    activeFacebookPage = pages[0];
   }
   bumpDataRevision();
   saveDatabaseToDisk();
