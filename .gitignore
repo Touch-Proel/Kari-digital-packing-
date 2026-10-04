@@ -9,6 +9,9 @@ coverage/
 server/db_store.json
 server/pos.db
 server/*.db
+server/ocr_cache.json
+server/messenger_slips_backup.json
+server/synced_attachments.json
 data/
 data/*.json
 public/uploads/slip_*
