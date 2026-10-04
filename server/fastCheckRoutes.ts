@@ -557,7 +557,12 @@ export function sortInvoicesNewestFirst(list: Invoice[]): Invoice[] {
 export function matchInvoiceForSlip(
   data: ExtractedSlipData,
   senderName?: string,
-  senderId?: string
+  senderId?: string,
+  precomputedPool?: Invoice[],
+  precomputedIndices?: {
+    byUid?: Map<string, Invoice[]>;
+    byName?: Map<string, Invoice[]>;
+  }
 ): {
   status: 'MATCHED' | 'MULTIPLE_CANDIDATES' | 'NOT_FOUND';
   confidence: number;
@@ -566,7 +571,7 @@ export function matchInvoiceForSlip(
 } {
   // Active invoices across all lives (exclude Cancelled & already Dispatched)
   // Always sorted newest first
-  const pool = sortInvoicesNewestFirst(
+  const pool = precomputedPool || sortInvoicesNewestFirst(
     invoices.filter(inv => inv.status !== 'Cancelled' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED')
   );
 
@@ -583,25 +588,33 @@ export function matchInvoiceForSlip(
     data.phone_number
   ].filter(Boolean) as string[];
 
-  // Find all baskets strictly belonging to this customer
-  const customerBaskets = pool.filter(inv => {
-    if (senderId && senderId !== 'TEST_USER_1' && senderId !== 'FB_USER' && inv.facebook_user_id === senderId) {
-      return true;
-    }
-    for (const name of candidateNames) {
-      if (isCustomerNameMatch(name, inv.facebook_name)) {
+  // Fast O(1) Map retrieval if precomputed indices provided
+  let customerBaskets: Invoice[] = [];
+  if (precomputedIndices?.byUid && senderId && senderId !== 'TEST_USER_1' && senderId !== 'FB_USER' && precomputedIndices.byUid.has(senderId)) {
+    customerBaskets = precomputedIndices.byUid.get(senderId) || [];
+  } else if (precomputedIndices?.byName && senderName && precomputedIndices.byName.has(senderName.toLowerCase().trim())) {
+    customerBaskets = precomputedIndices.byName.get(senderName.toLowerCase().trim()) || [];
+  } else {
+    // Fallback scan
+    customerBaskets = pool.filter(inv => {
+      if (senderId && senderId !== 'TEST_USER_1' && senderId !== 'FB_USER' && inv.facebook_user_id === senderId) {
         return true;
       }
-    }
-    if (data.phone_number && inv.phone_number) {
-      const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
-      const cleanInvPhone = inv.phone_number.replace(/\D/g, '');
-      if (cleanSlipPhone.length >= 8 && cleanInvPhone.length >= 8 && (cleanSlipPhone.includes(cleanInvPhone) || cleanInvPhone.includes(cleanSlipPhone))) {
-        return true;
+      for (const name of candidateNames) {
+        if (isCustomerNameMatch(name, inv.facebook_name)) {
+          return true;
+        }
       }
-    }
-    return false;
-  });
+      if (data.phone_number && inv.phone_number) {
+        const cleanSlipPhone = data.phone_number.replace(/\D/g, '');
+        const cleanInvPhone = inv.phone_number.replace(/\D/g, '');
+        if (cleanSlipPhone.length >= 8 && cleanInvPhone.length >= 8 && (cleanSlipPhone.includes(cleanInvPhone) || cleanInvPhone.includes(cleanSlipPhone))) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }
 
   if (customerBaskets.length > 0) {
     const sortedCustomerBaskets = sortInvoicesNewestFirst(customerBaskets);
@@ -1333,10 +1346,31 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
 
     const prebuiltIndices = { paidTxIdMap, slipTxIdMap, slipUrlMap };
 
+    // ⚡ Precompute active invoice pool and fast maps ONCE instead of inside loop 123 times
+    const activeInvoicePool = sortInvoicesNewestFirst(
+      invoices.filter(inv => inv.status !== 'Cancelled' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED')
+    );
+    const activeByUid = new Map<string, Invoice[]>();
+    const activeByName = new Map<string, Invoice[]>();
+    for (const inv of activeInvoicePool) {
+      if (inv.facebook_user_id) {
+        const list = activeByUid.get(inv.facebook_user_id) || [];
+        list.push(inv);
+        activeByUid.set(inv.facebook_user_id, list);
+      }
+      if (inv.facebook_name) {
+        const clean = inv.facebook_name.toLowerCase().trim();
+        const list = activeByName.get(clean) || [];
+        list.push(inv);
+        activeByName.set(clean, list);
+      }
+    }
+    const precomputedActive = { byUid: activeByUid, byName: activeByName };
+
     // Refresh match state for filtered subset
     for (const slip of filtered) {
       if (slip.status !== 'APPROVED' && slip.status !== 'REJECTED') {
-        const matchRes = matchInvoiceForSlip(slip.extracted, slip.sender_name, slip.sender_id);
+        const matchRes = matchInvoiceForSlip(slip.extracted, slip.sender_name, slip.sender_id, activeInvoicePool, precomputedActive);
         slip.status = matchRes.status;
         slip.confidence = matchRes.confidence;
         slip.matched_invoice = matchRes.matched ? {

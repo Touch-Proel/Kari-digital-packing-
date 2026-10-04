@@ -90,6 +90,10 @@ interface UnpaidBasket {
   status: string;
 }
 
+// ⚡ Global In-Memory Cache: preserves slips across modal close/reopen (Instant 0ms display)
+let cachedSlipsMemory: MessengerSlipItem[] = [];
+let cachedUnpaidBasketsMemory: UnpaidBasket[] = [];
+
 export function FastCheckSlipsModal({
   isOpen,
   onClose,
@@ -101,7 +105,8 @@ export function FastCheckSlipsModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [displayLimit, setDisplayLimit] = useState(35);
   
-  const [slips, setSlips] = useState<MessengerSlipItem[]>([]);
+  // Initialize with cached slips for instant 0ms render when re-opening
+  const [slips, setSlips] = useState<MessengerSlipItem[]>(() => cachedSlipsMemory);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [approvingIds, setApprovingIds] = useState<Record<string, boolean>>({});
@@ -114,7 +119,7 @@ export function FastCheckSlipsModal({
 
   // Manual Basket Search Modal State
   const [manualLinkSlip, setManualLinkSlip] = useState<MessengerSlipItem | null>(null);
-  const [unpaidBaskets, setUnpaidBaskets] = useState<UnpaidBasket[]>([]);
+  const [unpaidBaskets, setUnpaidBaskets] = useState<UnpaidBasket[]>(() => cachedUnpaidBasketsMemory);
   const [basketSearchTerm, setBasketSearchTerm] = useState('');
   const [isLoadingBaskets, setIsLoadingBaskets] = useState(false);
 
@@ -135,7 +140,15 @@ export function FastCheckSlipsModal({
   const fetchMessengerSlips = async (showLoading = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
-    if (showLoading) setIsLoading(true);
+    
+    // ⚡ Stale-While-Revalidate: Only show blocking spinner if there are literally NO slips in memory yet!
+    const hasExistingData = slips.length > 0 || cachedSlipsMemory.length > 0;
+    if (showLoading && !hasExistingData) {
+      setIsLoading(true);
+    } else {
+      setIsSyncing(true);
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
     try {
@@ -146,6 +159,7 @@ export function FastCheckSlipsModal({
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.slips)) {
+          cachedSlipsMemory = data.slips;
           setSlips(data.slips);
         }
       }
@@ -154,7 +168,8 @@ export function FastCheckSlipsModal({
     } finally {
       clearTimeout(timeoutId);
       isFetchingRef.current = false;
-      if (showLoading) setIsLoading(false);
+      setIsLoading(false);
+      setIsSyncing(false);
     }
   };
 
@@ -177,12 +192,15 @@ export function FastCheckSlipsModal({
   };
 
   const fetchUnpaidBaskets = async () => {
-    setIsLoadingBaskets(true);
+    if (unpaidBaskets.length === 0 && cachedUnpaidBasketsMemory.length === 0) {
+      setIsLoadingBaskets(true);
+    }
     try {
       const res = await fetch('/api/fast_check/unpaid_baskets');
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.baskets)) {
+          cachedUnpaidBasketsMemory = data.baskets;
           setUnpaidBaskets(data.baskets);
         }
       }
@@ -675,6 +693,12 @@ export function FastCheckSlipsModal({
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   <span>Live Webhook ON</span>
                 </span>
+                {isSyncing && (
+                  <span className="inline-flex items-center gap-1 bg-indigo-500/30 text-indigo-300 border border-indigo-500/50 text-[9.5px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 animate-pulse">
+                    <span className="animate-spin text-[10px]">🔄</span>
+                    <span>Syncing...</span>
+                  </span>
+                )}
                 <span className="hidden md:inline-flex items-center gap-1 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9.5px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" title="រូបភាពដែលធ្លាប់ស្កេនរួច នឹងទាញយកពី Local Cache ភ្លាមៗ (ចំណាយ 0 Token មិនខាតប្រាក់)">
                   <span>⚡ 0-Token Cache Active</span>
                 </span>
@@ -855,7 +879,7 @@ export function FastCheckSlipsModal({
         {/* MAIN CONTENT: EXPANDED SPACIOUS VIEWPORT */}
         <div className="flex-1 overflow-y-auto p-2 sm:p-3">
           
-          {isLoading ? (
+          {isLoading && slips.length === 0 ? (
             <div className="text-center py-20 text-slate-400 space-y-2">
               <span className="animate-spin text-3xl inline-block">⏳</span>
               <div className="font-bold text-xs text-slate-300">កំពុងទាញទិន្នន័យ Slips ពី Messenger...</div>
