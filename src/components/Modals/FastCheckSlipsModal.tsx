@@ -117,7 +117,7 @@ export function FastCheckSlipsModal({
   onSuccess,
   onShowToast
 }: FastCheckSlipsModalProps) {
-  const [timeFilter, setTimeFilter] = useState<'today' | '24h' | 'all'>('today');
+  const [timeFilter, setTimeFilter] = useState<'today' | '24h'>('today');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'MATCHED' | 'REVIEW' | 'DUPLICATE' | 'APPROVED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [displayLimit, setDisplayLimit] = useState(35);
@@ -800,34 +800,27 @@ export function FastCheckSlipsModal({
         {/* COMPACT SINGLE-ROW FILTER STRIP (SLIM & CLEAN) */}
         <div className="px-3 py-2 bg-[#080E1B] border-b border-slate-800 flex items-center justify-between gap-2 flex-wrap flex-shrink-0">
           
-          {/* Time Filter Pills */}
+          {/* Time Filter Pills (Strict Realtime & Token-Saving: 12:00 AM or 24h) */}
           <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-[11px] font-bold">
             <button
               type="button"
               onClick={() => setTimeFilter('today')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
                 timeFilter === 'today' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
               }`}
+              title="ចាប់យកតែ Slips ថ្ងៃនេះ (ចាប់ពីម៉ោង 12:00 AM យប់មិញដល់ឥឡូវ)"
             >
               📅 ថ្ងៃនេះ (12:00 AM)
             </button>
             <button
               type="button"
               onClick={() => setTimeFilter('24h')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
                 timeFilter === '24h' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
               }`}
+              title="ចាប់យក Slips ក្នុងរយៈពេល ២៤ ម៉ោងចុងក្រោយ"
             >
-              🕒 24h
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeFilter('all')}
-              className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
-                timeFilter === 'all' ? 'bg-indigo-600 text-white font-black shadow-sm' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              🌐 ទាំងអស់
+              🕒 ២៤ ម៉ោង (24h)
             </button>
           </div>
 

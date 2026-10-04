@@ -1302,28 +1302,23 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
     // Purge any lingering invalid items
     deduplicateAndSanitizeMessengerSlips();
 
-    const { since } = req.query; // 'today' | '24h' | 'all'
-    const now = new Date();
-    let cutoffDate: Date | null = null;
+    const { since } = req.query; // 'today' | '24h'
+    let cutoffDate: Date;
 
-    if (since === 'today' || !since) {
+    if (since === '24h') {
+      cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
+    } else {
       // Midnight today in Cambodia (UTC+7)
       const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
       const khmerMidnight = new Date(Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000);
       cutoffDate = khmerMidnight;
-    } else if (since === '24h') {
-      cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
     }
 
-    let filtered = [...messengerSlips];
-    if (cutoffDate) {
-      filtered = filtered.filter(s => {
-        // ⚡ CRITICAL: Unapproved / pending slips must NEVER disappear from the check queue before being reviewed!
-        if (s.status !== 'APPROVED' && !s.is_approved) return true;
-        if (!s.received_at) return true;
-        return new Date(s.received_at) >= cutoffDate;
-      });
-    }
+    let filtered = [...messengerSlips].filter(s => {
+      if (!s.received_at) return true;
+      const rec = new Date(s.received_at).getTime();
+      return rec >= cutoffDate.getTime();
+    });
 
     // Sort newest received first
     filtered.sort((a, b) => new Date(b.received_at || 0).getTime() - new Date(a.received_at || 0).getTime());
@@ -1493,25 +1488,24 @@ export async function executeBackgroundMessengerSync(since?: string): Promise<{ 
   try {
     const page = activeFacebookPage;
     const now = new Date();
-    let cutoffDate: Date | null = null;
+    let cutoffDate: Date;
 
-    if (since === 'all') {
-      cutoffDate = null;
-    } else if (since === '7d') {
-      cutoffDate = new Date(Date.now() - 7 * 24 * 3600 * 1000);
-    } else if (since === '24h') {
+    if (since === '24h') {
       cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
     } else {
       // Midnight today in Cambodia (UTC+7)
       const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
-      cutoffDate = new Date(Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000);
+      const midnightUtc = Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000;
+      cutoffDate = new Date(midnightUtc);
     }
+
+    console.log(`[Messenger Sync] Started sync with strict cutoff: ${cutoffDate.toISOString()} (Filter: ${since || 'today'})`);
 
     if (page && page.access_token && page.id) {
       try {
-        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(25){id,created_time,from,message,attachments{id,mime_type,name,size,file_url,image_data}}&limit=30&access_token=${page.access_token}`;
+        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(10){id,created_time,from,message,attachments{id,mime_type,name,size,file_url,image_data}}&limit=20&access_token=${page.access_token}`;
         let pageCount = 0;
-        const maxPages = since === 'all' ? 4 : 2;
+        const maxPages = 2;
 
         // ⚡ Fast O(1) Sets for deduplication
         const seenUrls = new Set(messengerSlips.map(s => s.slip_url).filter(Boolean));
@@ -1534,11 +1528,12 @@ export async function executeBackgroundMessengerSync(since?: string): Promise<{ 
               // ⚡ Yield event loop between conversations
               await new Promise(r => setTimeout(r, 20));
 
-              // If conversation is older than cutoff, stop pagination
-              if (cutoffDate && conv.updated_time) {
+              // If conversation was last updated before cutoffDate, all remaining conversations are even older
+              if (conv.updated_time) {
                 const convUpdated = new Date(conv.updated_time);
-                if (convUpdated < cutoffDate) {
-                  continue;
+                if (convUpdated.getTime() < cutoffDate.getTime()) {
+                  nextUrl = null;
+                  break; // Stop pagination early! Zero token waste!
                 }
               }
 
@@ -1565,8 +1560,16 @@ export async function executeBackgroundMessengerSync(since?: string): Promise<{ 
                   continue;
                 }
 
-                const msgTime = new Date(m.created_time);
-                if (cutoffDate && msgTime < cutoffDate) continue;
+                // ⚡ STRICT TIMING FILTER: Messages are ordered newest-first.
+                // If this message was sent before cutoffDate, all earlier messages in this conversation are even older -> BREAK!
+                if (m.created_time) {
+                  const msgTime = new Date(m.created_time);
+                  if (isNaN(msgTime.getTime()) || msgTime.getTime() < cutoffDate.getTime()) {
+                    break; // Stop looking at older messages in this conversation!
+                  }
+                } else {
+                  continue;
+                }
 
                 const attachments = m.attachments?.data || [];
                 for (const att of attachments) {
