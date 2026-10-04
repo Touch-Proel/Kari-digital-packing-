@@ -90,9 +90,26 @@ interface UnpaidBasket {
   status: string;
 }
 
-// ⚡ Global In-Memory Cache: preserves slips across modal close/reopen (Instant 0ms display)
+const LOCAL_STORAGE_SLIPS_KEY = 'POS_FAST_CHECK_SLIPS_V1';
+
+// ⚡ Global In-Memory & LocalStorage Cache: preserves slips across modal close/reopen (Instant 0ms display)
 let cachedSlipsMemory: MessengerSlipItem[] = [];
 let cachedUnpaidBasketsMemory: UnpaidBasket[] = [];
+
+function getInitialCachedSlips(): MessengerSlipItem[] {
+  if (cachedSlipsMemory.length > 0) return cachedSlipsMemory;
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_SLIPS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        cachedSlipsMemory = parsed;
+        return parsed;
+      }
+    }
+  } catch {}
+  return [];
+}
 
 export function FastCheckSlipsModal({
   isOpen,
@@ -106,7 +123,7 @@ export function FastCheckSlipsModal({
   const [displayLimit, setDisplayLimit] = useState(35);
   
   // Initialize with cached slips for instant 0ms render when re-opening
-  const [slips, setSlips] = useState<MessengerSlipItem[]>(() => cachedSlipsMemory);
+  const [slips, setSlips] = useState<MessengerSlipItem[]>(getInitialCachedSlips);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [approvingIds, setApprovingIds] = useState<Record<string, boolean>>({});
@@ -141,9 +158,9 @@ export function FastCheckSlipsModal({
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     
-    // ⚡ Stale-While-Revalidate: Only show blocking spinner if there are literally NO slips in memory yet!
-    const hasExistingData = slips.length > 0 || cachedSlipsMemory.length > 0;
-    if (showLoading && !hasExistingData) {
+    // ⚡ Stale-While-Revalidate: Only show blocking spinner if there are literally NO slips in memory or cache!
+    const existing = slips.length > 0 || cachedSlipsMemory.length > 0 || getInitialCachedSlips().length > 0;
+    if (showLoading && !existing) {
       setIsLoading(true);
     } else {
       setIsSyncing(true);
@@ -161,6 +178,9 @@ export function FastCheckSlipsModal({
         if (data.success && Array.isArray(data.slips)) {
           cachedSlipsMemory = data.slips;
           setSlips(data.slips);
+          try {
+            localStorage.setItem(LOCAL_STORAGE_SLIPS_KEY, JSON.stringify(data.slips.slice(0, 100)));
+          } catch {}
         }
       }
     } catch (err) {
@@ -244,6 +264,8 @@ export function FastCheckSlipsModal({
         onShowToast(data.message || '⚡ កំពុងដំណើរការ Auto-Scan ក្នុង Background...', 'success');
         fetchMessengerSlips(false);
         fetchUnpaidBaskets();
+        setTimeout(() => fetchMessengerSlips(false), 2500);
+        setTimeout(() => fetchMessengerSlips(false), 6000);
       } else {
         onShowToast(data.error || 'មិនអាចទាញយកសារ Messenger បានទេ', 'error');
       }

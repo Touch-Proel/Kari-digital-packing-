@@ -19,9 +19,12 @@ export interface CachedSlipData {
 }
 
 const OCR_CACHE_PATH = path.join(process.cwd(), 'server', 'ocr_cache.json');
+const PROCESSED_IDS_PATH = path.join(process.cwd(), 'server', 'synced_attachments.json');
 const ocrMemoryCache = new Map<string, CachedSlipData>();
+const processedIdsSet = new Set<string>();
 
 let isDirty = false;
+let isProcessedDirty = false;
 let saveTimer: NodeJS.Timeout | null = null;
 
 export function initOcrCache() {
@@ -33,14 +36,69 @@ export function initOcrCache() {
         for (const [key, val] of Object.entries(parsed)) {
           if (val && typeof val === 'object') {
             ocrMemoryCache.set(key, val as CachedSlipData);
+            // Also seed processed IDs from all known cache keys
+            processedIdsSet.add(key);
           }
         }
         console.log(`[OCR Cache] Loaded ${ocrMemoryCache.size} cached slip OCR results from disk.`);
       }
     }
+
+    if (fs.existsSync(PROCESSED_IDS_PATH)) {
+      const rawIds = fs.readFileSync(PROCESSED_IDS_PATH, 'utf8');
+      const parsedIds = JSON.parse(rawIds);
+      if (Array.isArray(parsedIds)) {
+        for (const id of parsedIds) {
+          if (id) processedIdsSet.add(String(id));
+        }
+        console.log(`[Processed Tracker] Loaded ${processedIdsSet.size} previously scanned message/attachment IDs.`);
+      }
+    }
   } catch (err) {
-    console.error('[OCR Cache] Failed to load ocr_cache.json:', err);
+    console.error('[OCR Cache] Failed to load ocr_cache.json or synced_attachments.json:', err);
   }
+}
+
+export function isProcessed(idOrUrl: string): boolean {
+  if (!idOrUrl) return false;
+  return processedIdsSet.has(idOrUrl);
+}
+
+export function markProcessed(idOrUrl: string) {
+  if (!idOrUrl) return;
+  if (!processedIdsSet.has(idOrUrl)) {
+    processedIdsSet.add(idOrUrl);
+    isProcessedDirty = true;
+    scheduleSaveProcessed();
+  }
+}
+
+export function markMultipleProcessed(idsOrUrls: string[]) {
+  let changed = false;
+  for (const id of idsOrUrls) {
+    if (id && !processedIdsSet.has(id)) {
+      processedIdsSet.add(id);
+      changed = true;
+    }
+  }
+  if (changed) {
+    isProcessedDirty = true;
+    scheduleSaveProcessed();
+  }
+}
+
+function scheduleSaveProcessed() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      const arr = Array.from(processedIdsSet);
+      fs.writeFileSync(PROCESSED_IDS_PATH, JSON.stringify(arr), 'utf8');
+      isProcessedDirty = false;
+    } catch (e) {
+      console.error('[Processed Tracker] Failed to save synced_attachments.json:', e);
+    }
+  }, 2000);
 }
 
 export function computeImageHash(buffer: Buffer): string {

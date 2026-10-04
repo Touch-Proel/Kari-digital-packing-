@@ -491,7 +491,7 @@ export async function persistToSqlite(data: {
       }
 
       // 7. Messenger Slips
-      if (data.messengerSlips && Array.isArray(data.messengerSlips)) {
+      if (data.messengerSlips && Array.isArray(data.messengerSlips) && data.messengerSlips.length > 0) {
         db.run('DELETE FROM messenger_slips;');
         const stmtSlip = db.prepare('INSERT OR REPLACE INTO messenger_slips (id, source, sender_id, sender_name, sender_avatar_url, slip_url, received_at, extracted_json, status, is_approved, confidence, matched_invoice_json, candidates_json, duplicate_warning_json, fraud_warning_json, amount_mismatch_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
         for (const s of data.messengerSlips) {

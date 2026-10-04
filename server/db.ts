@@ -22,6 +22,18 @@ const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
 
 export async function saveDatabaseToDisk(forceSync = false) {
   try {
+    const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
+    if (messengerSlips.length === 0 && fs.existsSync(BACKUP_SLIPS_PATH)) {
+      try {
+        const raw = fs.readFileSync(BACKUP_SLIPS_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          messengerSlips.push(...parsed);
+          console.log(`[DB Auto-Heal] Restored ${parsed.length} slips from backup file before saving.`);
+        }
+      } catch {}
+    }
+
     const payload = {
       dataRevision,
       activeLiveId,
@@ -44,7 +56,6 @@ export async function saveDatabaseToDisk(forceSync = false) {
       });
     }
 
-    const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
     if (messengerSlips && messengerSlips.length > 0) {
       try {
         fs.writeFileSync(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8');

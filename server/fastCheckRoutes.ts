@@ -6,7 +6,7 @@ import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db';
 import { Invoice } from './types';
 import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
-import { computeImageHash, getCachedOcr, setCachedOcr } from './ocrCache';
+import { computeImageHash, getCachedOcr, setCachedOcr, isProcessed, markProcessed, markMultipleProcessed } from './ocrCache';
 
 const router = Router();
 
@@ -700,7 +700,7 @@ export async function callGeminiSlipExtraction(
 
   for (const model of modelCandidates) {
     try {
-      const response: GenerateContentResponse = await ai.models.generateContent({
+      const genPromise = ai.models.generateContent({
         model,
         contents: [
           {
@@ -713,7 +713,12 @@ export async function callGeminiSlipExtraction(
           temperature: 0.1
         }
       });
-      const text = response.text?.trim() || '';
+      const timeoutPromise = new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error('AI OCR timeout (10s)')), 10000)
+      );
+
+      const response = (await Promise.race([genPromise, timeoutPromise])) as GenerateContentResponse;
+      const text = response?.text?.trim() || '';
       if (text) {
         return { text };
       }
@@ -1280,7 +1285,21 @@ router.get('/unpaid_baskets', (_req: Request, res: Response) => {
  */
 router.get('/messenger_slips', (req: Request, res: Response) => {
   try {
-    // Purge any lingering non-bank images and duplicate slips
+    // Auto-heal slips from backup file if memory queue is empty
+    if (messengerSlips.length === 0) {
+      const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
+      if (fs.existsSync(BACKUP_SLIPS_PATH)) {
+        try {
+          const raw = fs.readFileSync(BACKUP_SLIPS_PATH, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            messengerSlips.push(...parsed);
+          }
+        } catch {}
+      }
+    }
+
+    // Purge any lingering invalid items
     deduplicateAndSanitizeMessengerSlips();
 
     const { since } = req.query; // 'today' | '24h' | 'all'
@@ -1554,10 +1573,22 @@ export async function executeBackgroundMessengerSync(since?: string): Promise<{ 
                   const imgUrl = att.image_data?.url || att.file_url || att.image_data?.preview_url || att.payload?.url || att.url;
                   if (!imgUrl || att.image_data?.render_as_sticker) continue;
 
-                  // ⚡ Fast O(1) existence check
-                  if (seenUrls.has(imgUrl) || seenIds.has(`mslip_${m.id}`)) {
+                  // ⚡ Fast O(1) duplicate & already-processed check (Never re-download or re-scan previously seen images)
+                  const slipMsgId = `mslip_${m.id}`;
+                  if (
+                    isProcessed(m.id) ||
+                    isProcessed(imgUrl) ||
+                    isProcessed(slipMsgId) ||
+                    seenUrls.has(imgUrl) ||
+                    seenIds.has(slipMsgId)
+                  ) {
                     continue;
                   }
+
+                  // Mark as processed immediately so subsequent passes or non-bank photos are never re-downloaded
+                  markProcessed(m.id);
+                  markProcessed(imgUrl);
+                  markProcessed(slipMsgId);
 
                   let savedSlipUrl = imgUrl;
                   let rawBase64 = '';
@@ -1565,31 +1596,24 @@ export async function executeBackgroundMessengerSync(since?: string): Promise<{ 
 
                   try {
                     const imgResp = await fetch(imgUrl);
+                    if (!imgResp.ok) continue;
                     const arrayBuf = await imgResp.arrayBuffer();
                     const buf = Buffer.from(arrayBuf);
-                    let optBuf = buf;
-                    try {
-                      optBuf = await sharp(buf)
-                        .rotate()
-                        .resize({ width: 1400, fit: 'inside', withoutEnlargement: true })
-                        .webp({ quality: 82, effort: 3 })
-                        .toBuffer();
-                    } catch {
-                      optBuf = buf;
-                    }
-                    rawBase64 = optBuf.toString('base64');
-                    const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`;
+                    rawBase64 = buf.toString('base64');
+                    const ext = mimeType.includes('png') ? 'png' : 'jpg';
+                    const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
                     const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
                     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-                    // ⚡ Non-blocking async file write
-                    await fs.promises.writeFile(path.join(uploadsDir, fileName), optBuf);
+                    // ⚡ Non-blocking direct file write without heavy CPU sharp re-encoding
+                    await fs.promises.writeFile(path.join(uploadsDir, fileName), buf);
                     savedSlipUrl = `/uploads/${fileName}`;
+                    markProcessed(savedSlipUrl);
                   } catch (dlErr) {
                     console.error('Image download error:', dlErr);
                   }
 
-                  // ⚡ Yield event loop after downloading image
-                  await new Promise(r => setTimeout(r, 30));
+                  // ⚡ Cooperative event loop yield: gives 60ms for Express to serve other users
+                  await new Promise(r => setTimeout(r, 60));
 
                   let isGenuineBankSlip = false;
                   let extracted: ExtractedSlipData = {
@@ -1697,7 +1721,7 @@ Output strictly raw JSON with these fields.`
                   }
 
                   // ⚡ Yield event loop after OCR call
-                  await new Promise(r => setTimeout(r, 30));
+                  await new Promise(r => setTimeout(r, 40));
 
                   // Strict filter: If not a bank slip or paid_amount <= 0, skip
                   if (!isGenuineBankSlip || extracted.paid_amount <= 0) {
@@ -1762,6 +1786,7 @@ Output strictly raw JSON with these fields.`
 
                   messengerSlips.unshift(newSlipItem);
                   seenUrls.add(savedSlipUrl);
+                  seenUrls.add(imgUrl);
                   seenIds.add(newSlipItem.id);
                   newSlipsFound++;
 
