@@ -824,6 +824,12 @@ export function FastCheckSlipsModal({
             </button>
           </div>
 
+          {/* Zero Waste Token Saving Badge */}
+          <div className="hidden md:flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-xl border border-emerald-500/30 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>⚡ សន្សំ Token: ចាប់តែវិក្កយបត្រថ្មីៗ (Zero Waste) មិនស្កេនរូបចាស់ដដែលៗឡើយ</span>
+          </div>
+
           {/* Status Tabs */}
           <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-[11px] font-bold">
             <button

@@ -1305,19 +1305,36 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
     const { since } = req.query; // 'today' | '24h'
     let cutoffDate: Date;
 
+    // Time calculation in Cambodia UTC+7
+    const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
+    const todayKhmerStr = `${khmerNow.getUTCFullYear()}-${String(khmerNow.getUTCMonth() + 1).padStart(2, '0')}-${String(khmerNow.getUTCDate()).padStart(2, '0')}`;
+
     if (since === '24h') {
       cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
     } else {
-      // Midnight today in Cambodia (UTC+7)
-      const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
-      const khmerMidnight = new Date(Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000);
-      cutoffDate = khmerMidnight;
+      // Midnight today in Cambodia (UTC+7 00:00:00)
+      const midnightUtc = Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000;
+      cutoffDate = new Date(midnightUtc);
     }
 
     let filtered = [...messengerSlips].filter(s => {
-      if (!s.received_at) return true;
-      const rec = new Date(s.received_at).getTime();
-      return rec >= cutoffDate.getTime();
+      // If filtering for today (from 12:00 AM), check extracted transaction date
+      if (since !== '24h' && s.extracted?.trans_date) {
+        if (s.extracted.trans_date < todayKhmerStr) {
+          return false; // Reject old slip from earlier dates
+        }
+      }
+
+      // Check received_at timestamp against cutoff
+      if (s.received_at) {
+        const rec = new Date(s.received_at).getTime();
+        if (isNaN(rec) || rec < cutoffDate.getTime()) {
+          return false;
+        }
+      } else if (!s.extracted?.trans_date) {
+        return false;
+      }
+      return true;
     });
 
     // Sort newest received first
@@ -1487,23 +1504,26 @@ export async function executeBackgroundMessengerSync(since?: string): Promise<{ 
 
   try {
     const page = activeFacebookPage;
-    const now = new Date();
     let cutoffDate: Date;
+
+    const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
+    const todayKhmerStr = `${khmerNow.getUTCFullYear()}-${String(khmerNow.getUTCMonth() + 1).padStart(2, '0')}-${String(khmerNow.getUTCDate()).padStart(2, '0')}`;
 
     if (since === '24h') {
       cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
     } else {
-      // Midnight today in Cambodia (UTC+7)
-      const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
+      // Midnight today in Cambodia (UTC+7 00:00:00)
       const midnightUtc = Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000;
       cutoffDate = new Date(midnightUtc);
     }
 
-    console.log(`[Messenger Sync] Started sync with strict cutoff: ${cutoffDate.toISOString()} (Filter: ${since || 'today'})`);
+    const sinceSec = Math.floor(cutoffDate.getTime() / 1000);
+    console.log(`[Messenger Sync] Started sync with strict cutoff: ${cutoffDate.toISOString()} / Unix ${sinceSec} (Filter: ${since || 'today'})`);
 
     if (page && page.access_token && page.id) {
       try {
-        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(10){id,created_time,from,message,attachments{id,mime_type,name,size,file_url,image_data}}&limit=20&access_token=${page.access_token}`;
+        // Direct server-side filtering via ?since=${sinceSec} and messages.since(${sinceSec})
+        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?since=${sinceSec}&fields=id,updated_time,participants,messages.since(${sinceSec}).limit(10){id,created_time,from,message,attachments{id,mime_type,name,size,file_url,image_data}}&limit=25&access_token=${page.access_token}`;
         let pageCount = 0;
         const maxPages = 2;
 
@@ -1728,6 +1748,12 @@ Output strictly raw JSON with these fields.`
 
                   // Strict filter: If not a bank slip or paid_amount <= 0, skip
                   if (!isGenuineBankSlip || extracted.paid_amount <= 0) {
+                    continue;
+                  }
+
+                  // Strict filter: If filtering for today (12:00 AM), skip any slip with a transaction date from previous days
+                  if (since !== '24h' && extracted.trans_date && extracted.trans_date < todayKhmerStr) {
+                    console.log(`[Messenger Sync] Skipping slip with past date ${extracted.trans_date} (older than today ${todayKhmerStr})`);
                     continue;
                   }
 

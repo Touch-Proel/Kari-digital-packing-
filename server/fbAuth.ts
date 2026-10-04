@@ -9,13 +9,42 @@ let userAccessToken = '';
 let availablePages: FacebookPage[] = [];
 
 export function getRedirectUri(req: Request): string {
-  if (process.env.APP_URL) {
+  // 1. Explicit redirect_uri param passed from client (e.g. window.location.origin)
+  if (req.query?.redirect_uri && typeof req.query.redirect_uri === 'string') {
+    const raw = req.query.redirect_uri.trim();
+    if (raw.startsWith('https://') || raw.startsWith('http://localhost') || raw.startsWith('http://127.0.0.1')) {
+      return raw;
+    }
+  }
+
+  // 2. Request Origin or Referer header (matches browser address bar directly)
+  const origin = (req.headers['origin'] as string) || (req.headers['referer'] as string) || '';
+  if (origin) {
+    try {
+      const u = new URL(origin);
+      if (u.hostname) {
+        const proto = (u.hostname === 'localhost' || u.hostname === '127.0.0.1') ? 'http' : 'https';
+        return `${proto}://${u.host}/auth/callback`;
+      }
+    } catch {}
+  }
+
+  // 3. X-Forwarded-Host or Host header (behind Nginx / reverse proxy)
+  const forwardedHost = (req.headers['x-forwarded-host'] as string)?.split(',')[0].trim();
+  const host = forwardedHost || req.get('host') || '';
+
+  if (host) {
+    const proto = (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https';
+    return `${proto}://${host}/auth/callback`;
+  }
+
+  // 4. Fallback to chatbotkh.com or APP_URL
+  if (process.env.APP_URL && !process.env.APP_URL.includes('run.app')) {
     const base = process.env.APP_URL.replace(/\/$/, '');
     return `${base}/auth/callback`;
   }
-  const host = req.get('host') || 'localhost:3000';
-  const protocol = req.protocol || 'http';
-  return `${protocol}://${host}/auth/callback`;
+
+  return 'https://chatbotkh.com/auth/callback';
 }
 
 // Generate OAuth URL for Popup

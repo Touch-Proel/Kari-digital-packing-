@@ -36,6 +36,9 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// Enable trust proxy for Nginx / Cloudflare reverse proxies (crucial for https://chatbotkh.com)
+app.set('trust proxy', true);
+
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
@@ -306,6 +309,19 @@ app.get('/api/auth/facebook/url', (req: Request, res: Response) => {
 
 // 2. OAuth Callback handler (postMessage back to parent window & closes popup)
 app.get(['/auth/callback', '/auth/callback/'], handleOAuthCallback);
+
+// Facebook Compliance Pages (Required by Meta Developer Platform for public domains like chatbotkh.com)
+app.get(['/privacy-policy', '/privacy'], (_req: Request, res: Response) => {
+  res.send(`<!DOCTYPE html><html lang="km"><head><meta charset="utf-8"><title>Privacy Policy - ChatbotKH POS</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0b1329;color:#e2e8f0;padding:24px;max-width:800px;margin:0 auto;line-height:1.7}h1{color:#38bdf8}h2{color:#7dd3fc;margin-top:24px}.card{background:#1e293b;padding:24px;border-radius:16px;border:1px solid #334155}</style></head><body><div class="card"><h1>គោលការណ៍ភាពឯកជន (Privacy Policy)</h1><p>ChatbotKH POS («យើង») ផ្តល់សេវាកម្មគ្រប់គ្រងការលក់ Live Stream, សារ Messenger និងការផ្ទៀងផ្ទាត់វិក្កយបត្រផ្ទេរប្រាក់។</p><h2>១. ទិន្នន័យដែលយើងប្រមូល</h2><p>យើងប្រមូលតែទិន្នន័យចាំបាច់សម្រាប់ការគ្រប់គ្រងការលក់ រួមមាន ៖ ឈ្មោះអតិថិជនលើ Facebook, មតិយោបល់ (Comments) លើការផ្សាយផ្ទាល់ Live Stream, សារក្នុង Inbox Messenger និងវិក្កយបត្រផ្ទេរប្រាក់ដែលអតិថិជនផ្ញើចូល។</p><h2>២. ការប្រើប្រាស់ទិន្នន័យ</h2><p>ទិន្នន័យទាំងអស់ត្រូវបានប្រើប្រាស់សម្រាប់តែគោលបំណងចាត់ចែងការបញ្ជាទិញ បង្កើតកន្ត្រកទំនិញ និងផ្ទៀងផ្ទាត់ការបង់ប្រាក់តែប៉ុណ្ណោះ។ យើងមិនដែលលក់ ឬចែករំលែកទិន្នន័យទាំងនេះទៅភាគីទីបីឡើយ។</p><h2>៣. សំណើលុបទិន្នន័យ</h2><p>អ្នកប្រើប្រាស់អាចស្នើសុំលុបទិន្នន័យរបស់ខ្លួនបានគ្រប់ពេលវេលាតាមរយៈទំព័រ <a href="/data-deletion" style="color:#38bdf8">លុបទិន្នន័យ (Data Deletion)</a>។</p></div></body></html>`);
+});
+
+app.get(['/terms', '/terms-of-service'], (_req: Request, res: Response) => {
+  res.send(`<!DOCTYPE html><html lang="km"><head><meta charset="utf-8"><title>Terms of Service - ChatbotKH POS</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0b1329;color:#e2e8f0;padding:24px;max-width:800px;margin:0 auto;line-height:1.7}h1{color:#38bdf8}h2{color:#7dd3fc;margin-top:24px}.card{background:#1e293b;padding:24px;border-radius:16px;border:1px solid #334155}</style></head><body><div class="card"><h1>លក្ខខណ្ឌប្រើប្រាស់ (Terms of Service)</h1><p>សូមស្វាគមន៍មកកាន់ ChatbotKH POS។ ដោយការប្រើប្រាស់ប្រព័ន្ធនេះ អ្នកយល់ព្រមគោរពតាមលក្ខខណ្ឌទាំងអស់ដែលមានចែងនៅទីនេះ។</p><h2>១. ការប្រើប្រាស់គណនី</h2><p>ម្ចាស់អាជីវកម្មទទួលខុសត្រូវលើការរក្សាការសម្ងាត់នៃ Page Access Token និងគណនី Facebook របស់ខ្លួន។</p><h2>២. សិទ្ធិគ្រប់គ្រង</h2><p>ប្រព័ន្ធនេះត្រូវបានរចនាឡើងដើម្បីជួយសម្រួលដល់ដំណើរការលក់ Live Stream និងការគ្រប់គ្រងឃ្លាំងទំនិញប៉ុណ្ណោះ។</p></div></body></html>`);
+});
+
+app.get(['/data-deletion', '/user-data-deletion'], (_req: Request, res: Response) => {
+  res.send(`<!DOCTYPE html><html lang="km"><head><meta charset="utf-8"><title>Data Deletion Instructions - ChatbotKH POS</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0b1329;color:#e2e8f0;padding:24px;max-width:800px;margin:0 auto;line-height:1.7}h1{color:#38bdf8}h2{color:#7dd3fc;margin-top:24px}.card{background:#1e293b;padding:24px;border-radius:16px;border:1px solid #334155}</style></head><body><div class="card"><h1>ការណែនាំអំពីការលុបទិន្នន័យ (Data Deletion Instructions)</h1><p>ប្រសិនបើអ្នកចង់លុបទិន្នន័យរបស់អ្នកចេញពីកម្មវិធី ChatbotKH POS ៖</p><ol style="padding-left:20px;line-height:2"><li>ចូលទៅកាន់គណនី Facebook របស់អ្នក រួចចូល Settings & Privacy > Settings > Apps and Websites។</li><li>ស្វែងរកកម្មវិធី <strong>ChatbotKH POS</strong> រួចចុច Remove។</li><li>ដើម្បីស្នើសុំលុបទិន្នន័យទាំងអស់ជាស្ថាពរ សូមផ្ញើសារមកកាន់អ្នកគ្រប់គ្រងប្រព័ន្ធ នោះទិន្នន័យរបស់អ្នកនឹងត្រូវលុបចោលទាំងស្រុងក្នុងរយៈពេល ៤៨ ម៉ោង។</li></ol></div></body></html>`);
+});
 
 // 3. Facebook Connection Status
 app.get('/api/fb/status', (_req: Request, res: Response) => {

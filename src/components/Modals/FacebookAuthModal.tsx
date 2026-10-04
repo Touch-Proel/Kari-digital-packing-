@@ -25,6 +25,7 @@ export function FacebookAuthModal({
   onSyncSuccess,
   onOpenNoBasketModal
 }: FacebookAuthModalProps) {
+  const isHttpInsecure = typeof window !== 'undefined' && window.location.protocol === 'http:' && window.location.hostname !== 'localhost';
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [posts, setPosts] = useState<FacebookPost[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
@@ -32,7 +33,7 @@ export function FacebookAuthModal({
   const [manualToken, setManualToken] = useState('');
   const [manualPageName, setManualPageName] = useState('');
   const [customPostId, setCustomPostId] = useState('');
-  const [showManualForm, setShowManualForm] = useState(false);
+  const [showManualForm, setShowManualForm] = useState(() => isHttpInsecure);
   const [callbackUrl, setCallbackUrl] = useState('');
 
   useEffect(() => {
@@ -97,9 +98,15 @@ export function FacebookAuthModal({
 
   // Open Facebook OAuth Popup
   const handleConnectFacebook = async () => {
+    if (isHttpInsecure) {
+      setShowManualForm(true);
+      onShowToast('⚠️ Facebook ប្លុក Pop-up លើ HTTP IP! សូមប្រើប្រាស់ប្រអប់ Page Access Token ខាងក្រោម។', 'error');
+      return;
+    }
     try {
       onShowToast('⏳ កំពុងទាញយក OAuth URL...');
-      const res = await fetch('/api/auth/facebook/url');
+      const clientRedirectUri = `${window.location.origin}/auth/callback`;
+      const res = await fetch(`/api/auth/facebook/url?redirect_uri=${encodeURIComponent(clientRedirectUri)}`);
       if (!res.ok) throw new Error('Failed to get auth URL');
       const { url } = await res.json();
 
@@ -278,6 +285,23 @@ export function FacebookAuthModal({
         {/* Body */}
         <div className="p-4 overflow-y-auto flex flex-col gap-3.5 bg-[#050C1C] max-h-[80vh] custom-scroll">
           
+          {/* Insecure HTTP Warning Banner */}
+          {isHttpInsecure && (
+            <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/70 border border-amber-500/60 rounded-2xl p-3 text-xs text-amber-200 flex flex-col gap-1.5 shadow-md">
+              <div className="font-black text-amber-300 flex items-center gap-1.5 text-xs">
+                <span className="text-base">⚠️</span>
+                <span>មូលហេតុដែល Facebook ចេញ «Insecure Login Blocked»</span>
+              </div>
+              <p className="text-[11.5px] text-slate-300 leading-relaxed">
+                ដោយសារបងកំពុងប្រើប្រាស់តាម <strong>HTTP IP ({window?.location?.hostname})</strong> គ្មាន SSL (HTTPS) នោះ Facebook នឹងបិទមិនឱ្យប្រើប៊ូតុង Pop-up «ចូលគណនី FB» ឡើយ។
+              </p>
+              <div className="bg-slate-950/80 p-2 rounded-xl border border-amber-500/30 text-[11px] text-amber-300 font-bold flex items-center gap-1.5 mt-0.5">
+                <span>👉</span>
+                <span>ដំណោះស្រាយ ៖ សូមប្រើប្រាស់ប្រអប់ «Page Access Token» ខាងក្រោមនេះដើម្បីភ្ជាប់ភ្លាមៗ!</span>
+              </div>
+            </div>
+          )}
+
           {/* Active Connected Page Pill */}
           <div className="bg-gradient-to-r from-slate-900/90 via-[#0A1A36] to-slate-900/90 border border-cyan-500/30 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-md">
             <div className="text-xs text-slate-400 font-bold flex justify-between items-center">
@@ -555,25 +579,30 @@ export function FacebookAuthModal({
             )}
           </div>
 
-          {/* Toggle Manual Access Token Form */}
+          {/* Toggle Manual Access Token Form (Fastest & 100% Guaranteed Connection) */}
           <div className="border-t border-slate-800/80 pt-2.5 flex flex-col gap-2">
             <button
               onClick={() => setShowManualForm(!showManualForm)}
-              className="text-xs text-slate-400 hover:text-slate-200 flex items-center justify-between font-bold px-1 transition-colors"
+              className="text-xs text-cyan-300 hover:text-cyan-200 flex items-center justify-between font-bold px-1 transition-colors bg-cyan-950/40 p-2 rounded-xl border border-cyan-500/30"
             >
-              <span>⚙️ ជម្រើសកំណត់ដោយដៃ (Page Access Token / App Settings)</span>
-              <span className="text-[10px]">{showManualForm ? '▲' : '▼'}</span>
+              <span className="flex items-center gap-1.5">
+                <span>⚡</span> ជម្រើសភ្ជាប់លឿនបំផុត (Page Access Token / មិនបាច់ OAuth)
+              </span>
+              <span className="text-[10px]">{showManualForm ? '▲ បិទ' : '▼ បើក'}</span>
             </button>
 
             {showManualForm && (
-              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3 flex flex-col gap-2.5 shadow-inner">
+              <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 flex flex-col gap-2.5 shadow-inner">
+                <div className="text-[11px] text-slate-300 bg-blue-950/60 p-2 rounded-xl border border-blue-500/30">
+                  💡 ប្រសិនបើចុច «ចូលគណនី FB» ចេញផ្ទាំង Error ឬប្លុក URL សូមគ្រាន់តែយក <strong>Page Access Token</strong> ពី Meta Developer / Graph API Explorer មក Paste ត្រង់នេះ គឺដំណើរការភ្លាមៗ 100%!
+                </div>
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">ឈ្មោះ Facebook Page ៖</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">ឈ្មោះ Facebook Page (ជម្រើសបន្ថែម) ៖</label>
                   <input
                     type="text"
                     value={manualPageName}
                     onChange={e => setManualPageName(e.target.value)}
-                    placeholder="e.g. Kari Arnett"
+                    placeholder="e.g. ChatbotKH"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
                   />
                 </div>
@@ -583,30 +612,52 @@ export function FacebookAuthModal({
                     rows={2}
                     value={manualToken}
                     onChange={e => setManualToken(e.target.value)}
-                    placeholder="Paste Page Access Token from Graph API Explorer..."
+                    placeholder="Paste Page Access Token (EAAR...) ពី Meta..."
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-300 font-mono outline-none focus:border-cyan-400"
                   />
                 </div>
                 <button
                   onClick={handleManualConnect}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow transition-all active:scale-95"
+                  className="w-full py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-xl text-xs font-bold shadow transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  💾 រក្សាទុក & ភ្ជាប់ Token នេះ
+                  <span>💾 រក្សាទុក & ភ្ជាប់ទំព័រភ្លាមៗ</span>
                 </button>
               </div>
             )}
           </div>
 
           {/* OAuth Callback Info box for Facebook Dev Console */}
-          <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-3 flex flex-col gap-1.5 text-[11px] text-slate-400">
-            <div className="font-bold text-slate-300 flex items-center gap-1.5">
-              <span>📋</span> Facebook App OAuth Valid Redirect URI ៖
+          <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-3 flex flex-col gap-2 text-[11px] text-slate-400">
+            <div className="font-bold text-slate-200 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span>📋</span> ការកំណត់លើ developers.facebook.com ៖
+              </span>
+              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                chatbotkh.com
+              </span>
             </div>
-            <code className="bg-slate-900 text-cyan-300 p-2 rounded-xl font-mono break-all text-[10.5px] select-all border border-slate-800">
-              {callbackUrl}
-            </code>
-            <div className="text-[10px] text-slate-500 leading-normal">
-              បន្ថែម URL នេះទៅក្នុង Facebook Login Settings ក្នុង Meta Developer Portal ដើម្បីដំណើរការ OAuth Login។
+
+            <div className="flex items-center gap-2">
+              <code className="bg-slate-900 text-cyan-300 p-2 rounded-xl font-mono break-all text-[10.5px] select-all border border-slate-800 flex-1">
+                {callbackUrl || 'https://chatbotkh.com/auth/callback'}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(callbackUrl || 'https://chatbotkh.com/auth/callback');
+                  onShowToast('📋 បានចម្លង OAuth Redirect URI!', 'success');
+                }}
+                className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-3 py-2 rounded-xl text-[11px] font-bold border border-slate-700 transition-all flex-shrink-0 active:scale-95"
+              >
+                Copy
+              </button>
+            </div>
+
+            <div className="text-[10.5px] text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1 leading-relaxed">
+              <div className="font-bold text-cyan-300">ជំហានកំណត់ក្នុង Meta Developer Dashboard ដើម្បីកុំឱ្យ Error ៖</div>
+              <div>1. ចូល <strong>Facebook Login &gt; Settings</strong> &gt; បិទភ្ជាប់ (Paste) URL ខាងលើក្នុងប្រអប់ <strong>Valid OAuth Redirect URIs</strong>។</div>
+              <div>2. ចូល <strong>App Settings &gt; Basic</strong> &gt; បន្ថែម <code>chatbotkh.com</code> ក្នុង <strong>App Domains</strong>។</div>
+              <div>3. ត្រង់ <strong>Website &gt; Site URL</strong> បញ្ចូល <code>https://chatbotkh.com/</code>។</div>
             </div>
           </div>
         </div>
