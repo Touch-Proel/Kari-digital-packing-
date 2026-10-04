@@ -553,8 +553,21 @@ export function FullStockManagerModal({
                       >
                         {p.image_file ? (
                           <img
-                            src={p.image_file.includes('?') ? p.image_file : `${p.image_file}?t=${p.id || p.code}`}
+                            src={
+                              p.image_file.startsWith('http://') || p.image_file.startsWith('https://') || p.image_file.startsWith('/uploads/')
+                                ? `/api/image_proxy?url=${encodeURIComponent(p.image_file)}&w=160`
+                                : p.image_file
+                            }
                             alt={p.code}
+                            loading="lazy"
+                            decoding="async"
+                            referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              if (target.src !== p.image_file && p.image_file) {
+                                target.src = p.image_file;
+                              }
+                            }}
                             className="w-full h-full object-cover group-hover/img:scale-105 transition-transform"
                           />
                         ) : (

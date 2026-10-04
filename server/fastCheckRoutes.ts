@@ -1273,8 +1273,10 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
     let cutoffDate: Date | null = null;
 
     if (since === 'today' || !since) {
-      // 12:00 AM Midnight today
-      cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      // Midnight today in Cambodia (UTC+7)
+      const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
+      const khmerMidnight = new Date(Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000);
+      cutoffDate = khmerMidnight;
     } else if (since === '24h') {
       cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
     }
@@ -1282,6 +1284,8 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
     let filtered = [...messengerSlips];
     if (cutoffDate) {
       filtered = filtered.filter(s => {
+        // ⚡ CRITICAL: Unapproved / pending slips must NEVER disappear from the check queue before being reviewed!
+        if (s.status !== 'APPROVED' && !s.is_approved) return true;
         if (!s.received_at) return true;
         return new Date(s.received_at) >= cutoffDate;
       });

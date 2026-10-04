@@ -542,10 +542,22 @@ export function FastCheckSlipsModal({
     onZoom?: (url: string) => void;
   }) => {
     const rawUrl = slip.slip_url;
+    const proxiedSrc = rawUrl
+      ? (rawUrl.startsWith('http://') || rawUrl.startsWith('https://') || rawUrl.startsWith('/uploads/'))
+        ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=260`
+        : rawUrl
+      : '';
+    const [imgSrc, setImgSrc] = useState(proxiedSrc);
     const [hasError, setHasError] = useState(false);
 
     useEffect(() => {
       setHasError(false);
+      const next = rawUrl
+        ? (rawUrl.startsWith('http://') || rawUrl.startsWith('https://') || rawUrl.startsWith('/uploads/'))
+          ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=260`
+          : rawUrl
+        : '';
+      setImgSrc(next);
     }, [rawUrl]);
 
     const sizeClass = size === 'sm' ? 'w-12 h-12' : size === 'lg' ? 'w-20 h-20' : 'w-16 h-16';
@@ -568,11 +580,6 @@ export function FastCheckSlipsModal({
       );
     }
 
-    // Direct path for uploads, proxy for external URLs
-    const displaySrc = rawUrl.startsWith('http://') || rawUrl.startsWith('https://')
-      ? `/api/image_proxy?url=${encodeURIComponent(rawUrl)}&w=240`
-      : rawUrl;
-
     return (
       <div
         onClick={() => {
@@ -586,11 +593,19 @@ export function FastCheckSlipsModal({
         title="ចុចមើលរូបភាព Slip ធំ"
       >
         <img
-          src={displaySrc}
+          src={imgSrc}
           alt="Slip"
+          loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"
-          onError={() => setHasError(true)}
+          onError={() => {
+            // Double fallback: if proxy fails, retry rawUrl directly before hiding
+            if (imgSrc !== rawUrl && rawUrl) {
+              setImgSrc(rawUrl);
+            } else {
+              setHasError(true);
+            }
+          }}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform bg-slate-900"
         />
 
@@ -1608,6 +1623,11 @@ export function FastCheckSlipsModal({
               alt="Preview"
               decoding="async"
               referrerPolicy="no-referrer"
+              onError={(e) => {
+                if (e.currentTarget.src !== previewImage) {
+                  e.currentTarget.src = previewImage;
+                }
+              }}
               className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl border border-slate-700 bg-slate-900"
             />
             <div className="text-xs text-slate-400 mt-2 bg-slate-900/90 px-3 py-1 rounded-full border border-slate-800">

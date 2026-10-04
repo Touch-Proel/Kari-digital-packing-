@@ -501,8 +501,20 @@ export function ImageZoomModal({
           {currentImageUrl ? (
             <div className="w-full h-full flex items-center justify-center relative overflow-hidden">
               <img
-                src={currentImageUrl}
+                src={
+                  currentImageUrl.startsWith('http://') || currentImageUrl.startsWith('https://') || currentImageUrl.startsWith('/uploads/')
+                    ? `/api/image_proxy?url=${encodeURIComponent(currentImageUrl)}&w=1200`
+                    : currentImageUrl
+                }
                 alt={currentItem.name || currentItem.code}
+                decoding="async"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (target.src !== currentImageUrl && currentImageUrl) {
+                    target.src = currentImageUrl;
+                  }
+                }}
                 className={`w-full h-full object-contain p-2 transition-transform duration-200 ${
                   isDoubleZoomed ? 'scale-[2.4] cursor-grab active:cursor-grabbing' : 'scale-100'
                 }`}
@@ -589,7 +601,24 @@ export function ImageZoomModal({
                   }`}
                 >
                   {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.code} className="w-full h-full object-cover" />
+                    <img
+                      src={
+                        item.imageUrl.startsWith('http://') || item.imageUrl.startsWith('https://') || item.imageUrl.startsWith('/uploads/')
+                          ? `/api/image_proxy?url=${encodeURIComponent(item.imageUrl)}&w=120`
+                          : item.imageUrl
+                      }
+                      alt={item.code}
+                      loading="lazy"
+                      decoding="async"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (target.src !== item.imageUrl && item.imageUrl) {
+                          target.src = item.imageUrl;
+                        }
+                      }}
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     <div className="w-full h-full bg-slate-900 flex items-center justify-center text-[10px] font-mono font-bold text-slate-400">
                       [{item.code}]

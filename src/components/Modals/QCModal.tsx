@@ -207,8 +207,21 @@ export function QCModal({
                 >
                   {displayImage ? (
                     <img
-                      src={displayImage}
+                      src={
+                        displayImage.startsWith('http://') || displayImage.startsWith('https://') || displayImage.startsWith('/uploads/')
+                          ? `/api/image_proxy?url=${encodeURIComponent(displayImage)}&w=160`
+                          : displayImage
+                      }
                       alt={it.product_code}
+                      loading="lazy"
+                      decoding="async"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (target.src !== displayImage && displayImage) {
+                          target.src = displayImage;
+                        }
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
                   ) : (

@@ -90,9 +90,9 @@ app.get('/api/image_proxy', async (req: Request, res: Response) => {
     return res.end(memHit.buffer);
   }
 
-  // 2. Handle Local /uploads/ files
-  if (targetUrl.startsWith('/uploads/')) {
-    const filename = path.basename(targetUrl);
+  // 2. Handle Local /uploads/ files (including full origin URLs)
+  if (targetUrl.includes('/uploads/')) {
+    const filename = path.basename(targetUrl.split('?')[0]);
     const cwd = process.cwd();
     const possibleDirs = [
       path.join(cwd, 'public', 'uploads'),

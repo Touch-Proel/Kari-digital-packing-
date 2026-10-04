@@ -1073,9 +1073,8 @@ export function getProductsForLive(liveId?: string): Product[] {
 
 export function deduplicateAndSanitizeMessengerSlips(): number {
   let removed = 0;
-  const seenTxRefs = new Set<string>();
-  const seenUrls = new Set<string>();
-  const seenCompositeKeys = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenMids = new Set<string>();
 
   for (let i = messengerSlips.length - 1; i >= 0; i--) {
     const s = messengerSlips[i];
@@ -1094,47 +1093,35 @@ export function deduplicateAndSanitizeMessengerSlips(): number {
       s.extracted.currency = 'USD';
     }
 
-    // 2. Filter non-bank photos
+    // 2. Filter non-bank photos only if zero amount AND no bank details AND no slip image
     const hasBankOrRef = Boolean(s.extracted.bank_name || s.extracted.trans_ref);
-    if (amt <= 0 && !hasBankOrRef) {
+    if (amt <= 0 && !hasBankOrRef && !s.slip_url) {
       messengerSlips.splice(i, 1);
       removed++;
       continue;
     }
 
-    // 3. Deduplication checks
-    const cleanRef = (s.extracted.trans_ref || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    const cleanUrl = (s.slip_url || '').split('?')[0].trim();
-    const sender = (s.sender_id || s.sender_name || '').trim();
-    const compositeKey = `${sender}_${amt.toFixed(2)}_${(s.extracted.bank_name || '').toUpperCase()}_${cleanRef}`;
-
-    let isDuplicate = false;
-
-    if (cleanRef && cleanRef.length >= 4) {
-      if (seenTxRefs.has(cleanRef)) {
-        isDuplicate = true;
+    // 3. Deduplicate strictly ONLY identical network/webhook duplicates (identical slip id or identical Facebook message id)
+    // NEVER delete slips based on amount, sender, or bank - customers often send 2 slips for 1 basket or 2 transfers!
+    let isIdenticalDuplicate = false;
+    if (s.id) {
+      if (seenIds.has(s.id)) {
+        isIdenticalDuplicate = true;
       } else {
-        seenTxRefs.add(cleanRef);
+        seenIds.add(s.id);
       }
     }
 
-    if (cleanUrl && cleanUrl.length > 5) {
-      if (seenUrls.has(cleanUrl)) {
-        isDuplicate = true;
+    const mid = (s as any).mid || (s as any).message_id;
+    if (mid) {
+      if (seenMids.has(mid)) {
+        isIdenticalDuplicate = true;
       } else {
-        seenUrls.add(cleanUrl);
+        seenMids.add(mid);
       }
     }
 
-    if (compositeKey) {
-      if (seenCompositeKeys.has(compositeKey)) {
-        isDuplicate = true;
-      } else {
-        seenCompositeKeys.add(compositeKey);
-      }
-    }
-
-    if (isDuplicate) {
+    if (isIdenticalDuplicate) {
       messengerSlips.splice(i, 1);
       removed++;
     }
@@ -1143,7 +1130,7 @@ export function deduplicateAndSanitizeMessengerSlips(): number {
   if (removed > 0) {
     bumpDataRevision();
     saveDatabaseToDisk();
-    console.log(`[DB Deduplicate] Removed ${removed} duplicate/invalid slips from queue.`);
+    console.log(`[DB Deduplicate] Safely sanitized ${removed} invalid/webhook-duplicate slips from queue.`);
   }
 
   return removed;
