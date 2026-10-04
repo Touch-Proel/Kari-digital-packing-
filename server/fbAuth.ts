@@ -57,8 +57,7 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
     'pages_manage_metadata',
     'pages_show_list',
     'publish_video',
-    'pages_messaging',
-    'business_management'
+    'pages_messaging'
   ].join(',');
 
   // Store client redirectUri in base64url encoded state parameter to guarantee 100% exact match in code exchange
@@ -73,7 +72,7 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
     state: statePayload
   });
 
-  const url = `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
+  const url = `https://www.facebook.com/v18.0/dialog/oauth?${params.toString()}`;
   return { url, redirectUri, appId };
 }
 
@@ -81,7 +80,7 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
 async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<any> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     const res = await fetch(url, {
       ...options,
@@ -112,13 +111,13 @@ async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<an
   } catch (netErr: any) {
     return {
       error: {
-        message: (netErr?.name === 'AbortError' ? 'Connection timeout to Facebook API (8s)' : netErr?.message || 'Network error connecting to Facebook API').replace(/access_token=[a-zA-Z0-9_-]+/gi, 'access_token=[REDACTED]')
+        message: (netErr?.name === 'AbortError' ? 'Connection timeout to Facebook API (10s)' : netErr?.message || 'Network error connecting to Facebook API').replace(/access_token=[a-zA-Z0-9_-]+/gi, 'access_token=[REDACTED]')
       }
     };
   }
 }
 
-// Comprehensive multi-fallback Facebook Graph API page discovery (searches accounts, assigned pages, and business portfolios)
+// Comprehensive multi-fallback Facebook Graph API page discovery matching standard clean v18.0 implementation
 export async function fetchAllManagedFacebookPages(token: string): Promise<FacebookPage[]> {
   if (!token) return [];
   const fetchedMap = new Map<string, FacebookPage>();
@@ -136,9 +135,9 @@ export async function fetchAllManagedFacebookPages(token: string): Promise<Faceb
     });
   };
 
-  // 1. Query /me/accounts with safe standard fields & pagination
+  // 1. Primary endpoint: Clean /me/accounts with limit=100 (exact match to working system)
   try {
-    let nextUrl: string | null = `https://graph.facebook.com/v21.0/me/accounts?access_token=${token}&fields=id,name,access_token,category,picture&limit=100`;
+    let nextUrl: string | null = `https://graph.facebook.com/v18.0/me/accounts?access_token=${token}&limit=100`;
     let attempts = 0;
     while (nextUrl && attempts < 10) {
       attempts++;
@@ -154,9 +153,9 @@ export async function fetchAllManagedFacebookPages(token: string): Promise<Faceb
     console.warn('[Facebook Accounts] Primary query warning:', err);
   }
 
-  // 2. Query /me/accounts with minimal fields (in case category or picture threw field error)
+  // 2. Query with fields in case picture is needed
   try {
-    const resData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/accounts?access_token=${token}&fields=id,name,access_token&limit=100`);
+    const resData = await safeGraphApiFetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${token}&fields=id,name,access_token,category,picture&limit=100`);
     if (resData.data && Array.isArray(resData.data)) {
       for (const p of resData.data) {
         registerPage(p);
@@ -270,7 +269,7 @@ export async function handleOAuthCallback(req: Request, res: Response) {
     }
   }
 
-  const tokenUrl = 'https://graph.facebook.com/v21.0/oauth/access_token';
+  const tokenUrl = 'https://graph.facebook.com/v18.0/oauth/access_token';
 
   try {
     const tokenParams = new URLSearchParams({
