@@ -100,6 +100,117 @@ async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<an
   }
 }
 
+// Comprehensive multi-fallback Facebook Graph API page discovery
+export async function fetchAllManagedFacebookPages(token: string): Promise<FacebookPage[]> {
+  if (!token) return [];
+  const fetchedMap = new Map<string, FacebookPage>();
+
+  // 1. Primary endpoint: /me/accounts with safe standard fields (id, name, access_token, category, picture)
+  try {
+    let nextUrl: string | null = `https://graph.facebook.com/v21.0/me/accounts?access_token=${token}&fields=id,name,access_token,category,picture&limit=100`;
+    let attempts = 0;
+    while (nextUrl && attempts < 10) {
+      attempts++;
+      const resData = await safeGraphApiFetch(nextUrl);
+      if (resData.data && Array.isArray(resData.data) && resData.data.length > 0) {
+        for (const p of resData.data) {
+          if (p.id) {
+            fetchedMap.set(p.id, {
+              id: p.id,
+              name: p.name || 'Facebook Page',
+              access_token: p.access_token || token,
+              category: p.category,
+              picture: p.picture
+            });
+          }
+        }
+      }
+      nextUrl = resData.paging?.next || null;
+    }
+  } catch (err) {
+    console.warn('[Facebook Accounts] Primary query warning:', err);
+  }
+
+  // 2. Secondary fallback: /me/accounts with minimal fields (in case category or picture threw field error)
+  if (fetchedMap.size === 0) {
+    try {
+      const resData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/accounts?access_token=${token}&fields=id,name,access_token&limit=100`);
+      if (resData.data && Array.isArray(resData.data) && resData.data.length > 0) {
+        for (const p of resData.data) {
+          if (p.id) {
+            fetchedMap.set(p.id, {
+              id: p.id,
+              name: p.name || 'Facebook Page',
+              access_token: p.access_token || token,
+              category: p.category
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Facebook Accounts] Minimal query warning:', err);
+    }
+  }
+
+  // 3. Fallback: /me/accounts raw (no fields parameter)
+  if (fetchedMap.size === 0) {
+    try {
+      const resData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/accounts?access_token=${token}&limit=100`);
+      if (resData.data && Array.isArray(resData.data) && resData.data.length > 0) {
+        for (const p of resData.data) {
+          if (p.id) {
+            fetchedMap.set(p.id, {
+              id: p.id,
+              name: p.name || 'Facebook Page',
+              access_token: p.access_token || token
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Facebook Accounts] Raw accounts query warning:', err);
+    }
+  }
+
+  // 4. Fallback for Business Login / assigned_pages
+  if (fetchedMap.size === 0) {
+    try {
+      const resData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/assigned_pages?access_token=${token}&fields=id,name,access_token,picture&limit=100`);
+      if (resData.data && Array.isArray(resData.data) && resData.data.length > 0) {
+        for (const p of resData.data) {
+          if (p.id) {
+            fetchedMap.set(p.id, {
+              id: p.id,
+              name: p.name || 'Facebook Page',
+              access_token: p.access_token || token,
+              picture: p.picture
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 5. If it's a Page Access Token directly (not a user token), test /me
+  if (fetchedMap.size === 0) {
+    try {
+      const meData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me?access_token=${token}&fields=id,name,category,picture`);
+      if (meData.id && !meData.error) {
+        fetchedMap.set(meData.id, {
+          id: meData.id,
+          name: meData.name || 'Facebook Page',
+          access_token: token,
+          category: meData.category,
+          picture: meData.picture
+        });
+      }
+    } catch {}
+  }
+
+  console.log(`[Facebook Accounts Discovery] Discovered ${fetchedMap.size} managed page(s):`, Array.from(fetchedMap.values()).map(p => `${p.name} (${p.id})`).join(', '));
+  return Array.from(fetchedMap.values());
+}
+
 // Exchange Code for Access Tokens
 export async function handleOAuthCallback(req: Request, res: Response) {
   const code = req.query.code as string;
@@ -162,17 +273,8 @@ export async function handleOAuthCallback(req: Request, res: Response) {
         console.warn('Long-lived token exchange warning:', err);
       }
 
-      // Fetch user's managed Facebook Pages with pagination support
-      const allFetchedPages: FacebookPage[] = [];
-      let nextAccountsUrl: string | null = `https://graph.facebook.com/v21.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture,tasks&limit=100`;
-
-      while (nextAccountsUrl && allFetchedPages.length < 100) {
-        const pagesData = await safeGraphApiFetch(nextAccountsUrl);
-        if (pagesData.data && Array.isArray(pagesData.data)) {
-          allFetchedPages.push(...pagesData.data);
-        }
-        nextAccountsUrl = pagesData.paging?.next || null;
-      }
+      // Fetch user's managed Facebook Pages with pagination support and all fallbacks
+      const allFetchedPages = await fetchAllManagedFacebookPages(userAccessToken);
 
       console.log(`[Facebook OAuth] Successfully fetched ${allFetchedPages.length} managed pages:`, allFetchedPages.map(p => `${p.name} (${p.id})`).join(', '));
       availablePages = allFetchedPages;
@@ -287,16 +389,7 @@ export async function refreshFacebookAccounts(): Promise<FacebookPage[]> {
   if (!token) return getAvailablePages();
 
   try {
-    const allFetchedPages: FacebookPage[] = [];
-    let nextAccountsUrl: string | null = `https://graph.facebook.com/v21.0/me/accounts?access_token=${token}&fields=id,name,access_token,category,picture,tasks&limit=100`;
-
-    while (nextAccountsUrl && allFetchedPages.length < 100) {
-      const pagesData = await safeGraphApiFetch(nextAccountsUrl);
-      if (pagesData.data && Array.isArray(pagesData.data)) {
-        allFetchedPages.push(...pagesData.data);
-      }
-      nextAccountsUrl = pagesData.paging?.next || null;
-    }
+    const allFetchedPages = await fetchAllManagedFacebookPages(token);
 
     if (allFetchedPages.length > 0) {
       console.log(`[Facebook Accounts Refresh] Found ${allFetchedPages.length} pages.`);

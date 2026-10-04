@@ -81,18 +81,41 @@ export function FacebookAuthModal({
     }
   }, [isOpen, activePage?.id]);
 
-  // Listen for OAuth success message from popup window
+  // Listen for OAuth success message from popup window & storage/visibility events on mobile
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         playSuccessFanfare();
-        onShowToast('✨ បានភ្ជាប់ Facebook OAuth ជោគជ័យ!');
+        onShowToast(`✨ បានភ្ជាប់ Facebook OAuth ជោគជ័យ! (${event.data?.pageCount || ''} ផេក)`);
         fetchFbStatus();
         fetchPosts();
       }
     };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'FB_OAUTH_SYNC_TIME') {
+        playSuccessFanfare();
+        onShowToast('✨ បានធ្វើបច្ចុប្បន្នភាពបញ្ជី Facebook Pages ពី Mobile Login!');
+        fetchFbStatus();
+        fetchPosts();
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchFbStatus();
+      }
+    };
+
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    window.addEventListener('storage', handleStorage);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('storage', handleStorage);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   if (!isOpen) return null;

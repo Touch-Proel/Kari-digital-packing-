@@ -18,7 +18,8 @@ import {
   selectPageById,
   refreshFacebookAccounts,
   fetchPageVideosAndPosts,
-  fetchFacebookComments
+  fetchFacebookComments,
+  fetchAllManagedFacebookPages
 } from './server/fbAuth';
 import {
   activeFacebookPage,
@@ -399,41 +400,14 @@ app.post(['/api/fb/manual_connect', '/api/fb/import_pages'], async (req: Request
 
   for (const token of uniqueTokens) {
     try {
-      // 1. First test if token is a User/System Token that can access /me/accounts (returns ALL managed pages)
-      const accountsRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,category,picture,tasks&limit=100&access_token=${token}`);
-      const accountsData = await accountsRes.json();
-
-      if (accountsData.data && Array.isArray(accountsData.data) && accountsData.data.length > 0) {
-        for (const page of accountsData.data) {
-          if (page.id && (page.access_token || token)) {
-            collectedPages.push({
-              id: page.id,
-              name: page.name || 'Facebook Page',
-              access_token: page.access_token || token,
-              category: page.category,
-              picture: page.picture
-            });
-          }
-        }
-        continue;
-      }
-
-      // 2. If not a user accounts token, test if it is a single Page Access Token via /me
-      const meRes = await fetch(`https://graph.facebook.com/v21.0/me?fields=id,name,picture,category&access_token=${token}`);
-      const meData = await meRes.json();
-      if (meData.id) {
-        collectedPages.push({
-          id: meData.id,
-          name: meData.name || page_name || 'Facebook Page',
-          access_token: token,
-          category: meData.category,
-          picture: meData.picture
-        });
+      const pagesForToken = await fetchAllManagedFacebookPages(token);
+      if (pagesForToken.length > 0) {
+        collectedPages.push(...pagesForToken);
       } else {
-        // Fallback for custom/simulated or direct page entry
+        // Fallback for custom page entry
         collectedPages.push({
-          id: page_id || `manual_page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          name: page_name || `Facebook Page ${collectedPages.length + 1}`,
+          id: page_id || `manual_page_${Date.now()}`,
+          name: page_name || `Facebook Page`,
           access_token: token
         });
       }
