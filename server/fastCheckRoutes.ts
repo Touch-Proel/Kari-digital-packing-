@@ -763,8 +763,10 @@ router.post('/scan_slips', async (req: Request, res: Response) => {
           } catch {
             optBuf = rawBuf;
           }
-          fs.writeFileSync(filePath, optBuf);
+          await fs.promises.writeFile(filePath, optBuf);
           slipUrl = `/uploads/${fileName}`;
+          // ⚡ Yield event loop so concurrent requests from other users are never blocked
+          await new Promise(r => setTimeout(r, 20));
         } catch (err) {
           console.error('Failed to save slip image:', err);
         }
@@ -1455,38 +1457,52 @@ router.get('/messenger_slips', (req: Request, res: Response) => {
   }
 });
 
+// ⚡ Mutex to ensure only ONE sync worker runs at a time
+let isSyncingMessengerInProgress = false;
+
 /**
- * POST /api/fast_check/sync_messenger_slips
- * Scans Messenger conversations starting from 12:00 AM today and updates the verification queue
+ * Background worker for Messenger sync that cooperatively yields
+ * to the Node.js single-threaded event loop so other users/devices NEVER experience freeze or lag!
  */
-router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
+export async function executeBackgroundMessengerSync(since?: string): Promise<{ newSlips: number }> {
+  if (isSyncingMessengerInProgress) {
+    return { newSlips: 0 };
+  }
+  isSyncingMessengerInProgress = true;
+  let newSlipsFound = 0;
+
   try {
     const page = activeFacebookPage;
-    let newSlipsFound = 0;
-
-    const { since } = req.body || {};
     const now = new Date();
     let cutoffDate: Date | null = null;
 
     if (since === 'all') {
-      cutoffDate = null; // Scan all conversations without date limit
+      cutoffDate = null;
     } else if (since === '7d') {
       cutoffDate = new Date(Date.now() - 7 * 24 * 3600 * 1000);
     } else if (since === '24h') {
       cutoffDate = new Date(Date.now() - 24 * 3600 * 1000);
     } else {
-      // 12:00 AM Today (Local Midnight)
-      cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      // Midnight today in Cambodia (UTC+7)
+      const khmerNow = new Date(Date.now() + 7 * 3600 * 1000);
+      cutoffDate = new Date(Date.UTC(khmerNow.getUTCFullYear(), khmerNow.getUTCMonth(), khmerNow.getUTCDate(), 0, 0, 0) - 7 * 3600 * 1000);
     }
 
     if (page && page.access_token && page.id) {
       try {
-        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(40){id,created_time,from,message,attachments{id,mime_type,name,size,file_url,image_data}}&limit=50&access_token=${page.access_token}`;
+        let nextUrl: string | null = `https://graph.facebook.com/v21.0/${page.id}/conversations?fields=id,updated_time,participants,messages.limit(25){id,created_time,from,message,attachments{id,mime_type,name,size,file_url,image_data}}&limit=30&access_token=${page.access_token}`;
         let pageCount = 0;
-        const maxPages = since === 'all' ? 5 : 3;
+        const maxPages = since === 'all' ? 4 : 2;
+
+        // ⚡ Fast O(1) Sets for deduplication
+        const seenUrls = new Set(messengerSlips.map(s => s.slip_url).filter(Boolean));
+        const seenIds = new Set(messengerSlips.map(s => s.id));
 
         while (nextUrl && pageCount < maxPages) {
           pageCount++;
+          // ⚡ Yield event loop between pages
+          await new Promise(r => setTimeout(r, 40));
+
           const fbRes = await fetch(nextUrl);
           const fbData = await fbRes.json();
           nextUrl = fbData.paging?.next || null;
@@ -1496,7 +1512,10 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
             const pageName = (page.name || '').toLowerCase().trim();
 
             for (const conv of fbData.data) {
-              // If conversation is older than cutoff, we can skip further pages if sorted by updated_time
+              // ⚡ Yield event loop between conversations
+              await new Promise(r => setTimeout(r, 20));
+
+              // If conversation is older than cutoff, stop pagination
               if (cutoffDate && conv.updated_time) {
                 const convUpdated = new Date(conv.updated_time);
                 if (convUpdated < cutoffDate) {
@@ -1523,7 +1542,6 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                   continue;
                 }
 
-                // Also ensure message came from the customer participant, not another admin account
                 if (customerParticipant && fromId && fromId !== String(customerParticipant.id)) {
                   continue;
                 }
@@ -1531,14 +1549,15 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                 const msgTime = new Date(m.created_time);
                 if (cutoffDate && msgTime < cutoffDate) continue;
 
-              const attachments = m.attachments?.data || [];
-              for (const att of attachments) {
-                const imgUrl = att.image_data?.url || att.file_url || att.image_data?.preview_url || att.payload?.url || att.url;
-                if (!imgUrl || att.image_data?.render_as_sticker) continue;
+                const attachments = m.attachments?.data || [];
+                for (const att of attachments) {
+                  const imgUrl = att.image_data?.url || att.file_url || att.image_data?.preview_url || att.payload?.url || att.url;
+                  if (!imgUrl || att.image_data?.render_as_sticker) continue;
 
-                // Check if already in queue by URL or ID
-                const alreadyExists = messengerSlips.some(s => s.slip_url === imgUrl || s.id.includes(m.id));
-                if (!alreadyExists) {
+                  // ⚡ Fast O(1) existence check
+                  if (seenUrls.has(imgUrl) || seenIds.has(`mslip_${m.id}`)) {
+                    continue;
+                  }
 
                   let savedSlipUrl = imgUrl;
                   let rawBase64 = '';
@@ -1562,11 +1581,15 @@ router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
                     const fileName = `slip_fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`;
                     const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
                     if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-                    fs.writeFileSync(path.join(uploadsDir, fileName), optBuf);
+                    // ⚡ Non-blocking async file write
+                    await fs.promises.writeFile(path.join(uploadsDir, fileName), optBuf);
                     savedSlipUrl = `/uploads/${fileName}`;
                   } catch (dlErr) {
                     console.error('Image download error:', dlErr);
                   }
+
+                  // ⚡ Yield event loop after downloading image
+                  await new Promise(r => setTimeout(r, 30));
 
                   let isGenuineBankSlip = false;
                   let extracted: ExtractedSlipData = {
@@ -1608,19 +1631,13 @@ First, determine if this image is a GENUINE digital mobile banking transfer slip
 RULES FOR CLASSIFICATION:
 1. is_bank_slip (boolean):
    - MUST BE true ONLY IF this image is a genuine digital bank payment confirmation, bank transfer receipt, or KHQR payment completion screenshot.
-   - MUST BE false IF this image is:
-     * A photo of clothes, clothing products, dresses, shirts, skirts, pants, fashion wear on hangers or models.
-     * A live-stream video screenshot or live sales snapshot.
-     * A screenshot of customer asking product availability or product price.
-     * A paper receipt / thermal delivery bill / packing list.
-     * A photo of parcels, packages, or bags.
-     * A selfie, person photo, or random photo.
-2. customer_name (string: strictly the TRANSFER FROM / PAYER customer name who transferred money. The store receiver is "PROEL TOCH" - NEVER return "PROEL TOCH" as customer_name!).
+   - MUST BE false IF this image is clothing, live stream screenshot, product question, paper receipt, parcel photo, or selfie.
+2. customer_name (string: strictly the TRANSFER FROM / PAYER customer name who transferred money. Store receiver is "PROEL TOCH" - NEVER return receiver as customer_name!).
 3. paid_amount (number: transferred money amount. Return 0 if not a bank slip).
 4. currency (USD or KHR).
 5. phone_number (string or null).
 6. bank_name (string or null: e.g. "ABA Bank", "ACLEDA", "Bakong", "Wing").
-7. trans_date (string: Current Year is strictly 2026. For dates like "៣ តុលា ២០២៦", convert to "2026-10-03". Khmer digits: ០=0, ១=1, ២=2, ៣=3, ៤=4, ៥=5, ៦=6, ៧=7, ៨=8, ៩=9. Khmer six is ៦ - NEVER transcribe ២០២៦ as 2022! Year is strictly 2026).
+7. trans_date (string: Current Year is strictly 2026. For dates like "៣ តុលា ២០២៦", convert to "2026-10-03").
 8. trans_ref (string or null: Transaction ID / Ref number).
 9. basket_no (number or null).
 10. remarks (string or null).
@@ -1629,6 +1646,7 @@ RULES FOR CLASSIFICATION:
 
 Output strictly raw JSON with these fields.`
                       };
+
                       const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);
                       if (geminiRes.text) {
                         try {
@@ -1662,7 +1680,6 @@ Output strictly raw JSON with these fields.`
                               }
                             }
                           } else {
-                            // Cache negative/non-bank result too so clothing photos never consume tokens again!
                             if (imgHash) {
                               setCachedOcr(imgHash, {
                                 customer_name: '',
@@ -1679,17 +1696,18 @@ Output strictly raw JSON with these fields.`
                     }
                   }
 
-                  // 🚫 STRICT FILTER: If not a genuine bank transfer slip or paid_amount <= 0, IGNORE completely!
+                  // ⚡ Yield event loop after OCR call
+                  await new Promise(r => setTimeout(r, 30));
+
+                  // Strict filter: If not a bank slip or paid_amount <= 0, skip
                   if (!isGenuineBankSlip || extracted.paid_amount <= 0) {
-                    console.log(`[Auto-Scan Ignored] Skipped clothing/product photo from Messenger sender: ${senderName}`);
                     continue;
                   }
 
                   const matchRes = matchInvoiceForSlip(extracted, senderName, senderId);
-
                   const fraudEval = evaluateSlipFraudAndDuplicates(
                     {
-                      id: `mslip_${m.id}_${Date.now()}`,
+                      id: `mslip_${m.id}`,
                       sender_id: senderId,
                       sender_name: senderName,
                       slip_url: savedSlipUrl,
@@ -1705,8 +1723,8 @@ Output strictly raw JSON with these fields.`
                     ? 'DUPLICATE_TXID'
                     : matchRes.status;
 
-                  messengerSlips.unshift({
-                    id: `mslip_${m.id}_${Date.now()}`,
+                  const newSlipItem: AutoScannedMessengerSlip = {
+                    id: `mslip_${m.id}`,
                     source: 'MESSENGER',
                     sender_id: senderId,
                     sender_name: senderName,
@@ -1740,30 +1758,61 @@ Output strictly raw JSON with these fields.`
                       packing_stage: c.packing_stage,
                       status: c.status
                     })) : undefined
-                  });
+                  };
+
+                  messengerSlips.unshift(newSlipItem);
+                  seenUrls.add(savedSlipUrl);
+                  seenIds.add(newSlipItem.id);
                   newSlipsFound++;
+
+                  // Realtime notification: Notify connected clients immediately
+                  bumpDataRevision();
                 }
               }
             }
           }
         }
-      }
       } catch (e) {
         console.error('Facebook Graph sync error:', e);
       }
     }
 
-    // Auto-clean any duplicate slips
-    deduplicateAndSanitizeMessengerSlips();
+    if (newSlipsFound > 0) {
+      saveDatabaseToDisk();
+      bumpDataRevision();
+    }
+  } finally {
+    isSyncingMessengerInProgress = false;
+  }
 
-    saveDatabaseToDisk();
-    bumpDataRevision();
+  return { newSlips: newSlipsFound };
+}
+
+/**
+ * POST /api/fast_check/sync_messenger_slips
+ * Starts background sync worker immediately (0ms non-blocking response)
+ */
+router.post('/sync_messenger_slips', async (req: Request, res: Response) => {
+  try {
+    if (isSyncingMessengerInProgress) {
+      return res.json({
+        success: true,
+        syncing: true,
+        message: '⚡ ប្រព័ន្ធកំពុងដំណើរការ Auto-Scan ក្នុង Background រួចហើយ...'
+      });
+    }
+
+    const { since } = req.body || {};
+
+    // ⚡ Trigger worker asynchronously in background without blocking the HTTP request!
+    executeBackgroundMessengerSync(since).catch(err => {
+      console.error('[Background Messenger Sync Error]:', err);
+    });
 
     return res.json({
       success: true,
-      new_slips_count: newSlipsFound,
-      total_slips: messengerSlips.length,
-      message: `✅ បានទាញយក និង Auto-Scan វិក្កយបត្រថ្មីពី Messenger រួចរាល់ (${newSlipsFound} Slips ថ្មី)!`
+      syncing: true,
+      message: '⚡ បានចាប់ផ្តើម Auto-Scan ក្នុង Background ជោគជ័យ! ប្រព័ន្ធដំណើរការរលូនមិនគាំងឡើយ។'
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err?.message || 'Server error' });

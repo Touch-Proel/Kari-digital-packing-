@@ -230,7 +230,7 @@ export function FastCheckSlipsModal({
 
   if (!isOpen) return null;
 
-  // Manual Trigger to Sync from Messenger Inbox
+  // Manual Trigger to Sync from Messenger Inbox (Non-blocking background worker)
   const handleSyncMessengerNow = async () => {
     setIsSyncing(true);
     try {
@@ -241,8 +241,7 @@ export function FastCheckSlipsModal({
       });
       const data = await res.json();
       if (data.success) {
-        playSuccessFanfare();
-        onShowToast(data.message || '✅ បានទាញយក Slips ថ្មីៗពី Messenger ជោគជ័យ!', 'success');
+        onShowToast(data.message || '⚡ កំពុងដំណើរការ Auto-Scan ក្នុង Background...', 'success');
         fetchMessengerSlips(false);
         fetchUnpaidBaskets();
       } else {
