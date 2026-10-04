@@ -143,6 +143,24 @@ export function FacebookAuthModal({
     }
   };
 
+  const handleDeletePage = async (pageId: string, pageName: string) => {
+    if (!window.confirm(`តើបងពិតជាចង់ផ្តាច់ទំព័រ «${pageName}» ចេញពីប្រព័ន្ធមែនទេ?`)) return;
+    try {
+      const res = await fetch(`/api/fb/page/${pageId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setPages(data.pages || []);
+        if (data.activePage) {
+          onPageSelected(data.activePage);
+        }
+        onShowToast(`🗑️ បានផ្តាច់ទំព័រ ${pageName} រួចរាល់!`, 'success');
+        fetchPosts();
+      }
+    } catch {
+      onShowToast('Error removing page', 'error');
+    }
+  };
+
   const handleManualConnect = async () => {
     if (!manualToken.trim()) {
       alert('សូមបញ្ចូល Page Access Token!');
@@ -302,60 +320,102 @@ export function FacebookAuthModal({
             </div>
           )}
 
-          {/* Active Connected Page Pill */}
-          <div className="bg-gradient-to-r from-slate-900/90 via-[#0A1A36] to-slate-900/90 border border-cyan-500/30 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-md">
-            <div className="text-xs text-slate-400 font-bold flex justify-between items-center">
-              <span className="flex items-center gap-1.5 text-slate-300">
-                <span>🌐</span> ទំព័រ FACEBOOK PAGE សកម្ម ៖
+          {/* Multi-Page Management Section */}
+          <div className="bg-gradient-to-r from-slate-900/95 via-[#0A1A36] to-slate-900/95 border border-cyan-500/40 rounded-2xl p-3.5 flex flex-col gap-3 shadow-lg">
+            <div className="text-xs text-slate-300 font-bold flex justify-between items-center flex-wrap gap-1.5">
+              <span className="flex items-center gap-1.5">
+                <span className="text-sm">🌐</span> គ្រប់គ្រងទំព័រ FACEBOOK PAGES ({pages.length > 0 ? pages.length : 1})
               </span>
-              <span className="text-emerald-400 text-[11px] font-mono font-black flex items-center gap-1.5 bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> បានភ្ជាប់
-              </span>
-            </div>
-            
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex-shrink-0 shadow">
-                  {activePage?.picture?.data?.url ? (
-                    <img src={activePage.picture.data.url} alt="page" className="w-full h-full object-cover rounded-[10px]" />
-                  ) : (
-                    <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center text-xs font-black text-cyan-300">
-                      FB
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-white font-black text-sm truncate">{activePage?.name || 'Kari Arnett'}</div>
-                  <div className="text-cyan-400/90 font-mono text-[11px] font-bold truncate">ID: {activePage?.id || '102094263212256'}</div>
-                </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowManualForm(true)}
+                  className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2.5 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all flex items-center gap-1 active:scale-95"
+                >
+                  <span>➕ បន្ថែមផេក</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConnectFacebook}
+                  className="bg-gradient-to-r from-[#1877F2] to-[#0A60D4] hover:from-blue-600 hover:to-blue-700 text-white px-2.5 py-1 rounded-lg text-[10.5px] font-black flex items-center gap-1 shadow transition-all active:scale-95 border border-blue-400/30"
+                >
+                  <span>🔄 ចូល FB</span>
+                </button>
               </div>
+            </div>
 
-              <button
-                onClick={handleConnectFacebook}
-                className="bg-gradient-to-r from-[#1877F2] to-[#0A60D4] hover:from-blue-600 hover:to-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-[0_4px_12px_rgba(24,119,242,0.35)] active:scale-95 transition-all flex-shrink-0 border border-blue-400/30"
-              >
-                <span>🔄 ចូលគណនី FB</span>
-              </button>
+            {/* List of Connected Pages */}
+            <div className="flex flex-col gap-2">
+              {(pages.length > 0 ? pages : (activePage ? [activePage] : [])).map((p, pIdx) => {
+                const isActive = activePage?.id === p.id;
+                return (
+                  <div
+                    key={p.id ? `connected-page-${p.id}` : `connected-page-idx-${pIdx}`}
+                    className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-all ${
+                      isActive
+                        ? 'bg-gradient-to-r from-[#0C2752] to-[#0E356E] border-cyan-400/80 shadow-[0_0_12px_rgba(6,182,212,0.25)]'
+                        : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex-shrink-0">
+                        {p.picture?.data?.url ? (
+                          <img src={p.picture.data.url} alt="page" className="w-full h-full object-cover rounded-[6px]" />
+                        ) : (
+                          <div className="w-full h-full bg-slate-900 rounded-[6px] flex items-center justify-center text-[10px] font-black text-cyan-300">
+                            FB
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-white font-black text-xs truncate flex items-center gap-1.5">
+                          <span>{p.name}</span>
+                          {isActive && (
+                            <span className="text-[9.5px] text-emerald-400 font-mono bg-emerald-950/90 border border-emerald-500/40 px-1.5 py-0.2 rounded-full flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> សកម្ម
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-slate-400 font-mono text-[10.5px] truncate">
+                          ID: {p.id}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {!isActive ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPage(p.id)}
+                          className="bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 px-2.5 py-1 rounded-lg text-[10.5px] font-bold border border-cyan-600/50 transition-all active:scale-95"
+                        >
+                          🔄 ប្តូរមកផេកនេះ
+                        </button>
+                      ) : (
+                        <span className="text-cyan-400 font-bold text-[10.5px] px-2 py-0.5">
+                          ✓ កំពុងប្រើ
+                        </span>
+                      )}
+                      {pages.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePage(p.id, p.name)}
+                          className="text-slate-500 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-950/40 transition-colors"
+                          title="ផ្តាច់ទំព័រនេះ"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="text-[10px] text-cyan-300/80 bg-cyan-950/40 p-2 rounded-xl border border-cyan-500/20 leading-relaxed">
+              💡 <strong>Multi-Page Support ៖</strong> បងអាចភ្ជាប់ផេកច្រើនក្នុងពេលតែមួយ។ រាល់ពេលប្តូរផេក ការទាញយក Live, ខំមិន, Chatbot និងការចាប់ Slip នឹងរត់តាមផេកសកម្មដោយស្វ័យប្រវត្តិ!
             </div>
           </div>
-
-          {/* Connected Pages Selection if multiple */}
-          {pages.length > 1 && (
-            <div>
-              <label className="text-xs text-slate-300 font-bold block mb-1">ជ្រើសរើសទំព័រ Facebook ផ្សេងទៀត ៖</label>
-              <select
-                value={activePage?.id || ''}
-                onChange={e => handleSelectPage(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-cyan-300 font-bold rounded-xl px-3 py-2 text-xs outline-none focus:border-cyan-400"
-              >
-                {pages.map((p, pIdx) => (
-                  <option key={p.id ? `fb-page-${p.id}` : `fb-page-${pIdx}`} value={p.id}>
-                    {p.name} ({p.id})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Live Streams Section (10 Latest Live Streams) */}
           <div className="bg-[#08152E]/90 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3 shadow-md">

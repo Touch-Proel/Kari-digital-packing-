@@ -25,7 +25,10 @@ import {
   activeLiveId,
   setActiveLiveId,
   bumpDataRevision,
-  invoices
+  invoices,
+  addOrUpdateConnectedPage,
+  removeConnectedPage,
+  getConnectedFacebookPages
 } from './server/db';
 import { parseAndAllocateComment } from './server/parser';
 import { startLiveCommentsAutoSync } from './server/liveSync';
@@ -338,7 +341,7 @@ app.post('/api/fb/page/select', (req: Request, res: Response) => {
   const { page_id } = req.body;
   const page = selectPageById(page_id);
   if (page) {
-    res.json({ success: true, activePage: page });
+    res.json({ success: true, activePage: page, pages: getAvailablePages() });
   } else {
     res.status(404).json({ success: false, error: 'Page not found' });
   }
@@ -378,9 +381,17 @@ app.post('/api/fb/manual_connect', async (req: Request, res: Response) => {
     picture: pagePicture
   };
 
+  addOrUpdateConnectedPage(newPage);
   setActiveFacebookPage(newPage);
   bumpDataRevision();
-  res.json({ success: true, activePage: newPage });
+  res.json({ success: true, activePage: newPage, pages: getAvailablePages() });
+});
+
+// 5.1 Remove / Disconnect a Facebook Page
+app.delete('/api/fb/page/:page_id', (req: Request, res: Response) => {
+  const { page_id } = req.params;
+  removeConnectedPage(page_id);
+  res.json({ success: true, activePage: activeFacebookPage, pages: getAvailablePages() });
 });
 
 // 5.5 Set Active Live ID

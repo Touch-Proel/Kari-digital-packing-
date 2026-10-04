@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { activeFacebookPage, setActiveFacebookPage, bumpDataRevision } from './db';
+import { activeFacebookPage, setActiveFacebookPage, bumpDataRevision, getConnectedFacebookPages, addOrUpdateConnectedPage, removeConnectedPage } from './db';
 import { FacebookPage, FacebookPost } from './types';
 
 export const DEFAULT_APP_ID = process.env.FB_APP_ID || '1240481003109421';
@@ -168,6 +168,9 @@ export async function handleOAuthCallback(req: Request, res: Response) {
       );
       availablePages = pagesData.data || [];
 
+      for (const p of availablePages) {
+        addOrUpdateConnectedPage(p);
+      }
       if (availablePages.length > 0) {
         setActiveFacebookPage(availablePages[0]);
       }
@@ -226,17 +229,26 @@ export async function handleOAuthCallback(req: Request, res: Response) {
   }
 }
 
-// Get Connected Pages
+// Get Connected Pages (Full Multi-Page Support)
 export function getAvailablePages(): FacebookPage[] {
-  if (availablePages.length === 0 && activeFacebookPage) {
-    return [activeFacebookPage];
+  const connected = getConnectedFacebookPages();
+  const map = new Map<string, FacebookPage>();
+  for (const p of connected) {
+    if (p.id) map.set(p.id, p);
   }
-  return availablePages;
+  for (const p of availablePages) {
+    if (p.id) map.set(p.id, p);
+  }
+  if (activeFacebookPage && activeFacebookPage.id) {
+    map.set(activeFacebookPage.id, activeFacebookPage);
+  }
+  return Array.from(map.values());
 }
 
 // Select Active Page
 export function selectPageById(pageId: string): FacebookPage | null {
-  const page = availablePages.find(p => p.id === pageId);
+  const all = getAvailablePages();
+  const page = all.find(p => p.id === pageId);
   if (page) {
     setActiveFacebookPage(page);
     bumpDataRevision();
@@ -248,7 +260,8 @@ export function selectPageById(pageId: string): FacebookPage | null {
 // Fetch Page Live Videos & Posts
 // Fetch Page Live Videos & Posts with Real-Time Comment & Reaction Summary Counts
 export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: string): Promise<FacebookPost[]> {
-  const targetPage = activeFacebookPage;
+  const allPages = getAvailablePages();
+  const targetPage = pageId ? (allPages.find(p => p.id === pageId) || activeFacebookPage) : activeFacebookPage;
   const token = accessToken || targetPage?.access_token;
 
   if (!token || token.startsWith('simulated_')) {

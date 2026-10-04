@@ -44,6 +44,7 @@ export async function saveDatabaseToDisk(forceSync = false) {
       customers,
       packerLogs,
       activeFacebookPage,
+      connectedFacebookPages,
       messengerSlips
     };
     const jsonStr = JSON.stringify(payload);
@@ -464,7 +465,7 @@ export const packerLogs: PackerLog[] = [
   { log_id: 3, invoice_id: 94, packer_name: 'ធារ៉ា', items_count: 4, duration_seconds: 35, packed_at: '2026-09-12 20:10:00', facebook_name: 'ចន្ធូ កំពង់ចាម', total_amount: 36.00 }
 ];
 
-// In-Memory Facebook Connection State
+// In-Memory Facebook Connection State (Multi-Page Supported)
 export let activeFacebookPage: FacebookPage | null = {
   id: '102094263212256',
   name: 'Kari Arnett',
@@ -472,8 +473,50 @@ export let activeFacebookPage: FacebookPage | null = {
   category: "Women's Clothing Store & Live Sales"
 };
 
+export let connectedFacebookPages: FacebookPage[] = [
+  activeFacebookPage!
+];
+
+export function getConnectedFacebookPages(): FacebookPage[] {
+  if (connectedFacebookPages.length === 0 && activeFacebookPage) {
+    connectedFacebookPages.push(activeFacebookPage);
+  }
+  return connectedFacebookPages;
+}
+
 export function setActiveFacebookPage(page: FacebookPage | null) {
   activeFacebookPage = page;
+  if (page) {
+    const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
+    if (existingIdx >= 0) {
+      connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
+    } else {
+      connectedFacebookPages.push(page);
+    }
+  }
+  bumpDataRevision();
+  saveDatabaseToDisk();
+}
+
+export function addOrUpdateConnectedPage(page: FacebookPage) {
+  const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
+  if (existingIdx >= 0) {
+    connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
+  } else {
+    connectedFacebookPages.push(page);
+  }
+  activeFacebookPage = page;
+  bumpDataRevision();
+  saveDatabaseToDisk();
+}
+
+export function removeConnectedPage(pageId: string) {
+  connectedFacebookPages = connectedFacebookPages.filter(p => p.id !== pageId);
+  if (activeFacebookPage?.id === pageId) {
+    activeFacebookPage = connectedFacebookPages[0] || null;
+  }
+  bumpDataRevision();
+  saveDatabaseToDisk();
 }
 
 // -------------------------------------------------------------
@@ -601,7 +644,24 @@ export async function loadDatabaseFromDisk() {
       console.log(`[SQLite Loaded] Loaded ${invoices.length} invoices, ${products.length} products from pos.db`);
     }
 
-    // 2. Load / supplement messengerSlips from db_store.json or backup file if empty
+    // 2. Load connectedFacebookPages from db_store.json if present
+    if (fs.existsSync(DB_FILE_PATH)) {
+      try {
+        const raw = fs.readFileSync(DB_FILE_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed.connectedFacebookPages && Array.isArray(parsed.connectedFacebookPages) && parsed.connectedFacebookPages.length > 0) {
+          connectedFacebookPages.length = 0;
+          connectedFacebookPages.push(...parsed.connectedFacebookPages);
+        }
+        if (parsed.activeFacebookPage) {
+          activeFacebookPage = parsed.activeFacebookPage;
+        }
+      } catch (err) {
+        console.error('Error reading connectedFacebookPages from db_store.json:', err);
+      }
+    }
+
+    // 3. Load / supplement messengerSlips from db_store.json or backup file if empty
     const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
     if (messengerSlips.length === 0) {
       let candidateSlips: any[] = [];
