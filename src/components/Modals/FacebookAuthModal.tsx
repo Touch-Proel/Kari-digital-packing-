@@ -25,7 +25,6 @@ export function FacebookAuthModal({
   onSyncSuccess,
   onOpenNoBasketModal
 }: FacebookAuthModalProps) {
-  const isHttpInsecure = typeof window !== 'undefined' && window.location.protocol === 'http:' && window.location.hostname !== 'localhost';
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [posts, setPosts] = useState<FacebookPost[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
@@ -33,9 +32,8 @@ export function FacebookAuthModal({
   const [manualToken, setManualToken] = useState('');
   const [manualPageName, setManualPageName] = useState('');
   const [customPostId, setCustomPostId] = useState('');
-  const [showManualForm, setShowManualForm] = useState(() => isHttpInsecure);
+  const [showManualForm, setShowManualForm] = useState(false);
   const [callbackUrl, setCallbackUrl] = useState('');
-  const [isRefreshingPages, setIsRefreshingPages] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -81,56 +79,27 @@ export function FacebookAuthModal({
     }
   }, [isOpen, activePage?.id]);
 
-  // Listen for OAuth success message from popup window & storage/visibility events on mobile
+  // Listen for OAuth success message from popup window
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         playSuccessFanfare();
-        onShowToast(`✨ បានភ្ជាប់ Facebook OAuth ជោគជ័យ! (${event.data?.pageCount || ''} ផេក)`);
+        onShowToast('✨ បានភ្ជាប់ Facebook OAuth ជោគជ័យ!');
         fetchFbStatus();
         fetchPosts();
       }
     };
-
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'FB_OAUTH_SYNC_TIME') {
-        playSuccessFanfare();
-        onShowToast('✨ បានធ្វើបច្ចុប្បន្នភាពបញ្ជី Facebook Pages ពី Mobile Login!');
-        fetchFbStatus();
-        fetchPosts();
-      }
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        fetchFbStatus();
-      }
-    };
-
     window.addEventListener('message', handleMessage);
-    window.addEventListener('storage', handleStorage);
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      window.removeEventListener('storage', handleStorage);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
 
   if (!isOpen) return null;
 
   // Open Facebook OAuth Popup
   const handleConnectFacebook = async () => {
-    if (isHttpInsecure) {
-      setShowManualForm(true);
-      onShowToast('⚠️ Facebook ប្លុក Pop-up លើ HTTP IP! សូមប្រើប្រាស់ប្រអប់ Page Access Token ខាងក្រោម។', 'error');
-      return;
-    }
     try {
       onShowToast('⏳ កំពុងទាញយក OAuth URL...');
-      const clientRedirectUri = `${window.location.origin}/auth/callback`;
-      const res = await fetch(`/api/auth/facebook/url?redirect_uri=${encodeURIComponent(clientRedirectUri)}`);
+      const res = await fetch('/api/auth/facebook/url');
       if (!res.ok) throw new Error('Failed to get auth URL');
       const { url } = await res.json();
 
@@ -167,67 +136,9 @@ export function FacebookAuthModal({
     }
   };
 
-  const handleDeletePage = async (pageId: string, pageName: string) => {
-    if (!window.confirm(`តើបងពិតជាចង់ផ្តាច់ទំព័រ «${pageName}» ចេញពីប្រព័ន្ធមែនទេ?`)) return;
-    try {
-      const res = await fetch(`/api/fb/page/${pageId}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
-        setPages(data.pages || []);
-        if (data.activePage) {
-          onPageSelected(data.activePage);
-        }
-        onShowToast(`🗑️ បានផ្តាច់ទំព័រ ${pageName} រួចរាល់!`, 'success');
-        fetchPosts();
-      }
-    } catch {
-      onShowToast('Error removing page', 'error');
-    }
-  };
-
-  const handleClearAllPages = async () => {
-    if (!window.confirm('តើបងពិតជាចង់ផ្តាច់ Facebook Pages ទាំងអស់ចេញពីប្រព័ន្ធមែនទេ?')) return;
-    try {
-      const res = await fetch('/api/fb/pages/clear', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setPages([]);
-        onShowToast('🗑️ បានផ្តាច់ Facebook Pages ទាំងអស់រួចរាល់!');
-        fetchPosts();
-      }
-    } catch {
-      onShowToast('Error clearing pages', 'error');
-    }
-  };
-
-  const handleRefreshPages = async () => {
-    setIsRefreshingPages(true);
-    onShowToast('⏳ កំពុងទាញយកបញ្ជី Facebook Pages ទាំងអស់...');
-    try {
-      const res = await fetch('/api/fb/refresh_pages', { method: 'POST' });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.pages)) {
-        setPages(data.pages);
-        if (data.activePage) {
-          onPageSelected(data.activePage);
-        }
-        playSuccessFanfare();
-        onShowToast(`🎉 បានធ្វើបច្ចុប្បន្នភាពបញ្ជីទំព័រ Facebook សរុប ${data.pages.length} ដោយជោគជ័យ!`);
-        fetchPosts();
-      } else {
-        await fetchFbStatus();
-        onShowToast('✅ បានធ្វើបច្ចុប្បន្នភាពបញ្ជីទំព័រ Facebook រួចរាល់');
-      }
-    } catch {
-      await fetchFbStatus();
-    } finally {
-      setIsRefreshingPages(false);
-    }
-  };
-
   const handleManualConnect = async () => {
     if (!manualToken.trim()) {
-      alert('សូមបញ្ចូល Page Access Token ឬបញ្ជី Tokens!');
+      alert('សូមបញ្ចូល Page Access Token!');
       return;
     }
     try {
@@ -241,18 +152,9 @@ export function FacebookAuthModal({
       });
       const data = await res.json();
       if (data.success) {
-        if (data.pages && Array.isArray(data.pages)) {
-          setPages(data.pages);
-        }
-        if (data.activePage) {
-          onPageSelected(data.activePage);
-        }
-        const count = data.imported_count || data.pages?.length || 1;
-        playSuccessFanfare();
-        onShowToast(`🎉 បានភ្ជាប់ & នាំចូល Facebook Pages សរុប ${count} ដោយជោគជ័យ!`);
+        onPageSelected(data.activePage);
+        onShowToast(`✅ បានភ្ជាប់ទំព័រ ${data.activePage.name} (ID: ${data.activePage.id}) ដោយជោគជ័យ!`);
         setShowManualForm(false);
-        setManualToken('');
-        setManualPageName('');
         fetchFbStatus();
         fetchPosts();
       } else {
@@ -376,137 +278,60 @@ export function FacebookAuthModal({
         {/* Body */}
         <div className="p-4 overflow-y-auto flex flex-col gap-3.5 bg-[#050C1C] max-h-[80vh] custom-scroll">
           
-          {/* Insecure HTTP Warning Banner */}
-          {isHttpInsecure && (
-            <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/70 border border-amber-500/60 rounded-2xl p-3 text-xs text-amber-200 flex flex-col gap-1.5 shadow-md">
-              <div className="font-black text-amber-300 flex items-center gap-1.5 text-xs">
-                <span className="text-base">⚠️</span>
-                <span>មូលហេតុដែល Facebook ចេញ «Insecure Login Blocked»</span>
-              </div>
-              <p className="text-[11.5px] text-slate-300 leading-relaxed">
-                ដោយសារបងកំពុងប្រើប្រាស់តាម <strong>HTTP IP ({window?.location?.hostname})</strong> គ្មាន SSL (HTTPS) នោះ Facebook នឹងបិទមិនឱ្យប្រើប៊ូតុង Pop-up «ចូលគណនី FB» ឡើយ។
-              </p>
-              <div className="bg-slate-950/80 p-2 rounded-xl border border-amber-500/30 text-[11px] text-amber-300 font-bold flex items-center gap-1.5 mt-0.5">
-                <span>👉</span>
-                <span>ដំណោះស្រាយ ៖ សូមប្រើប្រាស់ប្រអប់ «Page Access Token» ខាងក្រោមនេះដើម្បីភ្ជាប់ភ្លាមៗ!</span>
-              </div>
-            </div>
-          )}
-
-          {/* Multi-Page Management Section */}
-          <div className="bg-gradient-to-r from-slate-900/95 via-[#0A1A36] to-slate-900/95 border border-cyan-500/40 rounded-2xl p-3.5 flex flex-col gap-3 shadow-lg">
-            <div className="text-xs text-slate-300 font-bold flex justify-between items-center flex-wrap gap-1.5">
-              <span className="flex items-center gap-1.5">
-                <span className="text-sm">🌐</span> គ្រប់គ្រងទំព័រ FACEBOOK PAGES ({pages.length > 0 ? pages.length : 1})
+          {/* Active Connected Page Pill */}
+          <div className="bg-gradient-to-r from-slate-900/90 via-[#0A1A36] to-slate-900/90 border border-cyan-500/30 rounded-2xl p-3.5 flex flex-col gap-2.5 shadow-md">
+            <div className="text-xs text-slate-400 font-bold flex justify-between items-center">
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span>🌐</span> ទំព័រ FACEBOOK PAGE សកម្ម ៖
               </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleRefreshPages}
-                  disabled={isRefreshingPages}
-                  className="bg-slate-800 hover:bg-slate-700 text-teal-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all flex items-center gap-1 active:scale-95 disabled:opacity-60"
-                  title="ទាញយកបញ្ជី Facebook Pages ទាំងអស់ពីគណនីឡើងវិញ"
-                >
-                  <span className={isRefreshingPages ? 'animate-spin' : ''}>🔄</span>
-                  <span>{isRefreshingPages ? 'កំពុងទាញ...' : 'Refresh'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowManualForm(true)}
-                  className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all flex items-center gap-1 active:scale-95"
-                >
-                  <span>➕ បន្ថែម / Import</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClearAllPages}
-                  className="bg-slate-800/90 hover:bg-red-950 text-red-400 hover:text-red-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 hover:border-red-500/50 transition-all flex items-center gap-1 active:scale-95"
-                  title="ផ្តាច់ Facebook Pages ទាំងអស់"
-                >
-                  <span>🗑️ សម្អាត</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConnectFacebook}
-                  className="bg-gradient-to-r from-[#1877F2] to-[#0A60D4] hover:from-blue-600 hover:to-blue-700 text-white px-2.5 py-1 rounded-lg text-[10.5px] font-black flex items-center gap-1 shadow transition-all active:scale-95 border border-blue-400/30"
-                >
-                  <span>⚡ ចូល FB</span>
-                </button>
+              <span className="text-emerald-400 text-[11px] font-mono font-black flex items-center gap-1.5 bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> បានភ្ជាប់
+              </span>
+            </div>
+            
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex-shrink-0 shadow">
+                  {activePage?.picture?.data?.url ? (
+                    <img src={activePage.picture.data.url} alt="page" className="w-full h-full object-cover rounded-[10px]" />
+                  ) : (
+                    <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center text-xs font-black text-cyan-300">
+                      FB
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-white font-black text-sm truncate">{activePage?.name || 'Kari Arnett'}</div>
+                  <div className="text-cyan-400/90 font-mono text-[11px] font-bold truncate">ID: {activePage?.id || '102094263212256'}</div>
+                </div>
               </div>
-            </div>
 
-            {/* List of Connected Pages */}
-            <div className="flex flex-col gap-2">
-              {(pages.length > 0 ? pages : (activePage ? [activePage] : [])).map((p, pIdx) => {
-                const isActive = activePage?.id === p.id;
-                return (
-                  <div
-                    key={p.id ? `connected-page-${p.id}` : `connected-page-idx-${pIdx}`}
-                    className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-all ${
-                      isActive
-                        ? 'bg-gradient-to-r from-[#0C2752] to-[#0E356E] border-cyan-400/80 shadow-[0_0_12px_rgba(6,182,212,0.25)]'
-                        : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 p-0.5 flex-shrink-0">
-                        {p.picture?.data?.url ? (
-                          <img src={p.picture.data.url} alt="page" className="w-full h-full object-cover rounded-[6px]" />
-                        ) : (
-                          <div className="w-full h-full bg-slate-900 rounded-[6px] flex items-center justify-center text-[10px] font-black text-cyan-300">
-                            FB
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-white font-black text-xs truncate flex items-center gap-1.5">
-                          <span>{p.name}</span>
-                          {isActive && (
-                            <span className="text-[9.5px] text-emerald-400 font-mono bg-emerald-950/90 border border-emerald-500/40 px-1.5 py-0.2 rounded-full flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> សកម្ម
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-slate-400 font-mono text-[10.5px] truncate">
-                          ID: {p.id}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {!isActive ? (
-                        <button
-                          type="button"
-                          onClick={() => handleSelectPage(p.id)}
-                          className="bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 px-2.5 py-1 rounded-lg text-[10.5px] font-bold border border-cyan-600/50 transition-all active:scale-95"
-                        >
-                          🔄 ប្តូរមកផេកនេះ
-                        </button>
-                      ) : (
-                        <span className="text-cyan-400 font-bold text-[10.5px] px-2 py-0.5">
-                          ✓ កំពុងប្រើ
-                        </span>
-                      )}
-                      {pages.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeletePage(p.id, p.name)}
-                          className="text-slate-500 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-950/40 transition-colors"
-                          title="ផ្តាច់ទំព័រនេះ"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="text-[10px] text-cyan-300/80 bg-cyan-950/40 p-2 rounded-xl border border-cyan-500/20 leading-relaxed">
-              💡 <strong>Multi-Page Support ៖</strong> បងអាចភ្ជាប់ផេកច្រើនក្នុងពេលតែមួយ។ រាល់ពេលប្តូរផេក ការទាញយក Live, ខំមិន, Chatbot និងការចាប់ Slip នឹងរត់តាមផេកសកម្មដោយស្វ័យប្រវត្តិ!
+              <button
+                onClick={handleConnectFacebook}
+                className="bg-gradient-to-r from-[#1877F2] to-[#0A60D4] hover:from-blue-600 hover:to-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-[0_4px_12px_rgba(24,119,242,0.35)] active:scale-95 transition-all flex-shrink-0 border border-blue-400/30"
+              >
+                <span>🔄 ចូលគណនី FB</span>
+              </button>
             </div>
           </div>
+
+          {/* Connected Pages Selection if multiple */}
+          {pages.length > 1 && (
+            <div>
+              <label className="text-xs text-slate-300 font-bold block mb-1">ជ្រើសរើសទំព័រ Facebook ផ្សេងទៀត ៖</label>
+              <select
+                value={activePage?.id || ''}
+                onChange={e => handleSelectPage(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-cyan-300 font-bold rounded-xl px-3 py-2 text-xs outline-none focus:border-cyan-400"
+              >
+                {pages.map((p, pIdx) => (
+                  <option key={p.id ? `fb-page-${p.id}` : `fb-page-${pIdx}`} value={p.id}>
+                    {p.name} ({p.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Live Streams Section (10 Latest Live Streams) */}
           <div className="bg-[#08152E]/90 border border-slate-800 rounded-2xl p-3.5 flex flex-col gap-3 shadow-md">
@@ -730,87 +555,58 @@ export function FacebookAuthModal({
             )}
           </div>
 
-          {/* Toggle Manual Access Token Form (Fastest & 100% Guaranteed Connection) */}
+          {/* Toggle Manual Access Token Form */}
           <div className="border-t border-slate-800/80 pt-2.5 flex flex-col gap-2">
             <button
               onClick={() => setShowManualForm(!showManualForm)}
-              className="text-xs text-cyan-300 hover:text-cyan-200 flex items-center justify-between font-bold px-1 transition-colors bg-cyan-950/40 p-2 rounded-xl border border-cyan-500/30"
+              className="text-xs text-slate-400 hover:text-slate-200 flex items-center justify-between font-bold px-1 transition-colors"
             >
-              <span className="flex items-center gap-1.5">
-                <span>⚡</span> ជម្រើសភ្ជាប់លឿនបំផុត (Page Access Token / មិនបាច់ OAuth)
-              </span>
-              <span className="text-[10px]">{showManualForm ? '▲ បិទ' : '▼ បើក'}</span>
+              <span>⚙️ ជម្រើសកំណត់ដោយដៃ (Page Access Token / App Settings)</span>
+              <span className="text-[10px]">{showManualForm ? '▲' : '▼'}</span>
             </button>
 
             {showManualForm && (
-              <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3 flex flex-col gap-2.5 shadow-inner">
-                <div className="text-[11px] text-slate-300 bg-blue-950/60 p-2.5 rounded-xl border border-blue-500/30 leading-relaxed">
-                  💡 <strong>គាំទ្រ Import ច្រើនផេកក្នុងពេលតែមួយ ៖</strong><br/>
-                  • បើអ្នក Paste <strong>User Access Token</strong> ប្រព័ន្ធនឹងទាញយក <strong>Facebook Pages ទាំងអស់</strong> ដែលអ្នកគ្រប់គ្រងដោយស្វ័យប្រវត្តិ!<br/>
-                  • ឬអាច Paste <strong>បញ្ជី Page Access Tokens ច្រើន</strong> (ចុះបន្ទាត់មួយ Token មួយ ឬទម្រង់ JSON) ដើម្បី Import ចូលទាំងអស់តែម្ដង។
-                </div>
+              <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-3 flex flex-col gap-2.5 shadow-inner">
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">ឈ្មោះ Facebook Page (ជម្រើសបន្ថែម / ទុកទំនេរបាន) ៖</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">ឈ្មោះ Facebook Page ៖</label>
                   <input
                     type="text"
                     value={manualPageName}
                     onChange={e => setManualPageName(e.target.value)}
-                    placeholder="e.g. ChatbotKH Store (ទុកទំនេរដើម្បីឱ្យប្រព័ន្ធស្វែងរកឈ្មោះពិត)"
+                    placeholder="e.g. Kari Arnett"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">Access Token (EAAB... / EAAR...) ៖</label>
+                  <label className="text-[11px] text-slate-400 block mb-1">Page Access Token (EAAR...) ៖</label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     value={manualToken}
                     onChange={e => setManualToken(e.target.value)}
-                    placeholder="Paste Page Access Token (EAAB...) ឬ User Token ឬចុះបន្ទាត់ដាក់ច្រើន Token..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-300 font-mono outline-none focus:border-cyan-400 leading-tight"
+                    placeholder="Paste Page Access Token from Graph API Explorer..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-300 font-mono outline-none focus:border-cyan-400"
                   />
                 </div>
                 <button
                   onClick={handleManualConnect}
-                  className="w-full py-2.5 bg-gradient-to-r from-blue-600 via-cyan-600 to-teal-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-xl text-xs font-black shadow transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow transition-all active:scale-95"
                 >
-                  <span>💾 រក្សាទុក & នាំចូល Facebook Pages ទាំងអស់</span>
+                  💾 រក្សាទុក & ភ្ជាប់ Token នេះ
                 </button>
               </div>
             )}
           </div>
 
           {/* OAuth Callback Info box for Facebook Dev Console */}
-          <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-3 flex flex-col gap-2 text-[11px] text-slate-400">
-            <div className="font-bold text-slate-200 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <span>📋</span> ការកំណត់លើ developers.facebook.com ៖
-              </span>
-              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
-                chatbotkh.com
-              </span>
+          <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-3 flex flex-col gap-1.5 text-[11px] text-slate-400">
+            <div className="font-bold text-slate-300 flex items-center gap-1.5">
+              <span>📋</span> Facebook App OAuth Valid Redirect URI ៖
             </div>
-
-            <div className="flex items-center gap-2">
-              <code className="bg-slate-900 text-cyan-300 p-2 rounded-xl font-mono break-all text-[10.5px] select-all border border-slate-800 flex-1">
-                {callbackUrl || 'https://chatbotkh.com/auth/callback'}
-              </code>
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(callbackUrl || 'https://chatbotkh.com/auth/callback');
-                  onShowToast('📋 បានចម្លង OAuth Redirect URI!', 'success');
-                }}
-                className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-3 py-2 rounded-xl text-[11px] font-bold border border-slate-700 transition-all flex-shrink-0 active:scale-95"
-              >
-                Copy
-              </button>
-            </div>
-
-            <div className="text-[10.5px] text-slate-400 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1 leading-relaxed">
-              <div className="font-bold text-cyan-300">ជំហានកំណត់ក្នុង Meta Developer Dashboard ដើម្បីកុំឱ្យ Error ៖</div>
-              <div>1. ចូល <strong>Facebook Login &gt; Settings</strong> &gt; បិទភ្ជាប់ (Paste) URL ខាងលើក្នុងប្រអប់ <strong>Valid OAuth Redirect URIs</strong>។</div>
-              <div>2. ចូល <strong>App Settings &gt; Basic</strong> &gt; បន្ថែម <code>chatbotkh.com</code> ក្នុង <strong>App Domains</strong>។</div>
-              <div>3. ត្រង់ <strong>Website &gt; Site URL</strong> បញ្ចូល <code>https://chatbotkh.com/</code>។</div>
+            <code className="bg-slate-900 text-cyan-300 p-2 rounded-xl font-mono break-all text-[10.5px] select-all border border-slate-800">
+              {callbackUrl}
+            </code>
+            <div className="text-[10px] text-slate-500 leading-normal">
+              បន្ថែម URL នេះទៅក្នុង Facebook Login Settings ក្នុង Meta Developer Portal ដើម្បីដំណើរការ OAuth Login។
             </div>
           </div>
         </div>
