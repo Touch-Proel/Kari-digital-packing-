@@ -1,5 +1,16 @@
 import { Request, Response } from 'express';
-import { activeFacebookPage, setActiveFacebookPage, bumpDataRevision, getConnectedFacebookPages, addOrUpdateConnectedPage, batchAddConnectedPages, removeConnectedPage } from './db';
+import {
+  activeFacebookPage,
+  setActiveFacebookPage,
+  bumpDataRevision,
+  getConnectedFacebookPages,
+  addOrUpdateConnectedPage,
+  batchAddConnectedPages,
+  removeConnectedPage,
+  facebookUserAccessToken,
+  getFacebookUserAccessToken,
+  setFacebookUserAccessToken
+} from './db';
 import { FacebookPage, FacebookPost } from './types';
 
 export const DEFAULT_APP_ID = process.env.FB_APP_ID || '1240481003109421';
@@ -52,12 +63,15 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
   const appId = DEFAULT_APP_ID;
   const redirectUri = getRedirectUri(req);
   const scopes = [
-    'pages_read_engagement',
-    'pages_read_user_content',
-    'pages_manage_metadata',
     'pages_show_list',
+    'pages_read_engagement',
+    'pages_manage_posts',
+    'pages_manage_metadata',
+    'pages_read_user_content',
+    'pages_messaging',
     'publish_video',
-    'pages_messaging'
+    'business_management',
+    'public_profile'
   ].join(',');
 
   // Store client redirectUri in base64url encoded state parameter to guarantee 100% exact match in code exchange
@@ -72,7 +86,7 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
     state: statePayload
   });
 
-  const url = `https://www.facebook.com/v18.0/dialog/oauth?${params.toString()}`;
+  const url = `https://www.facebook.com/v19.0/dialog/oauth?${params.toString()}`;
   return { url, redirectUri, appId };
 }
 
@@ -117,9 +131,10 @@ async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<an
   }
 }
 
-// Comprehensive multi-fallback Facebook Graph API page discovery matching standard clean v18.0 implementation
+// Comprehensive multi-fallback Facebook Graph API page discovery matching standard clean v19.0 / v18.0 implementation
 export async function fetchAllManagedFacebookPages(token: string): Promise<FacebookPage[]> {
   if (!token) return [];
+  const cleanToken = token.trim();
   const fetchedMap = new Map<string, FacebookPage>();
 
   const registerPage = (p: any) => {
@@ -129,19 +144,25 @@ export async function fetchAllManagedFacebookPages(token: string): Promise<Faceb
     fetchedMap.set(cleanId, {
       id: cleanId,
       name: p.name || existing?.name || 'Facebook Page',
-      access_token: p.access_token || existing?.access_token || token,
+      access_token: p.access_token || existing?.access_token || cleanToken,
       category: p.category || existing?.category,
       picture: p.picture || existing?.picture
     });
   };
 
-  // 1. Primary endpoint: Clean /me/accounts with limit=100 (exact match to working system)
+  const authOptions = {
+    headers: {
+      'Authorization': `Bearer ${cleanToken}`
+    }
+  };
+
+  // 1. Primary endpoint: Clean /me/accounts with limit=100 & pagination
   try {
-    let nextUrl: string | null = `https://graph.facebook.com/v18.0/me/accounts?access_token=${token}&limit=100`;
+    let nextUrl: string | null = `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,access_token,category,picture,tasks&limit=100`;
     let attempts = 0;
     while (nextUrl && attempts < 10) {
       attempts++;
-      const resData = await safeGraphApiFetch(nextUrl);
+      const resData = await safeGraphApiFetch(nextUrl, authOptions);
       if (resData.data && Array.isArray(resData.data)) {
         for (const p of resData.data) {
           registerPage(p);
@@ -153,9 +174,27 @@ export async function fetchAllManagedFacebookPages(token: string): Promise<Faceb
     console.warn('[Facebook Accounts] Primary query warning:', err);
   }
 
-  // 2. Query with fields in case picture is needed
+  // 1b. Fallback with query param directly in case Bearer header is filtered
+  if (fetchedMap.size === 0) {
+    try {
+      let nextUrl: string | null = `https://graph.facebook.com/v18.0/me/accounts?access_token=${encodeURIComponent(cleanToken)}&limit=100`;
+      let attempts = 0;
+      while (nextUrl && attempts < 10) {
+        attempts++;
+        const resData = await safeGraphApiFetch(nextUrl);
+        if (resData.data && Array.isArray(resData.data)) {
+          for (const p of resData.data) {
+            registerPage(p);
+          }
+        }
+        nextUrl = resData.paging?.next || null;
+      }
+    } catch {}
+  }
+
+  // 2. Query /me/assigned_pages (Meta Business Manager assigned assets)
   try {
-    const resData = await safeGraphApiFetch(`https://graph.facebook.com/v18.0/me/accounts?access_token=${token}&fields=id,name,access_token,category,picture&limit=100`);
+    const resData = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/me/assigned_pages?fields=id,name,access_token,picture&limit=100`, authOptions);
     if (resData.data && Array.isArray(resData.data)) {
       for (const p of resData.data) {
         registerPage(p);
@@ -163,19 +202,9 @@ export async function fetchAllManagedFacebookPages(token: string): Promise<Faceb
     }
   } catch {}
 
-  // 3. Query /me/assigned_pages (Meta Business Manager assigned assets)
+  // 3. Query /me/businesses (Meta Business Portfolio Pages)
   try {
-    const resData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/assigned_pages?access_token=${token}&fields=id,name,access_token,picture&limit=100`);
-    if (resData.data && Array.isArray(resData.data)) {
-      for (const p of resData.data) {
-        registerPage(p);
-      }
-    }
-  } catch {}
-
-  // 4. Query /me/businesses (Meta Business Portfolio Pages)
-  try {
-    const bizRes = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me/businesses?access_token=${token}&fields=id,name,owned_pages.limit(100){id,name,access_token,category,picture},client_pages.limit(100){id,name,access_token,category,picture}&limit=100`);
+    const bizRes = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/me/businesses?fields=id,name,owned_pages.limit(100){id,name,access_token,category,picture},client_pages.limit(100){id,name,access_token,category,picture}&limit=100`, authOptions);
     if (bizRes.data && Array.isArray(bizRes.data)) {
       for (const biz of bizRes.data) {
         // Collect owned_pages
@@ -193,11 +222,11 @@ export async function fetchAllManagedFacebookPages(token: string): Promise<Faceb
 
         // Direct fetch for this business ID
         try {
-          const ownedDirect = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${biz.id}/owned_pages?access_token=${token}&fields=id,name,access_token,category,picture&limit=100`);
+          const ownedDirect = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/${biz.id}/owned_pages?fields=id,name,access_token,category,picture&limit=100`, authOptions);
           if (ownedDirect.data && Array.isArray(ownedDirect.data)) {
             for (const p of ownedDirect.data) registerPage(p);
           }
-          const clientDirect = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/${biz.id}/client_pages?access_token=${token}&fields=id,name,access_token,category,picture&limit=100`);
+          const clientDirect = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/${biz.id}/client_pages?fields=id,name,access_token,category,picture&limit=100`, authOptions);
           if (clientDirect.data && Array.isArray(clientDirect.data)) {
             for (const p of clientDirect.data) registerPage(p);
           }
@@ -208,10 +237,10 @@ export async function fetchAllManagedFacebookPages(token: string): Promise<Faceb
     console.warn('[Facebook Businesses Discovery] Warning:', err);
   }
 
-  // 5. If still empty, test /me as single Page Token
+  // 4. If still empty, test /me as single Page Token
   if (fetchedMap.size === 0) {
     try {
-      const meData = await safeGraphApiFetch(`https://graph.facebook.com/v21.0/me?access_token=${token}&fields=id,name,category,picture`);
+      const meData = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/me?fields=id,name,category,picture`, authOptions);
       if (meData.id && !meData.error) {
         registerPage(meData);
       }
@@ -299,6 +328,9 @@ export async function handleOAuthCallback(req: Request, res: Response) {
       } catch (err) {
         console.warn('Long-lived token exchange warning:', err);
       }
+
+      // Save user access token in persistent database & SQLite
+      setFacebookUserAccessToken(userAccessToken);
 
       // Fetch user's managed Facebook Pages with pagination support and all fallbacks
       const allFetchedPages = await fetchAllManagedFacebookPages(userAccessToken);
@@ -412,7 +444,7 @@ export function selectPageById(pageId: string): FacebookPage | null {
 
 // Refresh all managed pages using active token
 export async function refreshFacebookAccounts(): Promise<FacebookPage[]> {
-  const token = userAccessToken || activeFacebookPage?.access_token;
+  const token = getFacebookUserAccessToken() || userAccessToken || activeFacebookPage?.access_token;
   if (!token) return getAvailablePages();
 
   try {

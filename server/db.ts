@@ -45,6 +45,7 @@ export async function saveDatabaseToDisk(forceSync = false) {
       packerLogs,
       activeFacebookPage,
       connectedFacebookPages,
+      facebookUserAccessToken,
       messengerSlips
     };
     const jsonStr = JSON.stringify(payload);
@@ -79,6 +80,7 @@ export async function saveDatabaseToDisk(forceSync = false) {
         packerLogs,
         activeFacebookPage,
         connectedFacebookPages,
+        fbUserAccessToken: facebookUserAccessToken,
         messengerSlips
       }).catch(err => console.error('[SQLite] Persist error:', err));
     }
@@ -474,6 +476,18 @@ export let activeFacebookPage: FacebookPage | null = {
   category: "Women's Clothing Store & Live Sales"
 };
 
+export let facebookUserAccessToken: string = '';
+
+export function getFacebookUserAccessToken(): string {
+  return facebookUserAccessToken;
+}
+
+export function setFacebookUserAccessToken(token: string) {
+  facebookUserAccessToken = token || '';
+  bumpDataRevision();
+  saveDatabaseToDisk();
+}
+
 export let connectedFacebookPages: FacebookPage[] = [
   activeFacebookPage!
 ];
@@ -650,6 +664,9 @@ export async function loadDatabaseFromDisk() {
       if (sqliteData.activeFacebookPage) {
         activeFacebookPage = sqliteData.activeFacebookPage;
       }
+      if (sqliteData.fbUserAccessToken) {
+        facebookUserAccessToken = sqliteData.fbUserAccessToken;
+      }
       if (sqliteData.connectedFacebookPages && Array.isArray(sqliteData.connectedFacebookPages) && sqliteData.connectedFacebookPages.length > 0) {
         connectedFacebookPages.length = 0;
         connectedFacebookPages.push(...sqliteData.connectedFacebookPages);
@@ -683,6 +700,9 @@ export async function loadDatabaseFromDisk() {
       try {
         const raw = fs.readFileSync(DB_FILE_PATH, 'utf8');
         const parsed = JSON.parse(raw);
+        if (parsed.facebookUserAccessToken && !facebookUserAccessToken) {
+          facebookUserAccessToken = parsed.facebookUserAccessToken;
+        }
         if (parsed.connectedFacebookPages && Array.isArray(parsed.connectedFacebookPages) && parsed.connectedFacebookPages.length > 0) {
           connectedFacebookPages.length = 0;
           connectedFacebookPages.push(...parsed.connectedFacebookPages);

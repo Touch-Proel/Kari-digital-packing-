@@ -31,7 +31,9 @@ import {
   addOrUpdateConnectedPage,
   batchAddConnectedPages,
   removeConnectedPage,
-  getConnectedFacebookPages
+  getConnectedFacebookPages,
+  getFacebookUserAccessToken,
+  setFacebookUserAccessToken
 } from './server/db';
 import { parseAndAllocateComment } from './server/parser';
 import { startLiveCommentsAutoSync } from './server/liveSync';
@@ -335,6 +337,7 @@ app.get('/api/fb/status', (_req: Request, res: Response) => {
     connected: !!activeFacebookPage,
     activePage: activeFacebookPage,
     pages: getAvailablePages(),
+    hasUserToken: !!getFacebookUserAccessToken(),
     activeLiveId
   });
 });
@@ -403,6 +406,10 @@ app.post(['/api/fb/manual_connect', '/api/fb/import_pages'], async (req: Request
       const pagesForToken = await fetchAllManagedFacebookPages(token);
       if (pagesForToken.length > 0) {
         collectedPages.push(...pagesForToken);
+        // If this token discovered multiple pages or user pages, save as user access token
+        if (pagesForToken.length > 1 || !getFacebookUserAccessToken()) {
+          setFacebookUserAccessToken(token);
+        }
       } else {
         // Fallback for custom page entry
         collectedPages.push({
