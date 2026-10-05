@@ -4,6 +4,8 @@ import {
   setActiveFacebookPage,
   bumpDataRevision,
   getConnectedFacebookPages,
+  setConnectedFacebookPages,
+  clearAllConnectedPages,
   addOrUpdateConnectedPage,
   batchAddConnectedPages,
   removeConnectedPage,
@@ -339,7 +341,7 @@ export async function handleOAuthCallback(req: Request, res: Response) {
       availablePages = allFetchedPages;
 
       if (allFetchedPages.length > 0) {
-        batchAddConnectedPages(allFetchedPages, true);
+        setConnectedFacebookPages(allFetchedPages, true);
       }
       bumpDataRevision();
 
@@ -417,17 +419,7 @@ export async function handleOAuthCallback(req: Request, res: Response) {
 // Get Connected Pages (Full Multi-Page Support)
 export function getAvailablePages(): FacebookPage[] {
   const connected = getConnectedFacebookPages();
-  const map = new Map<string, FacebookPage>();
-  for (const p of connected) {
-    if (p.id) map.set(p.id, p);
-  }
-  for (const p of availablePages) {
-    if (p.id) map.set(p.id, p);
-  }
-  if (activeFacebookPage && activeFacebookPage.id) {
-    map.set(activeFacebookPage.id, activeFacebookPage);
-  }
-  return Array.from(map.values());
+  return connected;
 }
 
 // Select Active Page
@@ -453,7 +445,7 @@ export async function refreshFacebookAccounts(): Promise<FacebookPage[]> {
     if (allFetchedPages.length > 0) {
       console.log(`[Facebook Accounts Refresh] Found ${allFetchedPages.length} pages.`);
       availablePages = allFetchedPages;
-      batchAddConnectedPages(allFetchedPages, false);
+      setConnectedFacebookPages(allFetchedPages, false);
     }
   } catch (err) {
     console.error('Error refreshing Facebook accounts:', err);

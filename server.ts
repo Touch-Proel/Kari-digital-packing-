@@ -31,6 +31,7 @@ import {
   addOrUpdateConnectedPage,
   batchAddConnectedPages,
   removeConnectedPage,
+  clearAllConnectedPages,
   getConnectedFacebookPages,
   getFacebookUserAccessToken,
   setFacebookUserAccessToken
@@ -466,6 +467,12 @@ app.post(['/api/fb/refresh_pages', '/api/fb/pages/refresh'], async (_req: Reques
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Failed to refresh pages' });
   }
+});
+
+// 5.3 Clear / Disconnect All Facebook Pages
+app.post(['/api/fb/pages/clear', '/api/fb/clear_all'], (_req: Request, res: Response) => {
+  clearAllConnectedPages();
+  res.json({ success: true, activePage: null, pages: [] });
 });
 
 // 5.5 Set Active Live ID

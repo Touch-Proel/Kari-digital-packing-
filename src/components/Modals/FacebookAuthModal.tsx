@@ -185,19 +185,34 @@ export function FacebookAuthModal({
     }
   };
 
+  const handleClearAllPages = async () => {
+    if (!window.confirm('តើបងពិតជាចង់ផ្តាច់ Facebook Pages ទាំងអស់ចេញពីប្រព័ន្ធមែនទេ?')) return;
+    try {
+      const res = await fetch('/api/fb/pages/clear', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setPages([]);
+        onShowToast('🗑️ បានផ្តាច់ Facebook Pages ទាំងអស់រួចរាល់!');
+        fetchPosts();
+      }
+    } catch {
+      onShowToast('Error clearing pages', 'error');
+    }
+  };
+
   const handleRefreshPages = async () => {
     setIsRefreshingPages(true);
     onShowToast('⏳ កំពុងទាញយកបញ្ជី Facebook Pages ទាំងអស់...');
     try {
       const res = await fetch('/api/fb/refresh_pages', { method: 'POST' });
       const data = await res.json();
-      if (data.success && Array.isArray(data.pages) && data.pages.length > 0) {
+      if (data.success && Array.isArray(data.pages)) {
         setPages(data.pages);
         if (data.activePage) {
           onPageSelected(data.activePage);
         }
         playSuccessFanfare();
-        onShowToast(`🎉 បានទាញយកទំព័រ Facebook សរុប ${data.pages.length} ដោយជោគជ័យ!`);
+        onShowToast(`🎉 បានធ្វើបច្ចុប្បន្នភាពបញ្ជីទំព័រ Facebook សរុប ${data.pages.length} ដោយជោគជ័យ!`);
         fetchPosts();
       } else {
         await fetchFbStatus();
@@ -401,6 +416,14 @@ export function FacebookAuthModal({
                   className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all flex items-center gap-1 active:scale-95"
                 >
                   <span>➕ បន្ថែម / Import</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearAllPages}
+                  className="bg-slate-800/90 hover:bg-red-950 text-red-400 hover:text-red-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 hover:border-red-500/50 transition-all flex items-center gap-1 active:scale-95"
+                  title="ផ្តាច់ Facebook Pages ទាំងអស់"
+                >
+                  <span>🗑️ សម្អាត</span>
                 </button>
                 <button
                   type="button"

@@ -553,6 +553,29 @@ export function batchAddConnectedPages(pages: FacebookPage[], selectFirstAsActiv
   saveDatabaseToDisk();
 }
 
+export function setConnectedFacebookPages(pages: FacebookPage[], selectFirstAsActive = true) {
+  if (!pages) return;
+  connectedFacebookPages.length = 0;
+  connectedFacebookPages.push(...pages);
+
+  if (selectFirstAsActive && pages.length > 0) {
+    const foundActive = activeFacebookPage ? pages.find(p => p.id === activeFacebookPage?.id) : null;
+    activeFacebookPage = foundActive || pages[0];
+  } else if (pages.length === 0) {
+    activeFacebookPage = null;
+  }
+  bumpDataRevision();
+  saveDatabaseToDisk();
+}
+
+export function clearAllConnectedPages() {
+  connectedFacebookPages.length = 0;
+  activeFacebookPage = null;
+  facebookUserAccessToken = '';
+  bumpDataRevision();
+  saveDatabaseToDisk();
+}
+
 export function removeConnectedPage(pageId: string) {
   connectedFacebookPages = connectedFacebookPages.filter(p => p.id !== pageId);
   if (activeFacebookPage?.id === pageId) {
