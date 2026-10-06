@@ -734,7 +734,7 @@ export async function fetchFacebookComments(
         const newComments: any[] = [];
         for (const itm of data.data) {
           if (!itm.id || state.seenCommentIds.has(itm.id)) {
-            break;
+            continue;
           }
           state.seenCommentIds.add(itm.id);
           newComments.push(itm);

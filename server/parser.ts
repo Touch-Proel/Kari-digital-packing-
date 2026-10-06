@@ -210,23 +210,6 @@ export function parseAndAllocateComment(
   const savedCommentId = commentId || `c_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const signatureKey = `${liveId}_${(fbUserId || cleanFbName).toLowerCase()}_${rawText}`;
 
-  // O(1) Instant Hash Check for duplicate comments
-  const isDuplicate =
-    (commentId && processedCommentKeys.has(commentId)) ||
-    processedCommentKeys.has(savedCommentId) ||
-    processedCommentKeys.has(signatureKey);
-
-  if (isDuplicate) {
-    return {
-      status: 'IGNORED',
-      message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`
-    };
-  }
-
-  processedCommentKeys.add(savedCommentId);
-  if (commentId) processedCommentKeys.add(commentId);
-  processedCommentKeys.add(signatureKey);
-
   // Safe invoice lookup helper: avoids merging two distinct users who happen to share the same name
   const existingInv = invoices.find(i => {
     if (i.live_id !== liveId) return false;
@@ -259,6 +242,36 @@ export function parseAndAllocateComment(
     return false;
   });
 
+  // O(1) Instant Hash Check for duplicate comments
+  const isDuplicate =
+    (commentId && processedCommentKeys.has(commentId)) ||
+    processedCommentKeys.has(savedCommentId) ||
+    processedCommentKeys.has(signatureKey);
+
+  if (isDuplicate) {
+    // If the customer already has an active invoice in this live, ensure this comment is in their comment history!
+    if (existingInv && rawText) {
+      if (!existingInv.comments) existingInv.comments = [];
+      if (!existingInv.comments.includes(rawText)) {
+        existingInv.comments.push(rawText);
+        if (commentId && !existingInv.comment_ids?.includes(commentId)) {
+          if (!existingInv.comment_ids) existingInv.comment_ids = [];
+          existingInv.comment_ids.push(commentId);
+        }
+        recalculateInvoice(existingInv);
+        if (!batchMode) bumpDataRevision();
+      }
+    }
+    return {
+      status: 'IGNORED',
+      message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`
+    };
+  }
+
+  processedCommentKeys.add(savedCommentId);
+  if (commentId) processedCommentKeys.add(commentId);
+  processedCommentKeys.add(signatureKey);
+
   const isAlreadyInBasket = existingInv && (
     (existingInv.comments && existingInv.comments.includes(rawText)) ||
     (existingInv.unmatched_comments && existingInv.unmatched_comments.includes(rawText)) ||
@@ -266,6 +279,13 @@ export function parseAndAllocateComment(
   );
 
   if (isAlreadyInBasket) {
+    // Ensure comment is in comments list even if previously only in items or unmatched
+    if (existingInv && rawText && (!existingInv.comments || !existingInv.comments.includes(rawText))) {
+      if (!existingInv.comments) existingInv.comments = [];
+      existingInv.comments.push(rawText);
+      recalculateInvoice(existingInv);
+      if (!batchMode) bumpDataRevision();
+    }
     return {
       status: 'IGNORED',
       message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`

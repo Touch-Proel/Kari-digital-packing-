@@ -2181,6 +2181,21 @@ router.post('/ai_smart_parse_basket', async (req: Request, res: Response) => {
     }
   }
 
+  // Also include any raw comments for this customer in this live session
+  const rawMatches = rawComments.filter(rc =>
+    rc.live_id === inv.live_id &&
+    ((inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' && rc.facebook_user_id === inv.facebook_user_id) ||
+     (!inv.facebook_user_id || inv.facebook_user_id === 'FB_USER_ID_STREAM' || !rc.facebook_user_id || rc.facebook_user_id === 'FB_USER_ID_STREAM') &&
+     (rc.facebook_name || '').toLowerCase() === (inv.facebook_name || '').toLowerCase())
+  );
+  for (const rc of rawMatches) {
+    const clean = (rc.comment_text || '').trim();
+    if (clean && !seenComments.has(clean)) {
+      seenComments.add(clean);
+      allCustomerComments.push(clean);
+    }
+  }
+
   if (allCustomerComments.length === 0) {
     return res.json({
       success: false,
@@ -3520,12 +3535,65 @@ router.get('/fb/live_auto_sync', (_req: Request, res: Response) => {
   res.json(getLiveCommentsAutoSyncStatus());
 });
 
+// Helper to reconcile and backfill all customer raw comments into active baskets
+function reconcileCustomerCommentsForLive(targetId: string) {
+  const activeBaskets = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled');
+  let hasChanges = false;
+  for (const inv of activeBaskets) {
+    const custComments = rawComments.filter(rc =>
+      rc.live_id === targetId &&
+      ((inv.facebook_user_id && inv.facebook_user_id !== 'FB_USER_ID_STREAM' && rc.facebook_user_id === inv.facebook_user_id) ||
+       (!inv.facebook_user_id || inv.facebook_user_id === 'FB_USER_ID_STREAM' || !rc.facebook_user_id || rc.facebook_user_id === 'FB_USER_ID_STREAM') &&
+       (rc.facebook_name || '').toLowerCase() === (inv.facebook_name || '').toLowerCase())
+    );
+    if (!inv.comments) inv.comments = [];
+    let basketChanged = false;
+    for (const rc of custComments) {
+      if (rc.comment_text && !inv.comments.includes(rc.comment_text)) {
+        inv.comments.push(rc.comment_text);
+        basketChanged = true;
+      }
+    }
+    if (basketChanged) {
+      recalculateInvoice(inv);
+      hasChanges = true;
+    }
+  }
+  if (hasChanges) {
+    saveDatabaseToDisk();
+    bumpDataRevision();
+  }
+}
+
+// POST /api/fb/sync_comments - Full Sync comments from Facebook Live
+router.post(['/fb/sync_comments', '/api/fb/sync_comments'], async (req: Request, res: Response) => {
+  const { post_id, live_id } = req.body;
+  const targetId = String(post_id || live_id || activeLiveId || '').trim();
+  if (!targetId) {
+    return res.status(400).json({ success: false, error: 'មិនទាន់មានលេខសម្គាល់ Live Video (Live ID) ឡើយ' });
+  }
+
+  const syncRes = await executeLiveCommentsSyncOnce(targetId, true);
+  reconcileCustomerCommentsForLive(targetId);
+
+  const totalBaskets = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled').length;
+  return res.json({
+    ...syncRes,
+    total_baskets: totalBaskets,
+    status: getLiveCommentsAutoSyncStatus()
+  });
+});
+
 // POST /api/fb/live_auto_sync - Toggle or trigger Facebook Live Comments Auto-Sync
 router.post('/fb/live_auto_sync', async (req: Request, res: Response) => {
   const { enabled, interval_sec, live_id, trigger_now } = req.body;
 
   if (trigger_now) {
-    const syncRes = await executeLiveCommentsSyncOnce(live_id, true);
+    const targetId = String(live_id || activeLiveId || '').trim();
+    const syncRes = await executeLiveCommentsSyncOnce(targetId, true);
+    if (targetId) {
+      reconcileCustomerCommentsForLive(targetId);
+    }
     return res.json({
       ...syncRes,
       status: getLiveCommentsAutoSyncStatus()
