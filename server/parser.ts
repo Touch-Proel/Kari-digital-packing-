@@ -479,6 +479,17 @@ export function parseAndAllocateComment(
       resolvedLabel = custZoneRes.label;
     }
 
+    // Collect any prior comments this customer made in this live session BEFORE basket was created
+    const priorComments = rawComments
+      .filter(rc => rc.live_id === liveId && (
+        (hasValidFbUserId && rc.facebook_user_id === fbUserId) ||
+        (!hasValidFbUserId && rc.facebook_name.toLowerCase() === cleanFbName.toLowerCase())
+      ))
+      .map(rc => rc.comment_text)
+      .filter(Boolean);
+
+    const mergedComments = Array.from(new Set([...priorComments, rawText]));
+
     inv = {
       invoice_id: nextId,
       basket_no: nextId,
@@ -498,10 +509,21 @@ export function parseAndAllocateComment(
       last_comment_id: savedCommentId,
       comment_ids: [savedCommentId],
       items: [],
-      comments: [rawText],
+      comments: mergedComments,
       unmatched_comments: []
     };
     newCommentEntry.invoice_id = inv.invoice_id;
+
+    // Link all prior raw comments to this newly created invoice as well
+    rawComments.forEach(rc => {
+      if (rc.live_id === liveId && !rc.invoice_id) {
+        if ((hasValidFbUserId && rc.facebook_user_id === fbUserId) ||
+            (!hasValidFbUserId && rc.facebook_name.toLowerCase() === cleanFbName.toLowerCase())) {
+          rc.invoice_id = inv.invoice_id;
+        }
+      }
+    });
+
     invoices.unshift(inv);
   } else {
     newCommentEntry.invoice_id = inv.invoice_id;
