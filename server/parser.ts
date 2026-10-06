@@ -52,14 +52,12 @@ export type { ExtractedItemPair };
 const COMMON_GREETINGS = NON_PRODUCT_CODES;
 
 const QUESTION_KEYWORDS = [
-  'អត់', 'មាន', 'ប៉ុន្មាន', 'ថ្លៃ', 'តម្លៃ', 'ពាក់បាន',
-  'សាច់', 'សល់', 'មានអត់', 'អត់បង', 'អត់ចែ', 'ថ្លៃប៉ុន្មាន',
-  'លក់ម៉េច', 'ម៉េចដែរ', 'ចុះ', 'បញ្ចុះ',
-  'ត្រូវថ្លៃ', 'សួរ', 'ចង់សួរ', 'មានកូន', 'មេីល', 'មើល',
-  'អស់នៅ', 'អស់ហើយ', 'អស់ឬនៅ', 'អស់រឺនៅ', 'អស់ហើយនៅ', 'អស់អត់', 'អស់បង', 'អស់ចែ',
-  'ហៅលេខ', 'ហៅកូដ', 'ហៅលេខកូដ', 'សុំមើល', 'មើលអាវ', 'មើលខោ', 'សុំមើលមួយ',
+  'អត់', 'ប៉ុន្មាន', 'ថ្លៃ', 'តម្លៃ', 'ពាក់បាន',
+  'សាច់ស្អាតអត់', 'សល់អត់', 'មានអត់', 'អត់បង', 'អត់ចែ', 'ថ្លៃប៉ុន្មាន',
+  'លក់ម៉េច', 'ម៉េចដែរ', 'ចុះថ្លៃ', 'បញ្ចុះ',
+  'ត្រូវថ្លៃ', 'ចង់សួរ', 'មានកូន', 'សុំមើល', 'មើលអាវ', 'មើលខោ', 'សុំមើលមួយ',
   'លក់យ៉ាងម៉េច', 'មិចដែរ', 'ប៉ុន្មានបង', 'ប៉ុន្មានចែ', 'សល់ប៉ុន្មាន', 'មានសល់',
-  'ពាក់បានអត់', 'គីឡូពាក់បាន', 'មានពណ៌អី', 'មានសាយអី', 'មានsize'
+  'ពាក់បានអត់', 'គីឡូពាក់បាន', 'មានពណ៌អី', 'មានសាយអី', 'មានsize', 'មានទេ'
 ];
 
 const ACTION_WORDS = ['យក', 'យល', 'ចង់បាន', 'កាត់', 'សុំ', 'ថែម', 'ដាក់', 'កក់', 'បូក', 'សុំយក'];
@@ -69,13 +67,29 @@ export function isQuestionComment(text: string): boolean {
   let norm = convertKhmerDigitsToArabic(text);
   norm = norm.replace(RE_PRICE_CLEANUP, ' ');
 
+  // 1. Never treat as pure question if comment contains a valid Cambodian phone number AND potential code/order intent
+  const hasPhone = /(?:\+?855[\s.\-()]*|0)(?:[1-9]\d)(?:[\s.\-()]*\d){6,7}(?!\d)/.test(norm);
+  const hasOrderOrCode = 
+    /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=»_\/]\s*\d{1,2}/.test(norm) ||
+    /(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(?:លេខ)?(?:កូដ|កូត|code)?\s*[A-Za-z0-9]{1,5}/i.test(norm) ||
+    /(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5}/i.test(norm) ||
+    /(?<!\d)\d{2,4}(?!\d)/.test(norm);
+
+  if (hasPhone && hasOrderOrCode) {
+    return false;
+  }
+
   // If comment has explicit order syntax like "47=2", "47:1", "47/2", "យក36", "ថែម 54", "38=2", "120=2", "16,2", "37»5", it is an order, not a pure question
   if (
     /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=»_]\s*\d{1,2}/.test(norm) ||
-    /(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(?:លេខ)?(?:កូដ|កូត|code)?\s*[A-Za-z0-9]{1,5}/i.test(norm)
+    /(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(?:លេខ)?(?:កូដ|កូត|code)?\s*[A-Za-z0-9]{1,5}/i.test(norm) ||
+    /(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5}/i.test(norm)
   ) {
     return false;
   }
+
+  // Protect location names containing question words (e.g. Mean Chey, Steung Mean Chey, Phsar Moan Ang, Teuk Thla)
+  norm = norm.replace(/(?:ស្ទឹងមានជ័យ|ខណ្ឌមានជ័យ|មានជ័យ|ផ្សារមាន់អាំង|មានលាភ|មានរិទ្ធ|ទឹកថ្លា)/gi, ' ');
 
   // Conversational inquiries, checks, and status questions
   if (/(?:មិញ)?\s*(?:ខ្ញុំ|ញុម)?\s*បានអត់|បានអីវ៉ាន់អត់|បានលោតសារ|លោតសារបាន|លោតសាចឹង|អត់លោតសារ|អត់ឮសំឡេង|អត់សូវឮ|ឮតិច|ឮតិចៗ|កុងកុំឮងមើល|កុងកុឮងមើល|ធ្វើមិចបានដឹង|អត់លោត|ទិញរហូត|ទិញមិនដែលបាន|ទិញ២ដងហើយ|មិនទាន់មកដល់|ពេញចិត្ត|អន់ចិត្ត|សាច់ស្អាត|ស្អាតណាស់|សេវ៉ាលឿន|យឺតក៏នៅតែទិញ|ម៉ូយគាត់តាំងពី|រាប់ឈុតចំរុះ|បាញ់លុយរួចហើយយក100|ច្រឡំអត់យក|ច្រឡំលេខកូដ/i.test(norm)) {
@@ -100,7 +114,8 @@ export function isQuestionComment(text: string): boolean {
 
 export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedItemPair[] {
   if (!text) return [];
-  if (isQuestionComment(text)) return [];
+  const { phone } = extractPhoneNumber(text);
+  if (!phone && isQuestionComment(text)) return [];
 
   const targetLive = liveId || activeLiveId;
   const targetProducts = products.filter(p => (p.live_id || activeLiveId) === targetLive);
@@ -322,7 +337,7 @@ export function parseAndAllocateComment(
     cust.last_interaction_at = new Date().toISOString();
   }
 
-  const isQuestion = isQuestionComment(rawText);
+  const isQuestion = !phone && isQuestionComment(rawText);
   const pairs = extractCodeQtyPairs(cleanText, liveId);
 
   // Match open/unpacked invoice for this customer in this live session
@@ -357,7 +372,9 @@ export function parseAndAllocateComment(
     return false;
   });
 
-  if (isQuestion || pairs.length === 0) {
+  const hasOrderIntent = pairs.length > 0 && (Boolean(phone) || Boolean(hasExplicitLocation) || !isQuestion);
+
+  if (!hasOrderIntent || pairs.length === 0) {
     if (inv) {
       newCommentEntry.invoice_id = inv.invoice_id;
       inv.last_comment_id = savedCommentId;

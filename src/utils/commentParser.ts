@@ -34,7 +34,7 @@ const SIZE_COLOR_SUFFIXES = [
 
 export const RE_PRICE_CLEANUP = /(?:[:=]\s*)?(?:\$\s*\d+(?:[\.,]\d{1,2})?|\b\d+(?:[\.,]\d{1,2})?\s*\$|\b\d+\s*៛|\b\d{4,}\s*(?:រៀល|៛)\b|[:=]\s*\d+\.\d{1,2}\b)/gi;
 export const RE_MEASUREMENTS_CLEANUP = /(?:(?:kg|kilo|gk|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ)\s*[:=\s\-_/]?\s*\d{1,3}(?![A-Za-z0-9\u1780-\u17FF])|(?<!\d)\d{2,3}\s*(?:kg|kilo|gk|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ)(?!\s*[:=\-]?\s*\d)(?![A-Za-z0-9\u1780-\u17FF])|(?<![A-Za-z0-9])គ\d{2}\b|(?:ដើមទ្រូង|ទ្រូង)\s*[:=\s\-]?\s*\d{2,3}|កម្ពស់\s*[:=\s\-]?\s*\d{2,3}|1\.[4-9]\d?\s*(?:m|ម៉ែត្រ)?\b)/gi;
-export const RE_ADDRESS_NUMBERS_CLEANUP = /(?:គំរោង(?:ទី)?\s*\d+|គម្រោង(?:ទី)?\s*\d+|ផ្លូវ(?:លេខ|ទី)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*[A-Za-z0-9\-]+|បន្ទប់(?:លេខ)?\s*\d+|ជាន់ទី\s*\d+|គីឡូ\s*\d+\s*(?:ដីថ្មី|ផ្សារ|សង្កាត់|ភូមិ|\.|\*|0\d{8,9})|ផ្សារ\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*\d*|បុរី\s*[\u1780-\u17FFa-zA-Z0-9_]+\s*(?:គំរោង|គម្រោង)?\s*\d*|សង្កាត់\s*[\u1780-\u17FFa-zA-Z0-9_]+|ខណ្ឌ\s*[\u1780-\u17FFa-zA-Z0-9_]+|ភូមិ\s*[\u1780-\u17FFa-zA-Z0-9_]+)/gi;
+export const RE_ADDRESS_NUMBERS_CLEANUP = /(?:(?:គំរោង|គម្រោង)(?:ទី)?\s*\d+|ផ្លូវ(?:លេខ|ទី)?\s*\d+[A-Za-z]?|ផ្ទះ(?:លេខ)?\s*[A-Za-z0-9\-]+|បន្ទប់(?:លេខ)?\s*\d+|ជាន់ទី\s*\d+|គីឡូម៉ែត្រ(?:លេខ)?\s*\d+|គីឡូលេខ\s*\d+)/gi;
 
 export const RE_CAMBODIAN_PHONE = /(?:\+?855[\s.\-()]*|0)(?:[1-9]\d)(?:[\s.\-()]*\d){6,7}(?!\d)/i;
 
@@ -144,8 +144,11 @@ export function normalizeKhmerText(text: string): string {
   // Normalize guillemets » and « often used in Cambodia live comments as arrows or item separators
   s = s.replace(/[»«]/g, ' » ');
 
-  s = s.replace(/(\d{3,4})\s*\n\s*(\d{3,6})/g, '$1$2');
   s = convertKhmerDigitsToArabic(s);
+
+  // Separate glued Khmer words and English/numbers (e.g. "ភ្នំពេញ28" -> "ភ្នំពេញ 28", "ចោមចៅ28" -> "ចោមចៅ 28", "កូដ28" -> "កូដ 28", "28អាវ" -> "28 អាវ")
+  s = s.replace(/([\u1780-\u17D2])([A-Za-z0-9])/g, '$1 $2');
+  s = s.replace(/([A-Za-z0-9])([\u1780-\u17D2])/g, '$1 $2');
 
   s = s.replace(/ឆុត/g, 'ឈុត')
        .replace(/កូត|ខូត|កូក|គូដ/g, 'កូដ')
@@ -578,7 +581,8 @@ export function isPureContactOrInquiryComment(text: string): boolean {
   }
 
   // 3. Pure location comments without order intent (e.g. "ផ្សារព្រែកឯង", "ចោមចៅ", "បែកចាន", "ទួលគោក", "សៀមរាប", "តាកែវ")
-  const hasOrderPattern = /(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})/i.test(s);
+  const hasOrderPattern = 
+    /(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})|(?:(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5})|(?<![A-Za-z0-9])(?:[A-Za-z]\d{1,3}|\d{2,4})(?![A-Za-z0-9])/i.test(s);
   if (!hasOrderPattern) {
     if (/(?:ផ្សារ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ភ្នំពេញ|ចោមចៅ|ទឹកថ្លា|បែកចាន|ទួលគោក|ដង្កោ|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|តាកែវ|កំពត|ព្រៃវែង|ស្វាយរៀង|វីរៈប៊ុនថាំ|j&t|flash|បសេដ្ឋ|បរសេដ្ឋ|ទន្លាប់)/i.test(s)) {
       return true;

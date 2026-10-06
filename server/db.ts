@@ -44,8 +44,6 @@ export async function saveDatabaseToDisk(forceSync = false) {
       customers,
       packerLogs,
       activeFacebookPage,
-      connectedFacebookPages,
-      facebookUserAccessToken,
       messengerSlips
     };
     const jsonStr = JSON.stringify(payload);
@@ -79,8 +77,6 @@ export async function saveDatabaseToDisk(forceSync = false) {
         customers,
         packerLogs,
         activeFacebookPage,
-        connectedFacebookPages,
-        fbUserAccessToken: facebookUserAccessToken,
         messengerSlips
       }).catch(err => console.error('[SQLite] Persist error:', err));
     }
@@ -468,7 +464,7 @@ export const packerLogs: PackerLog[] = [
   { log_id: 3, invoice_id: 94, packer_name: 'ធារ៉ា', items_count: 4, duration_seconds: 35, packed_at: '2026-09-12 20:10:00', facebook_name: 'ចន្ធូ កំពង់ចាម', total_amount: 36.00 }
 ];
 
-// In-Memory Facebook Connection State (Multi-Page Supported)
+// In-Memory Facebook Connection State
 export let activeFacebookPage: FacebookPage | null = {
   id: '102094263212256',
   name: 'Kari Arnett',
@@ -476,113 +472,8 @@ export let activeFacebookPage: FacebookPage | null = {
   category: "Women's Clothing Store & Live Sales"
 };
 
-export let facebookUserAccessToken: string = '';
-
-export function getFacebookUserAccessToken(): string {
-  return facebookUserAccessToken;
-}
-
-export function setFacebookUserAccessToken(token: string) {
-  facebookUserAccessToken = token || '';
-  bumpDataRevision();
-  saveDatabaseToDisk();
-}
-
-export let connectedFacebookPages: FacebookPage[] = [
-  activeFacebookPage!
-];
-
-export function getConnectedFacebookPages(): FacebookPage[] {
-  if (connectedFacebookPages.length === 0 && activeFacebookPage) {
-    connectedFacebookPages.push(activeFacebookPage);
-  }
-  return connectedFacebookPages;
-}
-
 export function setActiveFacebookPage(page: FacebookPage | null) {
   activeFacebookPage = page;
-  if (page) {
-    const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
-    if (existingIdx >= 0) {
-      connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
-    } else {
-      connectedFacebookPages.push(page);
-    }
-  }
-  bumpDataRevision();
-  saveDatabaseToDisk();
-}
-
-export function addOrUpdateConnectedPage(page: FacebookPage, makeActive = true) {
-  const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
-  if (existingIdx >= 0) {
-    connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
-  } else {
-    connectedFacebookPages.push(page);
-  }
-  if (makeActive || !activeFacebookPage) {
-    activeFacebookPage = page;
-  }
-  bumpDataRevision();
-  saveDatabaseToDisk();
-}
-
-export function batchAddConnectedPages(pages: FacebookPage[], selectFirstAsActive = true) {
-  if (!pages || pages.length === 0) return;
-  
-  // If only had the simulated placeholder page, replace it
-  if (connectedFacebookPages.length === 1 && connectedFacebookPages[0].id === '102094263212256') {
-    const hasDifferent = pages.some(p => p.id !== '102094263212256');
-    if (hasDifferent) {
-      connectedFacebookPages.length = 0;
-    }
-  }
-
-  for (const page of pages) {
-    const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
-    if (existingIdx >= 0) {
-      connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
-    } else {
-      connectedFacebookPages.push(page);
-    }
-  }
-  if (selectFirstAsActive && pages.length > 0) {
-    activeFacebookPage = pages[0];
-  }
-  bumpDataRevision();
-  saveDatabaseToDisk();
-}
-
-export function setConnectedFacebookPages(pages: FacebookPage[], selectFirstAsActive = true) {
-  if (!pages) return;
-  connectedFacebookPages.length = 0;
-  connectedFacebookPages.push(...pages);
-
-  if (selectFirstAsActive && pages.length > 0) {
-    const foundActive = activeFacebookPage ? pages.find(p => p.id === activeFacebookPage?.id) : null;
-    activeFacebookPage = foundActive || pages[0];
-  } else if (pages.length === 0) {
-    activeFacebookPage = null;
-  }
-  bumpDataRevision();
-  saveDatabaseToDisk();
-}
-
-export function clearAllConnectedPages() {
-  connectedFacebookPages.length = 0;
-  activeFacebookPage = null;
-  facebookUserAccessToken = '';
-  bumpDataRevision();
-  saveDatabaseToDisk();
-}
-
-export function removeConnectedPage(pageId: string) {
-  connectedFacebookPages = connectedFacebookPages.filter(p => p.id !== pageId);
-  if (activeFacebookPage?.id === pageId) {
-    activeFacebookPage = connectedFacebookPages[0] || null;
-  }
-  bumpDataRevision();
-  saveDatabaseToDisk();
 }
 
 // -------------------------------------------------------------
@@ -687,14 +578,6 @@ export async function loadDatabaseFromDisk() {
       if (sqliteData.activeFacebookPage) {
         activeFacebookPage = sqliteData.activeFacebookPage;
       }
-      if (sqliteData.fbUserAccessToken) {
-        facebookUserAccessToken = sqliteData.fbUserAccessToken;
-      }
-      if (sqliteData.connectedFacebookPages && Array.isArray(sqliteData.connectedFacebookPages) && sqliteData.connectedFacebookPages.length > 0) {
-        connectedFacebookPages.length = 0;
-        connectedFacebookPages.push(...sqliteData.connectedFacebookPages);
-        console.log(`[SQLite Loaded] Restored ${connectedFacebookPages.length} connected Facebook pages.`);
-      }
       if (sqliteData.rawComments && sqliteData.rawComments.length > 0) {
         rawComments.length = 0;
         rawComments.push(...sqliteData.rawComments);
@@ -718,27 +601,7 @@ export async function loadDatabaseFromDisk() {
       console.log(`[SQLite Loaded] Loaded ${invoices.length} invoices, ${products.length} products from pos.db`);
     }
 
-    // 2. Load connectedFacebookPages from db_store.json if present
-    if (fs.existsSync(DB_FILE_PATH)) {
-      try {
-        const raw = fs.readFileSync(DB_FILE_PATH, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed.facebookUserAccessToken && !facebookUserAccessToken) {
-          facebookUserAccessToken = parsed.facebookUserAccessToken;
-        }
-        if (parsed.connectedFacebookPages && Array.isArray(parsed.connectedFacebookPages) && parsed.connectedFacebookPages.length > 0) {
-          connectedFacebookPages.length = 0;
-          connectedFacebookPages.push(...parsed.connectedFacebookPages);
-        }
-        if (parsed.activeFacebookPage) {
-          activeFacebookPage = parsed.activeFacebookPage;
-        }
-      } catch (err) {
-        console.error('Error reading connectedFacebookPages from db_store.json:', err);
-      }
-    }
-
-    // 3. Load / supplement messengerSlips from db_store.json or backup file if empty
+    // 2. Load / supplement messengerSlips from db_store.json or backup file if empty
     const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
     if (messengerSlips.length === 0) {
       let candidateSlips: any[] = [];
@@ -936,7 +799,6 @@ export async function loadDatabaseFromDisk() {
     ]);
 
     const dummyQuantityCodes = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
-    const dummyWaistCodes = new Set(['24', '25', '26', '27', '28', '29', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46']);
 
     const initialProductCount = products.length;
     const purgedProductCodes = new Set<string>();
@@ -950,10 +812,6 @@ export async function loadDatabaseFromDisk() {
         return false;
       }
       if (dummyQuantityCodes.has(cleanCode) && isAutoDummy && p.price === 0) {
-        purgedProductCodes.add(cleanCode);
-        return false;
-      }
-      if (dummyWaistCodes.has(cleanCode) && isAutoDummy && p.price === 0) {
         purgedProductCodes.add(cleanCode);
         return false;
       }
@@ -1100,7 +958,7 @@ export async function loadDatabaseFromDisk() {
           inv.items = inv.items.filter(it => {
             const cleanC = (it.product_code || '').toUpperCase().trim();
             const isWaistNum = parseInt(cleanC, 10);
-            if ((!isNaN(isWaistNum) && isWaistNum >= 24 && isWaistNum <= 46) || dummyWaistCodes.has(cleanC)) {
+            if (!isNaN(isWaistNum) && isWaistNum >= 24 && isWaistNum <= 46) {
               const waistInCommentPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក|[-_\\/\\\\])\\s*${cleanC}\\b`, 'i');
               const waistListPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក)\\s*[:=\\s\\-]?\\s*(?:(?:2[4-9]|3[0-9]|4[0-6])(?:\\s*[\\/+,.,និង\\-_]\\s*|\\s+))*${cleanC}\\b`, 'i');
               if (waistInCommentPattern.test(allCommentsText) || waistListPattern.test(allCommentsText)) {

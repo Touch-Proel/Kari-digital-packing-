@@ -503,6 +503,11 @@ export function NoBasketUsersModal({
                               <span>📍</span> {user.detected_location}
                             </span>
                           )}
+                          {user.suggested_codes && user.suggested_codes.length > 0 && (
+                            <span className="text-amber-300 font-mono font-bold flex items-center gap-1 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800/40">
+                              <span>🏷️</span> កូដ: {user.suggested_codes.join(', ')}
+                            </span>
+                          )}
                           <span className="text-[11px] text-slate-500 font-mono">
                             {user.comment_count} ខំមិន • {formatTime(user.last_comment_time)}
                           </span>

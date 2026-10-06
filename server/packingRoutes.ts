@@ -23,7 +23,7 @@ import {
   syncAllActiveInvoicesWithStock
 } from './db';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
-import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES } from './parser';
+import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment } from './parser';
 import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper';
 import { Invoice, Product, OrderItem } from './types';
 import { sendFacebookReply, fetchFacebookComments } from './fbAuth';
@@ -3135,21 +3135,34 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
           hasQuestion = true;
         }
 
-        // Check code pattern
-        const codeMatches = txt.match(codeRegex);
-        if (codeMatches && codeMatches.length > 0) {
+        // Check code pattern via full comment parser
+        const parsedItems = extractCodeQtyPairsFromComment(txt, products);
+        if (parsedItems && parsedItems.length > 0) {
           hasCodeAttempt = true;
-          for (const m of codeMatches) {
-            potentialCodes.add(m.trim());
-            const cleanCode = m.replace(/[^\w\u1780-\u17D2]/g, '').toUpperCase();
+          for (const itm of parsedItems) {
+            potentialCodes.add(itm.code);
+            const cleanCode = itm.code.toUpperCase().trim();
             const prod = products.find(p => p.code.toUpperCase() === cleanCode);
             if (prod && prod.stock_qty <= 0) {
               isOutOfStock = true;
             }
           }
+        } else {
+          const codeMatches = txt.match(codeRegex);
+          if (codeMatches && codeMatches.length > 0) {
+            hasCodeAttempt = true;
+            for (const m of codeMatches) {
+              potentialCodes.add(m.trim());
+              const cleanCode = m.replace(/[^\w\u1780-\u17D2]/g, '').toUpperCase();
+              const prod = products.find(p => p.code.toUpperCase() === cleanCode);
+              if (prod && prod.stock_qty <= 0) {
+                isOutOfStock = true;
+              }
+            }
+          }
         }
 
-        if (isPureContactOrInquiryComment(txt) && pMatch && !codeMatches) {
+        if (isPureContactOrInquiryComment(txt) && pMatch && !hasCodeAttempt) {
           hasPhoneOnly = true;
         }
       }
@@ -3170,6 +3183,11 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
         reasonLabel = '❌ ដាច់ស្តុក (Out of Stock)';
         reasonColor = 'rose';
         categories.out_of_stock_count++;
+      } else if (hasCodeAttempt && detectedPhone && detectedLocation) {
+        primaryReason = 'UNMATCHED_CODE';
+        reasonLabel = '⚡ មានលេខ ទីតាំង & កូដ (រួចរាល់បង្កើតកន្ត្រក)';
+        reasonColor = 'emerald';
+        categories.unmatched_codes_count++;
       } else if (hasCodeAttempt) {
         primaryReason = 'UNMATCHED_CODE';
         reasonLabel = '❓ កូដមិនត្រូវស្តុក (Unmatched Code)';
