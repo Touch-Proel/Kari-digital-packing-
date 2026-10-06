@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision } from './db';
+import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db';
 import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, ExtractedSlipData } from './fastCheckRoutes';
 import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode, addMediaToBuffer, recentTelegramMediaBuffer } from './telegramSync';
 import { broadcastSSE } from './packingRoutes';
@@ -197,311 +197,85 @@ async function handleIncomingStockItemPhoto(
 }
 
 /**
- * Handle incoming Telegram photo (Slip OCR & Auto-Tick Paid - OPTION 1)
+ * Handle incoming Product Photo without Caption
+ * (All photos in Telegram group are product stock photos, NOT slips!)
+ * 1. Buffers photo silently
+ * 2. If recent text messages had item codes without images, links this photo to them
+ * 3. Does NOT send ANY message to Telegram (100% silent, keeps group chat clean)
  */
-async function handleIncomingSlipPhoto(token: string, chatId: number | string, messageId: number, photoArray: any[], caption?: string) {
-  // 1. Send initial feedback
-  await sendTelegramMessage(token, chatId, '🔍 <i>កំពុងប្រើ Gemini AI ស្កេនរូបភាព Slip... សូមរង់ចាំបន្តិច...</i>', messageId);
+async function handleIncomingPhotoWithoutCaption(
+  token: string,
+  chatId: number | string,
+  messageId: number,
+  photoArray: any[],
+  messageDate?: number | string
+) {
+  if (!Array.isArray(photoArray) || photoArray.length === 0) return;
 
-  // 2. Pick highest resolution photo
-  const bestPhoto = photoArray[photoArray.length - 1];
-  if (!bestPhoto?.file_id) {
-    await sendTelegramMessage(token, chatId, '❌ មិនអាចទាញយករូបភាពបានទេ', messageId);
-    return;
-  }
-
-  const downloaded = await downloadTelegramPhotoBuffer(token, bestPhoto.file_id);
-  if (!downloaded) {
-    await sendTelegramMessage(token, chatId, '❌ មិនអាចទាញយករូបភាពពី Telegram Server បានទេ', messageId);
-    return;
-  }
-
-  const slipUrl = `/uploads/${downloaded.fileName}`;
-  const base64Data = downloaded.buffer.toString('base64');
-  const ai = getGemini();
-
-  if (!ai) {
-    await sendTelegramMessage(
-      token,
-      chatId,
-      `⚠️ <b>មិនទាន់កំណត់ GEMINI_API_KEY ទេ!</b>\nសូមកំណត់ Key ក្នុង Settings លើ Web OS ឬក្នុង .env ដើម្បីឱ្យ AI ស្កេនរូបភាពបាន។`,
-      messageId
-    );
-    return;
-  }
-
-  // 3. Call Gemini OCR
-  const imagePart = {
-    inlineData: {
-      mimeType: downloaded.mimeType,
-      data: base64Data
+  // Pick best resolution photo (medium-large for HD product view)
+  let chosenPhoto = photoArray[photoArray.length - 1];
+  for (let pIdx = photoArray.length - 1; pIdx >= 0; pIdx--) {
+    const p = photoArray[pIdx];
+    if ((p.width >= 400 || p.height >= 400) && (p.width <= 1400 || p.height <= 1400)) {
+      chosenPhoto = p;
+      break;
     }
-  };
-
-  const textPart = {
-    text: `You are an expert at analyzing two types of images for Cambodian online shops:
-Type A: Delivery parcels / waybills (e.g. orange plastic parcel bags, Virak Buntham VET Express stickers, J&T, handwritten customer names, phone numbers like 015673303, and destination towns/provinces).
-Type B: Bank transfer payment receipts/slips (ABA Bank, ACLEDA, Canadia, TrueMoney, KHQR, Bakong) or Messenger chat payment screenshots.
-
-Analyze this image carefully:
-1. Determine "image_type": "DELIVERY_WAYBILL" if it is a parcel bag/waybill/VET sticker with recipient name/phone/tracking, OR "BANK_SLIP" if it is a money transfer slip.
-2. If DELIVERY_WAYBILL:
-   - "customer_name": Recipient's name written on parcel/sticker (e.g. "យ៉ាត នីតា", "Ru Ny", "ហួង មួយសៀប", "ជា ធីតា", "សារ៉េត", "ណាង").
-   - "phone_number": Recipient's phone number (e.g. "015673303", "093214087", "098668851", "0978601915").
-   - "destination": Destination address/province (e.g. "អង់តង់ស្លាប់ កំពង់ស្ពឺ", "លំដាប់បែកចាន ត្រពាំងក្រសាំង", "ផ្សារព្រៃទទឹង").
-   - "carrier_name": Delivery company (e.g. "វីរៈប៊ុនថាំ (VET Express)", "J&T Express", "Capitol", etc.).
-   - "tracking_code": Waybill barcode/QR tracking code (e.g. "pneat-angtonlob260900014/1", "230-01", or alphanumeric code on sticker).
-3. If BANK_SLIP:
-   - "customer_name": Facebook Name / sender name on slip.
-   - "paid_amount": Transferred numeric amount (e.g. 10.00).
-   - "currency": "USD" or "KHR".
-   - "phone_number": Phone number if in chat text.
-   - "bank_name": "ABA", "ACLEDA", "Wing", etc.
-   - "trans_ref": Transaction reference ID.
-   - "basket_no": order or basket number if mentioned in transfer remarks / memo (e.g. 102 or null).
-   - "remarks": transfer note / remarks text.
-
-Return ONLY pure valid JSON:
-{
-  "image_type": "DELIVERY_WAYBILL" | "BANK_SLIP" | "OTHER",
-  "customer_name": "...",
-  "phone_number": "...",
-  "destination": "...",
-  "carrier_name": "...",
-  "tracking_code": "...",
-  "paid_amount": 0,
-  "currency": "USD",
-  "bank_name": "...",
-  "trans_ref": "...",
-  "basket_no": null or number,
-  "remarks": "..."
-}`
-  };
-
-  const { text: rawText, error: extractionError } = await callGeminiSlipExtraction(ai, imagePart, textPart);
-
-  if (extractionError || !rawText) {
-    await sendTelegramMessage(
-      token,
-      chatId,
-      `⚠️ <b>ស្កេនរូបភាពមិនបានជោគជ័យ</b>\n${extractionError || 'AI មិនអាចអានអក្សរលើរូបភាពបានទេ'}`,
-      messageId
-    );
-    return;
   }
 
-  let parsed: any = {};
-  try {
-    const cleaned = rawText.replace(/```json/gi, '').replace(/```/gi, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch (err) {
-    console.error('Error parsing Gemini OCR JSON:', rawText);
-  }
+  if (!chosenPhoto?.file_id) return;
 
-  // =========================================================================
-  // 🚚 CASE A: DELIVERY WAYBILL / PARCEL PHOTO (បុងឡាន / VET Express)
-  // =========================================================================
-  if (parsed.image_type === 'DELIVERY_WAYBILL' || (parsed.carrier_name && parsed.phone_number) || parsed.tracking_code) {
-    const cleanPhone = (parsed.phone_number || '').replace(/\D/g, '');
-    const cleanName = (parsed.customer_name || '').trim().toLowerCase();
+  // Check if any recent items in cachedTelegramItems (added within last 30 mins) have no image
+  const targetItem = cachedTelegramItems.find(c => {
+    if (c.image_url) return false;
+    if (chatId && c.chat_id && String(c.chat_id) !== String(chatId)) return false;
+    return true;
+  });
 
-    // Match invoice by phone number first, then by customer name
-    const activeInvoices = invoices.filter(i => i.status !== 'Cancelled');
-    let matchedInv: Invoice | undefined;
+  if (targetItem) {
+    const photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, targetItem.code, messageDate, true);
+    if (photoUrl) {
+      targetItem.image_url = photoUrl;
 
-    if (cleanPhone && cleanPhone.length >= 8) {
-      matchedInv = activeInvoices.find(i => {
-        const invPhone = (i.phone_number || '').replace(/\D/g, '');
-        return invPhone && (invPhone.includes(cleanPhone) || cleanPhone.includes(invPhone));
-      });
-    }
-
-    if (!matchedInv && cleanName && cleanName.length >= 2) {
-      matchedInv = activeInvoices.find(i => {
-        const iName = (i.facebook_name || '').toLowerCase();
-        return iName.includes(cleanName) || cleanName.includes(iName);
-      });
-    }
-
-    if (matchedInv) {
-      matchedInv.status = 'Dispatched';
-      matchedInv.packing_stage = 'DISPATCHED';
-      matchedInv.waybill_image_url = slipUrl;
-      matchedInv.tracking_code = parsed.tracking_code || `VET-${Date.now().toString().slice(-6)}`;
-      matchedInv.delivery_carrier = parsed.carrier_name || 'វីរៈប៊ុនថាំ (VET Express)';
-      matchedInv.dispatched_at = new Date().toISOString();
-
-      if ((!matchedInv.phone_number || matchedInv.phone_number === 'គ្មានលេខ') && parsed.phone_number) {
-        matchedInv.phone_number = parsed.phone_number;
-      }
-      if ((!matchedInv.address || matchedInv.address.includes('មិនទាន់មាន')) && parsed.destination) {
-        matchedInv.address = parsed.destination;
+      // Update in products database
+      const existingProduct = products.find(p => p.code.toUpperCase() === targetItem.code.toUpperCase());
+      if (existingProduct) {
+        existingProduct.image_file = photoUrl;
+        syncAllActiveInvoicesWithStock();
+        saveDatabaseToDisk();
       }
 
-      saveDatabaseToDisk();
+      broadcastSSE('stock_updated', { live_id: activeLiveId, codes: [targetItem.code] });
       bumpDataRevision();
-
-      const basketNo = matchedInv.basket_no || matchedInv.invoice_id;
-      const waybillReply = `🚚 <b>បានកត់ត្រាបុងឡាន &amp; Dispatched ជោគជ័យ!</b> 🎉
-━━━━━━━━━━━━━━━━━━
-🛒 <b>កន្ត្រក:</b> #${basketNo} (<code>${matchedInv.facebook_name}</code>)
-👤 <b>អ្នកទទួល:</b> ${parsed.customer_name || matchedInv.facebook_name} (📞 <code>${parsed.phone_number || matchedInv.phone_number}</code>)
-🚚 <b>ក្រុមហ៊ុនដឹក:</b> ${matchedInv.delivery_carrier}
-🔖 <b>លេខកូដតាមដាន (Tracking):</b> <code>${matchedInv.tracking_code}</code>
-📍 <b>ទិសដៅដឹក:</b> ${parsed.destination || matchedInv.address || 'តាមខេត្ត'}
-💵 <b>សរុបវិក្កយបត្រ:</b> $${matchedInv.total_amount.toFixed(2)}
-📸 <b>រូបភាពបុង:</b> បានរក្សាទុកក្នុងប្រព័ន្ធរួចរាល់`;
-
-      await sendTelegramMessage(token, chatId, waybillReply, messageId);
-      return;
-    }
-
-    // If waybill was recognized but not matched to an active invoice
-    const unmatchMsg = `⚠️ <b>AI បានស្កេនបុងឡានកញ្ចប់អីវ៉ាន់ ៖</b>
-👤 <b>ឈ្មោះលើកញ្ចប់:</b> <code>${parsed.customer_name || 'មិនច្បាស់'}</code>
-📞 <b>លេខទូរស័ព្ទ:</b> <code>${parsed.phone_number || 'មិនមាន'}</code>
-🚚 <b>ក្រុមហ៊ុនដឹក:</b> ${parsed.carrier_name || 'វីរៈប៊ុនថាំ (VET Express)'}
-🔖 <b>Tracking:</b> <code>${parsed.tracking_code || 'ស្វ័យប្រវត្តិ'}</code>
-📍 <b>ទិសដៅ:</b> ${parsed.destination || 'តាមខេត្ត'}
-❌ <i>រកមិនឃើញកន្ត្រកដែលមានលេខទូរស័ព្ទ ឬឈ្មោះនេះក្នុងប្រព័ន្ធឡើយ!</i>
-💡 <i>លោកអ្នកអាចវាយ <code>/dispatch &lt;លេខកន្ត្រក&gt;</code> ដើម្បីកត់ត្រាចេញដឹកដោយផ្ទាល់ដៃបាន។</i>`;
-
-    await sendTelegramMessage(token, chatId, unmatchMsg, messageId);
-    return;
-  }
-
-  // =========================================================================
-  // 💳 CASE B: BANK TRANSFER SLIP (ABA / ACLEDA / KHQR)
-  // =========================================================================
-  let detectedBasketNo: string | undefined = parsed.basket_no ? String(parsed.basket_no).replace(/\D/g, '') : undefined;
-  if (!detectedBasketNo && caption) {
-    const matchB = caption.match(/(?:#|កន្ត្រក\s*|basket\s*|order\s*)(\d+)/i) || caption.match(/\b(\d{2,5})\b/);
-    if (matchB) {
-      detectedBasketNo = matchB[1];
+      console.log(`[Telegram Stock Sync] Silently attached incoming photo to recent item ${targetItem.code}`);
     }
   }
-
-  const extracted: ExtractedSlipData = {
-    customer_name: String(parsed.customer_name || '').trim(),
-    paid_amount: Number(parsed.paid_amount) || 0,
-    currency: String(parsed.currency || 'USD').toUpperCase() === 'KHR' ? 'KHR' : 'USD',
-    phone_number: parsed.phone_number ? String(parsed.phone_number).trim() : undefined,
-    bank_name: parsed.bank_name ? String(parsed.bank_name).trim() : undefined,
-    trans_ref: parsed.trans_ref ? String(parsed.trans_ref).trim() : undefined,
-    basket_no: detectedBasketNo,
-    remarks: parsed.remarks
-  };
-
-  const amountDisplay = extracted.currency === 'KHR'
-    ? `${extracted.paid_amount.toLocaleString()} ៛`
-    : `$${extracted.paid_amount.toFixed(2)}`;
-
-  // 4. Match against active invoices (prioritizing newest unpaid basket)
-  const matchResult = matchInvoiceForSlip(extracted, extracted.customer_name);
-
-  if (matchResult.status === 'MATCHED' && matchResult.matched) {
-    const inv = matchResult.matched;
-
-    // Apply Paid Status
-    inv.status = 'Paid';
-    inv.payment_status = 'Paid';
-    inv.payment_slip_url = slipUrl;
-    inv.paid_by = 'KARI AI Bot (Telegram)';
-    inv.paid_at = new Date().toISOString();
-    if (inv.packing_stage === 'UNPICKED') {
-      inv.packing_stage = 'STAGED';
-      inv.staged_by = 'KARI AI Bot';
-      inv.staged_at = new Date().toISOString();
-    }
-
-    if (!inv.phone_number && extracted.phone_number) {
-      inv.phone_number = extracted.phone_number;
-    }
-
-    saveDatabaseToDisk();
-    bumpDataRevision();
-    broadcastSSE('order_updated', { invoice: inv });
-
-    const basketNo = inv.basket_no || inv.invoice_id;
-    const itemsSummary = inv.items.map(it => `  • ${it.product_name || it.product_code} x${it.quantity} = $${(it.price * it.quantity).toFixed(2)}`).join('\n');
-
-    const locationDisp = inv.address || (inv.location_zone === 'PROVINCE' ? 'ផ្ញើតាមខេត្ត' : 'ភ្នំពេញ');
-
-    const replyMsg = `✅ <b>ផ្ទៀងផ្ទាត់ &amp; Tick [បង់រួច] ជោគជ័យ!</b> 🎉
-━━━━━━━━━━━━━━━━━━
-🛒 <b>កន្ត្រក:</b> #${basketNo} (<code>${inv.facebook_name || 'អតិថិជន'}</code>)
-💵 <b>សរុបវិក្កយបត្រ:</b> <b>$${inv.total_amount.toFixed(2)}</b>
-💳 <b>ព័ត៌មាន Slip:</b> ${amountDisplay} (${extracted.bank_name || 'Bank Transfer'})
-${extracted.trans_ref ? `🆔 <b>លេខប្រតិបត្តិការ (TxID):</b> <code>${extracted.trans_ref}</code>\n` : ''}📦 <b>ទំនិញ (${inv.items.length} មុខ):</b>
-${itemsSummary || '  (ទំនិញទទេ)'}
-📍 <b>ទីតាំង:</b> ${locationDisp}
-📞 <b>លេខទូរស័ព្ទ:</b> ${inv.phone_number || 'មិនទាន់មាន'}
-🎥 <b>វគ្គ Live:</b> #${(inv.live_id || '').replace('LIVE_', '')}`;
-
-    await sendTelegramMessage(token, chatId, replyMsg, messageId);
-    return;
-  }
-
-  if (matchResult.status === 'MULTIPLE_CANDIDATES' && matchResult.candidates && matchResult.candidates.length > 0) {
-    const candidateList = matchResult.candidates
-      .slice(0, 4)
-      .map((c, i) => `${i + 1}. <b>#${c.basket_no || c.invoice_id}</b> - ${c.facebook_name} ($${c.total_amount.toFixed(2)})`)
-      .join('\n');
-
-    const replyMsg = `⚠️ <b>AI បានស្កេន Slip រួចរាល់:</b>
-👤 <b>ឈ្មោះលើ Slip:</b> <code>${extracted.customer_name || 'មិនច្បាស់'}</code>
-💵 <b>ចំនួនទឹកប្រាក់:</b> <b>${amountDisplay}</b> (${extracted.bank_name || 'Bank'})
-${extracted.trans_ref ? `🆔 <b>TxID:</b> <code>${extracted.trans_ref}</code>\n` : ''}
-🔍 <b>រកឃើញកន្ត្រកដែលអាចត្រូវគ្នា (${matchResult.candidates.length}):</b>
-${candidateList}
-
-💡 <i>សូមវាយ <code>/paid &lt;លេខកន្ត្រក&gt;</code> (ឧ. <code>/paid ${matchResult.candidates[0].basket_no || matchResult.candidates[0].invoice_id}</code>) ដើម្បី Tick បង់រួច!</i>`;
-
-    await sendTelegramMessage(token, chatId, replyMsg, messageId);
-    return;
-  }
-
-  // If the image is not a bank slip and has 0 amount and no customer name
-  if (extracted.paid_amount <= 0 && !extracted.customer_name) {
-    const nonSlipMsg = `💡 <b>ព័ត៌មានជំនួយ ៖</b>
-រូបភាពនេះមិនមានទិន្នន័យវិក្កយបត្របង់ប្រាក់ ឬបុងឡានដឹកជញ្ជូនឡើយ។
-
-• ប្រសិនបើជា<b>រូបទំនិញលក់</b> ៖ សូមសរសេរ Caption ខាងក្រោមរូប ឧទាហរណ៍ <code>A12 5$</code> ឬ <code>កូដ A01 តម្លៃ 10$</code> ដើម្បីឱ្យ Bot ដាក់បញ្ចូលស្តុក POS ដោយស្វ័យប្រវត្តិ!
-• ប្រសិនបើជា<b>វិក្កយបត្រផ្ទេរប្រាក់ ឬបុងឡាន</b> ៖ សូមផ្ញើរូបភាព ឬ Screenshot ឱ្យបានច្បាស់។`;
-    await sendTelegramMessage(token, chatId, nonSlipMsg, messageId);
-    return;
-  }
-
-  // Not found
-  const replyMsg = `⚠️ <b>AI បានស្កេនរូបភាព Slip:</b>
-👤 <b>ឈ្មោះលើ Slip:</b> <code>${extracted.customer_name || 'មិនច្បាស់'}</code>
-💵 <b>ចំនួនទឹកប្រាក់:</b> <b>${amountDisplay}</b> (${extracted.bank_name || 'Bank'})
-${extracted.trans_ref ? `🆔 <b>TxID:</b> <code>${extracted.trans_ref}</code>\n` : ''}
-❌ <b>រកមិនឃើញកន្ត្រកដែលត្រូវគ្នា ឬកន្ត្រកបានបង់រួចហើយ!</b>
-💡 <i>ប្រសិនបើលោកអ្នកស្គាល់លេខកន្ត្រក សូមវាយ: <code>/paid &lt;លេខកន្ត្រក&gt;</code></i>`;
-
-  await sendTelegramMessage(token, chatId, replyMsg, messageId);
 }
 
 /**
- * Handle incoming Text Commands (OPTION 3: Chat Assistant)
+ * Handle incoming Telegram photo (Slip OCR - DISABLED for Group Chats to prevent messy chat spam)
  */
+async function handleIncomingSlipPhoto(token: string, chatId: number | string, messageId: number, photoArray: any[], caption?: string) {
+  // Silent return: All photos from the Telegram group are for product stock (Code, Photo, Price), NOT slips!
+  // Do NOT scan slips from Telegram and do NOT send messages to the group.
+  console.log('[Telegram Bot] Photo received without stock caption. Buffered silently; slip scan skipped.');
+  return;
+}
+
+
 async function handleIncomingTextCommand(token: string, chatId: number | string, messageId: number, text: string) {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
 
   // 1. /start or /help
   if (lower === '/start' || lower === '/help' || lower === 'help' || lower === 'ជំនួយ') {
-    const helpMsg = `🤖 <b>សួស្តី! ខ្ញុំជាជំនួយការ Telegram POS &amp; Live Assistant</b>
+    const helpMsg = `🤖 <b>សួស្តី! ខ្ញុំជាជំនួយការ Telegram Stock &amp; Live POS</b>
 ━━━━━━━━━━━━━━━━━━
-✨ <b>មុខងារពិសេសដែលអាចប្រើបាន ៖</b>
+✨ <b>មុខងារទាញស្តុកទំនិញស្វ័យប្រវត្តិ (Stock Auto-Sync) ៖</b>
+👉 <b>ផ្ញើរូបភាពទំនិញ ជាមួយកូដ និងតម្លៃ</b> (ឧ. <code>A01 5$</code> ឬ <code>B02 12$</code>) ប្រព័ន្ធនឹងបញ្ចូលទំនិញ រូបភាព និងតម្លៃទៅក្នុងស្តុក POS ភ្លាមៗដោយស្វ័យប្រវត្តិ!
 
-📸 <b>១. ស្កេន Slip បង់ប្រាក់ Auto (AI Free):</b>
-👉 គ្រាន់តែ <b>ផ្ញើរូបភាព ឬ Forward រូបភាព Screenshot វិក្កយបត្រ (ABA / ACLEDA / KHQR)</b> ចូលក្នុង Chat ឬ Group នេះ AI នឹងស្កេន និង Tick [បង់រួច] ស្វ័យប្រវត្តិតែម្តង!
-
-💬 <b>២. បញ្ជាពិនិត្យ និងគ្រប់គ្រងតាម Chat:</b>
-• <code>/check &lt;លេខកន្ត្រក ឬ ឈ្មោះ&gt;</code> ៖ មើលព័ត៌មានកន្ត្រក និងមុខទំនិញ
-  <i>(ឧ. <code>/check 1511</code> ឬ <code>/check ស្រីគុជ</code>)</i>
+💬 <b>បញ្ជាពិនិត្យ និងគ្រប់គ្រងតាម Chat ៖</b>
+• <code>/stock &lt;កូដទំនិញ&gt;</code> ៖ ស្វែងរកស្តុក និងតម្លៃទំនិញ (ឧ. <code>/stock A01</code>)
+• <code>/check &lt;លេខកន្ត្រក ឬ ឈ្មោះ&gt;</code> ៖ មើលព័ត៌មានកន្ត្រក និងមុខទំនិញ (ឧ. <code>/check 1511</code>)
 
 • <code>/paid &lt;លេខកន្ត្រក&gt;</code> ៖ Tick បង់រួចលើកន្ត្រកភ្លាមៗ
   <i>(ឧ. <code>/paid 1511</code>)</i>
@@ -824,10 +598,12 @@ async function startPollingLoop() {
                 await handleIncomingStockItemPhoto(token, chatId, messageId, photoArray, rawCaption, stockItems, msg.date);
               });
             } else {
-              // If image has no caption, check if in a private chat or group with slip keywords
-              // Only trigger Gemini Slip OCR if likely a payment slip or waybill
+              // 2. PRODUCT PHOTO WITHOUT CAPTION
+              // User instruction: ALL photos in group are stock items (Code, Photo, Price), NOT slips!
+              // NEVER scan slips from Telegram and NEVER send messages to the group.
+              // Silently buffers photo and links to recent stock item if waiting.
               telegramQueue.add(async () => {
-                await handleIncomingSlipPhoto(token, chatId, messageId, photoArray, msg.caption);
+                await handleIncomingPhotoWithoutCaption(token, chatId, messageId, photoArray, msg.date);
               });
             }
             continue;
@@ -849,12 +625,19 @@ async function startPollingLoop() {
                 telegramQueue.add(async () => {
                   // Find any recent unattached photo from this chat in sliding window (within 60 minutes)
                   const matchedPhoto = recentTelegramMediaBuffer.find(
-                    b => (!chatId || b.chat_id === chatId) && Math.abs((msg.date || Date.now() / 1000) - b.date_sec) < 3600
+                    b => (!chatId || !b.chat_id || String(b.chat_id) === String(chatId)) &&
+                         (!b.matched_codes || b.matched_codes.length === 0) &&
+                         Math.abs((msg.date || Date.now() / 1000) - b.date_sec) < 3600
+                  ) || recentTelegramMediaBuffer.find(
+                    b => (!chatId || !b.chat_id || String(b.chat_id) === String(chatId)) &&
+                         Math.abs((msg.date || Date.now() / 1000) - b.date_sec) < 3600
                   );
 
                   let photoUrl: string | undefined = undefined;
                   if (matchedPhoto?.file_id) {
                     photoUrl = await downloadTelegramPhoto(token, matchedPhoto.file_id, stockItems[0].code, msg.date, true);
+                    matchedPhoto.matched_codes = matchedPhoto.matched_codes || [];
+                    matchedPhoto.matched_codes.push(stockItems[0].code);
                   }
 
                   bulkImportStockItems(
