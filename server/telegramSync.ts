@@ -284,7 +284,7 @@ function cleanProductCode(raw: string): string {
   if (!raw) return '';
   return raw
     .replace(/^#+/, '')
-    .replace(/^(?:កូដ|code|no\.?|លេខ)\s*/i, '')
+    .replace(/^(?:កូដ|code|no\.?|n°|num|លេខ)\s*/i, '')
     .replace(/\s+/g, '')
     .trim()
     .toUpperCase();
@@ -300,7 +300,22 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
   const items: Array<{ code: string; price: number; name?: string }> = [];
   const seenCodes = new Set<string>();
 
-  // 1. Initial sanitization: remove bot mentions, bot commands, hashtags
+  const addItem = (codeRaw: string, priceRaw: number | string, nameRaw?: string) => {
+    const code = cleanProductCode(codeRaw);
+    const price = typeof priceRaw === 'string' ? parseFloat(priceRaw) : priceRaw;
+    if (code && !isNaN(price) && price >= 0 && price < 100000 && code.length >= 1 && code.length <= 15) {
+      if (!['USD', 'KHR', 'BOT', 'TEL', 'PAGE', 'LIVE'].includes(code) && !seenCodes.has(code)) {
+        let cleanName = nameRaw?.trim();
+        if (cleanName) {
+          cleanName = cleanName.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ|ក្បាល|ឈុត|មុខ)\s*/i, '').trim();
+        }
+        items.push({ code, price, name: cleanName || undefined });
+        seenCodes.add(code);
+      }
+    }
+  };
+
+  // 1. Initial sanitization: remove bot mentions, bot commands
   let cleanText = rawText
     .replace(/^\/[a-zA-Z0-9_]+(@[a-zA-Z0-9_]+)?\s*/gim, '')
     .replace(/@[a-zA-Z0-9_]+\b/gi, ' ')
@@ -308,155 +323,94 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
 
   if (!cleanText) return [];
 
-  // =========================================================================
-  // PASS 1: Inline Multi-Item Matching (e.g. "A01=3.5, A02=4, A03=5.5" or "100=3.5 101=4" or "A01 3.5$ A02 4$")
-  // =========================================================================
-  // Regex to find repeated code-price pairs: (CODE) (= / - / : / space) ($?PRICE)
-  const inlinePairRegex = /(?:^|[\s,;|/•👉*]+)(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s|\s+)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ|៛)?(?:\s+([A-Za-z\u1780-\u17B3\s]{2,20}))?(?=[\s,;|/•👉*]+(?:កូដ\s*)?[A-Za-z0-9_\u1780-\u17B3]{1,15}\s*(?:=|-|:|\s)|\s*$)/gi;
-
-  let inlineMatch: RegExpExecArray | null;
-  const inlineFound: Array<{ code: string; price: number; name?: string }> = [];
-
-  while ((inlineMatch = inlinePairRegex.exec(cleanText)) !== null) {
-    const rawCode = inlineMatch[1];
-    const rawPrice = inlineMatch[2];
-    const rawName = inlineMatch[3]?.trim();
-
-    const code = cleanProductCode(rawCode);
-    const price = parseFloat(rawPrice);
-
-    if (code && !isNaN(price) && price >= 0 && price < 10000 && code.length >= 1 && code.length <= 15) {
-      // Avoid false positive where code is pure small english word like "AND", "OR", "USD"
-      if (!['USD', 'KHR', 'BOT', 'TEL', 'PAGE', 'LIVE'].includes(code)) {
-        inlineFound.push({ code, price, name: rawName || undefined });
-        seenCodes.add(code);
-      }
-    }
-  }
-
-  if (inlineFound.length > 1) {
-    return inlineFound;
-  }
-
-  // =========================================================================
-  // PASS 2: Line-by-Line & Multi-Line Block Parsing
-  // =========================================================================
+  // 2. Check for multi-line block (Line 0: Code, Line 1: Price)
   const rawLines = cleanText.split(/[\r\n;,|]+/);
   const normalizedLines: string[] = [];
 
   for (const l of rawLines) {
     let t = l.trim();
     if (!t) continue;
-    // Strip leading list numbers/bullets: "1. A01=3.5" or "- A01=3.5" or "• A01=3.5"
+    // Strip leading list numbers/bullets: "1. 27=1.25" or "- 27=1.25"
     t = t.replace(/^(?:\d+[\.\)\/]|[-•👉*~✓✔︎])\s*/i, '').trim();
-    // Strip hashtags
     t = t.replace(/^#+/, '').trim();
     if (t) normalizedLines.push(t);
   }
 
-  // Check for Multi-Line Key-Value Blocks (e.g. Line 0: "A01" or "កូដ A01", Line 1: "3.5$" or "តម្លៃ 3.5$", Line 2: "រ៉ូប")
-  if (normalizedLines.length >= 2 && items.length === 0) {
+  if (normalizedLines.length >= 2) {
     for (let i = 0; i < normalizedLines.length; i++) {
       const line = normalizedLines[i];
       const nextLine = normalizedLines[i + 1] || '';
       const nextNextLine = normalizedLines[i + 2] || '';
 
-      // Check if current line is pure Code
       const codeMatch = line.match(/^(?:កូដ\s*|code\s*:?\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})$/i);
-      // Check if next line is pure Price
       const priceMatch = nextLine.match(/^(?:តម្លៃ\s*|price\s*:?\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?$/i);
 
       if (codeMatch && priceMatch) {
-        const code = cleanProductCode(codeMatch[1]);
-        const price = parseFloat(priceMatch[1]);
         let name: string | undefined = undefined;
-
         if (nextNextLine && !nextNextLine.match(/^(?:កូដ|code|តម្លៃ|price|[0-9]+)/i)) {
           name = nextNextLine.trim();
-          i++; // Skip name line too
+          i++;
         }
-
-        if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
-          items.push({ code, price, name });
-          seenCodes.add(code);
-          i++; // Skip price line
-          continue;
-        }
+        addItem(codeMatch[1], priceMatch[1], name);
+        i++;
       }
     }
   }
 
-  // Standard Individual Line Pattern Matching
+  // 3. Process each line individually
   for (const line of normalizedLines) {
     if (!line) continue;
 
-    // Pattern A: Explicit Delimiter (A01=3.5, 100:4.5$, A01-3.5, A01/3.5, 100 x 3.5, 100->3.5)
-    const patA = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\/|~|->|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
-    const mA = line.match(patA);
-    if (mA) {
-      const code = cleanProductCode(mA[1]);
-      const price = parseFloat(mA[2]);
-      let name = mA[3]?.trim();
-      if (name) name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ|ក្បាល|ឈុត|មុខ)\s*/i, '').trim();
-      if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
-        items.push({ code, price, name: name || undefined });
-        seenCodes.add(code);
-        continue;
+    // Check if line has multiple items separated by spaces (e.g. "27=1.25 28=3.5" or "A01=5$ A02=6$")
+    const inlineTokens = line.match(/(?:(?:កូដ\s*)?[A-Za-z0-9_\u1780-\u17B3]{1,15}\s*(?:=|-|:|\/)\s*\$?[0-9]+(?:\.[0-9]+)?(?:\$|usd|USD|ដុល្លារ)?(?:\s*[A-Za-z\u1780-\u17B3]{2,20})?)/gi);
+    if (inlineTokens && inlineTokens.length > 1) {
+      for (const tok of inlineTokens) {
+        const m = tok.match(/^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\/)\s*\$?([0-9]+(?:\.[0-9]+)?)(?:\$|usd|USD|ដុល្លារ)?(?:\s*(.*))?$/i);
+        if (m) addItem(m[1], m[2], m[3]);
       }
+      continue;
     }
 
-    // Pattern B: Khmer explicit: កូដ <Code> [តម្លៃ] <Price>$ [name]
+    // Pattern A: Explicit delimiter (=, -, :, /, ~, ->, x)
+    // Supports 27=1.25, 28=3.5ដៃខ្លីជើងខ្លី, 29=4.5 រ៉ូប, A01: 5$, A01-3.5, no. 27=1.25
+    const patA = /^(?:កូដ\s*|code\s*:?\s*|no\.?\s*|លេខ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\/|~|->|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
+    const mA = line.match(patA);
+    if (mA) {
+      addItem(mA[1], mA[2], mA[3]);
+      continue;
+    }
+
+    // Pattern B: Khmer explicit (កូដ 28 តម្លៃ 3.5$ ដៃខ្លី)
     const patB = /^កូដ\s*([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:តម្លៃ|ថ្លៃ)?\s*\$?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
     const mB = line.match(patB);
     if (mB) {
-      const code = cleanProductCode(mB[1]);
-      const price = parseFloat(mB[2]);
-      let name = mB[3]?.trim();
-      if (name) name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
-      if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
-        items.push({ code, price, name: name || undefined });
-        seenCodes.add(code);
-        continue;
-      }
+      addItem(mB[1], mB[2], mB[3]);
+      continue;
     }
 
-    // Pattern C: Space with dollar sign: "100 3.7$" or "100 $3.7" or "A01 4$"
-    const patC = /^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+(?:\$\s*)?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?$/i;
+    // Pattern C: Space separated with dollar sign (28 3.5$ ដៃខ្លី or A01 $5)
+    const patC = /^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+(?:\$\s*)?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)\s*(.*)$/i;
     const mC = line.match(patC);
     if (mC) {
-      const code = cleanProductCode(mC[1]);
-      const price = parseFloat(mC[2]);
-      const name = mC[3]?.trim();
-      if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
-        items.push({ code, price, name });
-        seenCodes.add(code);
-        continue;
-      }
+      addItem(mC[1], mC[2], mC[3]);
+      continue;
     }
 
-    // Pattern D: Plain two numbers separated by space (e.g. "100 3.5")
-    const patD = /^([A-Za-z0-9]{1,10})\s+([0-9]+(?:\.[0-9]+)?)(?:\s+(.+))?$/;
+    // Pattern D: Plain two numbers separated by space (28 3.5 or 100 2.50)
+    const patD = /^([A-Za-z0-9]{1,10})\s+([0-9]+(?:\.[0-9]+)?)(?:\s+(.*))?$/;
     const mD = line.match(patD);
     if (mD) {
-      const code = cleanProductCode(mD[1]);
-      const price = parseFloat(mD[2]);
-      const name = mD[3]?.trim();
-      if (code && !isNaN(price) && price >= 0 && price < 2000 && !seenCodes.has(code)) {
-        items.push({ code, price, name });
-        seenCodes.add(code);
-        continue;
-      }
+      addItem(mD[1], mD[2], mD[3]);
+      continue;
     }
 
-    // Pattern E: Standalone Code without explicit price (e.g. "100", "A05", "កូដ 100")
-    // Only if nothing else matched and line length is short
+    // Pattern E: Standalone code (28 or A01)
     const patE = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,10})$/i;
     const mE = line.match(patE);
     if (mE) {
       const code = cleanProductCode(mE[1]);
-      if (code && !['OK', 'HI', 'YES', 'NO', 'LIVE', 'PAGE'].includes(code) && !seenCodes.has(code)) {
-        items.push({ code, price: 5.0, name: `កូដ ${code}` });
-        seenCodes.add(code);
+      if (code && !['OK', 'HI', 'YES', 'NO', 'LIVE', 'PAGE'].includes(code)) {
+        addItem(code, 5.0, `កូដ ${code}`);
         continue;
       }
     }
