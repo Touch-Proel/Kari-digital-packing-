@@ -476,6 +476,79 @@ export function setActiveFacebookPage(page: FacebookPage | null) {
   activeFacebookPage = page;
 }
 
+export let facebookUserAccessToken: string = '';
+
+export function getFacebookUserAccessToken(): string {
+  return facebookUserAccessToken;
+}
+
+export function setFacebookUserAccessToken(token: string) {
+  facebookUserAccessToken = token || '';
+}
+
+export const connectedFacebookPages: FacebookPage[] = [
+  {
+    id: '102094263212256',
+    name: 'Kari Arnett',
+    access_token: 'EAARoNf2KfC0BSVCb4u9Wb7PWQvXM3iVdJoPYn0hL9kBqDRri6RBnK9uxRGHug68YROZBkmP6KQ6jNopaa3fPE3qLOjmSf2wElTIuUeyikn4H5jATBaC13mvCfbYURxEuUPIGunirDa8P61RLFuyRIxYZAuCmGPVKItvOqHsJ4y4Y3i1I1Ri2FgwNGlYoF8y7UPvCMNH3RYZAZAjztLQZD',
+    category: "Women's Clothing Store & Live Sales"
+  }
+];
+
+export function getConnectedFacebookPages(): FacebookPage[] {
+  return connectedFacebookPages;
+}
+
+export function setConnectedFacebookPages(pages: FacebookPage[], setFirstAsActive = true) {
+  connectedFacebookPages.length = 0;
+  connectedFacebookPages.push(...pages);
+  if (setFirstAsActive && pages.length > 0 && !activeFacebookPage) {
+    activeFacebookPage = pages[0];
+  }
+}
+
+export function addOrUpdateConnectedPage(page: FacebookPage, setAsActive = false) {
+  const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
+  if (existingIdx >= 0) {
+    connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
+  } else {
+    connectedFacebookPages.push(page);
+  }
+  if (setAsActive || !activeFacebookPage) {
+    activeFacebookPage = page;
+  }
+}
+
+export function batchAddConnectedPages(pages: FacebookPage[], setFirstAsActive = true) {
+  for (const page of pages) {
+    const existingIdx = connectedFacebookPages.findIndex(p => p.id === page.id);
+    if (existingIdx >= 0) {
+      connectedFacebookPages[existingIdx] = { ...connectedFacebookPages[existingIdx], ...page };
+    } else {
+      connectedFacebookPages.push(page);
+    }
+  }
+  if (setFirstAsActive && pages.length > 0 && !activeFacebookPage) {
+    activeFacebookPage = pages[0];
+  }
+}
+
+export function removeConnectedPage(pageId: string) {
+  const idx = connectedFacebookPages.findIndex(p => p.id === pageId);
+  if (idx >= 0) {
+    connectedFacebookPages.splice(idx, 1);
+  }
+  if (activeFacebookPage?.id === pageId) {
+    activeFacebookPage = connectedFacebookPages[0] || null;
+  }
+}
+
+export function clearAllConnectedPages() {
+  connectedFacebookPages.length = 0;
+  activeFacebookPage = null;
+  facebookUserAccessToken = '';
+}
+
 // -------------------------------------------------------------
 // Helper Calculation for an Invoice
 // -------------------------------------------------------------
