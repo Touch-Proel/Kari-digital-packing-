@@ -88,38 +88,140 @@ export function StockSyncModal({
   const [importingPaste, setImportingPaste] = useState<boolean>(false);
   const [previewZoomImage, setPreviewZoomImage] = useState<{ url: string; code: string; name?: string; price?: number } | null>(null);
 
-  // Parse Text helper for Paste Tab
+  // Advanced multi-format parse helper for Paste Tab
   const parsedPasteItems = React.useMemo(() => {
     if (!pasteText.trim()) return [];
-    const lines = pasteText.split(/[\r\n;,]+/);
+
+    const cleanText = pasteText
+      .replace(/^\/[a-zA-Z0-9_]+(@[a-zA-Z0-9_]+)?\s*/gim, '')
+      .replace(/@[a-zA-Z0-9_]+\b/gi, ' ')
+      .trim();
+
+    if (!cleanText) return [];
+
+    const seen = new Set<string>();
     const result: Array<{ code: string; price: number; name?: string }> = [];
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      // Patterns: 32=3កន្សែង, 33=3.25, 100=3.7, 100:3.7, 100 3.7$, កូដ 100 តម្លៃ 3.7$
-      const m1 = trimmed.match(/^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i);
-      if (m1) {
-        const code = m1[1].trim().toUpperCase();
-        const price = parseFloat(m1[2]);
-        let name = m1[3]?.trim();
-        if (name) {
-          name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
-        }
-        if (code && !isNaN(price) && price > 0) {
-          result.push({ code, price, name: name || undefined });
-          continue;
-        }
+    // 1. Inline Pair Matching (e.g. "A01=3.5, A02=4, A03=5.5" or "100=3.5 101=4")
+    const inlinePairRegex = /(?:^|[\s,;|/•👉*]+)(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s|\s+)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ|៛)?(?:\s+([A-Za-z\u1780-\u17B3\s]{2,20}))?(?=[\s,;|/•👉*]+(?:កូដ\s*)?[A-Za-z0-9_\u1780-\u17B3]{1,15}\s*(?:=|-|:|\s)|\s*$)/gi;
+    let mInline: RegExpExecArray | null;
+    const inlineList: Array<{ code: string; price: number; name?: string }> = [];
+
+    while ((mInline = inlinePairRegex.exec(cleanText)) !== null) {
+      const code = mInline[1].replace(/^#+/, '').replace(/^(?:កូដ|code)\s*/i, '').trim().toUpperCase();
+      const price = parseFloat(mInline[2]);
+      const name = mInline[3]?.trim();
+      if (code && !isNaN(price) && price >= 0 && price < 10000 && !['USD', 'KHR'].includes(code)) {
+        inlineList.push({ code, price, name });
+        seen.add(code);
       }
-      const m2 = trimmed.match(/^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+\$?([0-9]+(?:\.[0-9]+)?)(?:\s+(.+))?$/);
-      if (m2) {
-        const code = m2[1].trim().toUpperCase();
-        const price = parseFloat(m2[2]);
-        if (code && !isNaN(price) && price > 0 && price < 2000) {
-          result.push({ code, price, name: m2[3]?.trim() });
+    }
+
+    if (inlineList.length > 1) {
+      return inlineList;
+    }
+
+    // 2. Line-by-Line & Multi-Line Blocks
+    const rawLines = cleanText.split(/[\r\n;,|]+/);
+    const normalizedLines: string[] = [];
+    for (const l of rawLines) {
+      let t = l.trim().replace(/^(?:\d+[\.\)\/]|[-•👉*~✓✔︎])\s*/i, '').replace(/^#+/, '').trim();
+      if (t) normalizedLines.push(t);
+    }
+
+    // Multi-line block detection (Line 1: Code, Line 2: Price)
+    if (normalizedLines.length >= 2 && result.length === 0) {
+      for (let i = 0; i < normalizedLines.length; i++) {
+        const line = normalizedLines[i];
+        const nextLine = normalizedLines[i + 1] || '';
+        const nextNextLine = normalizedLines[i + 2] || '';
+
+        const codeMatch = line.match(/^(?:កូដ\s*|code\s*:?\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})$/i);
+        const priceMatch = nextLine.match(/^(?:តម្លៃ\s*|price\s*:?\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?$/i);
+
+        if (codeMatch && priceMatch) {
+          const code = codeMatch[1].trim().toUpperCase();
+          const price = parseFloat(priceMatch[1]);
+          let name: string | undefined = undefined;
+
+          if (nextNextLine && !nextNextLine.match(/^(?:កូដ|code|តម្លៃ|price|[0-9]+)/i)) {
+            name = nextNextLine.trim();
+            i++;
+          }
+
+          if (code && !isNaN(price) && price >= 0 && !seen.has(code)) {
+            result.push({ code, price, name });
+            seen.add(code);
+            i++;
+            continue;
+          }
         }
       }
     }
+
+    // Standard pattern lines
+    for (const line of normalizedLines) {
+      if (!line) continue;
+
+      // Delimited: A01=3.5, 100:4, A01-3.5, A01/3.5, 100~3.5
+      const patA = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\/|~|->|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
+      const mA = line.match(patA);
+      if (mA) {
+        const code = mA[1].trim().toUpperCase();
+        const price = parseFloat(mA[2]);
+        let name = mA[3]?.trim();
+        if (name) name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+        if (code && !isNaN(price) && price >= 0 && !seen.has(code)) {
+          result.push({ code, price, name: name || undefined });
+          seen.add(code);
+          continue;
+        }
+      }
+
+      // Explicit Khmer: កូដ 105 តម្លៃ 3.5$
+      const patB = /^កូដ\s*([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:តម្លៃ|ថ្លៃ)?\s*\$?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
+      const mB = line.match(patB);
+      if (mB) {
+        const code = mB[1].trim().toUpperCase();
+        const price = parseFloat(mB[2]);
+        let name = mB[3]?.trim();
+        if (name) name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+        if (code && !isNaN(price) && price >= 0 && !seen.has(code)) {
+          result.push({ code, price, name: name || undefined });
+          seen.add(code);
+          continue;
+        }
+      }
+
+      // Space dollar: 100 3.7$ or A01 4$
+      const patC = /^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+(?:\$\s*)?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?$/i;
+      const mC = line.match(patC);
+      if (mC) {
+        const code = mC[1].trim().toUpperCase();
+        const price = parseFloat(mC[2]);
+        const name = mC[3]?.trim();
+        if (code && !isNaN(price) && price >= 0 && !seen.has(code)) {
+          result.push({ code, price, name });
+          seen.add(code);
+          continue;
+        }
+      }
+
+      // Plain space numbers: 100 3.5
+      const patD = /^([A-Za-z0-9]{1,10})\s+([0-9]+(?:\.[0-9]+)?)(?:\s+(.+))?$/;
+      const mD = line.match(patD);
+      if (mD) {
+        const code = mD[1].trim().toUpperCase();
+        const price = parseFloat(mD[2]);
+        const name = mD[3]?.trim();
+        if (code && !isNaN(price) && price >= 0 && price < 2000 && !seen.has(code)) {
+          result.push({ code, price, name });
+          seen.add(code);
+          continue;
+        }
+      }
+    }
+
     return result;
   }, [pasteText]);
 
@@ -1006,29 +1108,57 @@ export function StockSyncModal({
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-1">
                               <span className="font-mono font-black text-cyan-300 text-xs">[{item.code}]</span>
-                              {isExisting ? (
-                                <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                  🔄 កែប្រែ
-                                </span>
-                              ) : (
-                                <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                  🆕 ថ្មី
-                                </span>
-                              )}
+                              <div className="flex items-center gap-1">
+                                {isExisting ? (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                    🔄 កែប្រែ
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                    🆕 ថ្មី
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setTgItems(prev => prev.filter((_, i) => i !== idx));
+                                  }}
+                                  className="w-4 h-4 rounded text-[10px] bg-slate-800 hover:bg-rose-900 text-slate-400 hover:text-rose-200 flex items-center justify-center cursor-pointer transition-colors"
+                                  title="ដកចេញពី Preview (Remove)"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
 
-                            {/* Price */}
+                            {/* Price (Click to edit) */}
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              {isPriceChanged ? (
-                                <div className="flex items-center gap-1 font-mono text-xs">
-                                  <span className="line-through text-slate-500 text-[10.5px]">${existingProd.price.toFixed(2)}</span>
-                                  <span className="text-emerald-400 font-black">${item.price.toFixed(2)}</span>
-                                </div>
-                              ) : (
-                                <span className="font-mono font-bold text-amber-400 text-xs">${item.price.toFixed(2)}</span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-amber-400 font-bold text-xs">$</span>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={item.price}
+                                  onChange={e => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setTgItems(prev => {
+                                      const next = [...prev];
+                                      next[idx] = { ...next[idx], price: val };
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-14 bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded px-1 text-xs font-mono font-bold text-amber-300 outline-none"
+                                  title="ចុចដើម្បីកែប្រែតម្លៃដោយផ្ទាល់"
+                                />
+                              </div>
+                              {isPriceChanged && (
+                                <span className="line-through text-slate-500 text-[10px] font-mono">(${existingProd.price.toFixed(2)})</span>
                               )}
-                              {item.image_url && isExisting && (
-                                <span className="text-[9px] text-cyan-300 font-semibold">🖼️ រូបថ្មី</span>
+                              {item.image_url && (
+                                <span className="text-[9px] text-cyan-300 font-semibold bg-cyan-950/60 px-1 py-0.2 rounded border border-cyan-800/40">
+                                  🖼️ រូបថ្មី
+                                </span>
                               )}
                             </div>
 

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision } from './db';
 import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, ExtractedSlipData } from './fastCheckRoutes';
-import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode } from './telegramSync';
+import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode, addMediaToBuffer, recentTelegramMediaBuffer } from './telegramSync';
 import { broadcastSSE } from './packingRoutes';
 import { Invoice, Product } from './types';
 
@@ -141,7 +141,7 @@ async function handleIncomingStockItemPhoto(
   let chosenPhoto = photoArray[photoArray.length - 1];
   for (let pIdx = photoArray.length - 1; pIdx >= 0; pIdx--) {
     const p = photoArray[pIdx];
-    if ((p.width >= 400 || p.height >= 400) && (p.width <= 1280 || p.height <= 1280)) {
+    if ((p.width >= 400 || p.height >= 400) && (p.width <= 1400 || p.height <= 1400)) {
       chosenPhoto = p;
       break;
     }
@@ -150,7 +150,7 @@ async function handleIncomingStockItemPhoto(
   const primaryItem = stockItems[0];
   let photoUrl: string | undefined = undefined;
   if (chosenPhoto?.file_id) {
-    photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, primaryItem.code, messageDate);
+    photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, primaryItem.code, messageDate, true);
   }
 
   // Bulk import items into products database (handles persistence, active live sync, and IDs)
@@ -190,9 +190,10 @@ async function handleIncomingStockItemPhoto(
     }
   }
 
-  // Debounced auto-save & revision bump (prevents 125 simultaneous disk writes)
+  // Broadcast real-time update
+  broadcastSSE('stock_updated', { live_id: activeLiveId, codes: stockItems.map(s => s.code) });
   bumpDataRevision();
-  console.log(`[Telegram Stock Sync] Recorded item ${stockItems.map(s => s.code).join(', ')} (Queue pending: ${telegramQueue.pending})`);
+  console.log(`[Telegram Stock Sync] Recorded item ${stockItems.map(s => s.code).join(', ')} with fresh photo ${photoUrl || '(none)'}`);
 }
 
 /**
@@ -797,6 +798,24 @@ async function startPollingLoop() {
           // Case A: Image Attached (Stock Photo or Bank Slip)
           if (Array.isArray(photoArray) && photoArray.length > 0) {
             const rawCaption = msg.caption || '';
+            const bestPhotoId = photoArray[photoArray.length - 1]?.file_id;
+
+            // Register photo into sliding media buffer
+            if (bestPhotoId) {
+              addMediaToBuffer({
+                file_id: bestPhotoId,
+                chat_id: chatId,
+                chat_title: msg.chat?.title || 'Telegram Group',
+                sender_name: msg.from ? `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim() : 'Admin',
+                message_id: messageId,
+                date_sec: msg.date || Math.floor(Date.now() / 1000),
+                date_iso: new Date((msg.date || Date.now() / 1000) * 1000).toISOString(),
+                media_group_id: msg.media_group_id ? String(msg.media_group_id) : undefined,
+                caption: rawCaption,
+                created_at: Date.now()
+              });
+            }
+
             const stockItems = parseLinesForStockItems(rawCaption);
 
             if (stockItems.length > 0) {
@@ -805,7 +824,8 @@ async function startPollingLoop() {
                 await handleIncomingStockItemPhoto(token, chatId, messageId, photoArray, rawCaption, stockItems, msg.date);
               });
             } else {
-              // 2. BANK SLIP PHOTO / Chat Screenshot -> Gemini AI Slip OCR via Queue
+              // If image has no caption, check if in a private chat or group with slip keywords
+              // Only trigger Gemini Slip OCR if likely a payment slip or waybill
               telegramQueue.add(async () => {
                 await handleIncomingSlipPhoto(token, chatId, messageId, photoArray, msg.caption);
               });
@@ -826,18 +846,55 @@ async function startPollingLoop() {
               // Check if plain text contains stock item codes (e.g. A01 5$, B02 10$)
               const stockItems = parseLinesForStockItems(trimmed);
               if (stockItems.length > 0) {
-                bulkImportStockItems(
-                  stockItems.map(item => ({
-                    code: item.code,
-                    name: item.name,
-                    price: item.price,
-                    stock_qty: 200
-                  })),
-                  'merge'
-                );
+                telegramQueue.add(async () => {
+                  // Find any recent unattached photo from this chat in sliding window (within 60 minutes)
+                  const matchedPhoto = recentTelegramMediaBuffer.find(
+                    b => (!chatId || b.chat_id === chatId) && Math.abs((msg.date || Date.now() / 1000) - b.date_sec) < 3600
+                  );
 
-                bumpDataRevision();
-                console.log(`[Telegram Stock Sync] Silently recorded text items from chat ${chatId}: ${stockItems.map(s => s.code).join(', ')}`);
+                  let photoUrl: string | undefined = undefined;
+                  if (matchedPhoto?.file_id) {
+                    photoUrl = await downloadTelegramPhoto(token, matchedPhoto.file_id, stockItems[0].code, msg.date, true);
+                  }
+
+                  bulkImportStockItems(
+                    stockItems.map((item, itmIdx) => ({
+                      code: item.code,
+                      name: item.name,
+                      price: item.price,
+                      stock_qty: 200,
+                      image_file: photoUrl
+                    })),
+                    'merge',
+                    { targetLiveId: activeLiveId }
+                  );
+
+                  for (const item of stockItems) {
+                    const upperCode = item.code.toUpperCase();
+                    const existingCached = cachedTelegramItems.find(c => c.code.toUpperCase() === upperCode);
+                    if (existingCached) {
+                      existingCached.price = item.price;
+                      if (photoUrl) existingCached.image_url = photoUrl;
+                      if (item.name) existingCached.name = item.name;
+                    } else {
+                      cachedTelegramItems.unshift({
+                        code: upperCode,
+                        name: item.name || `កូដ ${upperCode}`,
+                        price: item.price,
+                        stock_qty: 200,
+                        chat_id: typeof chatId === 'number' ? chatId : undefined,
+                        message_date: new Date().toISOString(),
+                        original_text: trimmed,
+                        message_id: messageId,
+                        image_url: photoUrl
+                      });
+                    }
+                  }
+
+                  broadcastSSE('stock_updated', { live_id: activeLiveId, codes: stockItems.map(s => s.code) });
+                  bumpDataRevision();
+                  console.log(`[Telegram Stock Sync] Recorded text items ${stockItems.map(s => s.code).join(', ')} with photo ${photoUrl || '(none)'}`);
+                });
               }
             }
             continue;

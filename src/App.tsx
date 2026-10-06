@@ -101,6 +101,32 @@ export default function App() {
   const [fontScale, setFontScale] = useState<number>(() => parseFloat(localStorage.getItem('fontScale') || '1'));
   const [khmerFont, setKhmerFont] = useState<string>(() => localStorage.getItem('khmerFont') || 'kantumruy');
 
+  // Ensure pure dark mode and remove any residual theme attributes
+  useEffect(() => {
+    try {
+      localStorage.removeItem('theme');
+      document.documentElement.removeAttribute('data-theme');
+      document.body.removeAttribute('data-theme');
+      document.documentElement.classList.remove('light-theme');
+      document.documentElement.classList.remove('light');
+    } catch {}
+  }, []);
+
+  // 🔒 Smart Filter: Hide Busy Baskets (Baskets currently locked by other packers)
+  const [hideBusyBaskets, setHideBusyBaskets] = useState<boolean>(() => {
+    return localStorage.getItem('hideBusyBaskets') === 'true';
+  });
+
+  const handleToggleHideBusyBaskets = () => {
+    setHideBusyBaskets(prev => {
+      const next = !prev;
+      localStorage.setItem('hideBusyBaskets', String(next));
+      playPureTone(next ? 820 : 600, 0.04);
+      showToast(next ? '👁️ បានលាក់កន្ត្រកដែលអ្នកដទៃកំពុងរើស' : '👥 បានបង្ហាញកន្ត្រកទាំងអស់');
+      return next;
+    });
+  };
+
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
@@ -1547,6 +1573,17 @@ export default function App() {
     setDispatchedCount(totalDispatched);
   }, [totalDispatched]);
 
+  // Busy Baskets Count (baskets locked by other packers in active session)
+  const busyBasketsCount = useMemo(() => {
+    return invoices.filter(inv =>
+      inv.is_locked &&
+      inv.locked_by &&
+      inv.locked_by.trim().toLowerCase() !== packerName.trim().toLowerCase() &&
+      inv.status !== 'Dispatched' &&
+      inv.status !== 'Cancelled'
+    ).length;
+  }, [invoices, packerName]);
+
   // Delayed payment orders from past live sessions waiting in QC
   const delayedPaidCount = useMemo(() => {
     if (!selectedLiveId) return 0;
@@ -1563,6 +1600,15 @@ export default function App() {
   // Filter invoices for display
   let filtered = sourceInvoices.filter(inv => {
     if (inv.status === 'Cancelled') return false;
+
+    // 🔒 Smart Filter: Hide Busy Baskets (If enabled, hide baskets locked by other packers unless searching)
+    if (hideBusyBaskets && !searchQuery.trim()) {
+      const isLockedByOther =
+        inv.is_locked &&
+        inv.locked_by &&
+        inv.locked_by.trim().toLowerCase() !== packerName.trim().toLowerCase();
+      if (isLockedByOther) return false;
+    }
 
     // 🗑️ Empty Filter (Applies when empty filter is active on either Stage 1 or Stage 2)
     if (activeSubFilter === 'EMPTY') {
@@ -1887,35 +1933,13 @@ export default function App() {
           onOpenNoBasketModal={() => setIsNoBasketModalOpen(true)}
         />
 
-        {/* 3. Gamified HUD Strip with Integrated Picking, Non-Basket Users, Fast-Check & Leaderboard */}
+        {/* 3. Streamlined Bar: Picking List, Non-Basket Users, Slips & Backlog Alert */}
         <GamifiedHud
-          topPackerName={topPackerName}
-          mySessionPacks={mySessionPacks}
           backlogCount={backlogCount}
-          allLivePaidCount={allLivePaidCount}
-          isAllLiveQcActive={currentMasterStage === 3 && isAllLiveQc}
-          onToggleAllLiveQc={() => {
-            if (currentMasterStage !== 3) {
-              setCurrentMasterStage(3);
-              setIsAllLiveQc(true);
-            } else {
-              setIsAllLiveQc(prev => !prev);
-            }
-            fetchAllLivePaidInvoices();
-          }}
           onOpenPickingModal={() => setIsPickingModalOpen(true)}
           onOpenNoBasketModal={() => setIsNoBasketModalOpen(true)}
           onOpenFastCheck={() => setIsFastCheckModalOpen(true)}
           onOpenBacklog={() => setIsBacklogModalOpen(true)}
-          onOpenLeaderboard={() => {
-            setPackerModalMode('leaderboard');
-            setIsPackerModalOpen(true);
-          }}
-          onOpenMyHistory={() => {
-            setPackerModalMode('history');
-            setIsPackerModalOpen(true);
-          }}
-          onOpenChatbot={() => setIsChatbotModalOpen(true)}
         />
 
         {/* 5. Workflow Tabs & Sub-Filters & Search Bar */}
@@ -1981,6 +2005,9 @@ export default function App() {
           totalFilteredBaskets={totalFilteredBaskets}
           onOpenScanner={() => setIsCameraScannerOpen(true)}
           onOpenFastCheck={() => setIsFastCheckModalOpen(true)}
+          hideBusyBaskets={hideBusyBaskets}
+          onToggleHideBusyBaskets={handleToggleHideBusyBaskets}
+          busyBasketsCount={busyBasketsCount}
         />
 
         {/* 6. Baskets Feed */}

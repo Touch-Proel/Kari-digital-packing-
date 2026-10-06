@@ -1,5 +1,18 @@
 import { Request, Response } from 'express';
-import { activeFacebookPage, setActiveFacebookPage, bumpDataRevision } from './db';
+import {
+  activeFacebookPage,
+  setActiveFacebookPage,
+  bumpDataRevision,
+  getConnectedFacebookPages,
+  setConnectedFacebookPages,
+  clearAllConnectedPages,
+  addOrUpdateConnectedPage,
+  batchAddConnectedPages,
+  removeConnectedPage,
+  facebookUserAccessToken,
+  getFacebookUserAccessToken,
+  setFacebookUserAccessToken
+} from './db';
 import { FacebookPage, FacebookPost } from './types';
 
 export const DEFAULT_APP_ID = process.env.FB_APP_ID || '1240481003109421';
@@ -9,13 +22,42 @@ let userAccessToken = '';
 let availablePages: FacebookPage[] = [];
 
 export function getRedirectUri(req: Request): string {
-  if (process.env.APP_URL) {
+  // 1. Explicit redirect_uri param passed from client (e.g. window.location.origin)
+  if (req.query?.redirect_uri && typeof req.query.redirect_uri === 'string') {
+    const raw = req.query.redirect_uri.trim();
+    if ((raw.startsWith('https://') || raw.startsWith('http://localhost') || raw.startsWith('http://127.0.0.1')) && !raw.includes('facebook.com')) {
+      return raw;
+    }
+  }
+
+  // 2. Server Host from X-Forwarded-Host or Host header (Nginx reverse-proxy on chatbotkh.com)
+  const forwardedHost = (req.headers['x-forwarded-host'] as string)?.split(',')[0].trim();
+  const host = forwardedHost || req.get('host') || '';
+
+  if (host && !host.includes('facebook.com') && !host.includes('fb.com')) {
+    const proto = (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https';
+    return `${proto}://${host}/auth/callback`;
+  }
+
+  // 3. Request Origin / Referer header (ONLY if NOT from Facebook)
+  const origin = (req.headers['origin'] as string) || (req.headers['referer'] as string) || '';
+  if (origin) {
+    try {
+      const u = new URL(origin);
+      if (u.hostname && !u.hostname.includes('facebook.com') && !u.hostname.includes('fb.com')) {
+        const proto = (u.hostname === 'localhost' || u.hostname === '127.0.0.1') ? 'http' : 'https';
+        return `${proto}://${u.host}/auth/callback`;
+      }
+    } catch {}
+  }
+
+  // 4. Fallback to chatbotkh.com or APP_URL
+  if (process.env.APP_URL && !process.env.APP_URL.includes('run.app')) {
     const base = process.env.APP_URL.replace(/\/$/, '');
     return `${base}/auth/callback`;
   }
-  const host = req.get('host') || 'localhost:3000';
-  const protocol = req.protocol || 'http';
-  return `${protocol}://${host}/auth/callback`;
+
+  return 'https://chatbotkh.com/auth/callback';
 }
 
 // Generate OAuth URL for Popup
@@ -23,30 +65,50 @@ export function getFacebookOAuthUrl(req: Request): { url: string; redirectUri: s
   const appId = DEFAULT_APP_ID;
   const redirectUri = getRedirectUri(req);
   const scopes = [
-    'pages_read_engagement',
-    'pages_read_user_content',
-    'pages_manage_metadata',
     'pages_show_list',
+    'pages_read_engagement',
+    'pages_manage_posts',
+    'pages_manage_metadata',
+    'pages_read_user_content',
+    'pages_messaging',
     'publish_video',
-    'pages_messaging'
+    'business_management',
+    'public_profile'
   ].join(',');
+
+  // Store client redirectUri in base64url encoded state parameter to guarantee 100% exact match in code exchange
+  const statePayload = Buffer.from(JSON.stringify({ redirectUri, ts: Date.now() })).toString('base64url');
 
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: redirectUri,
     scope: scopes,
     response_type: 'code',
-    auth_type: 'rerequest'
+    auth_type: 'rerequest',
+    state: statePayload
   });
 
-  const url = `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
+  const url = `https://www.facebook.com/v19.0/dialog/oauth?${params.toString()}`;
   return { url, redirectUri, appId };
 }
 
 // Helper to safely parse JSON from Facebook Graph API responses without throwing SyntaxError on HTML/error pages
 async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<any> {
   try {
-    const res = await fetch(url, options);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'ChatbotKH-POS/2.0',
+        ...(options?.headers || {})
+      }
+    });
+    clearTimeout(timeoutId);
+
     const text = await res.text();
     try {
       const parsed = JSON.parse(text);
@@ -65,10 +127,130 @@ async function safeGraphApiFetch(url: string, options?: RequestInit): Promise<an
   } catch (netErr: any) {
     return {
       error: {
-        message: (netErr?.message || 'Network error connecting to Facebook API').replace(/access_token=[a-zA-Z0-9_-]+/gi, 'access_token=[REDACTED]')
+        message: (netErr?.name === 'AbortError' ? 'Connection timeout to Facebook API (10s)' : netErr?.message || 'Network error connecting to Facebook API').replace(/access_token=[a-zA-Z0-9_-]+/gi, 'access_token=[REDACTED]')
       }
     };
   }
+}
+
+// Comprehensive multi-fallback Facebook Graph API page discovery matching standard clean v19.0 / v18.0 implementation
+export async function fetchAllManagedFacebookPages(token: string): Promise<FacebookPage[]> {
+  if (!token) return [];
+  const cleanToken = token.trim();
+  const fetchedMap = new Map<string, FacebookPage>();
+
+  const registerPage = (p: any) => {
+    if (!p || !p.id) return;
+    const cleanId = String(p.id).trim();
+    const existing = fetchedMap.get(cleanId);
+    fetchedMap.set(cleanId, {
+      id: cleanId,
+      name: p.name || existing?.name || 'Facebook Page',
+      access_token: p.access_token || existing?.access_token || cleanToken,
+      category: p.category || existing?.category,
+      picture: p.picture || existing?.picture
+    });
+  };
+
+  const authOptions = {
+    headers: {
+      'Authorization': `Bearer ${cleanToken}`
+    }
+  };
+
+  // 1. Primary endpoint: Clean /me/accounts with limit=100 & pagination
+  try {
+    let nextUrl: string | null = `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,access_token,category,picture,tasks&limit=100`;
+    let attempts = 0;
+    while (nextUrl && attempts < 10) {
+      attempts++;
+      const resData = await safeGraphApiFetch(nextUrl, authOptions);
+      if (resData.data && Array.isArray(resData.data)) {
+        for (const p of resData.data) {
+          registerPage(p);
+        }
+      }
+      nextUrl = resData.paging?.next || null;
+    }
+  } catch (err) {
+    console.warn('[Facebook Accounts] Primary query warning:', err);
+  }
+
+  // 1b. Fallback with query param directly in case Bearer header is filtered
+  if (fetchedMap.size === 0) {
+    try {
+      let nextUrl: string | null = `https://graph.facebook.com/v18.0/me/accounts?access_token=${encodeURIComponent(cleanToken)}&limit=100`;
+      let attempts = 0;
+      while (nextUrl && attempts < 10) {
+        attempts++;
+        const resData = await safeGraphApiFetch(nextUrl);
+        if (resData.data && Array.isArray(resData.data)) {
+          for (const p of resData.data) {
+            registerPage(p);
+          }
+        }
+        nextUrl = resData.paging?.next || null;
+      }
+    } catch {}
+  }
+
+  // 2. Query /me/assigned_pages (Meta Business Manager assigned assets)
+  try {
+    const resData = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/me/assigned_pages?fields=id,name,access_token,picture&limit=100`, authOptions);
+    if (resData.data && Array.isArray(resData.data)) {
+      for (const p of resData.data) {
+        registerPage(p);
+      }
+    }
+  } catch {}
+
+  // 3. Query /me/businesses (Meta Business Portfolio Pages)
+  try {
+    const bizRes = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/me/businesses?fields=id,name,owned_pages.limit(100){id,name,access_token,category,picture},client_pages.limit(100){id,name,access_token,category,picture}&limit=100`, authOptions);
+    if (bizRes.data && Array.isArray(bizRes.data)) {
+      for (const biz of bizRes.data) {
+        // Collect owned_pages
+        if (biz.owned_pages?.data && Array.isArray(biz.owned_pages.data)) {
+          for (const p of biz.owned_pages.data) {
+            registerPage(p);
+          }
+        }
+        // Collect client_pages
+        if (biz.client_pages?.data && Array.isArray(biz.client_pages.data)) {
+          for (const p of biz.client_pages.data) {
+            registerPage(p);
+          }
+        }
+
+        // Direct fetch for this business ID
+        try {
+          const ownedDirect = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/${biz.id}/owned_pages?fields=id,name,access_token,category,picture&limit=100`, authOptions);
+          if (ownedDirect.data && Array.isArray(ownedDirect.data)) {
+            for (const p of ownedDirect.data) registerPage(p);
+          }
+          const clientDirect = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/${biz.id}/client_pages?fields=id,name,access_token,category,picture&limit=100`, authOptions);
+          if (clientDirect.data && Array.isArray(clientDirect.data)) {
+            for (const p of clientDirect.data) registerPage(p);
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('[Facebook Businesses Discovery] Warning:', err);
+  }
+
+  // 4. If still empty, test /me as single Page Token
+  if (fetchedMap.size === 0) {
+    try {
+      const meData = await safeGraphApiFetch(`https://graph.facebook.com/v19.0/me?fields=id,name,category,picture`, authOptions);
+      if (meData.id && !meData.error) {
+        registerPage(meData);
+      }
+    } catch {}
+  }
+
+  console.log(`[Facebook Accounts Discovery] Discovered ${fetchedMap.size} managed page(s):`, Array.from(fetchedMap.values()).map(p => `${p.name} (${p.id})`).join(', '));
+  return Array.from(fetchedMap.values());
 }
 
 // Exchange Code for Access Tokens
@@ -101,8 +283,24 @@ export async function handleOAuthCallback(req: Request, res: Response) {
     `);
   }
 
-  const redirectUri = getRedirectUri(req);
-  const tokenUrl = 'https://graph.facebook.com/v21.0/oauth/access_token';
+  let redirectUri = getRedirectUri(req);
+  if (req.query.state && typeof req.query.state === 'string') {
+    try {
+      const decoded = JSON.parse(Buffer.from(req.query.state, 'base64url').toString('utf8'));
+      if (decoded?.redirectUri) {
+        redirectUri = decoded.redirectUri;
+      }
+    } catch {
+      try {
+        const decoded = JSON.parse(Buffer.from(req.query.state, 'base64').toString('utf8'));
+        if (decoded?.redirectUri) {
+          redirectUri = decoded.redirectUri;
+        }
+      } catch {}
+    }
+  }
+
+  const tokenUrl = 'https://graph.facebook.com/v18.0/oauth/access_token';
 
   try {
     const tokenParams = new URLSearchParams({
@@ -133,46 +331,67 @@ export async function handleOAuthCallback(req: Request, res: Response) {
         console.warn('Long-lived token exchange warning:', err);
       }
 
-      // Fetch user's managed Facebook Pages
-      const pagesData = await safeGraphApiFetch(
-        `https://graph.facebook.com/v21.0/me/accounts?access_token=${userAccessToken}&fields=id,name,access_token,category,picture&limit=50`
-      );
-      availablePages = pagesData.data || [];
+      // Save user access token in persistent database & SQLite
+      setFacebookUserAccessToken(userAccessToken);
 
-      if (availablePages.length > 0) {
-        setActiveFacebookPage(availablePages[0]);
+      // Fetch user's managed Facebook Pages with pagination support and all fallbacks
+      const allFetchedPages = await fetchAllManagedFacebookPages(userAccessToken);
+
+      console.log(`[Facebook OAuth] Successfully fetched ${allFetchedPages.length} managed pages:`, allFetchedPages.map(p => `${p.name} (${p.id})`).join(', '));
+      availablePages = allFetchedPages;
+
+      if (allFetchedPages.length > 0) {
+        setConnectedFacebookPages(allFetchedPages, true);
       }
       bumpDataRevision();
 
-      // Return popup success script matching oauth-integration skill
+      // Return popup success script matching oauth-integration skill with localStorage mobile sync
       return res.send(`
         <!DOCTYPE html>
         <html>
           <head>
             <meta charset="utf-8">
             <title>Facebook Connected</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
               body { font-family: sans-serif; background: #030712; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-              .card { background: #0f172a; border: 1.5px solid #10b981; padding: 32px; border-radius: 20px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
-              h2 { color: #34d399; margin-top: 0; }
-              p { color: #94a3b8; font-size: 15px; }
+              .card { background: #0f172a; border: 1.5px solid #10b981; padding: 28px; border-radius: 20px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+              h2 { color: #34d399; margin-top: 0; font-size: 20px; }
+              p { color: #94a3b8; font-size: 14px; line-height: 1.5; }
+              .page-tag { display: inline-block; background: #1e293b; color: #38bdf8; border: 1px solid #334155; padding: 4px 10px; border-radius: 8px; font-size: 12px; margin: 3px; }
             </style>
           </head>
           <body>
             <div class="card">
-              <h2>✨ ភ្ជាប់គណនី Facebook ជោគជ័យ!</h2>
-              <p>បានទាញយកទំព័រ Facebook Pages (${availablePages.length}) រួចរាល់។ កំពុងបិទផ្ទាំងនេះ...</p>
+              <h2>✨ ភ្ជាប់ Facebook ជោគជ័យ!</h2>
+              <p>បានទាញយកទំព័រ Facebook Pages សរុប <strong>${allFetchedPages.length}</strong> រួចរាល់ ៖</p>
+              <div style="margin: 12px 0;">
+                ${allFetchedPages.slice(0, 8).map(p => `<span class="page-tag">${p.name}</span>`).join('')}
+                ${allFetchedPages.length > 8 ? `<span class="page-tag">+${allFetchedPages.length - 8} ទៀត</span>` : ''}
+              </div>
+              <p style="color: #64748b; font-size: 12px;">កំពុងបញ្ជូនទិន្នន័យ & បិទផ្ទាំងនេះ...</p>
             </div>
             <script>
-              if (window.opener) {
-                window.opener.postMessage({
-                  type: 'OAUTH_AUTH_SUCCESS',
-                  provider: 'facebook',
-                  pageCount: ${availablePages.length}
-                }, '*');
-                setTimeout(() => window.close(), 1200);
-              } else {
-                setTimeout(() => { window.location.href = '/'; }, 1500);
+              try {
+                // 1. Sync via LocalStorage (100% reliable on mobile Android/iOS browsers)
+                localStorage.setItem('FB_OAUTH_SYNC_TIME', Date.now().toString());
+                localStorage.setItem('FB_OAUTH_PAGES_COUNT', '${allFetchedPages.length}');
+              } catch(e) {}
+
+              // 2. PostMessage to parent window if opened as popup
+              try {
+                if (window.opener && !window.opener.closed) {
+                  window.opener.postMessage({
+                    type: 'OAUTH_AUTH_SUCCESS',
+                    provider: 'facebook',
+                    pageCount: ${allFetchedPages.length}
+                  }, '*');
+                  setTimeout(() => window.close(), 1200);
+                } else {
+                  setTimeout(() => { window.location.href = '/?fb_connected=1'; }, 1500);
+                }
+              } catch(e) {
+                setTimeout(() => { window.location.href = '/?fb_connected=1'; }, 1500);
               }
             </script>
           </body>
@@ -197,17 +416,16 @@ export async function handleOAuthCallback(req: Request, res: Response) {
   }
 }
 
-// Get Connected Pages
+// Get Connected Pages (Full Multi-Page Support)
 export function getAvailablePages(): FacebookPage[] {
-  if (availablePages.length === 0 && activeFacebookPage) {
-    return [activeFacebookPage];
-  }
-  return availablePages;
+  const connected = getConnectedFacebookPages();
+  return connected;
 }
 
 // Select Active Page
 export function selectPageById(pageId: string): FacebookPage | null {
-  const page = availablePages.find(p => p.id === pageId);
+  const all = getAvailablePages();
+  const page = all.find(p => p.id === pageId);
   if (page) {
     setActiveFacebookPage(page);
     bumpDataRevision();
@@ -216,10 +434,31 @@ export function selectPageById(pageId: string): FacebookPage | null {
   return null;
 }
 
+// Refresh all managed pages using active token
+export async function refreshFacebookAccounts(): Promise<FacebookPage[]> {
+  const token = getFacebookUserAccessToken() || userAccessToken || activeFacebookPage?.access_token;
+  if (!token) return getAvailablePages();
+
+  try {
+    const allFetchedPages = await fetchAllManagedFacebookPages(token);
+
+    if (allFetchedPages.length > 0) {
+      console.log(`[Facebook Accounts Refresh] Found ${allFetchedPages.length} pages.`);
+      availablePages = allFetchedPages;
+      setConnectedFacebookPages(allFetchedPages, false);
+    }
+  } catch (err) {
+    console.error('Error refreshing Facebook accounts:', err);
+  }
+
+  return getAvailablePages();
+}
+
 // Fetch Page Live Videos & Posts
 // Fetch Page Live Videos & Posts with Real-Time Comment & Reaction Summary Counts
 export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: string): Promise<FacebookPost[]> {
-  const targetPage = activeFacebookPage;
+  const allPages = getAvailablePages();
+  const targetPage = pageId ? (allPages.find(p => p.id === pageId) || activeFacebookPage) : activeFacebookPage;
   const token = accessToken || targetPage?.access_token;
 
   if (!token || token.startsWith('simulated_')) {

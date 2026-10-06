@@ -963,10 +963,10 @@ export function SystemSettingsModal({
                   <button
                     type="button"
                     onClick={onResetFontSize}
-                    className="flex-1 bg-slate-950 text-cyan-400 font-mono font-bold text-xs active:scale-95 transition-all h-full flex items-center justify-center cursor-pointer border-r border-[#1C2B4B]"
-                    title="ទំហំដើម 100%"
+                    className="px-3 bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-white font-mono text-[11px] border-r border-[#1C2B4B] h-full flex items-center justify-center cursor-pointer"
+                    title="កំណត់ទំហំដើម"
                   >
-                    {Math.round(fontScale * 100)}%
+                    Reset
                   </button>
                   <button
                     type="button"

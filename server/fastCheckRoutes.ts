@@ -694,8 +694,8 @@ export async function callGeminiSlipExtraction(
   imagePart: { inlineData: { mimeType: string; data: string } },
   textPart: { text: string }
 ): Promise<{ text: string; error?: string }> {
-  // Ultra low-cost high-accuracy models with high throughput
-  const modelCandidates = ['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest'];
+  // Ultra low-cost high-accuracy models with high throughput (Gemini 3 series)
+  const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
   let lastErrorMessage = '';
 
   for (const model of modelCandidates) {

@@ -18,6 +18,8 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  background-color: #030712;
+  color: #F8FAFC;
 }
 
 /* Dynamic font switcher classes & attributes */
@@ -41,6 +43,9 @@ body[data-khmer-font="koulen"],
   font-family: var(--font-koulen) !important;
 }
 
+/* ==========================================================================
+   🖨️ POS THERMAL RECEIPT PRINTING (80mm)
+   ========================================================================== */
 @media print {
   @page {
     size: 80mm auto;

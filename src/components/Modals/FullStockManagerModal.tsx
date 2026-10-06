@@ -49,19 +49,24 @@ export function FullStockManagerModal({
   onOpenZoomModal
 }: FullStockManagerModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterTab, setFilterTab] = useState<'ALL' | 'IN_STOCK' | 'LOW' | 'OUT'>('ALL');
+  const [filterTab, setFilterTab] = useState<'ALL' | 'IN_STOCK' | 'LOW' | 'OUT' | 'NO_IMG' | 'ZERO_PRICE'>('ALL');
   const [sortOption, setSortOption] = useState<ProductSortOption>('CODE_ASC');
   const [updatingCode, setUpdatingCode] = useState<string | null>(null);
+  const [editingPriceCode, setEditingPriceCode] = useState<string | null>(null);
+  const [editingPriceValue, setEditingPriceValue] = useState<string>('');
   const [deletingCode, setDeletingCode] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [removeFromBasketsToo, setRemoveFromBasketsToo] = useState(true);
   const [confirmWipeStock, setConfirmWipeStock] = useState(false);
   const [wipingStock, setWipingStock] = useState(false);
   const [uploadingCode, setUploadingCode] = useState<string | null>(null);
+  const [syncingBaskets, setSyncingBaskets] = useState(false);
 
-  const outCount = useMemo(() => products.filter(p => p.stock_qty <= 0).length, [products]);
-  const lowCount = useMemo(() => products.filter(p => p.stock_qty > 0 && p.stock_qty <= 5).length, [products]);
-  const inStockCount = useMemo(() => products.filter(p => p.stock_qty > 5).length, [products]);
+  const outCount = useMemo(() => products.filter(p => (p.stock_qty ?? 0) <= 0).length, [products]);
+  const lowCount = useMemo(() => products.filter(p => (p.stock_qty ?? 0) > 0 && (p.stock_qty ?? 0) <= 5).length, [products]);
+  const inStockCount = useMemo(() => products.filter(p => (p.stock_qty ?? 0) > 5).length, [products]);
+  const noImgCount = useMemo(() => products.filter(p => !p.image_file || p.image_file.trim() === '').length, [products]);
+  const zeroPriceCount = useMemo(() => products.filter(p => !p.price || p.price <= 0).length, [products]);
 
   const filteredProducts = useMemo(() => {
     const list = products.filter(p => {
@@ -72,9 +77,11 @@ export function FullStockManagerModal({
         if (!matchCode && !matchName) return false;
       }
 
-      if (filterTab === 'OUT') return p.stock_qty <= 0;
-      if (filterTab === 'LOW') return p.stock_qty > 0 && p.stock_qty <= 5;
-      if (filterTab === 'IN_STOCK') return p.stock_qty > 5;
+      if (filterTab === 'OUT') return (p.stock_qty ?? 0) <= 0;
+      if (filterTab === 'LOW') return (p.stock_qty ?? 0) > 0 && (p.stock_qty ?? 0) <= 5;
+      if (filterTab === 'IN_STOCK') return (p.stock_qty ?? 0) > 5;
+      if (filterTab === 'NO_IMG') return !p.image_file || p.image_file.trim() === '';
+      if (filterTab === 'ZERO_PRICE') return !p.price || p.price <= 0;
       return true;
     });
 
@@ -97,6 +104,75 @@ export function FullStockManagerModal({
       }
     });
   }, [products, searchQuery, filterTab, sortOption]);
+
+  // Sync All Baskets with Current Stock Prices
+  const handleSyncBasketsPrice = async () => {
+    setSyncingBaskets(true);
+    try {
+      const res = await fetch('/api/stock/sync_baskets_price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ live_id: activeLiveId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        playSuccessFanfare();
+        onShowToast(`🔄 បានធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញគ្រប់កន្ត្រកក្នុង Live នេះជោគជ័យ!`);
+        onStockUpdated();
+      } else {
+        onShowToast(data.error || 'បរាជ័យក្នុងការ sync តម្លៃ', 'error');
+      }
+    } catch {
+      onShowToast('⚠️ បញ្ហាតភ្ជាប់បណ្តាញ WiFi!', 'error');
+    } finally {
+      setSyncingBaskets(false);
+    }
+  };
+
+  // Inline Quick Save Price
+  const handleSaveInlinePrice = async (p: Product, newPriceStr: string) => {
+    const newPrice = parseFloat(newPriceStr);
+    if (isNaN(newPrice) || newPrice < 0) {
+      setEditingPriceCode(null);
+      return;
+    }
+
+    if (Math.abs((p.price ?? 0) - newPrice) < 0.001) {
+      setEditingPriceCode(null);
+      return;
+    }
+
+    setUpdatingCode(p.code);
+    try {
+      const res = await fetch('/api/update_product_stock_price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: p.code,
+          name: p.name || `កូដ ${p.code}`,
+          stock_qty: p.stock_qty ?? 0,
+          price: newPrice,
+          image_file: p.image_file || '',
+          live_id: activeLiveId
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        p.price = newPrice;
+        playSuccessFanfare();
+        onShowToast(`💵 បានកែប្រែតម្លៃ [${p.code}] ទៅ $${newPrice.toFixed(2)} & sync កន្ត្រកជោគជ័យ!`);
+        onStockUpdated();
+      } else {
+        playWarningBuzzer();
+        onShowToast(data.error || 'មិនអាចកែប្រែតម្លៃបានទេ', 'error');
+      }
+    } catch {
+      onShowToast('⚠️ បញ្ហាបណ្តាញ WiFi!', 'error');
+    } finally {
+      setUpdatingCode(null);
+      setEditingPriceCode(null);
+    }
+  };
 
   // Quick adjust stock quantity (+1, -1, +10, etc.)
   const handleQuickAdjustStock = async (p: Product, delta: number, e: React.MouseEvent) => {
@@ -349,6 +425,18 @@ export function FullStockManagerModal({
               )}
             </div>
 
+            {/* Sync Baskets Button */}
+            <button
+              type="button"
+              onClick={handleSyncBasketsPrice}
+              disabled={syncingBaskets}
+              className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-50 flex-shrink-0"
+              title="ធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញគ្រប់កន្ត្រកក្នុង Live នេះឱ្យត្រូវតាមតម្លៃស្តុកបច្ចុប្បន្នភ្លាមៗ"
+            >
+              <span>{syncingBaskets ? '⏳...' : '🔄'}</span>
+              <span>Sync តម្លៃកន្ត្រក</span>
+            </button>
+
             {/* Add New Stock Button */}
             <button
               onClick={() => {
@@ -453,6 +541,32 @@ export function FullStockManagerModal({
               >
                 🔴 អស់ស្តុក ({outCount})
               </button>
+
+              {noImgCount > 0 && (
+                <button
+                  onClick={() => setFilterTab('NO_IMG')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    filterTab === 'NO_IMG'
+                      ? 'bg-cyan-500 text-slate-950 font-black shadow-md'
+                      : 'bg-cyan-950/40 text-cyan-300 border border-cyan-800/60 hover:bg-cyan-900/60'
+                  }`}
+                >
+                  📷 គ្មានរូប ({noImgCount})
+                </button>
+              )}
+
+              {zeroPriceCount > 0 && (
+                <button
+                  onClick={() => setFilterTab('ZERO_PRICE')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    filterTab === 'ZERO_PRICE'
+                      ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                      : 'bg-amber-950/40 text-amber-300 border border-amber-800/60 hover:bg-amber-900/60'
+                  }`}
+                >
+                  🏷️ តម្លៃ $0 ({zeroPriceCount})
+                </button>
+              )}
             </div>
 
             {/* Sort Dropdown & Quick Toggle Buttons */}
@@ -610,11 +724,42 @@ export function FullStockManagerModal({
                         </span>
                       </div>
 
-                      {/* Price & Stock Badge */}
+                      {/* Price & Stock Badge with Inline Price Edit */}
                       <div className="flex items-center gap-2 mt-1">
-                        <span className="text-amber-400 font-mono font-black text-sm">
-                          ${(p.price ?? 0).toFixed(2)}
-                        </span>
+                        {editingPriceCode === p.code ? (
+                          <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-cyan-400 shadow-sm" onClick={e => e.stopPropagation()}>
+                            <span className="text-amber-400 font-bold text-xs pl-1">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              autoFocus
+                              value={editingPriceValue}
+                              onChange={e => setEditingPriceValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleSaveInlinePrice(p, editingPriceValue);
+                                if (e.key === 'Escape') setEditingPriceCode(null);
+                              }}
+                              onBlur={() => handleSaveInlinePrice(p, editingPriceValue)}
+                              className="w-16 bg-transparent text-amber-300 font-mono font-bold text-xs outline-none"
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingPriceCode(p.code);
+                              setEditingPriceValue(String(p.price ?? 0));
+                            }}
+                            className="cursor-pointer group/price flex items-center gap-1 bg-slate-950/80 hover:bg-slate-900 border border-slate-700 hover:border-amber-400/80 px-1.5 py-0.5 rounded-lg transition-all shadow-inner"
+                            title="ចុចដើម្បីកែប្រែតម្លៃភ្លាមៗ"
+                          >
+                            <span className="text-amber-400 font-mono font-black text-sm">
+                              ${(p.price ?? 0).toFixed(2)}
+                            </span>
+                            <span className="text-[10px] text-slate-500 group-hover/price:text-amber-300">✏️</span>
+                          </div>
+                        )}
+
                         <span
                           className={`text-[10.5px] font-mono font-bold px-1.5 py-0.2 rounded border ${
                             isOut

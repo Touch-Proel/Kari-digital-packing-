@@ -3,8 +3,9 @@ import path from 'path';
 import sharp from 'sharp';
 import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db';
 import { Product } from './types';
+import { broadcastSSE } from './packingRoutes';
 
-// Optimize Sharp for low memory footprint on VPS / Cloud Run (prevents 6GB memory spikes during bulk photo sync)
+// Optimize Sharp for low memory footprint on VPS / Cloud Run
 try {
   sharp.cache(false);
   sharp.concurrency(1);
@@ -23,6 +24,7 @@ export interface TelegramItemParsed {
   message_date?: string;
   original_text?: string;
   message_id?: number;
+  is_fresh_image?: boolean;
 }
 
 export interface TelegramBotInfo {
@@ -31,6 +33,47 @@ export interface TelegramBotInfo {
   first_name: string;
   can_join_groups?: boolean;
   can_read_all_group_messages?: boolean;
+}
+
+export interface BufferedMediaItem {
+  file_id: string;
+  chat_id?: number | string;
+  chat_title?: string;
+  sender_name?: string;
+  message_id: number;
+  date_sec: number;
+  date_iso: string;
+  media_group_id?: string;
+  caption?: string;
+  photo_url?: string;
+  matched_codes?: string[];
+  created_at: number;
+}
+
+// In-memory media sliding window buffer (keeps last 100 media messages for up to 60 minutes)
+export const recentTelegramMediaBuffer: BufferedMediaItem[] = [];
+const MAX_MEDIA_BUFFER_SIZE = 120;
+const MEDIA_BUFFER_EXPIRY_MS = 60 * 60 * 1000; // 60 minutes
+
+export function addMediaToBuffer(item: BufferedMediaItem) {
+  // Clean expired items
+  const now = Date.now();
+  for (let i = recentTelegramMediaBuffer.length - 1; i >= 0; i--) {
+    if (now - recentTelegramMediaBuffer[i].created_at > MEDIA_BUFFER_EXPIRY_MS) {
+      recentTelegramMediaBuffer.splice(i, 1);
+    }
+  }
+
+  // Deduplicate by file_id
+  const existingIdx = recentTelegramMediaBuffer.findIndex(m => m.file_id === item.file_id);
+  if (existingIdx >= 0) {
+    recentTelegramMediaBuffer[existingIdx] = { ...recentTelegramMediaBuffer[existingIdx], ...item };
+  } else {
+    recentTelegramMediaBuffer.unshift(item);
+    if (recentTelegramMediaBuffer.length > MAX_MEDIA_BUFFER_SIZE) {
+      recentTelegramMediaBuffer.pop();
+    }
+  }
 }
 
 // 1. Verify Telegram Bot Token
@@ -68,7 +111,7 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
     deleteTelegramWebhook(cleanToken).catch(() => {});
 
     const res = await fetch(`https://api.telegram.org/bot${cleanToken}/getMe`, {
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(6000)
     });
     const data = await res.json();
     if (data.ok && data.result) {
@@ -88,13 +131,12 @@ export async function testTelegramBotToken(token: string): Promise<{ success: bo
   }
 }
 
-// 2. Helper to find best photo file_id from telegram message (Always select highest resolution)
+// 2. Helper to find best photo file_id from telegram message
 export function extractBestPhotoFileId(msg: any): string | undefined {
   if (!msg) return undefined;
 
   // 1. Direct photo array (Telegram provides thumbnails ascending: [90px, 320px, 800px, 1280px+])
   if (Array.isArray(msg.photo) && msg.photo.length > 0) {
-    // Highest resolution is always the last element in the array
     const chosen = msg.photo[msg.photo.length - 1];
     return chosen?.file_id;
   }
@@ -110,14 +152,13 @@ export function extractBestPhotoFileId(msg: any): string | undefined {
   return undefined;
 }
 
-// 3. Download and save Telegram photo to public/uploads (Cropped 500x500 HD Center Crop)
+// 3. Helper to find existing product image on disk
 export function findImageOnDiskForCode(code: string, liveId?: string): string | null {
   try {
     if (!code) return null;
     const clean = code.trim().toLowerCase();
     const targetLive = liveId || activeLiveId;
     
-    // Check in-memory products for target live session
     const existingProd = products.find(p => p.live_id === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
     if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
       const relPath = existingProd.image_file.replace(/^\//, '');
@@ -129,6 +170,7 @@ export function findImageOnDiskForCode(code: string, liveId?: string): string | 
   return null;
 }
 
+// 4. Download and save Telegram photo with HD 500x500 Sharp Progressive Optimization
 export async function downloadTelegramPhoto(
   token: string,
   fileId: string,
@@ -136,14 +178,13 @@ export async function downloadTelegramPhoto(
   dateHint?: string | number,
   forceFresh: boolean = false
 ): Promise<string | undefined> {
-  const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_-]/g, '') : 'item';
+  const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_\u1780-\u17B3-]/g, '') : 'item';
   const cleanFileKey = fileId.replace(/[^a-zA-Z0-9]/g, '').slice(-16) || 'img';
   const standardFilename = `tg_${safeCode}_${cleanFileKey}.jpg`;
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
   if (!forceFresh) {
-    // 1. In-memory cache check by exact fileId (0ms)
     if (downloadedPhotoCache.has(fileId)) {
       const cached = downloadedPhotoCache.get(fileId);
       if (cached) {
@@ -155,7 +196,6 @@ export async function downloadTelegramPhoto(
       }
     }
 
-    // 2. Fast disk check: if photo for this specific fileId is already downloaded
     const existingPath = path.join(uploadDir, standardFilename);
     const existingDistPath = path.join(distUploadDir, standardFilename);
     if (fs.existsSync(existingPath)) {
@@ -181,7 +221,7 @@ export async function downloadTelegramPhoto(
 
   try {
     const fileInfoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`, {
-      signal: AbortSignal.timeout(7000)
+      signal: AbortSignal.timeout(8000)
     });
     const fileInfo = await fileInfoRes.json();
     if (!fileInfo.ok || !fileInfo.result?.file_path) {
@@ -191,7 +231,7 @@ export async function downloadTelegramPhoto(
     const filePath = fileInfo.result.file_path;
     const downloadUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
     const imgRes = await fetch(downloadUrl, {
-      signal: AbortSignal.timeout(9000)
+      signal: AbortSignal.timeout(10000)
     });
     if (!imgRes.ok) return undefined;
 
@@ -205,7 +245,7 @@ export async function downloadTelegramPhoto(
     const filename = standardFilename;
     const localSavePath = path.join(uploadDir, filename);
 
-    // ⚡ Fast Progressive JPEG processing with Sharp (Lightweight, 500x500 HD Cover Crop with fastShrink)
+    // ⚡ Fast Sharp Progressive JPEG processing (500x500 HD Cover Crop)
     const processedBuffer = await sharp(rawBuffer)
       .rotate()
       .resize(500, 500, {
@@ -213,12 +253,11 @@ export async function downloadTelegramPhoto(
         position: 'center',
         fastShrinkOnLoad: true
       })
-      .jpeg({ quality: 80, progressive: false })
+      .jpeg({ quality: 82, progressive: false })
       .toBuffer();
 
     fs.writeFileSync(localSavePath, processedBuffer);
 
-    // Also sync to dist/uploads if production build folder exists
     if (fs.existsSync(distUploadDir)) {
       try {
         fs.writeFileSync(path.join(distUploadDir, filename), processedBuffer);
@@ -234,97 +273,192 @@ export async function downloadTelegramPhoto(
   }
 }
 
-// 4. Helper to parse text/caption into code, price, and optional name
+// ----------------------------------------------------------------------
+// 5. Intelligent Multi-Format Parser for Telegram Live Selling Groups
+// ----------------------------------------------------------------------
+
+/**
+ * Clean and normalize single code token
+ */
+function cleanProductCode(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/^#+/, '')
+    .replace(/^(?:កូដ|code|no\.?|លេខ)\s*/i, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
+}
+
+/**
+ * Parse a raw text or caption from Telegram into structured product items.
+ * Handles single lines, multi-line blocks, multi-item comma/space lists, Khmer letter prefixes, and price tags.
+ */
 export function parseLinesForStockItems(rawText: string, defaultQty: number = 200): Array<{ code: string; price: number; name?: string }> {
   if (!rawText || !rawText.trim()) return [];
 
-  // Support splitting by newlines, semicolons, commas, pipes
-  const lines = rawText.split(/[\r\n;,|]+/);
   const items: Array<{ code: string; price: number; name?: string }> = [];
+  const seenCodes = new Set<string>();
 
-  for (const line of lines) {
-    let trimmed = line.trim();
-    if (!trimmed) continue;
+  // 1. Initial sanitization: remove bot mentions, bot commands, hashtags
+  let cleanText = rawText
+    .replace(/^\/[a-zA-Z0-9_]+(@[a-zA-Z0-9_]+)?\s*/gim, '')
+    .replace(/@[a-zA-Z0-9_]+\b/gi, ' ')
+    .trim();
 
-    // Remove bot commands (e.g. /stock, /add@bot) and bot mentions
-    trimmed = trimmed
-      .replace(/^\/[a-zA-Z0-9_]+(@[a-zA-Z0-9_]+)?\s*/i, '')
-      .replace(/@[a-zA-Z0-9_]+\b/gi, ' ')
-      .trim();
+  if (!cleanText) return [];
 
-    // Strip leading hashtags (e.g. #100=3.7 or #11=1.5)
-    trimmed = trimmed.replace(/^#+/, '').trim();
+  // =========================================================================
+  // PASS 1: Inline Multi-Item Matching (e.g. "A01=3.5, A02=4, A03=5.5" or "100=3.5 101=4" or "A01 3.5$ A02 4$")
+  // =========================================================================
+  // Regex to find repeated code-price pairs: (CODE) (= / - / : / space) ($?PRICE)
+  const inlinePairRegex = /(?:^|[\s,;|/•👉*]+)(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s|\s+)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ|៛)?(?:\s+([A-Za-z\u1780-\u17B3\s]{2,20}))?(?=[\s,;|/•👉*]+(?:កូដ\s*)?[A-Za-z0-9_\u1780-\u17B3]{1,15}\s*(?:=|-|:|\s)|\s*$)/gi;
 
-    if (!trimmed) continue;
+  let inlineMatch: RegExpExecArray | null;
+  const inlineFound: Array<{ code: string; price: number; name?: string }> = [];
 
-    // Pattern 1: [កូដ] <code> [= / : / - / x] [តម្លៃ] <price> [$ / usd] [name]
-    // Examples: 10=2, 11=1.5សំពត់ក្មេង, 32=3កន្សែង, 33=3.25, 100=3.7, 95=4, 105: 4.5$, 100=3.7 អាវយឺត
-    const pat1 = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
-    const m1 = trimmed.match(pat1);
-    if (m1) {
-      const code = m1[1].trim().toUpperCase();
-      const price = parseFloat(m1[2]);
-      let name = m1[3]?.trim();
-      if (name) {
-        name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+  while ((inlineMatch = inlinePairRegex.exec(cleanText)) !== null) {
+    const rawCode = inlineMatch[1];
+    const rawPrice = inlineMatch[2];
+    const rawName = inlineMatch[3]?.trim();
+
+    const code = cleanProductCode(rawCode);
+    const price = parseFloat(rawPrice);
+
+    if (code && !isNaN(price) && price >= 0 && price < 10000 && code.length >= 1 && code.length <= 15) {
+      // Avoid false positive where code is pure small english word like "AND", "OR", "USD"
+      if (!['USD', 'KHR', 'BOT', 'TEL', 'PAGE', 'LIVE'].includes(code)) {
+        inlineFound.push({ code, price, name: rawName || undefined });
+        seenCodes.add(code);
       }
-      if (code && !isNaN(price) && price >= 0) {
+    }
+  }
+
+  if (inlineFound.length > 1) {
+    return inlineFound;
+  }
+
+  // =========================================================================
+  // PASS 2: Line-by-Line & Multi-Line Block Parsing
+  // =========================================================================
+  const rawLines = cleanText.split(/[\r\n;,|]+/);
+  const normalizedLines: string[] = [];
+
+  for (const l of rawLines) {
+    let t = l.trim();
+    if (!t) continue;
+    // Strip leading list numbers/bullets: "1. A01=3.5" or "- A01=3.5" or "• A01=3.5"
+    t = t.replace(/^(?:\d+[\.\)\/]|[-•👉*~✓✔︎])\s*/i, '').trim();
+    // Strip hashtags
+    t = t.replace(/^#+/, '').trim();
+    if (t) normalizedLines.push(t);
+  }
+
+  // Check for Multi-Line Key-Value Blocks (e.g. Line 0: "A01" or "កូដ A01", Line 1: "3.5$" or "តម្លៃ 3.5$", Line 2: "រ៉ូប")
+  if (normalizedLines.length >= 2 && items.length === 0) {
+    for (let i = 0; i < normalizedLines.length; i++) {
+      const line = normalizedLines[i];
+      const nextLine = normalizedLines[i + 1] || '';
+      const nextNextLine = normalizedLines[i + 2] || '';
+
+      // Check if current line is pure Code
+      const codeMatch = line.match(/^(?:កូដ\s*|code\s*:?\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})$/i);
+      // Check if next line is pure Price
+      const priceMatch = nextLine.match(/^(?:តម្លៃ\s*|price\s*:?\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?$/i);
+
+      if (codeMatch && priceMatch) {
+        const code = cleanProductCode(codeMatch[1]);
+        const price = parseFloat(priceMatch[1]);
+        let name: string | undefined = undefined;
+
+        if (nextNextLine && !nextNextLine.match(/^(?:កូដ|code|តម្លៃ|price|[0-9]+)/i)) {
+          name = nextNextLine.trim();
+          i++; // Skip name line too
+        }
+
+        if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
+          items.push({ code, price, name });
+          seenCodes.add(code);
+          i++; // Skip price line
+          continue;
+        }
+      }
+    }
+  }
+
+  // Standard Individual Line Pattern Matching
+  for (const line of normalizedLines) {
+    if (!line) continue;
+
+    // Pattern A: Explicit Delimiter (A01=3.5, 100:4.5$, A01-3.5, A01/3.5, 100 x 3.5, 100->3.5)
+    const patA = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:=|-|:|\/|~|->|\sx\s|\sX\s)\s*(?:តម្លៃ\s*)?\$?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
+    const mA = line.match(patA);
+    if (mA) {
+      const code = cleanProductCode(mA[1]);
+      const price = parseFloat(mA[2]);
+      let name = mA[3]?.trim();
+      if (name) name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ|ក្បាល|ឈុត|មុខ)\s*/i, '').trim();
+      if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
         items.push({ code, price, name: name || undefined });
+        seenCodes.add(code);
         continue;
       }
     }
 
-    // Pattern 2: Khmer explicit: កូដ <Code> [តម្លៃ] <Price>$ [name]
-    // Examples: កូដ 105 5$, កូដ A01 តម្លៃ 4.5កន្សែង
-    const pat2 = /^កូដ\s*([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:តម្លៃ|ថ្លៃ)?\s*\$?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
-    const m2 = trimmed.match(pat2);
-    if (m2) {
-      const code = m2[1].trim().toUpperCase();
-      const price = parseFloat(m2[2]);
-      let name = m2[3]?.trim();
-      if (name) {
-        name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
-      }
-      if (code && !isNaN(price) && price >= 0) {
+    // Pattern B: Khmer explicit: កូដ <Code> [តម្លៃ] <Price>$ [name]
+    const patB = /^កូដ\s*([A-Za-z0-9_\u1780-\u17B3]{1,15})\s*(?:តម្លៃ|ថ្លៃ)?\s*\$?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?\s*(.*)$/i;
+    const mB = line.match(patB);
+    if (mB) {
+      const code = cleanProductCode(mB[1]);
+      const price = parseFloat(mB[2]);
+      let name = mB[3]?.trim();
+      if (name) name = name.replace(/^(\$|usd|USD|ដុល្លារ|តម្លៃ|ថ្លៃ)\s*/i, '').trim();
+      if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
         items.push({ code, price, name: name || undefined });
+        seenCodes.add(code);
         continue;
       }
     }
 
-    // Pattern 3: Space with dollar sign: 100 3.7$ or 100 $3.7 or 100 $ 3.7
-    const pat3 = /^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+(?:\$\s*)?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?$/i;
-    const m3 = trimmed.match(pat3);
-    if (m3) {
-      const code = m3[1].trim().toUpperCase();
-      const price = parseFloat(m3[2]);
-      const name = m3[3]?.trim();
-      if (code && !isNaN(price) && price >= 0) {
+    // Pattern C: Space with dollar sign: "100 3.7$" or "100 $3.7" or "A01 4$"
+    const patC = /^([A-Za-z0-9_\u1780-\u17B3]{1,15})\s+(?:\$\s*)?([0-9]+(?:\.[0-9]+)?)\s*(?:\$|usd|USD|ដុល្លារ)?(?:\s+(.+))?$/i;
+    const mC = line.match(patC);
+    if (mC) {
+      const code = cleanProductCode(mC[1]);
+      const price = parseFloat(mC[2]);
+      const name = mC[3]?.trim();
+      if (code && !isNaN(price) && price >= 0 && !seenCodes.has(code)) {
         items.push({ code, price, name });
+        seenCodes.add(code);
         continue;
       }
     }
 
-    // Pattern 4: Plain two numbers separated by space if short code (e.g. "100 3.5")
-    const pat4 = /^([A-Za-z0-9]{1,10})\s+([0-9]+(?:\.[0-9]+)?)(?:\s+(.+))?$/;
-    const m4 = trimmed.match(pat4);
-    if (m4) {
-      const code = m4[1].trim().toUpperCase();
-      const price = parseFloat(m4[2]);
-      const name = m4[3]?.trim();
-      if (code && !isNaN(price) && price >= 0 && price < 2000) {
+    // Pattern D: Plain two numbers separated by space (e.g. "100 3.5")
+    const patD = /^([A-Za-z0-9]{1,10})\s+([0-9]+(?:\.[0-9]+)?)(?:\s+(.+))?$/;
+    const mD = line.match(patD);
+    if (mD) {
+      const code = cleanProductCode(mD[1]);
+      const price = parseFloat(mD[2]);
+      const name = mD[3]?.trim();
+      if (code && !isNaN(price) && price >= 0 && price < 2000 && !seenCodes.has(code)) {
         items.push({ code, price, name });
+        seenCodes.add(code);
         continue;
       }
     }
 
-    // Pattern 5: Standalone Code without explicit price (e.g. "100", "A05", "កូដ 100")
-    const pat5 = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,10})$/i;
-    const m5 = trimmed.match(pat5);
-    if (m5) {
-      const code = m5[1].trim().toUpperCase();
-      const price = 5.0;
-      items.push({ code, price, name: `កូដ ${code}` });
-      continue;
+    // Pattern E: Standalone Code without explicit price (e.g. "100", "A05", "កូដ 100")
+    // Only if nothing else matched and line length is short
+    const patE = /^(?:កូដ\s*)?([A-Za-z0-9_\u1780-\u17B3]{1,10})$/i;
+    const mE = line.match(patE);
+    if (mE) {
+      const code = cleanProductCode(mE[1]);
+      if (code && !['OK', 'HI', 'YES', 'NO', 'LIVE', 'PAGE'].includes(code) && !seenCodes.has(code)) {
+        items.push({ code, price: 5.0, name: `កូដ ${code}` });
+        seenCodes.add(code);
+        continue;
+      }
     }
   }
 
@@ -340,7 +474,9 @@ export function clearScannedTelegramCache() {
   downloadedPhotoCache.clear();
 }
 
-// 5. Advance Telegram Synchronization Engine
+// ----------------------------------------------------------------------
+// 6. Advanced Telegram Synchronization Engine
+// ----------------------------------------------------------------------
 export async function fetchTelegramStockUpdates(options: {
   token?: string;
   defaultQty?: number;
@@ -387,8 +523,8 @@ export async function fetchTelegramStockUpdates(options: {
   const defaultQty = options.defaultQty || 200;
 
   try {
-    // 2. Fetch updates from Telegram using Loop Pagination (up to 1,500 messages)
-    const maxPages = 15;
+    // 2. Fetch updates from Telegram using Loop Pagination (up to 2,000 messages)
+    const maxPages = 20;
     const allUpdates: any[] = [];
     let currentOffset: number | undefined = (!options.clearCache && lastScannedUpdateId) ? lastScannedUpdateId + 1 : undefined;
     let highestUpdateId = lastScannedUpdateId || 0;
@@ -401,7 +537,6 @@ export async function fetchTelegramStockUpdates(options: {
       let updatesRes = await fetch(url, { signal: AbortSignal.timeout(8000) });
       let updatesData = await updatesRes.json();
 
-      // If webhook is active, auto-delete webhook and retry
       if (!updatesData.ok && updatesData.description && (updatesData.description.includes('webhook is active') || updatesData.description.includes('deleteWebhook'))) {
         await deleteTelegramWebhook(token);
         updatesRes = await fetch(url, { signal: AbortSignal.timeout(8000) });
@@ -412,9 +547,7 @@ export async function fetchTelegramStockUpdates(options: {
         if (page === 0 && !currentOffset) {
           let desc = updatesData.description || 'បរាជ័យក្នុងការទាញ getUpdates ពី Telegram';
           if (desc.includes('Conflict: terminated by other getUpdates request')) {
-            desc = '⚠️ ជាន់គ្នាជាមួយកម្មវិធីផ្សេង (Conflict) ៖ Bot នេះកំពុងមានកម្មវិធីផ្សេងបើកដំណើរការទទួលសារស្របពេលគ្នា។ សូមបង្កើត Bot ថ្មីមួយផ្សេងទៀតក្នុង @BotFather សម្រាប់តែស្តុក!';
-          } else if (desc.includes('webhook is active') || desc.includes('deleteWebhook')) {
-            desc = '⚠️ Bot ធ្លាប់បានភ្ជាប់ Webhook ពីមុន។ ប្រព័ន្ធបានលុប Webhook ចាស់រួចរាល់ហើយ សូមចុចស្កេនម្តងទៀត!';
+            desc = '⚠️ ជាន់គ្នាជាមួយកម្មវិធីផ្សេង (Conflict) ៖ Bot នេះកំពុងមានកម្មវិធីផ្សេងបើកទទួលសារ។ សូមបង្កើត Bot ថ្មីមួយក្នុង @BotFather សម្រាប់តែស្តុក!';
           }
           return {
             success: false,
@@ -446,7 +579,7 @@ export async function fetchTelegramStockUpdates(options: {
       lastScannedUpdateId = highestUpdateId;
     }
 
-    // 3. Extract and normalize all messages, sorted strictly ASCENDING by date & message_id
+    // 3. Extract and normalize all messages
     interface NormalizedMessage {
       update_id: number;
       message_id: number;
@@ -477,7 +610,7 @@ export async function fetchTelegramStockUpdates(options: {
       const msgDateSec = msg.date || 0;
       const dateIso = msgDateSec ? new Date(msgDateSec * 1000).toISOString() : new Date().toISOString();
 
-      messagesList.push({
+      const norm: NormalizedMessage = {
         update_id: u.update_id,
         message_id: msg.message_id || 0,
         date: msgDateSec,
@@ -491,7 +624,25 @@ export async function fetchTelegramStockUpdates(options: {
         media_group_id: msg.media_group_id ? String(msg.media_group_id) : undefined,
         reply_to_message_id: msg.reply_to_message?.message_id,
         reply_to_photo_file_id: replyPhotoFileId
-      });
+      };
+
+      messagesList.push(norm);
+
+      // Also register photo into media buffer
+      if (photoFileId) {
+        addMediaToBuffer({
+          file_id: photoFileId,
+          chat_id: msg.chat?.id,
+          chat_title: chatTitle,
+          sender_name: senderName,
+          message_id: msg.message_id || 0,
+          date_sec: msgDateSec,
+          date_iso: dateIso,
+          media_group_id: msg.media_group_id ? String(msg.media_group_id) : undefined,
+          caption: rawText,
+          created_at: Date.now()
+        });
+      }
     }
 
     // Sort chronologically (oldest to newest) so newest updates take precedence
@@ -511,15 +662,15 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 5. Advance Multi-Pass Association Engine
-    const newlyParsedMap = new Map<string, TelegramItemParsed>();
-    const photoToDownloadMap = new Map<string, { fileId: string; code: string; messageDate?: string }>();
-
-    // Index all photo-only messages by message_id and index
+    // Index all photo-only messages by message_id
     const messageIdMap = new Map<number, NormalizedMessage>();
     messagesList.forEach(m => {
       if (m.message_id) messageIdMap.set(m.message_id, m);
     });
+
+    // 5. Advanced Association Engine
+    const newlyParsedMap = new Map<string, TelegramItemParsed>();
+    const photoToDownloadMap = new Map<string, { fileId: string; code: string; messageDate?: string; isFresh: boolean }>();
 
     for (let idx = 0; idx < messagesList.length; idx++) {
       const m = messagesList[idx];
@@ -528,10 +679,9 @@ export async function fetchTelegramStockUpdates(options: {
       const parsedLines = parseLinesForStockItems(m.raw_text, defaultQty);
       if (parsedLines.length === 0) continue;
 
-      // Determine photo for this message via Multi-Tier Advance Detection
       let assignedPhotoFileId: string | undefined = m.photo_file_id;
 
-      // Tier 1: Direct Reply-to Message Matching (Both directions)
+      // Tier 1: Reply-To Photo
       if (!assignedPhotoFileId && m.reply_to_photo_file_id) {
         assignedPhotoFileId = m.reply_to_photo_file_id;
       }
@@ -542,31 +692,19 @@ export async function fetchTelegramStockUpdates(options: {
         }
       }
 
-      // Tier 2: Check if any later photo message replied BACK to this text message
-      if (!assignedPhotoFileId) {
-        const replyingPhotoMsg = messagesList.find(
-          om => om.reply_to_message_id === m.message_id && om.photo_file_id
-        );
-        if (replyingPhotoMsg) {
-          assignedPhotoFileId = replyingPhotoMsg.photo_file_id;
-        }
-      }
-
-      // Tier 3: Media Group Album Pairing (Exact 1-to-1 Index Matching)
+      // Tier 2: Album Pairing
       if (m.media_group_id && mediaGroupMap.has(m.media_group_id)) {
         const albumMessages = mediaGroupMap.get(m.media_group_id)!;
         const albumPhotos = albumMessages.map(am => am.photo_file_id).filter(Boolean) as string[];
-        
-        // If multiple codes in caption lines and multiple photos in album, map line index to photo index!
+
         if (parsedLines.length > 1 && albumPhotos.length > 1) {
           for (let lIdx = 0; lIdx < parsedLines.length; lIdx++) {
             const lineItem = parsedLines[lIdx];
             const linePhoto = albumPhotos[lIdx] || albumPhotos[0];
-            
-            const existingInMap = newlyParsedMap.get(lineItem.code);
+
             newlyParsedMap.set(lineItem.code, {
               code: lineItem.code,
-              name: lineItem.name || existingInMap?.name || `កូដ ${lineItem.code}`,
+              name: lineItem.name || `កូដ ${lineItem.code}`,
               price: lineItem.price,
               stock_qty: defaultQty,
               chat_id: m.chat_id,
@@ -575,40 +713,38 @@ export async function fetchTelegramStockUpdates(options: {
               message_date: m.date_iso,
               original_text: m.raw_text,
               message_id: m.message_id,
-              image_url: existingInMap?.image_url || findImageOnDiskForCode(lineItem.code) || undefined
+              is_fresh_image: !!linePhoto
             });
 
             if (linePhoto) {
-              photoToDownloadMap.set(lineItem.code, { fileId: linePhoto, code: lineItem.code, messageDate: m.date_iso });
+              photoToDownloadMap.set(lineItem.code, { fileId: linePhoto, code: lineItem.code, messageDate: m.date_iso, isFresh: true });
             }
           }
-          continue; // Handled album multi-lines
+          continue;
         } else if (!assignedPhotoFileId && albumPhotos.length > 0) {
           assignedPhotoFileId = albumPhotos[0];
         }
       }
 
-      // Tier 4: Deep Proximity Search (Up to 6 messages before or after within 240 seconds)
+      // Tier 3: Deep Proximity Search (Up to 20 messages before/after or within 3600 seconds)
       if (!assignedPhotoFileId) {
-        // Search backwards for uncaptioned photos from same sender or same chat
-        for (let backStep = 1; backStep <= 6; backStep++) {
+        for (let backStep = 1; backStep <= 20; backStep++) {
           const candidate = messagesList[idx - backStep];
           if (!candidate) break;
           const timeDiff = Math.abs(m.date - candidate.date);
-          if (timeDiff > 240) break;
+          if (timeDiff > 3600) break;
           if (candidate.photo_file_id && (!candidate.raw_text || candidate.raw_text.trim() === '') && (candidate.chat_id === m.chat_id)) {
             assignedPhotoFileId = candidate.photo_file_id;
             break;
           }
         }
 
-        // Search forwards if not found backwards
         if (!assignedPhotoFileId) {
-          for (let fwdStep = 1; fwdStep <= 6; fwdStep++) {
+          for (let fwdStep = 1; fwdStep <= 20; fwdStep++) {
             const candidate = messagesList[idx + fwdStep];
             if (!candidate) break;
             const timeDiff = Math.abs(candidate.date - m.date);
-            if (timeDiff > 240) break;
+            if (timeDiff > 3600) break;
             if (candidate.photo_file_id && (!candidate.raw_text || candidate.raw_text.trim() === '') && (candidate.chat_id === m.chat_id)) {
               assignedPhotoFileId = candidate.photo_file_id;
               break;
@@ -617,14 +753,23 @@ export async function fetchTelegramStockUpdates(options: {
         }
       }
 
-      // Assign parsed lines to items
+      // Tier 4: Sliding Window Media Buffer Fallback
+      if (!assignedPhotoFileId) {
+        const bufferedMatch = recentTelegramMediaBuffer.find(
+          b => (!m.chat_id || b.chat_id === m.chat_id) && Math.abs(m.date - b.date_sec) < 3600
+        );
+        if (bufferedMatch?.file_id) {
+          assignedPhotoFileId = bufferedMatch.file_id;
+        }
+      }
+
+      // Record items
       for (const item of parsedLines) {
-        const existingInMap = newlyParsedMap.get(item.code);
         const existingDiskImage = findImageOnDiskForCode(item.code);
 
         newlyParsedMap.set(item.code, {
           code: item.code,
-          name: item.name || existingInMap?.name || `កូដ ${item.code}`,
+          name: item.name || `កូដ ${item.code}`,
           price: item.price,
           stock_qty: defaultQty,
           chat_id: m.chat_id,
@@ -633,24 +778,25 @@ export async function fetchTelegramStockUpdates(options: {
           message_date: m.date_iso,
           original_text: m.raw_text,
           message_id: m.message_id,
-          image_url: existingInMap?.image_url || existingDiskImage || undefined
+          image_url: assignedPhotoFileId ? undefined : existingDiskImage || undefined,
+          is_fresh_image: !!assignedPhotoFileId
         });
 
         if (assignedPhotoFileId) {
-          photoToDownloadMap.set(item.code, { fileId: assignedPhotoFileId, code: item.code, messageDate: m.date_iso });
+          photoToDownloadMap.set(item.code, { fileId: assignedPhotoFileId, code: item.code, messageDate: m.date_iso, isFresh: true });
         }
       }
     }
 
-    // 6. Download all required photos in controlled throttled batches (concurrency: 2) to protect CPU & memory
+    // 6. Download fresh photos
     const downloadEntries = Array.from(photoToDownloadMap.entries());
     const concurrency = 2;
     for (let i = 0; i < downloadEntries.length; i += concurrency) {
       const chunk = downloadEntries.slice(i, i + concurrency);
       await Promise.all(
-        chunk.map(async ([code, { fileId, messageDate }]) => {
+        chunk.map(async ([code, { fileId, messageDate, isFresh }]) => {
           try {
-            const url = await downloadTelegramPhoto(token, fileId, code, messageDate, !!options.clearCache);
+            const url = await downloadTelegramPhoto(token, fileId, code, messageDate, isFresh || !!options.clearCache);
             const item = newlyParsedMap.get(code);
             if (item && url) {
               item.image_url = url;
@@ -665,7 +811,7 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 7. Merge with cached items (Preserves all scanned items without stale image bleed)
+    // 7. Merge with cached items
     const combinedMap = new Map<string, TelegramItemParsed>();
     for (const it of cachedTelegramItems) {
       combinedMap.set(it.code, it);
@@ -688,7 +834,7 @@ export async function fetchTelegramStockUpdates(options: {
     const items = cachedTelegramItems;
     const isPrivacyRestricted = botRes.bot?.can_read_all_group_messages === false;
     const privacyNotice = (isPrivacyRestricted && items.length === 0)
-      ? `Bot Privacy Mode កំពុងបើក (can_read_all_group_messages=false)។ ដើម្បីឱ្យ Bot អាចមើលឃើញសារក្នុង Group សូមចូល @BotFather រួចវាយ /setprivacy -> ជ្រើស Bot @${botRes.bot?.username || 'bot'} -> ចុច 'Disable' រួចផ្ញើរូបភាព/កូដថ្មីក្នុង Group (ឬ Mention @${botRes.bot?.username || 'bot'} ក្នុង Caption)!`
+      ? `Bot Privacy Mode កំពុងបើក (can_read_all_group_messages=false)។ ដើម្បីឱ្យ Bot មើលឃើញសារក្នុង Group សូមចូល @BotFather រួចវាយ /setprivacy -> ជ្រើស Bot @${botRes.bot?.username || 'bot'} -> ចុច 'Disable' រួចផ្ញើរូបភាព/កូដថ្មីក្នុង Group!`
       : undefined;
 
     return {
@@ -711,7 +857,9 @@ export async function fetchTelegramStockUpdates(options: {
   }
 }
 
-// 6. Bulk Import stock items into Database & Real-Time Sync
+// ----------------------------------------------------------------------
+// 7. Bulk Import stock items into Database & Real-Time Live Sync
+// ----------------------------------------------------------------------
 export function bulkImportStockItems(
   items: Array<{
     code: string;
@@ -787,11 +935,14 @@ export function bulkImportStockItems(
     }
   }
 
-  // Auto-sync all imported/updated stock prices, names, and photos to ALL active (non-dispatched) baskets
+  // Auto-sync all imported/updated stock prices, names, and photos to ALL active baskets
   syncAllActiveInvoicesWithStock(targetLive);
 
   bumpDataRevision();
   saveDatabaseToDisk();
+
+  // Broadcast real-time update event
+  broadcastSSE('stock_updated', { live_id: targetLive, count: products.length });
 
   return {
     success: true,
@@ -802,7 +953,7 @@ export function bulkImportStockItems(
 }
 
 // -------------------------------------------------------------
-// 🔄 Auto Real-Time Telegram Stock Sync Manager
+// 8. Auto Real-Time Telegram Stock Sync Manager
 // -------------------------------------------------------------
 export interface TelegramAutoSyncStatus {
   enabled: boolean;
@@ -861,7 +1012,7 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
     });
 
     if (!res.success) {
-      tgAutoSyncState.lastError = res.error || 'បរាជ័យក្នុងការទាញយកទិន្នន័យពី Telegram';
+      tgAutoSyncState.lastError = res.error || 'បរាជ័យក្នុងការទាញទិន្នន័យពី Telegram';
       tgAutoSyncState.running = false;
       return { success: false, imported: 0, scanned: 0, error: tgAutoSyncState.lastError };
     }
@@ -912,7 +1063,6 @@ export function startTelegramAutoSync(intervalSec = 10, targetLiveId?: string): 
 
   if (tgAutoSyncTimer) clearInterval(tgAutoSyncTimer);
 
-  // Trigger immediate initial sync
   executeTelegramAutoSyncOnce(true).catch(() => {});
 
   tgAutoSyncTimer = setInterval(() => {
