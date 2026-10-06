@@ -407,12 +407,17 @@ export function parseAndAllocateComment(
       }
 
       // If comment is purely contact info (phone/address) or general inquiry, do NOT flag as unmatched product code warning!
-      const isPureContactOrChat = Boolean(phone) || isQuestion || isPureContactOrInquiryComment(rawText);
+      // BUT if the comment contains potential product codes or action verbs (e.g. 36.យកក្រហម, យក, កាត់, etc.), ALWAYS flag as unmatched warning!
+      const hasCodeOrOrderClues = Boolean(
+        rawText.match(/(?:យក|កាត់|ថែម|ដាក់|កក់|បូក|កូដ|code|\b\d{2,4}\b)/i) ||
+        cleanText.match(/(?:យក|កាត់|ថែម|ដាក់|កក់|បូក|កូដ|code|\b\d{2,4}\b)/i)
+      );
+      const isPureContactOrChat = !hasCodeOrOrderClues && (isQuestion || isPureContactOrInquiryComment(rawText));
       if (!isPureContactOrChat) {
         if (!inv.unmatched_comments) inv.unmatched_comments = [];
         if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
       } else {
-        // If it was in unmatched_comments previously, clean it up
+        // If it was in unmatched_comments previously and was truly pure contact, clean it up
         if (inv.unmatched_comments) {
           inv.unmatched_comments = inv.unmatched_comments.filter(c => c !== rawText);
         }
@@ -713,10 +718,20 @@ export function parseAndAllocateComment(
     };
   }
 
+  if (inv) {
+    if (!inv.unmatched_comments) inv.unmatched_comments = [];
+    if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
+    recalculateInvoice(inv);
+    if (!batchMode) bumpDataRevision();
+  }
+
+  const unallocCodes = pairs.map(p => p.code).join(', ');
   return {
     status: 'UNMATCHED_SAVED',
-    message: `💬 បានរក្សាទុកខមិន ៖ "${rawText}"`,
-    invoice_id: inv.invoice_id,
-    customer_name: cleanFbName
+    message: unallocCodes ? `💬 កត់ត្រាខមិន (កូដ [${unallocCodes}] មិនមានក្នុងស្តុក) ៖ "${rawText}"` : `💬 បានរក្សាទុកខមិន ៖ "${rawText}"`,
+    invoice_id: inv?.invoice_id,
+    customer_name: cleanFbName,
+    phone_number: inv?.phone_number,
+    address: inv?.address
   };
 }
