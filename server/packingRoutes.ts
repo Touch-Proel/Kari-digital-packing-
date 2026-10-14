@@ -4752,6 +4752,92 @@ router.get('/db/backup', async (_req: Request, res: Response) => {
   }
 });
 
+// GET /api/backup/export - Download full JSON backup
+router.get(['/backup/export', '/backup/download'], async (_req: Request, res: Response) => {
+  try {
+    await persistToSqlite({
+      activeLiveId,
+      settings,
+      products,
+      invoices,
+      customers,
+      packerLogs,
+      activeFacebookPage
+    });
+    const backupData = {
+      exported_at: new Date().toISOString(),
+      version: '1.0',
+      activeLiveId,
+      activeFacebookPage,
+      settings,
+      products_count: products.length,
+      invoices_count: invoices.length,
+      rawComments_count: rawComments.length,
+      customers_count: customers.length,
+      products,
+      invoices,
+      customers,
+      rawComments,
+      packerLogs
+    };
+
+    const fileName = `pos_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.json(backupData);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Failed exporting backup' });
+  }
+});
+
+// POST /api/backup/import - Restore full JSON backup
+router.post('/backup/import', async (req: Request, res: Response) => {
+  try {
+    const data = req.body;
+    if (!data || (!data.invoices && !data.products)) {
+      return res.status(400).json({ success: false, error: 'ទិន្នន័យ Backup មិនត្រឹមត្រូវទេ' });
+    }
+
+    if (Array.isArray(data.invoices) && data.invoices.length > 0) {
+      invoices.length = 0;
+      invoices.push(...data.invoices);
+    }
+    if (Array.isArray(data.products) && data.products.length > 0) {
+      products.length = 0;
+      products.push(...data.products);
+    }
+    if (Array.isArray(data.rawComments)) {
+      rawComments.length = 0;
+      rawComments.push(...data.rawComments);
+    }
+    if (Array.isArray(data.customers)) {
+      customers.length = 0;
+      customers.push(...data.customers);
+    }
+    if (data.activeLiveId) {
+      setActiveLiveId(data.activeLiveId);
+    }
+
+    bumpDataRevision();
+    await persistToSqlite({
+      activeLiveId,
+      settings,
+      products,
+      invoices,
+      customers,
+      packerLogs,
+      activeFacebookPage
+    });
+
+    res.json({
+      success: true,
+      message: `បានបញ្ចូលទិន្នន័យចាស់ជោគជ័យ! (${invoices.length} invoices, ${products.length} products)`
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Failed importing backup' });
+  }
+});
+
 // GET /api/history/dates - Get list of live stream dates for historical verification
 router.get('/history/dates', (_req: Request, res: Response) => {
   const dateMap = new Map<string, { date: string; live_ids: Set<string>; total_invoices: number; total_revenue: number; staged_count: number; verified_count: number; paid_count: number }>();

@@ -12,15 +12,19 @@ import {
 } from './types';
 import { persistToSqlite, loadFromSqlite } from './sqlite';
 import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment, isQuestionOrLiveChatter } from './locationHelper';
-import { extractPhoneNumber } from './parser';
+import { extractPhoneNumber, extractCodeQtyPairsFromComment, extractSizeAndColorNotes } from '../src/utils/commentParser';
 
 let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;
 let lastSqlitePersistTime = 0;
+let isDatabaseLoaded = false;
 
 const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
 
 export async function saveDatabaseToDisk(forceSync = false) {
+  if (!isDatabaseLoaded && !forceSync) {
+    return;
+  }
   try {
     const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
     if (messengerSlips.length === 0 && fs.existsSync(BACKUP_SLIPS_PATH)) {
@@ -632,7 +636,11 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string): number {
   return updatedInvoicesCount;
 }
 
-export async function loadDatabaseFromDisk() {
+let loadPromise: Promise<void> | null = null;
+
+export function loadDatabaseFromDisk(): Promise<void> {
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
   try {
     // 1. Try loading from SQLite pos.db first
     const sqliteData = await loadFromSqlite();
@@ -672,6 +680,61 @@ export async function loadDatabaseFromDisk() {
         console.log(`[SQLite Loaded] Restored ${messengerSlips.length} messenger slips from SQLite pos.db`);
       }
       console.log(`[SQLite Loaded] Loaded ${invoices.length} invoices, ${products.length} products from pos.db`);
+    }
+
+    // 1b. Auto-heal from live_invoices.json / live_products.json / all_real_comments.json if SQLite had only seed records
+    const LIVE_INVOICES_PATH = path.join(process.cwd(), 'server', 'live_invoices.json');
+    const LIVE_PRODUCTS_PATH = path.join(process.cwd(), 'server', 'live_products.json');
+    const ALL_COMMENTS_PATH = path.join(process.cwd(), 'server', 'all_real_comments.json');
+    if (invoices.length <= 10 && fs.existsSync(LIVE_INVOICES_PATH)) {
+      try {
+        const liveInvs = JSON.parse(fs.readFileSync(LIVE_INVOICES_PATH, 'utf8'));
+        if (Array.isArray(liveInvs) && liveInvs.length > invoices.length) {
+          const existingIds = new Set(invoices.map(i => i.invoice_id));
+          for (const li of liveInvs) {
+            if (!existingIds.has(li.invoice_id)) {
+              invoices.push(li);
+              existingIds.add(li.invoice_id);
+            }
+          }
+          if (liveInvs[0]?.live_id) {
+            activeLiveId = liveInvs[0].live_id;
+          }
+          console.log(`[DB Auto-Heal] Restored ${liveInvs.length} live invoices (activeLiveId=${activeLiveId})`);
+        }
+        if (fs.existsSync(LIVE_PRODUCTS_PATH)) {
+          const liveProds = JSON.parse(fs.readFileSync(LIVE_PRODUCTS_PATH, 'utf8'));
+          if (Array.isArray(liveProds)) {
+            const existingProdKeys = new Set(products.map(p => `${p.live_id}_${p.code}`));
+            let maxId = products.reduce((m, p) => Math.max(m, p.id || 0), 0);
+            for (const lp of liveProds) {
+              const key = `${lp.live_id || activeLiveId}_${lp.code}`;
+              if (!existingProdKeys.has(key)) {
+                products.push({ ...lp, id: ++maxId });
+                existingProdKeys.add(key);
+              }
+            }
+          }
+        }
+        if (fs.existsSync(ALL_COMMENTS_PATH) && rawComments.length <= 10) {
+          const allComms = JSON.parse(fs.readFileSync(ALL_COMMENTS_PATH, 'utf8'));
+          if (Array.isArray(allComms) && allComms.length > rawComments.length) {
+            const existingCids = new Set(rawComments.map(c => c.comment_id));
+            for (const rc of allComms) {
+              if (rc.comment_id && !existingCids.has(rc.comment_id)) {
+                rawComments.push({
+                  ...rc,
+                  live_id: rc.live_id || activeLiveId,
+                  is_matched: Boolean(rc.invoice_id)
+                });
+                existingCids.add(rc.comment_id);
+              }
+            }
+          }
+        }
+      } catch (healErr) {
+        console.error('[DB Auto-Heal] Failed restoring live JSON files:', healErr);
+      }
     }
 
     // 2. Load / supplement messengerSlips from db_store.json or backup file if empty
@@ -866,12 +929,11 @@ export async function loadDatabaseFromDisk() {
     settings.bulk_discount_qty = 0;
     settings.bulk_discount_amount = 0;
 
-    // Purge invalid clothing size codes (e.g. XS, S, M, L, XL, 2XL, 3XL, 4XL, 5XL) mistakenly auto-created as products
+    // Purge invalid clothing size codes and bogus auto-created entries
     const invalidSizes = new Set([
-      'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE'
+      'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXS', '2XL', '3XL', '4XL', '5XL', '6XL', 'FS', 'FREESIZE', 'FREE-SIZE',
+      'M1', '443', '209'
     ]);
-
-    const dummyQuantityCodes = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
 
     const initialProductCount = products.length;
     const purgedProductCodes = new Set<string>();
@@ -884,10 +946,6 @@ export async function loadDatabaseFromDisk() {
         purgedProductCodes.add(cleanCode);
         return false;
       }
-      if (dummyQuantityCodes.has(cleanCode) && isAutoDummy && p.price === 0) {
-        purgedProductCodes.add(cleanCode);
-        return false;
-      }
       return true;
     });
 
@@ -895,7 +953,7 @@ export async function loadDatabaseFromDisk() {
       const purgedCount = initialProductCount - sanitizedProducts.length;
       products.length = 0;
       products.push(...sanitizedProducts);
-      console.log(`[Stock Cleanup] Purged ${purgedCount} invalid clothing size and dummy quantity entries (e.g. 1..9, 34, XL) from products stock.`);
+      console.log(`[Stock Cleanup] Purged ${purgedCount} invalid clothing size and bogus entries from products stock.`);
     }
 
     // Clean up purged dummy items from invoices
@@ -1112,6 +1170,71 @@ export async function loadDatabaseFromDisk() {
               }
             }
           }
+
+          // Verify each item with item_comment against extractCodeQtyPairsFromComment
+          // to eliminate false extractions (e.g. "21នឹងមានច្រើនពណអត់", "10" from "28-10គ្រុបពណ", "2" from "ថែ45-2សាយ31")
+          // and sync accurate quantities (e.g. 28-10 -> qty 10) and notes!
+          inv.items = inv.items.filter(it => {
+            if (!it.item_comment) return true;
+            const cleanCode = (it.product_code || '').toUpperCase().trim();
+            const subComments = it.item_comment.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
+            const seenNorm = new Set<string>();
+            let matchedQty = 0;
+            let matchedAny = false;
+            for (const sc of subComments) {
+              const normKey = sc.replace(/0\d{8,9}|\*+/g, '').replace(/\s+/g, ' ').trim();
+              const pairs = extractCodeQtyPairsFromComment(sc, products, false);
+              const found = pairs.find(p => p.code.toUpperCase() === cleanCode || p.code.replace(/^0+/, '') === cleanCode.replace(/^0+/, ''));
+              if (found) {
+                matchedAny = true;
+                if (!seenNorm.has(normKey)) {
+                  seenNorm.add(normKey);
+                  matchedQty += found.qty;
+                }
+              }
+            }
+            if (!matchedAny) {
+              return false;
+            }
+            if (matchedQty > 0 && matchedQty !== it.quantity) {
+              it.quantity = matchedQty;
+            }
+            const cleanNote = extractSizeAndColorNotes(it.item_comment);
+            if (cleanNote) {
+              it.note = cleanNote;
+            } else if (it.note && it.note.includes('ពណ៌ស') && !/(?:^|\s)ស(?:\s|$)|ពណ៌\s*ស|ពណ៍\s*ស/.test(it.item_comment)) {
+              it.note = it.note.replace(/\s*\|\s*ពណ៌ស|ពណ៌ស\s*\|\s*|ពណ៌ស/g, '').trim() || undefined;
+            }
+            return true;
+          });
+
+          // Recover any dash/underscore order items from inv.comments that were previously missed (e.g. "8-10" -> code 8, qty 10)
+          for (const rawC of inv.comments || []) {
+            if (/[-_]/.test(rawC)) {
+              const pairs = extractCodeQtyPairsFromComment(rawC, products, false);
+              for (const p of pairs) {
+                const alreadyHas = inv.items.some(it => (it.product_code || '').toUpperCase().trim() === p.code.toUpperCase());
+                if (!alreadyHas) {
+                  const stockProd = products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase() && (pr.live_id || activeLiveId) === (inv.live_id || activeLiveId)) ||
+                                    products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase());
+                  const note = extractSizeAndColorNotes(rawC);
+                  inv.items.push({
+                    id: Date.now() + Math.floor(Math.random() * 10000),
+                    invoice_id: inv.invoice_id,
+                    product_id: stockProd ? stockProd.id : 0,
+                    product_code: p.code.toUpperCase(),
+                    product_name: stockProd ? stockProd.name : `កូដ ${p.code.toUpperCase()}`,
+                    quantity: p.qty,
+                    price: stockProd ? stockProd.price : 0,
+                    is_packed: false,
+                    item_comment: rawC,
+                    image_file: stockProd?.image_file || '',
+                    ...(note ? { note } : {})
+                  });
+                }
+              }
+            }
+          }
         }
       }
 
@@ -1136,11 +1259,15 @@ export async function loadDatabaseFromDisk() {
     // Automatically sync all active (non-dispatched) basket prices & photos strictly within their own live sessions
     syncAllActiveInvoicesWithStock();
 
+    isDatabaseLoaded = true;
     // Persist normalized data to disk and SQLite
-    saveDatabaseToDisk();
+    await saveDatabaseToDisk(true);
   } catch (err) {
+    isDatabaseLoaded = true;
     console.error('Failed to load database on startup:', err);
   }
+  })();
+  return loadPromise;
 }
 
 export function getProductsForLive(liveId?: string): Product[] {
@@ -1236,8 +1363,6 @@ export function cleanupEmptyZeroItemInvoices() {
 // Load from disk on startup
 loadDatabaseFromDisk().then(() => {
   deduplicateAndSanitizeMessengerSlips();
+  invoices.forEach(recalculateInvoice);
+  bumpDataRevision();
 }).catch(err => console.error(err));
-
-// Calculate on start
-invoices.forEach(recalculateInvoice);
-bumpDataRevision();

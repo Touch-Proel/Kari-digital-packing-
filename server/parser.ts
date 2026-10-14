@@ -64,13 +64,13 @@ const ACTION_WORDS = ['យក', 'យល', 'ចង់បាន', 'កាត់', 
 
 export function isQuestionComment(text: string): boolean {
   if (!text) return false;
-  let norm = convertKhmerDigitsToArabic(text);
+  let norm = normalizeKhmerText(text);
   norm = norm.replace(RE_PRICE_CLEANUP, ' ');
 
   // 1. Never treat as pure question if comment contains a valid Cambodian phone number AND potential code/order intent
   const hasPhone = /(?:\+?855[\s.\-()]*|0)(?:[1-9]\d)(?:[\s.\-()]*\d){6,7}(?!\d)/.test(norm);
   const hasOrderOrCode = 
-    /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=»_\/]\s*\d{1,2}/.test(norm) ||
+    /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=»_\/\-]\s*\d{1,2}/.test(norm) ||
     /(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(?:លេខ)?(?:កូដ|កូត|code)?\s*[A-Za-z0-9]{1,5}/i.test(norm) ||
     /(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5}/i.test(norm) ||
     /(?<!\d)\d{2,4}(?!\d)/.test(norm);
@@ -79,9 +79,9 @@ export function isQuestionComment(text: string): boolean {
     return false;
   }
 
-  // If comment has explicit order syntax like "47=2", "47:1", "47/2", "យក36", "ថែម 54", "38=2", "120=2", "16,2", "37»5", it is an order, not a pure question
+  // If comment has explicit order syntax like "47=2", "47:1", "47/2", "28-10", "យក36", "ថែម 54", "38=2", "120=2", "16,2", "37»5", it is an order, not a pure question
   if (
-    /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=»_]\s*\d{1,2}/.test(norm) ||
+    /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=»_\-]\s*(?:0?[1-9]|1[0-9]|20)(?!\d)/.test(norm) ||
     /(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(?:លេខ)?(?:កូដ|កូត|code)?\s*[A-Za-z0-9]{1,5}/i.test(norm) ||
     /(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5}/i.test(norm)
   ) {
@@ -92,7 +92,12 @@ export function isQuestionComment(text: string): boolean {
   norm = norm.replace(/(?:ស្ទឹងមានជ័យ|ខណ្ឌមានជ័យ|មានជ័យ|ផ្សារមាន់អាំង|មានលាភ|មានរិទ្ធ|ទឹកថ្លា)/gi, ' ');
 
   // Conversational inquiries, checks, and status questions
-  if (/(?:មិញ)?\s*(?:ខ្ញុំ|ញុម)?\s*បានអត់|បានអីវ៉ាន់អត់|បានលោតសារ|លោតសារបាន|លោតសាចឹង|អត់លោតសារ|អត់ឮសំឡេង|អត់សូវឮ|ឮតិច|ឮតិចៗ|កុងកុំឮងមើល|កុងកុឮងមើល|ធ្វើមិចបានដឹង|អត់លោត|ទិញរហូត|ទិញមិនដែលបាន|ទិញ២ដងហើយ|មិនទាន់មកដល់|ពេញចិត្ត|អន់ចិត្ត|សាច់ស្អាត|ស្អាតណាស់|សេវ៉ាលឿន|យឺតក៏នៅតែទិញ|ម៉ូយគាត់តាំងពី|រាប់ឈុតចំរុះ|បាញ់លុយរួចហើយយក100|ច្រឡំអត់យក|ច្រឡំលេខកូដ/i.test(norm)) {
+  const hasOrderIntent =
+    /(?:កូដ\s*)?[A-Za-z0-9]{1,5}\s*[:=»_\-]\s*(?:0?[1-9]|1[0-9]|20)(?!\d)/.test(norm) ||
+    /(?:យក|កាត់|ថែម|ដាក់|កក់|បូក)\s*(?:លេខ)?(?:កូដ|កូត|code)?\s*[A-Za-z0-9]{1,5}/i.test(norm) ||
+    /(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5}/i.test(norm);
+
+  if (!hasOrderIntent && /(?:(?:មិញ)?\s*(?:ខ្ញុំ|ញុម)?\s*បានអត់|បានអីវ៉ាន់អត់|បានលោតសារ|លោតសារបាន|លោតសាចឹង|អត់លោតសារ|អត់ឮសំឡេង|អត់សូវឮ|ឮតិច|ឮតិចៗ|កុងកុំឮងមើល|កុងកុឮងមើល|ធ្វើមិចបានដឹង|អត់លោត|ទិញរហូត|ទិញមិនដែលបាន|ទិញ២ដងហើយ|មិនទាន់មកដល់|ពេញចិត្ត|អន់ចិត្ត|សាច់ស្អាត|ស្អាតណាស់|សេវ៉ាលឿន|យឺតក៏នៅតែទិញ|ម៉ូយគាត់តាំងពី|រាប់ឈុតចំរុះ|បាញ់លុយរួចហើយយក100|ច្រឡំអត់យក|ច្រឡំលេខកូដ)/i.test(norm)) {
     return true;
   }
   if (/(?:លើខ្លួន|នៅលើខ្លួន|លើកខ្លួន|លើកសំពត់|លើកខោ|លើកអាវ|លើកឈុត|សុំមើល)\s*(?:មួយឈុត|មួយឆុត)?\s*(?:ប៉ុន្មាន|លក់ម៉េច|ម៉េច|ម៉ាន|មាណ|លក់អត់|មានលក់|អស់នៅ|អស់ហើយ|សុំមើល|ផង|មក)/i.test(norm)) {
@@ -114,13 +119,13 @@ export function isQuestionComment(text: string): boolean {
 
 export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedItemPair[] {
   if (!text) return [];
-  const { phone } = extractPhoneNumber(text);
+  const { phone, cleanText } = extractPhoneNumber(text);
   if (!phone && isQuestionComment(text)) return [];
 
   const targetLive = liveId || activeLiveId;
   const targetProducts = products.filter(p => (p.live_id || activeLiveId) === targetLive);
 
-  return extractCodeQtyPairsFromComment(text, targetProducts, settings.parser_strict_catalog);
+  return extractCodeQtyPairsFromComment(cleanText || text, targetProducts, settings.parser_strict_catalog);
 }
 
 export interface ParseCommentResult {
@@ -198,6 +203,10 @@ export function parseAndAllocateComment(
     rawText.includes('TOCH PROEL')
   ) {
     return { status: 'IGNORED', message: 'Bot Comment ត្រូវបានរំលង' };
+  }
+
+  if (/(?:លេងសើច|និយាយលេង|ខមិនលេង|កុំយក|ច្រឡំអត់យក|កុំទាន់ដាក់|កុំទាន់យក)/i.test(rawText)) {
+    return { status: 'IGNORED', message: `⏩ ខមិនលេងសើច/ច្រឡំត្រូវបានរំលង ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"` };
   }
 
   if (!rawText) {
@@ -602,20 +611,29 @@ export function parseAndAllocateComment(
       continue; // NEVER treat clothing sizes (XS, S, M, L, XL, 2XL, etc.) as product codes or create in stock!
     }
 
-    // Guard: Accidental extraction of waist numbers (e.g. 29, 30, 31, 32 from "87Size29, 30,31,32")
+    // Guard: Accidental extraction of waist numbers (e.g. 29, 30, 31, 32 from "87Size29, 30,31,32" or "24 28=2 29=2" or "23លេខ 34")
     const isWaistNum = parseInt(cleanPairCode, 10);
     if (!isNaN(isWaistNum) && isWaistNum >= 24 && isWaistNum <= 46) {
-      const waistPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក)\\s*[:=\\s\\-]?\\s*(?:\\d{1,2}\\s*[,/+\\-\\s]*)*${cleanPairCode}\\b`, 'i');
+      const waistPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក|ទំហំ|លេខ|ដល់|ដល)\\s*[:=\\s\\-]?\\s*(?:\\d{1,2}\\s*[,/+\\-\\s]*)*${cleanPairCode}\\b`, 'i');
       if (waistPattern.test(rawText)) {
+        continue;
+      }
+      if (pairs.length > 1 && pairs.some(p => p.code !== cleanPairCode && !COMMON_WAIST_SIZES.has(p.code))) {
         continue;
       }
     }
 
-    // Guard: Accidental extraction of weight / kilo numbers (e.g. 68 from "73=1គឺឡូ68")
+    // Guard: Accidental extraction of weight / kilo numbers (e.g. 68 from "73=1គឺឡូ68" or "28/65")
     const kiloPattern = new RegExp(`(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|kg|kilo)\\s*[:=\\s\\-_/]?\\s*${cleanPairCode}\\b`, 'i');
     const kiloAfterPattern = new RegExp(`\\b${cleanPairCode}\\s*(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គក)\\b`, 'i');
     if (kiloPattern.test(rawText) || kiloAfterPattern.test(rawText)) {
       continue;
+    }
+    const isWeightNum = parseInt(cleanPairCode, 10);
+    if (!isNaN(isWeightNum) && isWeightNum >= 40 && isWeightNum <= 120) {
+      if (pairs.length > 1 && pairs.some(p => p.code !== cleanPairCode)) {
+        continue;
+      }
     }
 
     // Guard: Accidental extraction of chest / bust numbers (e.g. 38 from "ទ្រូង 38")
@@ -625,23 +643,43 @@ export function parseAndAllocateComment(
     }
 
     // Guard: Accidental extraction of address / building numbers (e.g. 19 from "គំរោង19")
-    const addressPattern = new RegExp(`(?:គំរោង|គម្រោង|ផ្លូវ|ផ្ទះ|បន្ទប់|ជាន់ទី)\\s*(?:លេខ|ទី)?\\s*${cleanPairCode}\\b`, 'i');
+    const addressPattern = new RegExp(`(?:គំរោង|គម្រោង|ផ្លូវ|ផ្ទះ|បន្ទប់|ជាន់ទី|បុរី|ផ្លូវជាតិ)\\s*(?:លេខ|ទី)?\\s*${cleanPairCode}\\b`, 'i');
     if (addressPattern.test(rawText)) {
       continue;
     }
 
-    let prod = products.find(
-      p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanPairCode
-    );
+    let prod = products.find(p => {
+      if ((p.live_id || activeLiveId) !== liveId) return false;
+      const pCode = p.code.toUpperCase().trim();
+      if (pCode === cleanPairCode) return true;
+      if (pCode.replace(/^0+/, '') === cleanPairCode.replace(/^0+/, '') && cleanPairCode.replace(/^0+/, '') !== '') {
+        return true;
+      }
+      return false;
+    });
 
     if (!prod) {
       if (settings.parser_strict_catalog) {
         continue;
       }
+      // Guard against auto-creating bogus products:
+      // Single digit (1-9) requires explicit order/code indicator (=, /, កូដ, សាយ, ចង្កេះ, លេខ, យក, ថែម, កាត់)
+      if (/^\d$/.test(cleanPairCode) && !/(?:កូដ|កូត|កូ|គូត|គូដ|លេខ|CODE|=|\/|សាយ|size|ចង្កេះ|ចង្កះ|ចង្កោះ|យក|កាត់|ថែម|ដាក់|កក់)/i.test(rawText)) {
+        continue;
+      }
+      // Waist size numbers (24-46) should not be auto-created if another code is present in the comment
+      if (COMMON_WAIST_SIZES.has(cleanPairCode) && pairs.some(p => p.code !== cleanPairCode)) {
+        continue;
+      }
+      // Unusually large numbers (> 200) without explicit code prefix are usually phone numbers, addresses, or pranks
+      if (!isNaN(parseInt(cleanPairCode, 10)) && parseInt(cleanPairCode, 10) > 200 && !new RegExp(`(?:កូដ|កូត|កូ|កូដលេខ|CODE)\\s*${cleanPairCode}\\b`, 'i').test(rawText)) {
+        continue;
+      }
+      const normalizedCode = /^0\d$/.test(cleanPairCode) ? cleanPairCode.replace(/^0+/, '') : cleanPairCode;
       const nextId = ++maxProductIdTracker;
       prod = {
         id: nextId,
-        code: cleanPairCode,
+        code: normalizedCode,
         name: `កូដ ${cleanPairCode}`,
         stock_qty: 200,
         price: 0,

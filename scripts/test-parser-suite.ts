@@ -12,9 +12,13 @@ const mockCatalog = [
   { code: '1' },
   { code: '2' },
   { code: '3' },
+  { code: '4' },
+  { code: '5' },
   { code: '6' },
+  { code: '7' },
   { code: '12' },
   { code: '13' },
+  { code: '17' },
   { code: '19' },
   { code: '20' },
   { code: '27' },
@@ -357,6 +361,185 @@ const testCases: TestCase[] = [
     name: 'QTY Guard clamp for bare naked number > 20 (12=55)',
     comment: '12=55',
     expectedCodes: [{ code: '12', qty: 1 }]
+  },
+  // Real Facebook Live Commerce Edge Cases
+  {
+    name: 'Comma separated code, waist, and quantity (1,សាយ31,2)',
+    comment: '1,សាយ31,2',
+    expectedCodes: [{ code: '1', qty: 2 }],
+    expectedNotes: ['size 31']
+  },
+  {
+    name: 'Comma separated code and waist without qty (1,សាយ30)',
+    comment: '1,សាយ30',
+    expectedCodes: [{ code: '1', qty: 1 }],
+    expectedNotes: ['size 30']
+  },
+  {
+    name: 'Slash separated code and waist (2/សាយ33)',
+    comment: '2/សាយ33',
+    expectedCodes: [{ code: '2', qty: 1 }],
+    expectedNotes: ['size 33']
+  },
+  {
+    name: 'Khmer equals word ស្មើ with bundle (កូដ1 ស្មើ១ដុំ)',
+    comment: 'កូដ1 ស្មើ១ដុំ',
+    expectedCodes: [{ code: '1', qty: 1 }]
+  },
+  {
+    name: 'Khmer code prefix with action and equals (កូដ1យក=2ដំុ)',
+    comment: 'កូដ1យក=2ដំុ',
+    expectedCodes: [{ code: '1', qty: 2 }]
+  },
+  {
+    name: 'Code with waist and equals qty (កូដ4=ចង្កេះ29=1)',
+    comment: 'កូដ4=ចង្កេះ29=1',
+    expectedCodes: [{ code: '4', qty: 1 }],
+    expectedNotes: ['size 29']
+  },
+  {
+    name: 'Typo កូត with single digit code (ថែមកូត5)',
+    comment: 'ថែមកូត5',
+    expectedCodes: [{ code: '5', qty: 1 }]
+  },
+  {
+    name: 'Typo កូត with single digit code 7 (ថែមកូត7)',
+    comment: 'ថែមកូត7',
+    expectedCodes: [{ code: '7', qty: 1 }]
+  },
+  {
+    name: 'Khmer shorthand code prefix កូ (បងកូ១សុំយកសាយ៣២វិញ)',
+    comment: 'បងកូ១សុំយកសាយ៣២វិញ',
+    expectedCodes: [{ code: '1', qty: 1 }],
+    expectedNotes: ['size 32']
+  },
+  {
+    name: 'Question phrasing with multiple orders (បងខ្ញុំយកកូដ17និង19បានអត់)',
+    comment: 'បងខ្ញុំយកកូដ17និង19បានអត់',
+    expectedCodes: [{ code: '17', qty: 1 }, { code: '19', qty: 1 }]
+  },
+  {
+    name: 'Single digit code with dark color (2សុំពណ៍ក្រម៉ៅ)',
+    comment: '2សុំពណ៍ក្រម៉ៅ',
+    expectedCodes: [{ code: '2', qty: 1 }],
+    expectedNotes: ['ពណ៍ក្រម៉ៅ']
+  },
+  {
+    name: 'Single digit code with chocolate color (5សុកុឡា)',
+    comment: '5សុកុឡា',
+    expectedCodes: [{ code: '5', qty: 1 }],
+    expectedNotes: ['ពណ៌សុកុឡា']
+  },
+  {
+    name: 'Single digit code with all sizes (2=គ្រប់សាយ)',
+    comment: '2=គ្រប់សាយ',
+    expectedCodes: [{ code: '2', qty: 1 }]
+  },
+  {
+    name: 'Multi-waist sub-quantities (24 28=2 29=2)',
+    comment: '24 28=2 29=2',
+    expectedCodes: [{ code: '24', qty: 4 }],
+    forbiddenCodes: ['28', '29']
+  },
+  {
+    name: 'Explicit total with multi-waist sub-quantities (43=4 សាយ32=3 សាយ31=1)',
+    comment: '43=4 សាយ32=3 សាយ31=1',
+    expectedCodes: [{ code: '43', qty: 4 }],
+    forbiddenCodes: ['32', '31']
+  },
+  {
+    name: 'Multi-waist list with លេខ keyword (24 យកលេខ 30=1 31=1 32=1 33=1)',
+    comment: '24 យកលេខ 30=1 31=1 32=1 33=1',
+    expectedCodes: [{ code: '24', qty: 4 }],
+    forbiddenCodes: ['30', '31', '32', '33']
+  },
+  {
+    name: 'Waist range with ដល and total qty (24 28ដល32=10)',
+    comment: '24 28ដល32=10',
+    expectedCodes: [{ code: '24', qty: 10 }],
+    forbiddenCodes: ['28', '32']
+  },
+  {
+    name: 'Code slash waist size (124/28)',
+    comment: '124/28',
+    expectedCodes: [{ code: '124', qty: 1 }],
+    forbiddenCodes: ['28']
+  },
+  {
+    name: 'Code slash weight (27/65គីឡូ)',
+    comment: '27/65គីឡូ',
+    expectedCodes: [{ code: '27', qty: 1 }],
+    forbiddenCodes: ['65'],
+    expectedNotes: ['65kg']
+  },
+  {
+    name: 'Color sub-quantities not registered as code 1 (56=2គគី១ខ្មៅ១)',
+    comment: '56=2គគី១ខ្មៅ១',
+    expectedCodes: [{ code: '56', qty: 2 }],
+    forbiddenCodes: ['1']
+  },
+  {
+    name: 'Code with action verb + letter size + qty (61យកM1)',
+    comment: '61យកM1',
+    expectedCodes: [{ code: '61', qty: 1 }],
+    forbiddenCodes: ['M1', '1']
+  },
+  {
+    name: 'National Road address number protection (45=2 សាយ34 ស្រុកអង្គស្នួលខេត្តកណ្ដាលផ្លូវជាតិលេខ 4 070529746)',
+    comment: '45=2 សាយ34 ស្រុកអង្គស្នួលខេត្តកណ្ដាលផ្លូវជាតិលេខ 4 070529746',
+    expectedCodes: [{ code: '45', qty: 2 }],
+    forbiddenCodes: ['34', '4', '1']
+  },
+  {
+    name: 'Borey Chhouk Va 2 address protection (089828290 បុរីឈូកវ៉ា2/ 28)',
+    comment: '089828290 បុរីឈូកវ៉ា2/ 28',
+    expectedCodes: [{ code: '28', qty: 1 }],
+    forbiddenCodes: ['2']
+  },
+  {
+    name: 'Prank comment ignored (443=20លេងសើច)',
+    comment: '443=20លេងសើច',
+    expectedCodes: [],
+    forbiddenCodes: ['443']
+  },
+  {
+    name: 'Color availability question ignored (21នឹងមានច្រើនពណអត់)',
+    comment: '21នឹងមានច្រើនពណអត់',
+    expectedCodes: [],
+    forbiddenCodes: ['21']
+  },
+  {
+    name: 'Dash code-qty with product code 28 in waist range (28-10គ្រុបពណ)',
+    comment: '28-10គ្រុបពណ',
+    expectedCodes: [{ code: '28', qty: 10 }],
+    forbiddenCodes: ['10'],
+    expectedNotes: ['គ្រប់ពណ៌']
+  },
+  {
+    name: 'Typo ថែ with dash code-qty for product code 36 (ថែ36-10គ្រុបពណ)',
+    comment: 'ថែ36-10គ្រុបពណ',
+    expectedCodes: [{ code: '36', qty: 10 }],
+    forbiddenCodes: ['10'],
+    expectedNotes: ['គ្រប់ពណ៌']
+  },
+  {
+    name: 'Typo ថែ with dash code-qty and waist size 31 (ថែ45-2សាយ31)',
+    comment: 'ថែ45-2សាយ31',
+    expectedCodes: [{ code: '45', qty: 2 }],
+    forbiddenCodes: ['2', '31'],
+    expectedNotes: ['size 31']
+  },
+  {
+    name: 'Multi-waist list joined by និង (43=28និង30)',
+    comment: '43=28និង30',
+    expectedCodes: [{ code: '43', qty: 2 }],
+    forbiddenCodes: ['28', '30']
+  },
+  {
+    name: 'Comma-separated multi-letter sizes with sub-quantities (136,S,1,M,1,L,1)',
+    comment: '136,S,1,M,1,L,1',
+    expectedCodes: [{ code: '136', qty: 3 }],
+    forbiddenCodes: ['1']
   }
 ];
 
