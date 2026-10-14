@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
+import { isSlipVoiceEnabled, setSlipVoiceEnabled, testKhmerVoicePlayback, announceSlipScanned } from '../../utils/khmerVoice';
 
 interface FastCheckSlipsModalProps {
   isOpen: boolean;
@@ -146,10 +147,14 @@ export function FastCheckSlipsModal({
     maskedKey: string;
     isFromEnv: boolean;
     hasCustomKey: boolean;
+    isCreditDepleted?: boolean;
+    depletedMessage?: string | null;
   }>({ hasKey: false, maskedKey: '', isFromEnv: false, hasCustomKey: false });
   const [showKeyConfig, setShowKeyConfig] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [isSavingKey, setIsSavingKey] = useState(false);
+  const [isTestingKey, setIsTestingKey] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(isSlipVoiceEnabled);
 
   const isFetchingRef = useRef(false);
 
@@ -203,7 +208,9 @@ export function FastCheckSlipsModal({
           hasKey: Boolean(data.hasKey),
           maskedKey: data.maskedKey || '',
           isFromEnv: Boolean(data.isFromEnv),
-          hasCustomKey: Boolean(data.hasCustomKey)
+          hasCustomKey: Boolean(data.hasCustomKey),
+          isCreditDepleted: Boolean(data.isCreditDepleted),
+          depletedMessage: data.depletedMessage || null
         });
       }
     } catch {
@@ -295,7 +302,9 @@ export function FastCheckSlipsModal({
           ...prev,
           hasKey: data.hasKey,
           maskedKey: data.maskedKey || '',
-          hasCustomKey: Boolean(apiKeyInput.trim())
+          hasCustomKey: Boolean(apiKeyInput.trim()),
+          isCreditDepleted: false,
+          depletedMessage: null
         }));
         setApiKeyInput('');
         setShowKeyConfig(false);
@@ -308,6 +317,31 @@ export function FastCheckSlipsModal({
       onShowToast('មានបញ្ហាក្នុងការតភ្ជាប់ Server', 'error');
     } finally {
       setIsSavingKey(false);
+    }
+  };
+
+  const handleTestGeminiKey = async () => {
+    setIsTestingKey(true);
+    try {
+      const res = await fetch('/api/fast_check/test_gemini_key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: apiKeyInput.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        onShowToast(data.message || '✅ Gemini API Key ដំណើរការល្អ (Active)!', 'success');
+        setGeminiStatus(prev => ({ ...prev, isCreditDepleted: false, depletedMessage: null }));
+      } else {
+        onShowToast(data.error || 'Key មិនដំណើរការទេ', 'error');
+        if (data.isCreditDepleted) {
+          setGeminiStatus(prev => ({ ...prev, isCreditDepleted: true, depletedMessage: data.error }));
+        }
+      }
+    } catch {
+      onShowToast('មិនអាចតភ្ជាប់ Server ដើម្បីតេស្ត Key បានទេ', 'error');
+    } finally {
+      setIsTestingKey(false);
     }
   };
 
@@ -738,6 +772,36 @@ export function FastCheckSlipsModal({
               <span>🛡️ ការពារ Slip ស្ទួន</span>
             </button>
 
+            {/* 🔊 Voice Announcement Toggle & Test Button */}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !voiceEnabled;
+                setVoiceEnabled(next);
+                setSlipVoiceEnabled(next);
+                if (next) {
+                  testKhmerVoicePlayback('សំឡេងប្រកាស Slip ត្រូវបានបើក');
+                }
+              }}
+              className={`py-1 px-2 rounded-xl border font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm ${
+                voiceEnabled
+                  ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/60'
+                  : 'bg-slate-800/90 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+              title={voiceEnabled ? 'សំឡេងប្រកាស Slip កំពុងបើក (ចុចដើម្បីបិទ)' : 'សំឡេងប្រកាស Slip កំពុងបិទ (ចុចដើម្បីបើក)'}
+            >
+              <span>{voiceEnabled ? '🔊 និយាយខ្មែរ' : '🔇 បិទសំឡេង'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => testKhmerVoicePlayback()}
+              className="py-1 px-2 rounded-xl bg-cyan-950/80 hover:bg-cyan-900/80 border border-cyan-500/40 text-cyan-300 font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm"
+              title="ចុចដើម្បីសាកល្បងស្តាប់សំឡេង AI និយាយខ្មែរ"
+            >
+              <span>▶️ សាកល្បង</span>
+            </button>
+
             {/* Sync Now Button */}
             <button
               type="button"
@@ -770,13 +834,84 @@ export function FastCheckSlipsModal({
           </div>
         </div>
 
+        {/* Gemini Credits Depleted Alert Banner (402) */}
+        {geminiStatus.isCreditDepleted && (
+          <div className="mx-3 mt-2 p-3 bg-gradient-to-r from-rose-950/90 via-red-950/80 to-amber-950/80 border border-rose-500/60 rounded-xl text-xs space-y-2 animate-in slide-in-from-top duration-200 flex-shrink-0 shadow-lg">
+            <div className="flex items-center justify-between text-rose-300 font-bold">
+              <span className="flex items-center gap-1.5 text-rose-200 text-xs">
+                <span className="text-base animate-bounce">⚠️</span>
+                <span>Gemini API Key អស់ Credit / កូតា (Error 402 Prepayment Depleted)</span>
+              </span>
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] bg-rose-900/80 hover:bg-rose-800 text-rose-100 px-2 py-0.5 rounded border border-rose-500/50 font-bold transition-colors shadow-sm"
+              >
+                ✨ យក Free Key (100% Free) ↗
+              </a>
+            </div>
+            <p className="text-slate-300 text-[11px] leading-relaxed">
+              ប្រព័ន្ធ AI Scan មិនអាចដំណើរការបានទេដោយសារ Key លើគម្រោងនេះបានអស់ Prepayment Credits។ លោកអ្នកអាចយក API Key ថ្មី (Free Tier) ពី Google AI Studio រួច paste ខាងក្រោមដើម្បីបន្តដំណើរការ scan ភ្លាមៗ៖
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={e => setApiKeyInput(e.target.value)}
+                placeholder="បិទភ្ជាប់ Gemini API Key ថ្មី (AIzaSy...)"
+                className="flex-1 bg-slate-900 border border-rose-500/50 focus:border-rose-400 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-mono"
+              />
+              <button
+                type="button"
+                disabled={isTestingKey || (!apiKeyInput.trim() && !geminiStatus.hasKey)}
+                onClick={() => handleTestGeminiKey()}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-2.5 py-1.5 rounded-lg text-xs border border-slate-600 disabled:opacity-40"
+              >
+                {isTestingKey ? '...' : '🧪 តេស្ត'}
+              </button>
+              <button
+                type="button"
+                disabled={isSavingKey || !apiKeyInput.trim()}
+                onClick={handleSaveGeminiKey}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs disabled:opacity-40 shadow-sm"
+              >
+                {isSavingKey ? '...' : '💾 រក្សាទុក & ដំណើរការ'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Gemini API Key Configuration Panel */}
         {showKeyConfig && (
           <div className="mx-3 mt-2 p-2.5 bg-slate-950 border border-indigo-500/40 rounded-xl text-xs space-y-2 animate-in slide-in-from-top duration-200 flex-shrink-0">
             <div className="flex items-center justify-between text-indigo-200 font-bold">
-              <span>🔑 កំណត់ Google Gemini API Key សម្រាប់ Auto-Scan Slips</span>
-              <button onClick={() => setShowKeyConfig(false)} className="text-slate-400 hover:text-white">✕</button>
+              <span className="flex items-center gap-1.5">
+                <span>🔑</span>
+                <span>កំណត់ Google Gemini API Key សម្រាប់ Auto-Scan Slips</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10.5px] text-indigo-400 hover:underline"
+                >
+                  ✨ យក Key ឥតគិតថ្លៃ ↗
+                </a>
+                <button onClick={() => setShowKeyConfig(false)} className="text-slate-400 hover:text-white">✕</button>
+              </div>
             </div>
+
+            {geminiStatus.hasKey && (
+              <div className="flex items-center justify-between bg-slate-900/80 border border-slate-800 px-2.5 py-1 rounded-lg text-[11px]">
+                <span className="text-slate-400">Key បច្ចុប្បន្ន ៖ <span className="font-mono text-emerald-400 font-bold">{geminiStatus.maskedKey}</span></span>
+                <span className="text-[9.5px] bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-bold">
+                  {geminiStatus.isFromEnv ? 'ENV' : 'Custom'}
+                </span>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <input
                 type="password"
@@ -787,9 +922,17 @@ export function FastCheckSlipsModal({
               />
               <button
                 type="button"
+                disabled={isTestingKey || (!apiKeyInput.trim() && !geminiStatus.hasKey)}
+                onClick={() => handleTestGeminiKey()}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-2.5 py-1.5 rounded-lg text-xs border border-slate-600 disabled:opacity-40"
+              >
+                {isTestingKey ? '...' : '🧪 តេស្ត'}
+              </button>
+              <button
+                type="button"
                 disabled={isSavingKey || !apiKeyInput.trim()}
                 onClick={handleSaveGeminiKey}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs disabled:opacity-40"
               >
                 {isSavingKey ? '...' : '💾 រក្សាទុក'}
               </button>

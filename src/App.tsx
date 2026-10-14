@@ -36,6 +36,7 @@ import { AdminPinModal } from './components/Modals/AdminPinModal';
 import { CameraScannerModal, parseScannedText } from './components/Modals/CameraScannerModal';
 import { NoBasketUsersModal } from './components/Modals/NoBasketUsersModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone, playCollisionAlert, triggerHapticAlert } from './utils/audio';
+import { announceSlipScanned } from './utils/khmerVoice';
 
 export default function App() {
   // Check if current user is viewing as a customer via public link
@@ -1343,6 +1344,33 @@ export default function App() {
                   return inv;
                 })
               );
+            }
+          } catch {}
+        });
+
+        // 🔊 Listen for AI Slip Auto-Scan from Messenger & Speak Loudly in Khmer
+        eventSource.addEventListener('messenger:slip_scanned', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data) {
+              announceSlipScanned({
+                id: data.id,
+                trans_ref: data.trans_ref,
+                customer_name: data.customer_name,
+                paid_amount: data.paid_amount,
+                currency: data.currency,
+                bank_name: data.bank_name,
+                basket_no: data.basket_no
+              });
+
+              const name = data.customer_name || 'អតិថិជន';
+              const amt = data.paid_amount ? `$${Number(data.paid_amount).toFixed(2)}` : '';
+              const bank = data.bank_name || '';
+              const basket = data.basket_no ? `[កន្ត្រក #${data.basket_no}] ` : '';
+              showToast(`📥 ស្កេនបាន Slip ពី Messenger: ${basket}${name} ${amt} (${bank})`, 'info');
+
+              // Seamlessly update invoices without page reload
+              fetchInvoices();
             }
           } catch {}
         });

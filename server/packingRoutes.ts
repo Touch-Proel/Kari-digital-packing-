@@ -94,6 +94,60 @@ router.get(['/realtime_events', '/api/realtime_events'], (req: Request, res: Res
   });
 });
 
+// ⚡ In-Memory High-Speed Cache for Text-To-Speech Audio Buffers
+const ttsAudioCache = new Map<string, { buffer: Buffer; contentType: string; time: number }>();
+const MAX_TTS_CACHE_ITEMS = 300;
+
+// GET /api/tts - High-Fidelity Khmer Text-To-Speech Audio Endpoint
+router.get(['/tts', '/api/tts'], async (req: Request, res: Response) => {
+  const text = String(req.query.text || '').trim();
+  const lang = String(req.query.lang || 'km').trim();
+
+  if (!text) {
+    return res.status(400).json({ success: false, error: 'Missing text parameter' });
+  }
+
+  // Check cache for instant 0ms playback
+  const cacheKey = `${lang}:${text}`;
+  const cached = ttsAudioCache.get(cacheKey);
+  if (cached) {
+    res.setHeader('Content-Type', cached.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    return res.end(cached.buffer);
+  }
+
+  try {
+    const encoded = encodeURIComponent(text);
+    const googleTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=${lang}&client=tw-ob`;
+    const audioResp = await fetch(googleTtsUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
+
+    if (!audioResp.ok) {
+      return res.status(audioResp.status).json({ success: false, error: 'TTS upstream error' });
+    }
+
+    const arrayBuf = await audioResp.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    const contentType = audioResp.headers.get('content-type') || 'audio/mpeg';
+
+    if (ttsAudioCache.size >= MAX_TTS_CACHE_ITEMS) {
+      const firstKeys = Array.from(ttsAudioCache.keys()).slice(0, 50);
+      for (const k of firstKeys) ttsAudioCache.delete(k);
+    }
+    ttsAudioCache.set(cacheKey, { buffer, contentType, time: Date.now() });
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+    return res.end(buffer);
+  } catch (err: any) {
+    console.error('[TTS Error]:', err);
+    return res.status(500).json({ success: false, error: err.message || 'TTS generation failed' });
+  }
+});
+
 // GET /api/invoices
 router.get('/invoices', (req: Request, res: Response) => {
   const liveId = (req.query.live_id as string) || activeLiveId;

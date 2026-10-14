@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FacebookPage } from '../../types';
 import { PWAInstallButton } from '../PWAInstallButton';
 import { playPureTone } from '../../utils/audio';
+import { isSlipVoiceEnabled, setSlipVoiceEnabled, getSlipVoiceVolume, setSlipVoiceVolume, testKhmerVoicePlayback } from '../../utils/khmerVoice';
 
 interface SystemSettingsModalProps {
   isOpen: boolean;
@@ -75,10 +76,17 @@ export function SystemSettingsModal({
     maskedKey: string;
     isFromEnv: boolean;
     hasCustomKey: boolean;
+    isCreditDepleted?: boolean;
+    depletedMessage?: string | null;
   }>({ hasKey: false, maskedKey: '', isFromEnv: false, hasCustomKey: false });
   const [geminiKeyInput, setGeminiKeyInput] = useState('');
   const [isSavingGemini, setIsSavingGemini] = useState(false);
+  const [isTestingGemini, setIsTestingGemini] = useState(false);
   const [geminiFeedback, setGeminiFeedback] = useState<string | null>(null);
+
+  // AI Slip Voice Settings
+  const [slipVoiceEnabled, setSlipVoiceEnabledState] = useState(isSlipVoiceEnabled);
+  const [slipVoiceVolume, setSlipVoiceVolumeState] = useState(getSlipVoiceVolume);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -113,7 +121,9 @@ export function SystemSettingsModal({
             hasKey: Boolean(data.hasKey),
             maskedKey: data.maskedKey || '',
             isFromEnv: Boolean(data.isFromEnv),
-            hasCustomKey: Boolean(data.hasCustomKey)
+            hasCustomKey: Boolean(data.hasCustomKey),
+            isCreditDepleted: Boolean(data.isCreditDepleted),
+            depletedMessage: data.depletedMessage || null
           });
         }
       })
@@ -217,12 +227,15 @@ export function SystemSettingsModal({
       });
       const data = await res.json();
       if (data.success) {
-        setGeminiStatus({
+        setGeminiStatus(prev => ({
+          ...prev,
           hasKey: Boolean(data.hasKey),
           maskedKey: data.maskedKey || '',
           isFromEnv: false,
-          hasCustomKey: Boolean(geminiKeyInput.trim())
-        });
+          hasCustomKey: Boolean(geminiKeyInput.trim()),
+          isCreditDepleted: false,
+          depletedMessage: null
+        }));
         setGeminiKeyInput('');
         setGeminiFeedback('✅ បានរក្សាទុក Key ជោគជ័យ!');
         playPureTone(880, 0.1);
@@ -234,6 +247,34 @@ export function SystemSettingsModal({
     } finally {
       setIsSavingGemini(false);
       setTimeout(() => setGeminiFeedback(null), 3000);
+    }
+  };
+
+  const handleTestGeminiKey = async () => {
+    setIsTestingGemini(true);
+    setGeminiFeedback(null);
+    try {
+      const res = await fetch('/api/fast_check/test_gemini_key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: geminiKeyInput.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGeminiFeedback('✅ Key ដំណើរការល្អ (Active & Valid)!');
+        setGeminiStatus(prev => ({ ...prev, isCreditDepleted: false, depletedMessage: null }));
+        playPureTone(880, 0.1);
+      } else {
+        setGeminiFeedback(`❌ ${data.error || 'Key មិនដំណើរការទេ'}`);
+        if (data.isCreditDepleted) {
+          setGeminiStatus(prev => ({ ...prev, isCreditDepleted: true, depletedMessage: data.error }));
+        }
+      }
+    } catch {
+      setGeminiFeedback('❌ មិនអាចតភ្ជាប់ដើម្បីតេស្តបានទេ');
+    } finally {
+      setIsTestingGemini(false);
+      setTimeout(() => setGeminiFeedback(null), 5000);
     }
   };
 
@@ -628,6 +669,90 @@ export function SystemSettingsModal({
             )}
           </div>
 
+          {/* Section 3.3: 🔊 AI Khmer Voice Announcement (Auto-Speaking for Messenger Slips) */}
+          <div className="bg-[#081524] border border-cyan-500/40 rounded-2xl p-3.5 flex flex-col gap-3 shadow-sm">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🔊</span>
+                <div>
+                  <div className="font-bold text-sm text-cyan-200 flex items-center gap-2">
+                    <span>សំឡេង AI និយាយខ្មែរពេល Scan Slip ពី Messenger</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      slipVoiceEnabled
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {slipVoiceEnabled ? 'កំពុងបើក (ON)' : 'បានបិទ (OFF)'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    នៅពេល AI ស្កេនឃើញ Slip ធនាគារពិតប្រាកដ ប្រព័ន្ធនឹងស្រែកប្រាប់ជាសំឡេងខ្មែរឮៗ៖ «ទទួលបានប្រាក់ពី... ចំនួន... ដុល្លារ...»
+                  </p>
+                </div>
+              </div>
+
+              {/* Toggle Switch */}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !slipVoiceEnabled;
+                  setSlipVoiceEnabledState(next);
+                  setSlipVoiceEnabled(next);
+                  if (next) {
+                    testKhmerVoicePlayback('សំឡេងប្រកាស Slip ត្រូវបានបើក');
+                  }
+                }}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  slipVoiceEnabled ? 'bg-cyan-500' : 'bg-slate-700'
+                }`}
+                title={slipVoiceEnabled ? 'ចុចដើម្បីបិទសំឡេង' : 'ចុចដើម្បីបើកសំឡេង'}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    slipVoiceEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {slipVoiceEnabled && (
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in duration-200">
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <span className="text-xs text-slate-300 font-bold whitespace-nowrap">កម្រិតសំឡេង (Volume) ៖</span>
+                  <div className="flex items-center gap-2 flex-1 sm:w-44">
+                    <span className="text-xs text-slate-400">🔈</span>
+                    <input
+                      type="range"
+                      min="0.8"
+                      max="2.2"
+                      step="0.1"
+                      value={slipVoiceVolume}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setSlipVoiceVolumeState(val);
+                        setSlipVoiceVolume(val);
+                      }}
+                      className="w-full accent-cyan-400 cursor-pointer"
+                    />
+                    <span className="text-xs text-slate-400">🔊</span>
+                    <span className="text-xs font-mono font-bold text-cyan-300 min-w-[36px] text-right">
+                      {Math.round(slipVoiceVolume * 100)}%
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => testKhmerVoicePlayback()}
+                  className="w-full sm:w-auto bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer shadow-sm"
+                  title="សាកល្បងសំឡេងប្រកាស Slip ឥឡូវនេះ"
+                >
+                  <span>▶️ សាកល្បងសំឡេងខ្មែរ</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Section 3.5: Safety Guardrail - Strict Catalog vs Auto-Create Products */}
           <div className={`border rounded-2xl p-3.5 flex flex-col gap-2 transition-all ${
             strictCatalogMode
@@ -677,13 +802,27 @@ export function SystemSettingsModal({
                 </div>
               </div>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                geminiStatus.hasKey
+                geminiStatus.isCreditDepleted
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 animate-pulse'
+                  : geminiStatus.hasKey
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
                   : 'bg-amber-500/20 text-amber-300 border-amber-500/50'
               }`}>
-                {geminiStatus.hasKey ? '✅ សកម្ម (Active)' : '⚠️ មិនទាន់កំណត់'}
+                {geminiStatus.isCreditDepleted ? '⚠️ អស់ Credit (Error 402)' : geminiStatus.hasKey ? '✅ សកម្ម (Active)' : '⚠️ មិនទាន់កំណត់'}
               </span>
             </div>
+
+            {geminiStatus.isCreditDepleted && (
+              <div className="bg-rose-950/70 border border-rose-500/50 rounded-xl p-2.5 text-[11px] text-rose-200 space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-rose-300">
+                  <span>⚠️</span>
+                  <span>Gemini API Key បានអស់ Prepayment Credits (Error 402)</span>
+                </div>
+                <p className="text-slate-300 text-[10.5px] leading-relaxed">
+                  កូតា API Key បច្ចុប្បន្នបានអស់ហើយ។ លោកអ្នកអាចបង្កើត API Key ថ្មីដោយឥតគិតថ្លៃ (Free 100%) ពី Google AI Studio រួចបញ្ចូលក្នុងប្រអប់ខាងក្រោម ហើយចុច «រក្សាទុក»។
+                </p>
+              </div>
+            )}
 
             {geminiStatus.hasKey && (
               <div className="flex items-center justify-between bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-xl text-[11px]">
@@ -703,6 +842,15 @@ export function SystemSettingsModal({
                 placeholder={geminiStatus.hasKey ? 'បញ្ចូល Key ថ្មីដើម្បីប្តូរ...' : 'បញ្ចូល Gemini API Key (AIzaSy...)'}
                 className="flex-1 bg-slate-950 border border-indigo-500/50 focus:border-indigo-400 rounded-xl px-3 py-2 text-xs text-indigo-100 placeholder-slate-500 outline-none font-mono"
               />
+              <button
+                type="button"
+                disabled={isTestingGemini || (!geminiKeyInput.trim() && !geminiStatus.hasKey)}
+                onClick={handleTestGeminiKey}
+                title="ធ្វើតេស្ត Key ថាតើដំណើរការឬអត់"
+                className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 font-bold px-3 py-2 rounded-xl text-xs border border-slate-600 transition-all cursor-pointer shadow-sm"
+              >
+                {isTestingGemini ? '...' : '🧪 តេស្ត'}
+              </button>
               <button
                 type="button"
                 disabled={isSavingGemini || !geminiKeyInput.trim()}

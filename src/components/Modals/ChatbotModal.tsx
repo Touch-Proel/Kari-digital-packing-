@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from '../../utils/audio';
+import { announceSlipScanned } from '../../utils/khmerVoice';
 
 interface ChatbotConfig {
   enabled: boolean;
@@ -288,11 +289,19 @@ export function ChatbotModal({
         const data = await res.json();
         const replyTime = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-        if (data.result?.reply) {
+        if (data.result?.reply || data.result?.success) {
           playSuccessFanfare();
+          if (data.result.success) {
+            announceSlipScanned({
+              customer_name: simCustomerName,
+              paid_amount: data.result.invoice?.total_amount || 0,
+              currency: 'USD',
+              basket_no: data.result.invoice?.basket_no
+            });
+          }
           setChatMessages(prev => [
             ...prev,
-            { sender: 'bot', text: data.result.reply, time: replyTime, type: 'SLIP_VERIFIED' }
+            { sender: 'bot', text: data.result.reply || '✅ បានទទួល Slip ជោគជ័យ!', time: replyTime, type: 'SLIP_VERIFIED' }
           ]);
           if (data.result.success && onDataChanged) {
             onDataChanged();

@@ -475,6 +475,21 @@ Return strict JSON ONLY:
     bumpDataRevision();
     saveDatabaseToDisk();
 
+    // 🔊 Real-Time Notification & Spoken Audio Trigger
+    broadcastSSE('messenger:slip_scanned', {
+      id: newSlipItem.id,
+      customer_name: (targetInvoice && targetInvoice.facebook_name) || senderName,
+      paid_amount: paidAmount,
+      currency: 'USD',
+      bank_name: bankName,
+      basket_no: basketNoInSlip || (targetInvoice && targetInvoice.basket_no),
+      slip_url: savedSlipUrl,
+      trans_ref: transRef,
+      invoice_id: targetInvoice?.invoice_id,
+      status: initialStatus,
+      fraud_suspected: Boolean(fraudEval.fraud_warning || fraudEval.duplicate_warning)
+    });
+
     // Log the auto-scan event waiting for Admin
     addChatbotLog({
       type: 'SLIP_VERIFIED',

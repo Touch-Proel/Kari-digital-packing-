@@ -83,7 +83,7 @@ export async function aiSmartAuditFullBasket(
     stock: p.stock_qty
   }));
 
-  const apiKey = (process.env.GEMINI_API_KEY || settings.gemini_api_key || '').trim();
+  const apiKey = (settings.gemini_api_key || process.env.GEMINI_API_KEY || '').trim();
 
   if (!apiKey) {
     throw new Error('មិនទាន់មាន Gemini API Key នៅឡើយទេ។ សូមកំណត់ GEMINI_API_KEY នៅក្នុង Settings > Secrets ដើម្បីដំណើរការ AI!');
@@ -229,6 +229,10 @@ Return ONLY valid JSON:
     } catch (err: any) {
       lastError = err;
       const errMsg = String(err?.message || err || '');
+      if (errMsg.includes('402') || errMsg.includes('prepayment credits') || errMsg.includes('billing')) {
+        console.warn('[Gemini AI Notice]: Prepayment credits depleted (402). Falling back immediately to Cambodian rule auditor.');
+        break;
+      }
       if (!errMsg.includes('429') && !errMsg.includes('RESOURCE_EXHAUSTED')) {
         console.log(`[Gemini AI] Attempt with ${modelName} notice:`, errMsg.slice(0, 120));
       }

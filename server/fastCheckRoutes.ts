@@ -2,20 +2,42 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+// @ts-ignore
+import jsQR from 'jsqr';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db';
 import { Invoice } from './types';
 import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
 import { computeImageHash, getCachedOcr, setCachedOcr, isProcessed, markProcessed, markMultipleProcessed } from './ocrCache';
+import { broadcastSSE } from './packingRoutes';
 
 const router = Router();
 
-// Lazy-init Gemini client with dynamic API key support (env or UI settings)
+// Lazy-init Gemini client with dynamic API key support (custom UI key takes priority over env)
 let geminiClient: GoogleGenAI | null = null;
 let currentActiveKey: string = '';
 
-export function getGemini(): GoogleGenAI | null {
-  const key = (process.env.GEMINI_API_KEY || settings.gemini_api_key || '').trim();
+// Track credit depletion status (HTTP 402 Prepayment Credits Depleted)
+export let isCreditDepleted = false;
+export let depletedErrorMessage = '';
+export let lastDepletedAt: number | null = null;
+
+export function getActiveGeminiKey(): { key: string; source: 'custom' | 'env' | 'none' } {
+  const customKey = (settings.gemini_api_key || '').trim();
+  const envKey = (process.env.GEMINI_API_KEY || '').trim();
+
+  // User-provided custom key always takes precedence so user can override depleted env key
+  if (customKey) {
+    return { key: customKey, source: 'custom' };
+  }
+  if (envKey) {
+    return { key: envKey, source: 'env' };
+  }
+  return { key: '', source: 'none' };
+}
+
+export function getGemini(forceKey?: string): GoogleGenAI | null {
+  const { key } = forceKey ? { key: forceKey } : getActiveGeminiKey();
   if (!key) return null;
   if (!geminiClient || currentActiveKey !== key) {
     geminiClient = new GoogleGenAI({
@@ -33,9 +55,9 @@ export function getGemini(): GoogleGenAI | null {
 
 // GET /api/fast_check/gemini_status
 router.get('/gemini_status', (req: Request, res: Response) => {
+  const { key: activeKey, source: activeSource } = getActiveGeminiKey();
   const envKey = (process.env.GEMINI_API_KEY || '').trim();
   const dbKey = (settings.gemini_api_key || '').trim();
-  const activeKey = envKey || dbKey;
   
   let maskedKey = '';
   if (activeKey) {
@@ -47,9 +69,13 @@ router.get('/gemini_status', (req: Request, res: Response) => {
   res.json({
     success: true,
     hasKey: Boolean(activeKey),
-    isFromEnv: Boolean(envKey),
+    activeSource,
+    isFromEnv: activeSource === 'env',
     maskedKey,
-    hasCustomKey: Boolean(dbKey)
+    hasCustomKey: Boolean(dbKey),
+    isCreditDepleted,
+    depletedMessage: isCreditDepleted ? (depletedErrorMessage || 'Your prepayment credits are depleted. Please update or top up your Gemini API Key.') : null,
+    lastDepletedAt
   });
 });
 
@@ -66,23 +92,92 @@ router.post('/save_gemini_key', (req: Request, res: Response) => {
   // Invalidate cached client to force re-initialization with new key
   geminiClient = null;
   currentActiveKey = '';
+  // Reset credit depletion status upon saving key
+  isCreditDepleted = false;
+  depletedErrorMessage = '';
+  lastDepletedAt = null;
   
   saveDatabaseToDisk();
   bumpDataRevision();
 
+  const activeKeyInfo = getActiveGeminiKey();
   let maskedKey = '';
-  if (cleanKey) {
-    maskedKey = cleanKey.length > 8 
-      ? `${cleanKey.slice(0, 4)}••••••••${cleanKey.slice(-4)}`
+  if (activeKeyInfo.key) {
+    maskedKey = activeKeyInfo.key.length > 8 
+      ? `${activeKeyInfo.key.slice(0, 4)}••••••••${activeKeyInfo.key.slice(-4)}`
       : '••••••••';
   }
 
   res.json({
     success: true,
     message: cleanKey ? 'បានរក្សាទុក Gemini API Key រួចរាល់!' : 'បានលុប Gemini API Key រួចរាល់!',
-    hasKey: Boolean(cleanKey || process.env.GEMINI_API_KEY),
-    maskedKey
+    hasKey: Boolean(activeKeyInfo.key),
+    maskedKey,
+    isCreditDepleted: false
   });
+});
+
+// POST /api/fast_check/test_gemini_key
+router.post('/test_gemini_key', async (req: Request, res: Response) => {
+  const testKey = typeof req.body?.key === 'string' && req.body.key.trim()
+    ? req.body.key.trim()
+    : getActiveGeminiKey().key;
+
+  if (!testKey) {
+    return res.status(400).json({ success: false, error: 'មិនមាន API Key សម្រាប់ធ្វើតេស្តទេ (No API Key provided)' });
+  }
+
+  try {
+    const testAi = new GoogleGenAI({
+      apiKey: testKey,
+      httpOptions: {
+        headers: { 'User-Agent': 'aistudio-build' },
+      },
+    });
+
+    const response = await testAi.models.generateContent({
+      model: 'gemini-3.1-flash-lite',
+      contents: 'Ping. Reply OK in 1 word.',
+      config: {
+        temperature: 0.1,
+      }
+    });
+
+    const reply = response?.text?.trim() || '';
+    // Successful test clears depleted state if this was the active key
+    if (testKey === currentActiveKey || !settings.gemini_api_key) {
+      isCreditDepleted = false;
+      depletedErrorMessage = '';
+    }
+
+    return res.json({
+      success: true,
+      message: '✅ Gemini API Key ដំណើរការល្អ (Valid & Active)!',
+      reply
+    });
+  } catch (err: any) {
+    const msg = String(err?.message || (typeof err === 'object' ? JSON.stringify(err) : err));
+    const is402 = msg.includes('402') || msg.includes('prepayment credits are depleted') || (msg.includes('RESOURCE_EXHAUSTED') && msg.includes('billing'));
+    
+    if (is402) {
+      if (testKey === currentActiveKey || !settings.gemini_api_key) {
+        isCreditDepleted = true;
+        depletedErrorMessage = 'Prepayment credits are depleted (Error 402)';
+        lastDepletedAt = Date.now();
+      }
+      return res.json({
+        success: false,
+        isCreditDepleted: true,
+        error: '⚠️ Key នេះបានអស់ Prepayment Credits (Error 402)។ សូមបញ្ចូល Credit ឬប្តូរ Key ផ្សេង។'
+      });
+    }
+
+    return res.json({
+      success: false,
+      isCreditDepleted: false,
+      error: `មិនអាចភ្ជាប់ទៅ Gemini API បានទេ: ${msg.substring(0, 180)}`
+    });
+  }
 });
 
 // Check if extracted name is the store's receiving bank account name (e.g. Proel Toch / Kari Arnett)
@@ -687,13 +782,95 @@ export function matchInvoiceForSlip(
 }
 
 /**
+ * Offline QR Code Extractor for Bank Slips (using sharp + jsQR)
+ * Cambodian bank slips (ABA, ACLEDA, Bakong, Wing) frequently contain KHQR codes.
+ * This runs locally in ~5ms without needing external API credits!
+ */
+export async function tryExtractSlipFromQR(imageBuffer: Buffer): Promise<ExtractedSlipData | null> {
+  try {
+    const { data, info } = await sharp(imageBuffer)
+      .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const code = jsQR(new Uint8ClampedArray(data), info.width, info.height);
+    if (!code || !code.data) return null;
+
+    const rawQr = String(code.data).trim();
+    let bankName = '';
+    let amount = 0;
+    let currency: 'USD' | 'KHR' = 'USD';
+    let transRef = '';
+    let basketNo: string | undefined = undefined;
+
+    if (rawQr.includes('abaa') || rawQr.includes('payway.com.kh') || rawQr.includes('aba')) {
+      bankName = 'ABA Bank';
+    } else if (rawQr.includes('aclb') || rawQr.includes('acleda')) {
+      bankName = 'ACLEDA Bank';
+    } else if (rawQr.includes('wing')) {
+      bankName = 'Wing Bank';
+    } else if (rawQr.includes('bakong')) {
+      bankName = 'Bakong';
+    } else if (rawQr.includes('cadi') || rawQr.includes('canadia')) {
+      bankName = 'Canadia Bank';
+    }
+
+    // Try parsing EMV KHQR tags if present (Tag 54 = amount, Tag 53 = 840/116)
+    const amtMatch = rawQr.match(/54(\d{2})([0-9.]+)/);
+    if (amtMatch && amtMatch[2]) {
+      const parsedAmt = parseFloat(amtMatch[2]);
+      if (!isNaN(parsedAmt) && parsedAmt > 0) {
+        amount = parsedAmt;
+      }
+    }
+
+    const currMatch = rawQr.match(/53(\d{2})(\d{3})/);
+    if (currMatch && currMatch[2]) {
+      if (currMatch[2] === '116') {
+        currency = 'KHR';
+      } else if (currMatch[2] === '840') {
+        currency = 'USD';
+      }
+    }
+
+    // Reference / Bill number in Tag 62 (Additional Data Field)
+    const refMatch = rawQr.match(/62(\d{2})(.*?)(?:63[0-9A-Fa-f]{4}|$)/);
+    if (refMatch && refMatch[2]) {
+      transRef = refMatch[2].substring(0, 32);
+      const bMatch = transRef.match(/(?:basket|b|order|#)?\s*(\d{2,5})/i);
+      if (bMatch) {
+        basketNo = bMatch[1];
+      }
+    }
+
+    if (amount > 0 || bankName) {
+      return {
+        customer_name: '',
+        paid_amount: currency === 'KHR' && amount > 500 ? Math.round((amount / 4100) * 100) / 100 : amount,
+        currency: 'USD',
+        bank_name: bankName || 'Bakong KHQR',
+        trans_ref: transRef || undefined,
+        basket_no: basketNo,
+        fraud_suspected: false,
+        fraud_reasons: []
+      };
+    }
+  } catch {
+    // Fail silently to normal flow
+  }
+  return null;
+}
+
+/**
  * Robust OCR Helper with Multi-Model Fallback for 503 / 429 Demand Spikes
+ * Handles 402 Prepayment Depleted gracefully without spamming error logs.
  */
 export async function callGeminiSlipExtraction(
   ai: GoogleGenAI,
   imagePart: { inlineData: { mimeType: string; data: string } },
   textPart: { text: string }
-): Promise<{ text: string; error?: string }> {
+): Promise<{ text: string; error?: string; isCreditDepleted?: boolean }> {
   // Ultra low-cost high-accuracy models with high throughput (Gemini 3 series)
   const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
   let lastErrorMessage = '';
@@ -720,12 +897,29 @@ export async function callGeminiSlipExtraction(
       const response = (await Promise.race([genPromise, timeoutPromise])) as GenerateContentResponse;
       const text = response?.text?.trim() || '';
       if (text) {
+        // Success clears depleted flag
+        if (isCreditDepleted) {
+          isCreditDepleted = false;
+          depletedErrorMessage = '';
+        }
         return { text };
       }
     } catch (err: any) {
       const msg = String(err?.message || (typeof err === 'object' ? JSON.stringify(err) : err));
       lastErrorMessage = msg;
-      console.warn(`[Gemini Slip Scan on ${model}]:`, msg);
+
+      // Check if 402 Prepayment credits depleted
+      const is402 = msg.includes('402') || msg.includes('prepayment credits are depleted') || (msg.includes('RESOURCE_EXHAUSTED') && msg.includes('billing'));
+      if (is402) {
+        isCreditDepleted = true;
+        depletedErrorMessage = 'Your prepayment credits are depleted. Please update or top up your Gemini API Key.';
+        lastDepletedAt = Date.now();
+        console.warn(`[Gemini AI Notice]: Prepayment credits depleted (402). OCR paused until API key is renewed or updated.`);
+        // Stop retrying other candidates because the API key itself has no credits
+        return { text: '', error: 'PREPAYMENT_CREDITS_DEPLETED', isCreditDepleted: true };
+      }
+
+      console.warn(`[Gemini Slip Scan on ${model}]:`, msg.substring(0, 160));
     }
   }
 
@@ -846,12 +1040,27 @@ Return ONLY a JSON object:
 }`
         };
 
-        const { text: rawText, error: extractionError } = await callGeminiSlipExtraction(ai, imagePart, textPart);
+        const { text: rawText, error: extractionError, isCreditDepleted: scanDepleted } = await callGeminiSlipExtraction(ai, imagePart, textPart);
 
         if (extractionError) {
-          errorMessage = extractionError.includes('503') || extractionError.includes('high demand') || extractionError.includes('UNAVAILABLE')
-            ? 'សេវា AI កំពុងមមាញឹកបណ្តោះអាសន្ន (503 High Demand) - សូមចុចស្កេនម្តងទៀត ឬរើសកន្ត្រកដោយផ្ទាល់ដៃ'
-            : 'មិនអាចវិភាគរូបភាពបាន (សូមចុចស្កេនម្តងទៀត ឬរើសកន្ត្រកដោយផ្ទាល់ដៃ)';
+          if (extractionError === 'PREPAYMENT_CREDITS_DEPLETED' || scanDepleted) {
+            errorMessage = '⚠️ Gemini API Key អស់ Credit / កូតា (Error 402 Depleted Credits)។ សូមបញ្ចូល API Key ថ្មី (Free Key) នៅក្នុង Settings ឬ Fast Check Slips ឬរើសកន្ត្រកដោយផ្ទាល់ដៃ';
+          } else if (extractionError.includes('503') || extractionError.includes('high demand') || extractionError.includes('UNAVAILABLE')) {
+            errorMessage = 'សេវា AI កំពុងមមាញឹកបណ្តោះអាសន្ន (503 High Demand) - សូមចុចស្កេនម្តងទៀត ឬរើសកន្ត្រកដោយផ្ទាល់ដៃ';
+          } else {
+            errorMessage = 'មិនអាចវិភាគរូបភាពបាន (សូមចុចស្កេនម្តងទៀត ឬរើសកន្ត្រកដោយផ្ទាល់ដៃ)';
+          }
+
+          // Offline fallback: Try extracting KHQR from the slip image directly
+          if (rawBase64) {
+            try {
+              const qrExtracted = await tryExtractSlipFromQR(Buffer.from(rawBase64, 'base64'));
+              if (qrExtracted && qrExtracted.paid_amount > 0) {
+                extracted = qrExtracted;
+                errorMessage = ''; // Successfully recovered via QR!
+              }
+            } catch {}
+          }
         }
 
         if (rawText) {
@@ -892,7 +1101,20 @@ Return ONLY a JSON object:
           }
         }
       } else if (!ai) {
-        errorMessage = 'មិនទាន់កំណត់ GEMINI_API_KEY ទេ';
+        if (rawBase64) {
+          try {
+            const qrExtracted = await tryExtractSlipFromQR(Buffer.from(rawBase64, 'base64'));
+            if (qrExtracted && qrExtracted.paid_amount > 0) {
+              extracted = qrExtracted;
+            } else {
+              errorMessage = 'មិនទាន់កំណត់ GEMINI_API_KEY ទេ';
+            }
+          } catch {
+            errorMessage = 'មិនទាន់កំណត់ GEMINI_API_KEY ទេ';
+          }
+        } else {
+          errorMessage = 'មិនទាន់កំណត់ GEMINI_API_KEY ទេ';
+        }
       }
 
       // If non-bank image, do not auto-match
@@ -960,7 +1182,9 @@ Return ONLY a JSON object:
       matched_count: results.filter(r => r.status === 'MATCHED').length,
       ambiguous_count: results.filter(r => r.status === 'MULTIPLE_CANDIDATES').length,
       unmatched_count: results.filter(r => r.status === 'NOT_FOUND').length,
-      results
+      results,
+      isCreditDepleted,
+      depletedMessage: isCreditDepleted ? depletedErrorMessage : undefined
     });
   } catch (err: any) {
     console.error('Error in /scan_slips:', err);
@@ -1675,6 +1899,41 @@ Output strictly raw JSON with these fields.`
                       };
 
                       const geminiRes = await callGeminiSlipExtraction(ai, imagePart, textPart);
+                      if (geminiRes.isCreditDepleted || geminiRes.error === 'PREPAYMENT_CREDITS_DEPLETED') {
+                        // Attempt offline QR extraction as fallback before breaking
+                        try {
+                          const qrExtracted = await tryExtractSlipFromQR(Buffer.from(rawBase64, 'base64'));
+                          if (qrExtracted && qrExtracted.paid_amount > 0) {
+                            isGenuineBankSlip = true;
+                            extracted = {
+                              ...qrExtracted,
+                              customer_name: sanitizeCustomerName(qrExtracted.customer_name, senderName)
+                            };
+                            if (imgHash) {
+                              setCachedOcr(imgHash, extracted, [imgUrl, m.id, savedSlipUrl]);
+                            }
+                          }
+                        } catch {}
+                        break;
+                      }
+
+                      if (!geminiRes.text && !isGenuineBankSlip) {
+                        // If AI returned empty or failed, try offline QR extraction
+                        try {
+                          const qrExtracted = await tryExtractSlipFromQR(Buffer.from(rawBase64, 'base64'));
+                          if (qrExtracted && qrExtracted.paid_amount > 0) {
+                            isGenuineBankSlip = true;
+                            extracted = {
+                              ...qrExtracted,
+                              customer_name: sanitizeCustomerName(qrExtracted.customer_name, senderName)
+                            };
+                            if (imgHash) {
+                              setCachedOcr(imgHash, extracted, [imgUrl, m.id, savedSlipUrl]);
+                            }
+                          }
+                        } catch {}
+                      }
+
                       if (geminiRes.text) {
                         try {
                           const cleaned = geminiRes.text.replace(/```json/gi, '').replace(/```/gi, '').trim();
@@ -1792,6 +2051,21 @@ Output strictly raw JSON with these fields.`
                   seenUrls.add(imgUrl);
                   seenIds.add(newSlipItem.id);
                   newSlipsFound++;
+
+                  // 🔊 Real-Time Notification & Spoken Audio Trigger
+                  broadcastSSE('messenger:slip_scanned', {
+                    id: newSlipItem.id,
+                    customer_name: extracted.customer_name || senderName,
+                    paid_amount: extracted.paid_amount,
+                    currency: extracted.currency || 'USD',
+                    bank_name: extracted.bank_name || 'ធនាគារ',
+                    basket_no: extracted.basket_no || matchRes.matched?.basket_no,
+                    slip_url: savedSlipUrl,
+                    trans_ref: extracted.trans_ref,
+                    invoice_id: matchRes.matched?.invoice_id,
+                    status: statusFinal,
+                    fraud_suspected: Boolean(fraudEval.fraud_warning || fraudEval.duplicate_warning)
+                  });
 
                   // Realtime notification: Notify connected clients immediately
                   bumpDataRevision();
