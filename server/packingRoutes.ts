@@ -4583,6 +4583,8 @@ router.post('/print_agent/heartbeat', (req: Request, res: Response) => {
   res.json({ success: true, timestamp: Date.now(), pending: pendingAgentJobs.length });
 });
 
+const recentServerPrintJobs = new Map<string, number>();
+
 // POST /api/print_agent/job - Enqueue print job from mobile phone or web UI (Instant <5ms dispatch)
 router.post('/print_agent/job', (req: Request, res: Response) => {
   try {
@@ -4590,6 +4592,28 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
 
     if (!escpos_base64) {
       return res.status(400).json({ success: false, error: 'ទិន្នន័យ ESC/POS base64 ត្រូវបានទាមទារ!' });
+    }
+
+    const cleanBasket = String(basket_no || invoice_id || '').trim().replace(/^#/, '');
+    const jobKey = cleanBasket ? `basket_${cleanBasket}` : `payload_${String(escpos_base64).slice(0, 100)}`;
+    const now = Date.now();
+
+    // SERVER-SIDE DEDUPLICATION:
+    // If the same basket was enqueued within the last 60 seconds, do not re-enqueue or broadcast again!
+    const lastDispatched = recentServerPrintJobs.get(jobKey);
+    if (lastDispatched && (now - lastDispatched) < 60000) {
+      console.log(`[Shop Agent Server] Blocked duplicate print job for Basket #${cleanBasket} (${Math.round((now - lastDispatched) / 1000)}s ago)`);
+      return res.json({
+        success: true,
+        duplicate_prevented: true,
+        message: `កន្ត្រក #${cleanBasket} ត្រូវបានបញ្ជូនទៅព្រីនរួចរាល់ហើយ (ទប់ស្កាត់ការព្រីនជាន់គ្នា)`
+      });
+    }
+    recentServerPrintJobs.set(jobKey, now);
+
+    // Clean up stale entries (> 5 minutes)
+    for (const [k, t] of recentServerPrintJobs.entries()) {
+      if (now - t > 300000) recentServerPrintJobs.delete(k);
     }
 
     // Auto stage invoice (UNPICKED -> STAGED)
@@ -4620,7 +4644,7 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
       pendingAgentJobs.shift();
     }
 
-    // 2. Dispatch immediately to ALL currently waiting long-poll connections!
+    // 2. Dispatch immediately to waiting long-poll connections!
     while (waitingAgentPollers.length > 0) {
       const poller = waitingAgentPollers.shift();
       if (poller) {
@@ -4630,9 +4654,15 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
       }
     }
 
-    // Forward to Store VPS (185.2.103.93:3000) only if not already running on VPS
-    const currentHost = String(req.headers['x-forwarded-host'] || req.get('host') || '');
-    if (!currentHost.includes('185.2.103.93')) {
+    // Forward to Store VPS ONLY when running on Google Cloud Run (preview/dev environment)
+    // NEVER forward to itself if already running on the VPS (185.2.103.93, chatbotkh.com, localhost)
+    const currentHost = String(req.headers['x-forwarded-host'] || req.get('host') || '').toLowerCase();
+    const isAlreadyOnVps = currentHost.includes('185.2.103.93') ||
+                           currentHost.includes('chatbotkh.com') ||
+                           currentHost.includes('localhost') ||
+                           currentHost.includes('127.0.0.1');
+
+    if (!isAlreadyOnVps && currentHost.includes('run.app')) {
       fetch('http://185.2.103.93:3000/api/print_agent/job', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4688,9 +4718,9 @@ router.get('/print_agent/poll', (req: Request, res: Response) => {
     agentHeartbeat.last_seen = Date.now();
   }
 
-  // If there are pending jobs, return them
+  // If there are pending jobs, pop them immediately so subsequent pollers do not get duplicate jobs!
   if (pendingAgentJobs.length > 0) {
-    const jobs = [...pendingAgentJobs];
+    const jobs = pendingAgentJobs.splice(0, pendingAgentJobs.length);
     return res.json({ success: true, jobs });
   }
 

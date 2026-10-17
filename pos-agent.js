@@ -144,28 +144,39 @@ function downloadAttachmentWithRetry(url, maxRetries = 5) {
 const crypto = require('crypto');
 const recentPrintJobs = new Map();
 
-function isDuplicateJob(title, buffer, ttlSeconds = 15) {
+function isDuplicateJob(title, buffer, ttlSeconds = 180) {
   const now = Date.now();
-  let key = title;
-  if (title.includes('#')) {
+  const keys = [];
+
+  if (title) {
     const match = title.match(/#(\w+)/);
-    if (match) key = `basket_${match[1]}`;
-  } else if (buffer && buffer.length > 0) {
-    key = `hash_${crypto.createHash('md5').update(buffer).digest('hex')}`;
+    if (match) keys.push(`basket_${match[1]}`);
+    else keys.push(`title_${title.trim()}`);
+  }
+  if (buffer && buffer.length > 0) {
+    keys.push(`hash_${crypto.createHash('md5').update(buffer).digest('hex')}`);
   }
 
-  // Cleanup old keys
+  if (keys.length === 0) return false;
+
+  // Cleanup old keys older than 10 minutes
   for (const [k, time] of recentPrintJobs.entries()) {
-    if (now - time > 60000) recentPrintJobs.delete(k);
+    if (now - time > 600000) recentPrintJobs.delete(k);
   }
 
-  if (recentPrintJobs.has(key)) {
-    if (now - recentPrintJobs.get(key) < ttlSeconds * 1000) {
-      return true;
+  for (const k of keys) {
+    if (recentPrintJobs.has(k)) {
+      if (now - recentPrintJobs.get(k) < ttlSeconds * 1000) {
+        // Refresh timestamp to block ongoing retries/echoes from passing through
+        recentPrintJobs.set(k, now);
+        return true;
+      }
     }
   }
 
-  recentPrintJobs.set(key, now);
+  for (const k of keys) {
+    recentPrintJobs.set(k, now);
+  }
   return false;
 }
 
@@ -207,8 +218,8 @@ async function handleMessage(eventData) {
     }
 
     if (rawBuffer && rawBuffer.length > 0) {
-      if (isDuplicateJob(title, rawBuffer, 15)) {
-        console.log(`⏩ [DUPLICATE BLOCKED] ${title} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)`);
+      if (isDuplicateJob(title, rawBuffer, 180)) {
+        console.log(`⏩ [DUPLICATE BLOCKED] ${title} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ៣នាទីមុន)`);
         return;
       }
       await printRawEscpos(rawBuffer);
@@ -273,7 +284,7 @@ function pollAppServer() {
             if (job && job.escpos_base64) {
               const buffer = Buffer.from(job.escpos_base64, 'base64');
               const basketTitle = `Basket #${job.basket_no || job.invoice_id}`;
-              if (!isDuplicateJob(basketTitle, buffer, 15)) {
+              if (!isDuplicateJob(basketTitle, buffer, 180)) {
                 console.log(`\n⚡ [DIRECT APP JOB] ${basketTitle} - ${job.customer_name || ''}`);
                 printRawEscpos(buffer).then(() => {
                   // Send ack

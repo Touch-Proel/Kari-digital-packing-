@@ -52,13 +52,20 @@ else:
 if not SERVER_URL:
     SERVER_URL = DEFAULT_SERVER_URL
 
-# Multi-Server Mesh: Poll and Heartbeat to both Store VPS & AI Studio Cloud
-candidate_urls = [
-    SERVER_URL,
-    "http://185.2.103.93:3000",
-    "https://ais-pre-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app",
-    "https://ais-dev-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app"
-]
+# Multi-Server Mesh: Poll and Heartbeat to Store VPS & AI Studio Cloud
+# If SERVER_URL is already chatbotkh.com or the VPS IP, don't poll the same host twice!
+is_vps_target = "chatbotkh.com" in SERVER_URL or "185.2.103.93" in SERVER_URL
+if is_vps_target:
+    candidate_urls = [
+        SERVER_URL,
+        "https://ais-pre-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app"
+    ]
+else:
+    candidate_urls = [
+        SERVER_URL,
+        "http://185.2.103.93:3000",
+        "https://ais-pre-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app"
+    ]
 ACTIVE_SERVERS = []
 for u in candidate_urls:
     clean_u = u.rstrip("/") if u else ""
@@ -283,31 +290,39 @@ import time
 import hashlib
 
 recent_print_jobs = {} # {key: timestamp}
+recent_job_lock = threading.Lock()
 
-def is_duplicate_job(basket_no=None, binary_data=None, ttl_seconds=15):
+def is_duplicate_job(basket_no=None, binary_data=None, ttl_seconds=180):
     """Prevent duplicate printing of the same basket/receipt within ttl_seconds across all channels."""
     now = time.time()
     
-    key = None
-    if basket_no and str(basket_no).strip():
-        key = f"basket_{str(basket_no).strip()}"
-    elif binary_data and len(binary_data) > 0:
-        key = f"hash_{hashlib.md5(binary_data).hexdigest()}"
+    keys = []
+    if basket_no:
+        clean_basket = str(basket_no).strip().lstrip('#')
+        if clean_basket:
+            keys.append(f"basket_{clean_basket}")
+    if binary_data and len(binary_data) > 0:
+        keys.append(f"hash_{hashlib.md5(binary_data).hexdigest()}")
 
-    if not key:
+    if not keys:
         return False
 
-    # Clean up entries older than 60 seconds
-    stale_keys = [k for k, t in recent_print_jobs.items() if now - t > 60]
-    for k in stale_keys:
-        recent_print_jobs.pop(k, None)
+    with recent_job_lock:
+        # Clean up entries older than 600 seconds (10 mins)
+        stale_keys = [k for k, t in recent_print_jobs.items() if now - t > 600]
+        for k in stale_keys:
+            recent_print_jobs.pop(k, None)
 
-    if key in recent_print_jobs:
-        if now - recent_print_jobs[key] < ttl_seconds:
-            return True
+        for k in keys:
+            if k in recent_print_jobs:
+                if now - recent_print_jobs[k] < ttl_seconds:
+                    # Refresh timestamp to block ongoing retries/echoes from passing through
+                    recent_print_jobs[k] = now
+                    return True
 
-    recent_print_jobs[key] = now
-    return False
+        for k in keys:
+            recent_print_jobs[k] = now
+        return False
 
 class LocalPrintHandler(http.server.BaseHTTPRequestHandler):
     """Direct HTTP Server for instant Wi-Fi printing from staff phones without cloud relay."""
@@ -349,9 +364,9 @@ class LocalPrintHandler(http.server.BaseHTTPRequestHandler):
             
             raw_bytes = base64.b64decode(escpos_base64) if escpos_base64 else None
 
-            # Deduplication check
-            if is_duplicate_job(basket_no, raw_bytes, ttl_seconds=15):
-                print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no} (Wi-Fi Direct) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+            # Deduplication check (3-minute guard against echoes and network retries)
+            if is_duplicate_job(basket_no, raw_bytes, ttl_seconds=180):
+                print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no} (Wi-Fi Direct) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ៣នាទីមុន)")
                 return
 
             print(f"📥 [WI-FI DIRECT JOB] Basket #{basket_no} - {cust} (ល្បឿនលឿនក្នុងហាង)")
@@ -501,8 +516,8 @@ def app_server_poll_worker(target_server_url):
                         
                         raw_bytes = base64.b64decode(b64) if b64 else None
 
-                        if is_duplicate_job(basket, raw_bytes, ttl_seconds=15):
-                            print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+                        if is_duplicate_job(basket, raw_bytes, ttl_seconds=180):
+                            print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ៣នាទីមុន)")
                             try:
                                 ack_payload = json.dumps({"job_id": job_id, "status": "SKIPPED_DUPLICATE"}).encode("utf-8")
                                 req_ack = urllib.request.Request(f"{target_server_url}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
@@ -536,6 +551,8 @@ def ntfy_poll_worker():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     last_poll_time = int(time.time()) - 30
+    seen_ntfy_ids = set()
+
     while True:
         try:
             poll_url = f"https://ntfy.sh/{JOBS_TOPIC}/json?poll=1&since={last_poll_time}"
@@ -550,6 +567,14 @@ def ntfy_poll_worker():
                         try:
                             event_data = json.loads(line)
                             if event_data.get("event") == "message":
+                                event_id = event_data.get("id")
+                                if event_id:
+                                    if event_id in seen_ntfy_ids:
+                                        continue
+                                    seen_ntfy_ids.add(event_id)
+                                    if len(seen_ntfy_ids) > 1000:
+                                        seen_ntfy_ids.clear()
+
                                 event_time = event_data.get("time")
                                 if event_time and event_time > last_poll_time:
                                     last_poll_time = event_time
@@ -672,8 +697,8 @@ def process_message(data):
                 if m:
                     basket_no = m.group(1)
 
-            if is_duplicate_job(basket_no, binary_escpos, ttl_seconds=15):
-                print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no or title} (Cloud Relay) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+            if is_duplicate_job(basket_no, binary_escpos, ttl_seconds=180):
+                print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket_no or title} (Cloud Relay) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ៣នាទីមុន)")
                 return
 
             print_raw_escpos(binary_escpos)
