@@ -25,6 +25,9 @@ import urllib.error
 import http.server
 import socketserver
 
+# Set global default socket timeout so no urllib connection can ever freeze or hang indefinitely!
+socket.setdefaulttimeout(25.0)
+
 # ----------------- CONFIGURATION -----------------
 DEFAULT_SERVER_URL = "http://185.2.103.93:3000"
 DEFAULT_PRINTER_TARGET = "USB"
@@ -444,15 +447,22 @@ def print_raw_escpos(binary_data):
                 pass
 
 
+last_poll_activity = {}
+poll_status_lock = threading.Lock()
+
 def _send_one_server_heartbeat(s_url, payload):
     try:
         req_app = urllib.request.Request(
             f"{s_url}/api/print_agent/heartbeat",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) POS-Agent/2.0",
+                "Connection": "close"
+            },
             method="POST"
         )
-        with urllib.request.urlopen(req_app, timeout=2.5):
+        with urllib.request.urlopen(req_app, timeout=8.0):
             pass
     except Exception:
         pass
@@ -468,7 +478,7 @@ def send_heartbeat_once():
         "status": "online"
     }).encode("utf-8")
 
-    # 1. Concurrently ping App Servers in background threads (0ms blocking time!)
+    # 1. Concurrently ping App Servers in background threads
     for s_url in ACTIVE_SERVERS:
         t = threading.Thread(target=_send_one_server_heartbeat, args=(s_url, payload), daemon=True)
         t.start()
@@ -483,11 +493,12 @@ def send_heartbeat_once():
                     "Title": "heartbeat",
                     "Tags": "heartpulse",
                     "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0"
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) POS-Agent/2.0",
+                    "Connection": "close"
                 },
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=3.5):
+            with urllib.request.urlopen(req, timeout=8.0):
                 pass
         except Exception:
             pass
@@ -498,12 +509,30 @@ def send_heartbeat_once():
 
 
 def app_server_poll_worker(target_server_url):
-    """Poll a dedicated App Server endpoint continuously (Zero Rate Limit)."""
+    """Poll a dedicated App Server endpoint continuously (Zero Rate Limit & Continuous Auto-Reconnect)."""
+    headers = {
+        "User-Agent": "POS-Agent-Python/2.0 (Windows; Persistent)",
+        "Connection": "close",
+        "Cache-Control": "no-cache"
+    }
+
+    last_log_time = 0
+
     while True:
         try:
             url = f"{target_server_url}/api/print_agent/poll"
-            req = urllib.request.Request(url, headers={"User-Agent": "POS-Agent-Python/1.0"})
-            with urllib.request.urlopen(req, timeout=35) as resp:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=25.0) as resp:
+                now = time.time()
+                with poll_status_lock:
+                    last_poll_activity[target_server_url] = now
+
+                # Print periodic keepalive log so user knows the terminal connection is 100% active
+                if now - last_log_time >= 60:
+                    now_str = time.strftime("%H:%M:%S")
+                    print(f"🟢 [ACTIVE & LISTENING] {now_str} — ភ្ជាប់ជាប់ជានិច្ចជាមួយ App Server ({target_server_url})")
+                    last_log_time = now
+
                 if resp.status == 200:
                     raw_text = resp.read().decode("utf-8")
                     data = json.loads(raw_text)
@@ -520,8 +549,8 @@ def app_server_poll_worker(target_server_url):
                             print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ៣នាទីមុន)")
                             try:
                                 ack_payload = json.dumps({"job_id": job_id, "status": "SKIPPED_DUPLICATE"}).encode("utf-8")
-                                req_ack = urllib.request.Request(f"{target_server_url}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
-                                with urllib.request.urlopen(req_ack, timeout=4):
+                                req_ack = urllib.request.Request(f"{target_server_url}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json", "Connection": "close"}, method="POST")
+                                with urllib.request.urlopen(req_ack, timeout=5.0):
                                     pass
                             except Exception:
                                 pass
@@ -532,17 +561,20 @@ def app_server_poll_worker(target_server_url):
                             success = print_raw_escpos(raw_bytes)
                             try:
                                 ack_payload = json.dumps({"job_id": job_id, "status": "PRINTED" if success else "FAILED"}).encode("utf-8")
-                                req_ack = urllib.request.Request(f"{target_server_url}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
-                                with urllib.request.urlopen(req_ack, timeout=4):
+                                req_ack = urllib.request.Request(f"{target_server_url}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json", "Connection": "close"}, method="POST")
+                                with urllib.request.urlopen(req_ack, timeout=5.0):
                                     pass
                             except Exception:
                                 pass
         except urllib.error.HTTPError:
-            time.sleep(3)
+            time.sleep(2)
         except socket.timeout:
+            # Expected on 15s long-poll without jobs, immediately loop back
+            with poll_status_lock:
+                last_poll_activity[target_server_url] = time.time()
             continue
         except Exception:
-            time.sleep(3)
+            time.sleep(2)
 
 
 def ntfy_poll_worker():
@@ -593,10 +625,9 @@ def ntfy_poll_worker():
 
 
 def heartbeat_loop():
-    """Send heartbeat every 15 seconds so the mobile phone knows the agent is online."""
+    """Send heartbeat every 10 seconds so the mobile phone and server know the agent is continuously online."""
     first = True
     last_logged = 0
-    backoff = 15
     while True:
         try:
             send_heartbeat_once()
@@ -606,18 +637,12 @@ def heartbeat_loop():
                 print(f"💓 [HEARTBEAT OK] ភ្ជាប់ទៅកាន់ Cloud Server ជោគជ័យ ({now_str}) ➡️ ទូរស័ព្ទដៃនឹងបង្ហាញថា [ONLINE]!")
                 first = False
                 last_logged = now
-                backoff = 15
             elif now - last_logged >= 60:
                 print(f"💓 [AGENT ACTIVE] {now_str} — កំពុងរង់ចាំការងារព្រីន...")
                 last_logged = now
-            time.sleep(backoff)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(30)
-            else:
-                time.sleep(15)
+            time.sleep(10)
         except Exception:
-            time.sleep(15)
+            time.sleep(10)
 
 
 def download_attachment_with_retry(file_url, max_retries=5):
@@ -728,29 +753,45 @@ def main():
     print("🚀 កំពុងដំណើរការ Multi-Server Mesh & Local Wi-Fi Server...")
     
     # Start direct App Server Polling threads for all servers in mesh
+    active_poll_threads = {}
     for s_url in ACTIVE_SERVERS:
         print(f"🚀 [SERVER SYNC] ភ្ជាប់ទៅកាន់ App Server ៖ {s_url}")
         t_serv = threading.Thread(target=app_server_poll_worker, args=(s_url,), daemon=True)
         t_serv.start()
+        active_poll_threads[s_url] = t_serv
 
-    # Start robust atomic ntfy.sh poll worker (Zero 502 Bad Gateway errors!)
+    # Start robust atomic ntfy.sh poll worker
     t_ntfy = threading.Thread(target=ntfy_poll_worker, daemon=True)
     t_ntfy.start()
 
-    # Start local HTTP server thread in background (for 10+ staff phones on Wi-Fi)
+    # Start local HTTP server thread in background (for staff phones on Wi-Fi)
     t_local = threading.Thread(target=start_local_server, daemon=True)
     t_local.start()
 
-    # Start heartbeat thread in background
-    t = threading.Thread(target=heartbeat_loop, daemon=True)
-    t.start()
+    # Start continuous heartbeat thread (10s intervals)
+    t_hb = threading.Thread(target=heartbeat_loop, daemon=True)
+    t_hb.start()
 
     print(f"🟢 [ONLINE] Print Agent បានភ្ជាប់ជោគជ័យ! រង់ចាំទទួលការបញ្ជាព្រីនពីទូរស័ព្ទដៃ...\n")
 
-    # Clean keep-alive loop (Zero 502 Bad Gateway spam)
+    # Watchdog loop: runs forever while terminal is open, automatically reviving any stalled threads
     while True:
         try:
-            time.sleep(1)
+            time.sleep(5)
+            # 1. Watchdog for app server poll workers
+            for s_url, th in list(active_poll_threads.items()):
+                if not th.is_alive():
+                    print(f"⚠️ [WATCHDOG] Polling thread for {s_url} was lost. Auto-restarting worker...")
+                    new_th = threading.Thread(target=app_server_poll_worker, args=(s_url,), daemon=True)
+                    new_th.start()
+                    active_poll_threads[s_url] = new_th
+
+            # 2. Watchdog for heartbeat thread
+            if not t_hb.is_alive():
+                print(f"⚠️ [WATCHDOG] Heartbeat thread was lost. Auto-restarting...")
+                t_hb = threading.Thread(target=heartbeat_loop, daemon=True)
+                t_hb.start()
+
         except KeyboardInterrupt:
             print("\n🛑 Agent stopped by user.")
             sys.exit(0)

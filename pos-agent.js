@@ -76,24 +76,39 @@ function sendHeartbeat() {
     status: 'online'
   });
 
-  const req = https.request(`https://ntfy.sh/${HB_TOPIC}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Title': 'heartbeat',
-      'Tags': 'heartpulse',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-  }, (res) => {
-    if (res.statusCode === 200) {
-      // heartbeats ok
-    } else if (res.statusCode === 429) {
-      console.log('⏳ [429 RATE LIMIT] ntfy.sh busy. Pausing heartbeat...');
-    }
-  });
-  req.on('error', () => {});
-  req.write(payload);
-  req.end();
+  // 1. Send heartbeat directly to App Server
+  try {
+    const urlObj = new URL(`${SERVER_URL}/api/print_agent/heartbeat`);
+    const client = urlObj.protocol === 'https:' ? https : http;
+    const srvReq = client.request(urlObj.href, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) POS-Agent/2.0',
+        'Connection': 'close'
+      }
+    });
+    srvReq.on('error', () => {});
+    srvReq.write(payload);
+    srvReq.end();
+  } catch {}
+
+  // 2. Public relay ping
+  try {
+    const req = https.request(`https://ntfy.sh/${HB_TOPIC}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Title': 'heartbeat',
+        'Tags': 'heartpulse',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) POS-Agent/2.0',
+        'Connection': 'close'
+      }
+    });
+    req.on('error', () => {});
+    req.write(payload);
+    req.end();
+  } catch {}
 }
 
 function downloadAttachmentWithRetry(url, maxRetries = 5) {
@@ -317,7 +332,7 @@ function pollAppServer() {
 console.log(`🚀 [SERVER SYNC] App Server ៖ ${SERVER_URL}`);
 console.log('🚀 កំពុងតភ្ជាប់ទៅកាន់ Cloud Relay & App Server...');
 sendHeartbeat();
-setInterval(sendHeartbeat, 15000);
+setInterval(sendHeartbeat, 10000);
 listenForJobs();
 pollAppServer();
 console.log('🟢 [ONLINE] Print Agent បានភ្ជាប់ជោគជ័យ! រង់ចាំទទួលការបញ្ជាព្រីនពីទូរស័ព្ទដៃ...\n');

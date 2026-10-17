@@ -4536,7 +4536,7 @@ refreshVpsStatusInBackground();
 
 // GET /api/print_agent/status - Check if shop agent is currently online (Instant 0ms from memory cache)
 router.get('/print_agent/status', (_req: Request, res: Response) => {
-  const isOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat.last_seen < 65000);
+  const isOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat.last_seen < 180000);
   if (isOnline && agentHeartbeat) {
     return res.json({
       success: true,
@@ -4638,19 +4638,29 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
       status: 'PENDING'
     };
 
-    // 1. Queue job in pendingAgentJobs so any reconnecting poller receives it
-    pendingAgentJobs.push(job);
-    if (pendingAgentJobs.length > 50) {
-      pendingAgentJobs.shift();
-    }
+    const isOnline = Boolean(
+      (agentHeartbeat && Date.now() - agentHeartbeat.last_seen < 180000) ||
+      (cachedVpsStatus && cachedVpsStatus.online && Date.now() - cachedVpsStatus.last_checked < 180000)
+    );
 
-    // 2. Dispatch immediately to waiting long-poll connections!
+    let deliveredDirectly = false;
+
+    // 1. Dispatch immediately to waiting long-poll connections!
     while (waitingAgentPollers.length > 0) {
       const poller = waitingAgentPollers.shift();
       if (poller) {
         try {
           poller([job]);
+          deliveredDirectly = true;
         } catch {}
+      }
+    }
+
+    // 2. Only queue in pendingAgentJobs if not delivered directly to an active waiting poller
+    if (!deliveredDirectly) {
+      pendingAgentJobs.push(job);
+      if (pendingAgentJobs.length > 50) {
+        pendingAgentJobs.shift();
       }
     }
 
@@ -4677,28 +4687,26 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
       }).catch(() => {});
     }
 
-    // Broadcast to public ntfy.sh relay in background
-    try {
-      const ntfyReq = https.request('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
-        method: 'POST',
-        headers: {
-          'Title': `Basket #${job.basket_no} - ${job.customer_name}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      ntfyReq.on('error', () => {});
-      ntfyReq.write(JSON.stringify({
-        basket_no: job.basket_no,
-        customer_name: job.customer_name,
-        escpos_base64: job.escpos_base64
-      }));
-      ntfyReq.end();
-    } catch {}
-
-    const isOnline = Boolean(
-      (agentHeartbeat && Date.now() - agentHeartbeat.last_seen < 35000) ||
-      (cachedVpsStatus && cachedVpsStatus.online && Date.now() - cachedVpsStatus.last_checked < 35000)
-    );
+    // 3. Only broadcast to ntfy.sh relay as a fallback if no direct agent is connected!
+    // This stops redundant ntfy jobs, 429 rate limit errors, and duplicate "[NEW JOB RECEIVED]" on the agent!
+    if (!deliveredDirectly && !isOnline) {
+      try {
+        const ntfyReq = https.request('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
+          method: 'POST',
+          headers: {
+            'Title': `Basket #${job.basket_no} - ${job.customer_name}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        ntfyReq.on('error', () => {});
+        ntfyReq.write(JSON.stringify({
+          basket_no: job.basket_no,
+          customer_name: job.customer_name,
+          escpos_base64: job.escpos_base64
+        }));
+        ntfyReq.end();
+      } catch {}
+    }
 
     return res.json({
       success: true,
@@ -4713,8 +4721,14 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
 
 // GET /api/print_agent/poll - Long-poll endpoint for pos-agent.js & pos_agent.py
 router.get('/print_agent/poll', (req: Request, res: Response) => {
-  // Update heartbeat on poll
-  if (agentHeartbeat) {
+  // Update heartbeat on poll - auto initialize if not set yet!
+  if (!agentHeartbeat) {
+    agentHeartbeat = {
+      agent_name: 'Store PC',
+      printer_target: 'USB: CASHIER',
+      last_seen: Date.now()
+    };
+  } else {
     agentHeartbeat.last_seen = Date.now();
   }
 
