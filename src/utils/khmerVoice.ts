@@ -26,19 +26,14 @@ function getAudioContext(): AudioContext | null {
   }
 }
 
-// User-friendly voice settings
+// User-friendly voice settings (Permanently disabled to keep app blazing fast)
 export function isSlipVoiceEnabled(): boolean {
-  try {
-    const val = localStorage.getItem(STORAGE_KEY_VOICE_ENABLED);
-    return val !== 'false'; // Default to enabled
-  } catch {
-    return true;
-  }
+  return false;
 }
 
-export function setSlipVoiceEnabled(enabled: boolean): void {
+export function setSlipVoiceEnabled(_enabled: boolean): void {
   try {
-    localStorage.setItem(STORAGE_KEY_VOICE_ENABLED, enabled ? 'true' : 'false');
+    localStorage.setItem(STORAGE_KEY_VOICE_ENABLED, 'false');
   } catch {}
 }
 
@@ -217,8 +212,8 @@ function playBrowserSpeechFallback(text: string) {
   } catch {}
 }
 
-// Announce Slip Scanned (with deduplication lock so same slip is never read twice)
-export function announceSlipScanned(slip: {
+// Announce Slip Scanned - Permanently silenced per user instruction to keep app fast
+export function announceSlipScanned(_slip: {
   id?: string;
   trans_ref?: string;
   customer_name?: string;
@@ -227,23 +222,8 @@ export function announceSlipScanned(slip: {
   bank_name?: string;
   basket_no?: number | string;
 }): void {
-  if (!isSlipVoiceEnabled()) return;
-
-  const dedupeKey = slip.trans_ref || slip.id || `${slip.customer_name}_${slip.paid_amount}_${slip.basket_no}`;
-  if (dedupeKey && recentlySpokenKeys.has(dedupeKey)) {
-    return; // Already spoken
-  }
-
-  if (dedupeKey) {
-    recentlySpokenKeys.add(dedupeKey);
-    // Evict after 5 minutes
-    setTimeout(() => {
-      recentlySpokenKeys.delete(dedupeKey);
-    }, 5 * 60 * 1000);
-  }
-
-  const speechText = formatKhmerSlipAnnouncement(slip);
-  speakKhmerLoudly(speechText, { playChime: true });
+  // Disabled permanently: AI voice reading slips removed to stop app lag
+  return;
 }
 
 // 🧪 Test button helper

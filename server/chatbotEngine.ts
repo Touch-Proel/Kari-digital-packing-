@@ -64,7 +64,7 @@ const LOGS_FILE = path.join(process.cwd(), 'data', 'chatbot_logs.json');
 // Default Config
 let chatbotConfig: ChatbotConfig = {
   enabled: true,
-  enableSlipAutoVerify: true,
+  enableSlipAutoVerify: false, // Disabled to eliminate OCR lag and keep application fast
   enableAddressAutoExtract: true,
   enableVoiceUnderstanding: true,
   enablePaymentReminders: true,
@@ -473,22 +473,6 @@ Return strict JSON ONLY:
     }
 
     bumpDataRevision();
-    saveDatabaseToDisk();
-
-    // 🔊 Real-Time Notification & Spoken Audio Trigger
-    broadcastSSE('messenger:slip_scanned', {
-      id: newSlipItem.id,
-      customer_name: (targetInvoice && targetInvoice.facebook_name) || senderName,
-      paid_amount: paidAmount,
-      currency: 'USD',
-      bank_name: bankName,
-      basket_no: basketNoInSlip || (targetInvoice && targetInvoice.basket_no),
-      slip_url: savedSlipUrl,
-      trans_ref: transRef,
-      invoice_id: targetInvoice?.invoice_id,
-      status: initialStatus,
-      fraud_suspected: Boolean(fraudEval.fraud_warning || fraudEval.duplicate_warning)
-    });
 
     // Log the auto-scan event waiting for Admin
     addChatbotLog({

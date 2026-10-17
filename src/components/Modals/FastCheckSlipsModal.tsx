@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
-import { isSlipVoiceEnabled, setSlipVoiceEnabled, testKhmerVoicePlayback, announceSlipScanned } from '../../utils/khmerVoice';
 import { safeResponseJson } from '../../utils/safeFetch';
 
 interface FastCheckSlipsModalProps {
@@ -155,7 +154,6 @@ export function FastCheckSlipsModal({
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [isSavingKey, setIsSavingKey] = useState(false);
   const [isTestingKey, setIsTestingKey] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(isSlipVoiceEnabled);
 
   const isFetchingRef = useRef(false);
 
@@ -773,36 +771,6 @@ export function FastCheckSlipsModal({
               title="ស្វែងយល់ពីរបៀបដែលប្រព័ន្ធការពារ Slip ស្ទួន & ក្លែងបន្លំ"
             >
               <span>🛡️ ការពារ Slip ស្ទួន</span>
-            </button>
-
-            {/* 🔊 Voice Announcement Toggle & Test Button */}
-            <button
-              type="button"
-              onClick={() => {
-                const next = !voiceEnabled;
-                setVoiceEnabled(next);
-                setSlipVoiceEnabled(next);
-                if (next) {
-                  testKhmerVoicePlayback('សំឡេងប្រកាស Slip ត្រូវបានបើក');
-                }
-              }}
-              className={`py-1 px-2 rounded-xl border font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm ${
-                voiceEnabled
-                  ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/60'
-                  : 'bg-slate-800/90 border-slate-700 text-slate-400 hover:text-slate-200'
-              }`}
-              title={voiceEnabled ? 'សំឡេងប្រកាស Slip កំពុងបើក (ចុចដើម្បីបិទ)' : 'សំឡេងប្រកាស Slip កំពុងបិទ (ចុចដើម្បីបើក)'}
-            >
-              <span>{voiceEnabled ? '🔊 និយាយខ្មែរ' : '🔇 បិទសំឡេង'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => testKhmerVoicePlayback()}
-              className="py-1 px-2 rounded-xl bg-cyan-950/80 hover:bg-cyan-900/80 border border-cyan-500/40 text-cyan-300 font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-sm"
-              title="ចុចដើម្បីសាកល្បងស្តាប់សំឡេង AI និយាយខ្មែរ"
-            >
-              <span>▶️ សាកល្បង</span>
             </button>
 
             {/* Sync Now Button */}

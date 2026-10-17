@@ -2052,22 +2052,6 @@ Output strictly raw JSON with these fields.`
                   seenIds.add(newSlipItem.id);
                   newSlipsFound++;
 
-                  // 🔊 Real-Time Notification & Spoken Audio Trigger
-                  broadcastSSE('messenger:slip_scanned', {
-                    id: newSlipItem.id,
-                    customer_name: extracted.customer_name || senderName,
-                    paid_amount: extracted.paid_amount,
-                    currency: extracted.currency || 'USD',
-                    bank_name: extracted.bank_name || 'ធនាគារ',
-                    basket_no: extracted.basket_no || matchRes.matched?.basket_no,
-                    slip_url: savedSlipUrl,
-                    trans_ref: extracted.trans_ref,
-                    invoice_id: matchRes.matched?.invoice_id,
-                    status: statusFinal,
-                    fraud_suspected: Boolean(fraudEval.fraud_warning || fraudEval.duplicate_warning)
-                  });
-
-                  // Realtime notification: Notify connected clients immediately
                   bumpDataRevision();
                 }
               }
