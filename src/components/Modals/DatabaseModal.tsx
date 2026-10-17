@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { safeResponseJson } from '../../utils/safeFetch';
 import {
   getKHQRConfig,
   saveKHQRConfig,
@@ -79,12 +80,12 @@ export function DatabaseModal({
         fetch('/api/history/dates')
       ]);
       if (statsRes.ok) {
-        const sData = await statsRes.json();
-        setStats(sData);
+        const sData = await safeResponseJson(statsRes);
+        if (sData) setStats(sData);
       }
       if (datesRes.ok) {
-        const dData = await datesRes.json();
-        setDates(dData.dates || []);
+        const dData = await safeResponseJson(datesRes);
+        if (dData) setDates(dData.dates || []);
       }
     } catch (err) {
       console.error('Failed to fetch DB stats:', err);
@@ -101,11 +102,11 @@ export function DatabaseModal({
         fetch(`/api/packer_history?name=${encodeURIComponent(packerName || '')}`)
       ]);
       if (lRes.ok) {
-        const lData = await lRes.json();
+        const lData = await safeResponseJson(lRes);
         setLeaderboard(Array.isArray(lData) ? lData : []);
       }
       if (hRes.ok) {
-        const hData = await hRes.json();
+        const hData = await safeResponseJson(hRes);
         setPackerHistory(Array.isArray(hData) ? hData : []);
       }
     } catch (err) {
@@ -120,8 +121,8 @@ export function DatabaseModal({
     try {
       const res = await fetch('/api/khqr/config');
       if (res.ok) {
-        const data = await res.json();
-        if (data.config) {
+        const data = await safeResponseJson(res);
+        if (data && data.config) {
           const cfg = saveKHQRConfig(data.config);
           setKhqrConfig(cfg);
           setManualForm(cfg);

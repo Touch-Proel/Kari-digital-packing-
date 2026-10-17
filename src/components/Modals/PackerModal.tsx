@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 
+import { parseResponseJson } from '../../utils/safeFetch';
+
 interface PackerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -24,15 +26,15 @@ export function PackerModal({
       setLoading(true);
       if (mode === 'leaderboard') {
         fetch('/api/packer_leaderboard')
-          .then(res => res.json())
-          .then(data => setLeaderboard(data))
-          .catch(err => console.error(err))
+          .then(parseResponseJson)
+          .then(data => { if (Array.isArray(data)) setLeaderboard(data); })
+          .catch(() => {})
           .finally(() => setLoading(false));
       } else {
         fetch(`/api/packer_history?name=${encodeURIComponent(packerName)}`)
-          .then(res => res.json())
-          .then(data => setHistory(data))
-          .catch(err => console.error(err))
+          .then(parseResponseJson)
+          .then(data => { if (Array.isArray(data)) setHistory(data); })
+          .catch(() => {})
           .finally(() => setLoading(false));
       }
     }

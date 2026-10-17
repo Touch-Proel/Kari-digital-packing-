@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PickingItem } from '../../types';
 import { playPureTone, playWarningBuzzer } from '../../utils/audio';
+import { parseResponseJson } from '../../utils/safeFetch';
 import { ImageZoomModal, ZoomModalItem } from './ImageZoomModal';
 
 interface PickingModalProps {
@@ -28,9 +29,9 @@ export function PickingModal({
   const fetchPickingList = useCallback(() => {
     setLoading(true);
     fetch(`/api/picking_list?live_id=${encodeURIComponent(liveId)}`)
-      .then(res => res.json())
+      .then(parseResponseJson)
       .then(data => setItems(Array.isArray(data) ? data : []))
-      .catch(err => console.error(err))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [liveId]);
 

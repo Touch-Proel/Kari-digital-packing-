@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone } from '../utils/audio';
+import { safeResponseJson } from '../utils/safeFetch';
 
 interface RecentLiveOrder {
   id: string;
@@ -57,7 +58,7 @@ export function LiveCommentStream({
   const fetchParserSettings = async () => {
     try {
       const res = await fetch('/api/parser/settings');
-      const data = await res.json();
+      const data = await safeResponseJson(res);
       if (data && typeof data.parser_strict_catalog === 'boolean') {
         setStrictCatalogMode(data.parser_strict_catalog);
       }
@@ -75,8 +76,8 @@ export function LiveCommentStream({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parser_strict_catalog: nextVal })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeResponseJson(res);
+      if (data && data.success) {
         setStrictCatalogMode(nextVal);
         playPureTone(nextVal ? 800 : 600, 0.05);
         onShowToast(
@@ -94,7 +95,7 @@ export function LiveCommentStream({
   const fetchLiveSyncStatus = async () => {
     try {
       const res = await fetch('/api/fb/live_auto_sync');
-      const data = await res.json();
+      const data = await safeResponseJson(res);
       if (data) {
         setAutoSyncEnabled(Boolean(data.enabled));
         setTotalSynced(data.totalCommentsSynced || 0);
@@ -126,8 +127,8 @@ export function LiveCommentStream({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trigger_now: true, live_id: activeLiveId })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeResponseJson(res);
+      if (data && data.success) {
         if (data.new_orders > 0) {
           playSuccessFanfare();
           onShowToast(`🎉 បានកាត់ចូលកន្ត្រក ${data.new_orders} ជួរថ្មីដោយជោគជ័យ!`);
@@ -137,7 +138,7 @@ export function LiveCommentStream({
         fetchLiveSyncStatus();
         onCommentProcessed();
       } else {
-        onShowToast(data.error || 'បរាជ័យក្នុងការទាញខំមិន', 'error');
+        onShowToast(data ? (data.error || 'បរាជ័យក្នុងការទាញខំមិន') : 'Server error', 'error');
       }
     } catch (e) {
       onShowToast('Network error triggering live sync', 'error');
@@ -154,7 +155,7 @@ export function LiveCommentStream({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: nextState, live_id: activeLiveId })
       });
-      const data = await res.json();
+      const data = await safeResponseJson(res);
       setAutoSyncEnabled(nextState);
       onShowToast(nextState ? '🟢 បានបើក Real-time Auto-Sync!' : '⏸️ បានផ្អាក Auto-Sync!');
     } catch {
@@ -181,9 +182,9 @@ export function LiveCommentStream({
           live_id: activeLiveId
         })
       });
-      const data = await res.json();
+      const data = await safeResponseJson(res);
 
-      if (data.status === 'SUCCESS') {
+      if (data && data.status === 'SUCCESS') {
         playSuccessFanfare();
         onShowToast(data.message);
         setRecentLogs(prev => [data.message, ...prev.slice(0, 8)]);

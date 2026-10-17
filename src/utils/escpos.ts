@@ -50,19 +50,38 @@ export function canvasToEscPos(
 
   // 80mm printable width is 576 dots (72 bytes)
   const widthBytes = Math.ceil(width / 8);
-  const buffer: number[] = [];
+  const sliceHeight = 128;
+  const numSlices = Math.ceil(height / sliceHeight);
+  const feed = options.feedLines ?? 5;
+  const cutPaper = options.cutPaper !== false;
+
+  // Exact precalculated byte size avoids dynamic JS array reallocations
+  const totalBytes =
+    8 + // Init + Align + Line spacing
+    numSlices * 8 + // Headers for each slice
+    height * widthBytes + // Raster bits
+    2 + // Reset line spacing
+    (feed > 0 ? 3 : 0) + // Feed lines
+    (cutPaper ? 4 : 0); // Cut command
+
+  const out = new Uint8Array(totalBytes);
+  let ptr = 0;
 
   // 1. Initialize printer: ESC @ (0x1B, 0x40)
-  buffer.push(0x1B, 0x40);
+  out[ptr++] = 0x1B;
+  out[ptr++] = 0x40;
 
   // 2. Center alignment: ESC a 1 (0x1B, 0x61, 0x01)
-  buffer.push(0x1B, 0x61, 0x01);
+  out[ptr++] = 0x1B;
+  out[ptr++] = 0x61;
+  out[ptr++] = 0x01;
 
   // 3. Set line spacing to 0: ESC 3 0 (0x1B, 0x33, 0x00)
-  buffer.push(0x1B, 0x33, 0x00);
+  out[ptr++] = 0x1B;
+  out[ptr++] = 0x33;
+  out[ptr++] = 0x00;
 
-  // 4. Chunk raster image into 128-dot vertical slices (Prevents buffer overflow on XP-80C / Xprinter / POS-80)
-  const sliceHeight = 128;
+  // 4. Chunk raster image into 128-dot vertical slices
   for (let startY = 0; startY < height; startY += sliceHeight) {
     const currentSliceHeight = Math.min(sliceHeight, height - startY);
     const xL = widthBytes & 0xFF;
@@ -71,49 +90,62 @@ export function canvasToEscPos(
     const yH = (currentSliceHeight >> 8) & 0xFF;
 
     // GS v 0 0 xL xH yL yH
-    buffer.push(0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH);
+    out[ptr++] = 0x1D;
+    out[ptr++] = 0x76;
+    out[ptr++] = 0x30;
+    out[ptr++] = 0x00;
+    out[ptr++] = xL;
+    out[ptr++] = xH;
+    out[ptr++] = yL;
+    out[ptr++] = yH;
 
     // Convert slice RGBA to 1-bit monochrome bitmap
     for (let y = startY; y < startY + currentSliceHeight; y++) {
+      const rowOffset = y * width;
       for (let b = 0; b < widthBytes; b++) {
         let byteVal = 0;
+        const baseBitX = b * 8;
         for (let bit = 0; bit < 8; bit++) {
-          const x = b * 8 + bit;
+          const x = baseBitX + bit;
           if (x < width) {
-            const idx = (y * width + x) * 4;
-            const r = data[idx];
-            const g = data[idx + 1];
-            const bl = data[idx + 2];
+            const idx = (rowOffset + x) * 4;
             const a = data[idx + 3];
-
-            // Fast integer luminance calculation (avoids floating point overhead on mobile)
-            const lum = r * 299 + g * 587 + bl * 114;
-            if (a > 120 && lum < 138000) {
-              byteVal |= (1 << (7 - bit));
+            if (a > 120) {
+              const r = data[idx];
+              const g = data[idx + 1];
+              const bl = data[idx + 2];
+              const lum = r * 299 + g * 587 + bl * 114;
+              if (lum < 138000) {
+                byteVal |= (1 << (7 - bit));
+              }
             }
           }
         }
-        buffer.push(byteVal);
+        out[ptr++] = byteVal;
       }
     }
   }
 
   // 5. Reset line spacing: ESC 2 (0x1B, 0x32)
-  buffer.push(0x1B, 0x32);
+  out[ptr++] = 0x1B;
+  out[ptr++] = 0x32;
 
   // 6. Feed lines so the receipt passes the printhead and reaches cutter knife
-  const feed = options.feedLines ?? 5;
   if (feed > 0) {
-    buffer.push(0x1B, 0x64, feed); // ESC d n (feed n lines)
+    out[ptr++] = 0x1B;
+    out[ptr++] = 0x64;
+    out[ptr++] = feed;
   }
 
   // 7. Trigger paper cut
-  if (options.cutPaper !== false) {
-    // GS V 65 0 (0x1D, 0x56, 0x41, 0x10) -> Feed 16 vertical units and cut
-    buffer.push(0x1D, 0x56, 0x41, 0x10);
+  if (cutPaper) {
+    out[ptr++] = 0x1D;
+    out[ptr++] = 0x56;
+    out[ptr++] = 0x41;
+    out[ptr++] = 0x10;
   }
 
-  return new Uint8Array(buffer);
+  return ptr === out.length ? out : out.subarray(0, ptr);
 }
 
 /**

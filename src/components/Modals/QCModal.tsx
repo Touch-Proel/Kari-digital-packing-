@@ -58,6 +58,8 @@ export function QCModal({
 
   if (!isOpen || !invoice) return null;
 
+  const isSameLive = !activeLiveId || !invoice.live_id || invoice.live_id === activeLiveId;
+
   const toggleItem = (code: string) => {
     setVerifiedMap(prev => {
       const next = { ...prev, [code]: !prev[code] };
@@ -157,9 +159,8 @@ export function QCModal({
           {(invoice.items || []).map((it, idx) => {
             const isVerified = verifiedMap[it.product_code] ?? true;
             const codeUpper = (it.product_code || '').trim().toUpperCase();
-            const isSameLive = Boolean(!activeLiveId || !invoice.live_id || invoice.live_id === activeLiveId);
-            const prod = (isSameLive && productMap) ? productMap[codeUpper] : undefined;
-            const displayImage = it.image_file && it.image_file.trim() !== '' ? it.image_file : (isSameLive ? prod?.image_file : '');
+            const prod = productMap ? productMap[codeUpper] : undefined;
+            const displayImage = (prod?.image_file && prod.image_file.trim() !== '') ? prod.image_file : (it.image_file || '');
 
             return (
               <div
@@ -178,8 +179,8 @@ export function QCModal({
                     if (displayImage && onOpenZoomModal && invoice) {
                       e.stopPropagation();
                       const allQcZoomItems = (invoice.items || []).map(item => {
-                        const p = (isSameLive && productMap) ? (productMap[item.product_code.toUpperCase()] || productMap[item.product_code]) : undefined;
-                        const img = (item.image_file && item.image_file.trim() !== '') ? item.image_file : (isSameLive ? (p?.image_file || '') : '');
+                        const p = productMap ? (productMap[item.product_code.toUpperCase()] || productMap[item.product_code]) : undefined;
+                        const img = (p?.image_file && p.image_file.trim() !== '') ? p.image_file : (item.image_file || '');
                         return {
                           code: item.product_code,
                           name: item.product_name || p?.name || `កូដ ${item.product_code}`,

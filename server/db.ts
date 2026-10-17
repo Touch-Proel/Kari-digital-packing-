@@ -21,10 +21,20 @@ let isDatabaseLoaded = false;
 
 const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
 
+let isSaving = false;
+let pendingSave = false;
+
 export async function saveDatabaseToDisk(forceSync = false) {
   if (!isDatabaseLoaded && !forceSync) {
     return;
   }
+
+  if (isSaving && !forceSync) {
+    pendingSave = true;
+    return;
+  }
+
+  isSaving = true;
   try {
     const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
     if (messengerSlips.length === 0 && fs.existsSync(BACKUP_SLIPS_PATH)) {
@@ -54,17 +64,18 @@ export async function saveDatabaseToDisk(forceSync = false) {
 
     if (forceSync) {
       fs.writeFileSync(DB_FILE_PATH, jsonStr, 'utf8');
+      if (messengerSlips && messengerSlips.length > 0) {
+        try {
+          fs.writeFileSync(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8');
+        } catch {}
+      }
     } else {
       await fs.promises.writeFile(DB_FILE_PATH, jsonStr, 'utf8').catch(err => {
         console.error('[DB] Async save error:', err);
       });
-    }
 
-    if (messengerSlips && messengerSlips.length > 0) {
-      try {
-        fs.writeFileSync(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8');
-      } catch (bkErr) {
-        console.error('[DB] Slips backup error:', bkErr);
+      if (messengerSlips && messengerSlips.length > 0) {
+        fs.promises.writeFile(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8').catch(() => {});
       }
     }
 
@@ -86,6 +97,12 @@ export async function saveDatabaseToDisk(forceSync = false) {
     }
   } catch (err) {
     console.error('Failed to save database:', err);
+  } finally {
+    isSaving = false;
+    if (pendingSave) {
+      pendingSave = false;
+      setTimeout(() => saveDatabaseToDisk(), 500);
+    }
   }
 }
 
@@ -94,7 +111,7 @@ export function bumpDataRevision(): number {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveDatabaseToDisk();
-  }, 1200);
+  }, 1000);
   return dataRevision;
 }
 
@@ -599,7 +616,8 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string): number {
         const cleanCode = (item.product_code || '').trim().toUpperCase();
         if (!cleanCode) continue;
 
-        const prod = products.find(p => (p.live_id || activeLiveId) === invLive && (p.code || '').trim().toUpperCase() === cleanCode);
+        const prod = products.find(p => (p.live_id || activeLiveId) === invLive && (p.code || '').trim().toUpperCase() === cleanCode)
+          || products.find(p => (p.code || '').trim().toUpperCase() === cleanCode);
 
         if (prod) {
           // Auto-sync price if stock price is positive and differs

@@ -749,8 +749,8 @@ app.all('/api/*', (req: Request, res: Response) => {
 // -------------------------------------------------------------
 async function startServer() {
   const distPath = path.join(process.cwd(), 'dist');
-  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
-  const isProduction = process.env.NODE_ENV === 'production' || (hasDist && process.env.FORCE_DEV !== 'true');
+  const distIndexPath = path.join(distPath, 'index.html');
+  const isProduction = process.env.NODE_ENV === 'production' && fs.existsSync(distIndexPath);
 
   if (!isProduction) {
     const vite = await createViteServer({
@@ -775,11 +775,26 @@ async function startServer() {
         }
       }
     }));
-    app.get('*', (_req: Request, res: Response) => {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', (_req: Request, res: Response, next) => {
+      if (fs.existsSync(distIndexPath)) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        res.sendFile(distIndexPath, (err) => {
+          if (err && !res.headersSent) {
+            next(err);
+          }
+        });
+      } else {
+        const rootIndex = path.join(process.cwd(), 'index.html');
+        if (fs.existsSync(rootIndex)) {
+          res.sendFile(rootIndex, (err) => {
+            if (err && !res.headersSent) next(err);
+          });
+        } else {
+          res.status(404).send('Frontend index.html not found');
+        }
+      }
     });
   }
 

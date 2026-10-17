@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Invoice } from '../../types';
+import { parseResponseJson } from '../../utils/safeFetch';
 import { playPureTone, playSuccessFanfare } from '../../utils/audio';
 
 interface VipInvoiceModalProps {
@@ -29,9 +30,9 @@ export function VipInvoiceModal({
       const cid = (invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]) || '').trim();
       if (!cid) {
         fetch(`/api/invoices/${invoice.invoice_id}/auto_resolve_comment`)
-          .then(r => r.json())
+          .then(parseResponseJson)
           .then(d => {
-            if (d.success && d.comment_id) {
+            if (d && d.success && d.comment_id) {
               invoice.last_comment_id = d.comment_id;
               if (!invoice.comment_ids) invoice.comment_ids = [];
               if (!invoice.comment_ids.includes(d.comment_id)) invoice.comment_ids.unshift(d.comment_id);

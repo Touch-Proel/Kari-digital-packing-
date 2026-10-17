@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Invoice } from '../../types';
+import { safeResponseJson } from '../../utils/safeFetch';
 import {
   generateBakongKHQRString,
   generateKHQRDataUrl,
@@ -44,9 +45,9 @@ export function KHQRModal({
   useEffect(() => {
     if (!isOpen) return;
     fetch('/api/khqr/config')
-      .then(r => r.json())
+      .then(r => safeResponseJson(r))
       .then(data => {
-        if (data.success && data.config) {
+        if (data && data.success && data.config) {
           const cfg = saveKHQRConfig(data.config);
           setConfig(cfg);
           setTempConfig(cfg);

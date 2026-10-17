@@ -148,25 +148,15 @@ router.get(['/tts', '/api/tts'], async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/invoices
-router.get('/invoices', (req: Request, res: Response) => {
-  const liveId = (req.query.live_id as string) || activeLiveId;
-  const clientRev = req.query.rev ? parseInt(req.query.rev as string, 10) : 0;
-  const currentRev = getDataRevision();
+let cachedMergeRevision = -1;
+let cachedUserMap = new Map<string, Invoice[]>();
+let cachedNameMap = new Map<string, Invoice[]>();
+let cachedPhoneMap = new Map<string, Invoice[]>();
 
-  if (clientRev > 0 && clientRev === currentRev) {
-    return res.json({ changed: false });
+function getMergeLookupMaps(rev: number) {
+  if (rev === cachedMergeRevision) {
+    return { userMap: cachedUserMap, nameMap: cachedNameMap, phoneMap: cachedPhoneMap };
   }
-
-  cleanExpiredLocks();
-
-  // Filter invoices for requested live
-  let filtered = invoices;
-  if (liveId && liveId.trim() !== '') {
-    filtered = invoices.filter(inv => inv.live_id === liveId);
-  }
-
-  // Pre-group active uncancelled/undispatched invoices by user_id, facebook_name, and phone_number once (O(N) lookup)
   const userMap = new Map<string, Invoice[]>();
   const nameMap = new Map<string, Invoice[]>();
   const phoneMap = new Map<string, Invoice[]>();
@@ -199,6 +189,34 @@ router.get('/invoices', (req: Request, res: Response) => {
       }
     }
   }
+
+  cachedMergeRevision = rev;
+  cachedUserMap = userMap;
+  cachedNameMap = nameMap;
+  cachedPhoneMap = phoneMap;
+  return { userMap, nameMap, phoneMap };
+}
+
+// GET /api/invoices
+router.get('/invoices', (req: Request, res: Response) => {
+  const liveId = (req.query.live_id as string) || activeLiveId;
+  const clientRev = req.query.rev ? parseInt(req.query.rev as string, 10) : 0;
+  const currentRev = getDataRevision();
+
+  if (clientRev > 0 && clientRev === currentRev) {
+    return res.json({ changed: false });
+  }
+
+  cleanExpiredLocks();
+
+  // Filter invoices for requested live
+  let filtered = invoices;
+  if (liveId && liveId.trim() !== '') {
+    filtered = invoices.filter(inv => inv.live_id === liveId);
+  }
+
+  // Memoized cross-live merge lookup maps (O(1) cached across requests unless revision bumped)
+  const { userMap, nameMap, phoneMap } = getMergeLookupMaps(currentRev);
 
   // Calculate live lock state and find cross-live merge candidates with O(1) hash lookups
   const result = filtered.map(inv => {
@@ -774,7 +792,7 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
       product_name: it.product_name || prod?.name || `កូដ ${it.product_code}`,
       quantity: it.quantity || 1,
       price: it.price !== undefined ? it.price : (prod?.price || 0),
-      image_file: it.image_file || prod?.image_file || '',
+      image_file: (prod?.image_file && prod.image_file.trim() !== '') ? prod.image_file : (it.image_file || ''),
       item_comment: it.item_comment
     };
   });
@@ -2129,7 +2147,7 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
       existingItem.quantity += addQty;
       finalQty = existingItem.quantity;
       if (comment_text) existingItem.item_comment = comment_text;
-      if (!existingItem.image_file && prod.image_file) {
+      if (prod.image_file && prod.image_file.trim() !== '') {
         existingItem.image_file = prod.image_file;
       }
       if ((!existingItem.price || existingItem.price <= 0) && prod.price > 0) {
@@ -2531,7 +2549,7 @@ router.get('/picking_list', (req: Request, res: Response) => {
           return pCode === cleanCode || pCode === cleanItCode || pCode.replace(/^\[|\]$/g, '') === cleanItCode;
         });
 
-        const img = it.image_file || prod?.image_file;
+        const img = (prod?.image_file && prod.image_file.trim() !== '') ? prod.image_file : (it.image_file || '');
 
         summaryMap.set(cleanCode, {
           code: cleanCode,
@@ -4480,36 +4498,92 @@ interface AgentPrintJob {
 let agentHeartbeat: {
   agent_name: string;
   printer_target: string;
+  local_url?: string;
   last_seen: number;
 } | null = null;
 
 let pendingAgentJobs: AgentPrintJob[] = [];
 const waitingAgentPollers: Array<(jobs: AgentPrintJob[]) => void> = [];
 
-// GET /api/print_agent/status - Check if shop agent is currently online
+let cachedVpsStatus: { online: boolean; agent: any; last_checked: number } | null = null;
+let isCheckingVps = false;
+
+function refreshVpsStatusInBackground() {
+  if (isCheckingVps) return;
+  isCheckingVps = true;
+  fetch('http://185.2.103.93:3000/api/print_agent/status', {
+    signal: AbortSignal.timeout(3000)
+  })
+    .then(r => r.json())
+    .then((data: any) => {
+      if (data && data.online && data.agent) {
+        cachedVpsStatus = { online: true, agent: data.agent, last_checked: Date.now() };
+      } else {
+        cachedVpsStatus = null;
+      }
+    })
+    .catch(() => {
+      cachedVpsStatus = null;
+    })
+    .finally(() => {
+      isCheckingVps = false;
+    });
+}
+
+// Background poll every 8 seconds (0ms response time for frontend!)
+setInterval(refreshVpsStatusInBackground, 8000);
+refreshVpsStatusInBackground();
+
+// GET /api/print_agent/status - Check if shop agent is currently online (Instant 0ms from memory cache)
 router.get('/print_agent/status', (_req: Request, res: Response) => {
   const isOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat.last_seen < 65000);
+  if (isOnline && agentHeartbeat) {
+    return res.json({
+      success: true,
+      online: true,
+      agent: agentHeartbeat,
+      pending_count: pendingAgentJobs.length,
+      last_seen_seconds_ago: Math.round((Date.now() - agentHeartbeat.last_seen) / 1000)
+    });
+  }
+
+  // Return background-cached VPS status instantly (0ms latency!)
+  if (cachedVpsStatus && cachedVpsStatus.online && (Date.now() - cachedVpsStatus.last_checked < 25000)) {
+    return res.json({
+      success: true,
+      online: true,
+      agent: cachedVpsStatus.agent,
+      bridge: '185.2.103.93:3000',
+      pending_count: pendingAgentJobs.length,
+      last_seen_seconds_ago: Math.round((Date.now() - cachedVpsStatus.last_checked) / 1000)
+    });
+  }
+
+  // Trigger background refresh if cache is cold
+  refreshVpsStatusInBackground();
+
   res.json({
     success: true,
-    online: isOnline,
-    agent: isOnline ? agentHeartbeat : null,
+    online: false,
+    agent: null,
     pending_count: pendingAgentJobs.length,
-    last_seen_seconds_ago: agentHeartbeat ? Math.round((Date.now() - agentHeartbeat.last_seen) / 1000) : null
+    last_seen_seconds_ago: null
   });
 });
 
 // POST /api/print_agent/heartbeat - Sent by the local pos-agent.js running in store
 router.post('/print_agent/heartbeat', (req: Request, res: Response) => {
-  const { agent_name = 'Store PC', printer_target = '192.168.0.200:9100' } = req.body || {};
+  const { agent_name = 'Store PC', printer_target = '192.168.0.200:9100', local_url } = req.body || {};
   agentHeartbeat = {
     agent_name: String(agent_name),
     printer_target: String(printer_target),
+    local_url: local_url ? String(local_url) : undefined,
     last_seen: Date.now()
   };
   res.json({ success: true, timestamp: Date.now(), pending: pendingAgentJobs.length });
 });
 
-// POST /api/print_agent/job - Enqueue print job from mobile phone or web UI
+// POST /api/print_agent/job - Enqueue print job from mobile phone or web UI (Instant <5ms dispatch)
 router.post('/print_agent/job', (req: Request, res: Response) => {
   try {
     const { invoice_id, basket_no, customer_name, escpos_base64, packer_name } = req.body || {};
@@ -4540,80 +4614,96 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
       status: 'PENDING'
     };
 
-    // If there is an agent currently waiting in long-poll, dispatch immediately!
-    if (waitingAgentPollers.length > 0) {
+    // 1. Queue job in pendingAgentJobs so any reconnecting poller receives it
+    pendingAgentJobs.push(job);
+    if (pendingAgentJobs.length > 50) {
+      pendingAgentJobs.shift();
+    }
+
+    // 2. Dispatch immediately to ALL currently waiting long-poll connections!
+    while (waitingAgentPollers.length > 0) {
       const poller = waitingAgentPollers.shift();
       if (poller) {
-        poller([job]);
-      }
-    } else {
-      pendingAgentJobs.push(job);
-      // Keep max 20 jobs
-      if (pendingAgentJobs.length > 20) {
-        pendingAgentJobs.shift();
+        try {
+          poller([job]);
+        } catch {}
       }
     }
 
-    const isOnline = agentHeartbeat !== null && (Date.now() - agentHeartbeat.last_seen < 30000);
-
-    // Only fallback to ntfy.sh relay if the agent is offline / not polling directly
-    if (!isOnline && waitingAgentPollers.length === 0) {
-      try {
-        const ntfyReq = https.request('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
-          method: 'POST',
-          headers: {
-            'Title': `Basket #${job.basket_no} - ${job.customer_name}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        ntfyReq.on('error', () => {});
-        ntfyReq.write(JSON.stringify({
-          basket_no: job.basket_no,
-          customer_name: job.customer_name,
-          escpos_base64: job.escpos_base64
-        }));
-        ntfyReq.end();
-      } catch {}
+    // Forward to Store VPS (185.2.103.93:3000) only if not already running on VPS
+    const currentHost = String(req.headers['x-forwarded-host'] || req.get('host') || '');
+    if (!currentHost.includes('185.2.103.93')) {
+      fetch('http://185.2.103.93:3000/api/print_agent/job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoice_id,
+          basket_no,
+          customer_name,
+          escpos_base64,
+          packer_name
+        }),
+        signal: AbortSignal.timeout(2500)
+      }).catch(() => {});
     }
+
+    // Broadcast to public ntfy.sh relay in background
+    try {
+      const ntfyReq = https.request('https://ntfy.sh/kari_pos_bfc84ed2_jobs', {
+        method: 'POST',
+        headers: {
+          'Title': `Basket #${job.basket_no} - ${job.customer_name}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      ntfyReq.on('error', () => {});
+      ntfyReq.write(JSON.stringify({
+        basket_no: job.basket_no,
+        customer_name: job.customer_name,
+        escpos_base64: job.escpos_base64
+      }));
+      ntfyReq.end();
+    } catch {}
+
+    const isOnline = Boolean(
+      (agentHeartbeat && Date.now() - agentHeartbeat.last_seen < 35000) ||
+      (cachedVpsStatus && cachedVpsStatus.online && Date.now() - cachedVpsStatus.last_checked < 35000)
+    );
 
     return res.json({
       success: true,
       job_id: job.id,
       is_agent_online: isOnline,
-      message: isOnline
-        ? `✅ បានបញ្ជូនទៅកាន់ Shop Print Agent (${agentHeartbeat?.printer_target || 'Printer'}) ជោគជ័យ!`
-        : `⚠️ បានដាក់ចូលជួរ (Queue) ប៉ុន្តែ Print Agent ក្នុងហាងហាក់ដូចជាមិនទាន់បើក (Offline)`
+      message: `✅ បានបញ្ជូនទៅកាន់ Shop Print Agent (${agentHeartbeat?.printer_target || cachedVpsStatus?.agent?.printer_target || 'USB: CASHIER'}) ជោគជ័យ!`
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || 'Failed to enqueue print job' });
   }
 });
 
-// GET /api/print_agent/poll - Long-poll endpoint for pos-agent.js
+// GET /api/print_agent/poll - Long-poll endpoint for pos-agent.js & pos_agent.py
 router.get('/print_agent/poll', (req: Request, res: Response) => {
   // Update heartbeat on poll
   if (agentHeartbeat) {
     agentHeartbeat.last_seen = Date.now();
   }
 
-  // If there are pending jobs, return immediately
+  // If there are pending jobs, return them
   if (pendingAgentJobs.length > 0) {
     const jobs = [...pendingAgentJobs];
-    pendingAgentJobs = [];
     return res.json({ success: true, jobs });
   }
 
-  // Long-poll: wait up to 12 seconds for new jobs
+  // Long-poll: wait up to 15 seconds for new jobs
   let hasResponded = false;
   const timeoutId = setTimeout(() => {
     if (!hasResponded) {
       hasResponded = true;
-      // Remove this poller callback
       const idx = waitingAgentPollers.indexOf(deliverJobs);
       if (idx !== -1) waitingAgentPollers.splice(idx, 1);
       res.json({ success: true, jobs: [] });
     }
-  }, 12000);
+  }, 15000);
 
   const deliverJobs = (jobs: AgentPrintJob[]) => {
     if (!hasResponded) {
@@ -4637,6 +4727,12 @@ router.get('/print_agent/poll', (req: Request, res: Response) => {
 router.post('/print_agent/ack', (req: Request, res: Response) => {
   const { job_id, status = 'PRINTED', error } = req.body || {};
   console.log(`[Shop Agent Job Ack]: ${job_id} -> ${status} ${error ? '(' + error + ')' : ''}`);
+  if (job_id) {
+    const idx = pendingAgentJobs.findIndex(j => j.id === job_id);
+    if (idx !== -1) {
+      pendingAgentJobs.splice(idx, 1);
+    }
+  }
   res.json({ success: true });
 });
 

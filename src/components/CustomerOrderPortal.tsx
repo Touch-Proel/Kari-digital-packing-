@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { safeResponseJson } from '../utils/safeFetch';
 
 interface OrderItem {
   product_code: string;
@@ -63,8 +64,8 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
       setError(null);
       try {
         const res = await fetch(`/api/public/order/${orderId}`);
-        const data = await res.json();
-        if (data.success && data.data) {
+        const data = await safeResponseJson(res);
+        if (data && data.success && data.data) {
           setOrder(data.data);
           setPhone(data.data.phone || '');
           setAddress(data.data.shipping_address || '');
@@ -72,7 +73,7 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
             setIsEditingInfo(true);
           }
         } else {
-          setError(data.error || 'រកមិនឃើញវិក្កយបត្រនេះឡើយ');
+          setError(data ? (data.error || 'រកមិនឃើញវិក្កយបត្រនេះឡើយ') : 'រកមិនឃើញវិក្កយបត្រនេះឡើយ');
         }
       } catch (err) {
         setError('⚠️ បញ្ហាក្នុងការតភ្ជាប់បណ្តាញ');
@@ -97,8 +98,8 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, address })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeResponseJson(res);
+      if (data && data.success) {
         setIsEditingInfo(false);
         setSaveSuccessMsg('✅ បានរក្សាទុកព័ត៌មានដឹកជញ្ជូនជោគជ័យ!');
         setTimeout(() => setSaveSuccessMsg(null), 4000);

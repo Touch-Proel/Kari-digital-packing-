@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product } from '../../types';
+import { parseResponseJson } from '../../utils/safeFetch';
 import { playPureTone, playWarningBuzzer, playSuccessFanfare } from '../../utils/audio';
 
 interface StockSyncModalProps {
@@ -219,7 +220,7 @@ export function StockSyncModal({
       fetchAutoSyncStatus();
       // Fetch current telegram config from server
       fetch('/api/telegram/config')
-        .then(res => res.json())
+        .then(parseResponseJson)
         .then(data => {
           if (data && data.token) {
             setBotToken(data.token);

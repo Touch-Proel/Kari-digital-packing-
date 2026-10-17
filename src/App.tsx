@@ -37,6 +37,7 @@ import { CameraScannerModal, parseScannedText } from './components/Modals/Camera
 import { NoBasketUsersModal } from './components/Modals/NoBasketUsersModal';
 import { playSuccessFanfare, playWarningBuzzer, playPureTone, playCollisionAlert, triggerHapticAlert } from './utils/audio';
 import { announceSlipScanned } from './utils/khmerVoice';
+import { safeResponseJson } from './utils/safeFetch';
 
 export default function App() {
   // Check if current user is viewing as a customer via public link
@@ -194,9 +195,9 @@ export default function App() {
 
       // Call API to locate the exact stage and live session of this basket
       fetch(`/api/find_basket?basket=${encodeURIComponent(cleanBasket)}${scanLive ? `&live=${encodeURIComponent(scanLive)}` : ''}`)
-        .then(r => r.json())
+        .then(r => safeResponseJson(r))
         .then(data => {
-          if (data.success && data.found) {
+          if (data && data.success && data.found) {
             let stageNum = 1;
             if (typeof data.stage === 'number') {
               stageNum = data.stage;
@@ -340,8 +341,8 @@ export default function App() {
     try {
       const res = await fetch(`/api/qc_all_lives?t=${Date.now()}`);
       if (res.ok) {
-        const json = await res.json();
-        if (json.success) {
+        const json = await safeResponseJson(res);
+        if (json && json.success) {
           setAllLivePaidInvoices(json.invoices || []);
           setAllLivePaidCount(json.total_count || 0);
         }
@@ -355,8 +356,8 @@ export default function App() {
     try {
       const res = await fetch(`/api/dispatched_all_lives?t=${Date.now()}`);
       if (res.ok) {
-        const json = await res.json();
-        if (json.success) {
+        const json = await safeResponseJson(res);
+        if (json && json.success) {
           setAllLiveDispatchedInvoices(json.invoices || []);
           setAllLiveDispatchedStats({
             total: json.total_count || 0,
@@ -378,8 +379,8 @@ export default function App() {
       const lid = targetLiveId !== undefined ? targetLiveId : selectedLiveId;
       const res = await fetch(`/api/backlog_invoices?current_live_id=${encodeURIComponent(lid)}&t=${Date.now()}`);
       if (res.ok) {
-        const json = await res.json();
-        if (json.success) {
+        const json = await safeResponseJson(res);
+        if (json && json.success) {
           setBacklogCount(json.total_backlog || 0);
         }
       }
@@ -395,8 +396,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoice_id: inv.invoice_id })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeResponseJson(res);
+      if (data && data.success) {
         playSuccessFanfare();
         showToast(`✅ បានត្រឡប់កន្ត្រក #${inv.basket_no || inv.invoice_id} មកផ្ទាំង QC វិញ!`);
         fetchInvoices();
@@ -404,7 +405,7 @@ export default function App() {
         fetchAllLiveDispatchedInvoices();
       } else {
         playWarningBuzzer();
-        showToast(`❌ មិនអាចត្រឡប់បានទេ ៖ ${data.error || data.message}`, 'error');
+        showToast(`❌ មិនអាចត្រឡប់បានទេ ៖ ${data ? (data.error || data.message) : 'Server error'}`, 'error');
       }
     } catch (e) {
       showToast('⚠️ បរាជ័យក្នុងការតភ្ជាប់បណ្តាញ!', 'error');
@@ -872,7 +873,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      const data = await res.json();
+      const data = await safeResponseJson(res);
+      if (!data) {
+        throw new Error('Server returned non-JSON error');
+      }
 
       if (res.status === 409 || data.locked) {
         // Concurrency collision! Another packer already grabbed or packed this basket!
@@ -925,7 +929,9 @@ export default function App() {
     try {
       const targetLive = overrideLiveId !== undefined ? overrideLiveId : selectedLiveIdRef.current;
       const targetRev = overrideRev !== undefined ? overrideRev : currentRevisionRef.current;
-      const res = await fetch(`/api/invoices?live_id=${encodeURIComponent(targetLive)}&rev=${targetRev}&t=${Date.now()}`);
+      const res = await fetch(`/api/invoices?live_id=${encodeURIComponent(targetLive)}&rev=${targetRev}&t=${Date.now()}`, {
+        signal: AbortSignal.timeout(8000)
+      });
       if (!res.ok) {
         networkFailureCountRef.current += 1;
         if (networkFailureCountRef.current >= 3) {
@@ -935,7 +941,8 @@ export default function App() {
       }
       networkFailureCountRef.current = 0;
       setNetworkOnline(true);
-      const json = await res.json();
+      const json = await safeResponseJson(res);
+      if (!json) return;
 
       // If a newer request was dispatched while this was in flight, discard stale response
       if (reqId !== fetchRequestIdRef.current) {
@@ -1017,10 +1024,18 @@ export default function App() {
       const url = targetLive ? `/api/obs_data?live_id=${encodeURIComponent(targetLive)}&t=${Date.now()}` : `/api/obs_data?t=${Date.now()}`;
       const res = await fetch(url);
       if (res.ok) {
-        const json = await res.json();
-        // Guard: only apply products if this response belongs to the currently active live session!
-        if (json.products && (!targetLive || targetLive === selectedLiveIdRef.current)) {
-          setProducts(json.products);
+        const json = await safeResponseJson(res);
+        if (json && json.products && (!targetLive || targetLive === selectedLiveIdRef.current)) {
+          setProducts(prev => {
+            if (prev.length === json.products.length) {
+              const unchanged = prev.every((p, idx) => {
+                const np = json.products[idx];
+                return np && p.code === np.code && p.stock_qty === np.stock_qty && p.price === np.price && p.image_url === np.image_url;
+              });
+              if (unchanged) return prev;
+            }
+            return json.products;
+          });
         }
       }
     } catch (e) {}
@@ -1038,7 +1053,8 @@ export default function App() {
     try {
       const res = await fetch('/api/live_sessions');
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeResponseJson(res);
+        if (!data) return;
         const list = Array.isArray(data) ? data : (data.sessions || []);
         const serverActiveId = !Array.isArray(data) ? data.active_live_id : undefined;
         setLiveSessions(list);
@@ -1101,8 +1117,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(options)
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeResponseJson(res);
+      if (data && data.success) {
         playSuccessFanfare();
         setSelectedLiveId(data.live_id);
         localStorage.setItem('selectedLiveId', data.live_id);
@@ -1117,8 +1133,8 @@ export default function App() {
         setIsCreateLiveModalOpen(false);
       } else {
         playWarningBuzzer();
-        showToast(data.error || 'មិនអាចបង្កើត Live ថ្មីបានទេ', 'error');
-        throw new Error(data.error);
+        showToast(data?.error || 'មិនអាចបង្កើត Live ថ្មីបានទេ', 'error');
+        throw new Error(data?.error || 'Failed');
       }
     } catch (e: any) {
       playWarningBuzzer();
@@ -1132,11 +1148,11 @@ export default function App() {
     try {
       const res = await fetch('/api/packer_leaderboard');
       if (res.ok) {
-        const list = await res.json();
-        if (list.length > 0) {
+        const list = await safeResponseJson(res);
+        if (list && Array.isArray(list) && list.length > 0) {
           setTopPackerName(`${list[0].packer_name} (${list[0].total_bags} កន្ត្រក)`);
         }
-        const me = list.find((p: any) => p.packer_name.toLowerCase() === packerName.toLowerCase());
+        const me = Array.isArray(list) ? list.find((p: any) => p.packer_name.toLowerCase() === packerName.toLowerCase()) : null;
         setMySessionPacks(me ? me.total_bags : 0);
       }
     } catch (e) {}
@@ -1152,9 +1168,9 @@ export default function App() {
       // Query server to find basket & stage across ALL live sessions + trigger auto_ping to Messenger
       const queryUrl = `/api/find_basket?basket=${encodeURIComponent(cleanBasket)}${scannedLiveId ? `&live=${encodeURIComponent(scannedLiveId)}` : ''}&auto_ping=1`;
       const res = await fetch(queryUrl);
-      const data = await res.json();
+      const data = await safeResponseJson(res);
 
-      if (data.success && data.found) {
+      if (data && data.success && data.found) {
         let stageNum = 1;
         if (typeof data.stage === 'number') {
           stageNum = data.stage;
@@ -1245,8 +1261,8 @@ export default function App() {
           live_id: inv.live_id
         })
       });
-      const data = await res.json();
-      if (data.success && data.pinged) {
+      const data = await safeResponseJson(res);
+      if (data && data.success && data.pinged) {
         playSuccessFanfare();
         showToast(`⚡ បាន Ping ទៅ Messenger ភ្ញៀវ (${inv.facebook_name}) រួចរាល់! ឆាតបានលោតឡើងលេខ ១ ក្នុង Meta Business Suite`, 'success');
         setLastPingedCustomer({
@@ -1257,7 +1273,7 @@ export default function App() {
           timestamp: Date.now()
         });
       } else {
-        showToast(data.message || data.error || 'មិនទាន់អាចផ្ញើ Ping បានទេ', 'error');
+        showToast(data ? (data.message || data.error) : 'មិនទាន់អាចផ្ញើ Ping បានទេ', 'error');
       }
     } catch (err: any) {
       showToast('⚠️ មានបញ្ហាតភ្ជាប់', 'error');
@@ -1276,7 +1292,7 @@ export default function App() {
 
     // Initial Facebook status
     fetch('/api/fb/status')
-      .then(r => r.json())
+      .then(r => safeResponseJson(r))
       .then(d => {
         if (d.activePage) setActivePage(d.activePage);
       })
@@ -1401,29 +1417,53 @@ export default function App() {
 
     const packerTimer = setInterval(() => {
       if (isVisible()) fetchPackerStats();
-    }, 30000);
+    }, 45000);
 
     const backlogTimer = setInterval(() => {
       if (isVisible()) fetchBacklogCount(selectedLiveIdRef.current);
-    }, 30000);
+    }, 45000);
 
     const allLiveQcTimer = setInterval(() => {
-      if (isVisible()) fetchAllLivePaidInvoices();
-    }, 30000);
+      if (isVisible() && (currentMasterStage === 3 || isAllLiveQc)) fetchAllLivePaidInvoices();
+    }, 45000);
 
     const allLiveDispatchedTimer = setInterval(() => {
-      if (isVisible()) fetchAllLiveDispatchedInvoices();
-    }, 30000);
+      if (isVisible() && (currentMasterStage === 4 || isAllLiveDispatched)) fetchAllLiveDispatchedInvoices();
+    }, 45000);
 
     // Immediate refresh when tab becomes active again
     const handleVisibilityChange = () => {
       if (!document.hidden) {
+        networkFailureCountRef.current = 0;
+        isFetchingInvoicesRef.current = false;
         fetchInvoices();
         fetchStock();
         fetchBacklogCount(selectedLiveIdRef.current);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Instant recovery when Wi-Fi / Internet comes back
+    const handleWindowOnline = () => {
+      networkFailureCountRef.current = 0;
+      isFetchingInvoicesRef.current = false;
+      setNetworkOnline(true);
+      fetchInvoices();
+      fetchStock();
+      showToast('✅ សេវាបណ្តាញ WiFi បានភ្ជាប់ឡើងវិញហើយ!', 'success');
+    };
+    const handleWindowOffline = () => {
+      setNetworkOnline(false);
+    };
+    window.addEventListener('online', handleWindowOnline);
+    window.addEventListener('offline', handleWindowOffline);
+
+    // Fast recovery probe: when offline, ping every 3.5s to recover instantly as soon as Wi-Fi is back
+    const fastReconnectTimer = setInterval(() => {
+      if (networkFailureCountRef.current >= 3 || !networkOnline) {
+        fetchInvoices();
+      }
+    }, 3500);
 
     return () => {
       clearTimeout(sseReconnectTimer);
@@ -1437,7 +1477,10 @@ export default function App() {
       clearInterval(backlogTimer);
       clearInterval(allLiveQcTimer);
       clearInterval(allLiveDispatchedTimer);
+      clearInterval(fastReconnectTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleWindowOnline);
+      window.removeEventListener('offline', handleWindowOffline);
     };
   }, [selectedLiveId, packerName]);
 
@@ -1519,12 +1562,12 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ live_id: selectedLiveId })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeResponseJson(res);
+      if (data && data.success) {
         showToast(data.message || 'បានសម្អាតកន្ត្រកទទេជោគជ័យ');
         fetchInvoices(undefined, 0);
       } else {
-        showToast(data.message || 'មិនអាចលុបបានទេ', 'error');
+        showToast(data ? (data.message || 'មិនអាចលុបបានទេ') : 'Server error', 'error');
       }
     } catch {
       showToast('កំហុសក្នុងការសម្អាតកន្ត្រកទទេ', 'error');
@@ -1540,77 +1583,78 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoice_id: invoiceId, packer_name: packerName })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeResponseJson(res);
+      if (data && data.success) {
         showToast(data.message || `បានលុបកន្ត្រក #${invoiceId} រួចរាល់`);
         fetchInvoices(undefined, 0);
       } else {
-        showToast(data.message || 'មិនអាចលុបបានទេ', 'error');
+        showToast(data ? (data.message || 'មិនអាចលុបបានទេ') : 'Server error', 'error');
       }
     } catch {
       showToast('កំហុសក្នុងការលុបកន្ត្រក', 'error');
     }
   };
 
-  // Counts for 3 Stage tabs
-  const unpickedCount = invoices.filter(
-    i => (i.packing_stage === 'UNPICKED' || !i.packing_stage) &&
-         i.status !== 'Paid' &&
-         i.payment_status !== 'Paid' &&
-         !i.paid_at &&
-         i.status !== 'Packed' &&
-         i.status !== 'Dispatched' &&
-         i.packing_stage !== 'DISPATCHED' &&
-         i.status !== 'Cancelled' &&
-         !isBasketEmpty(i)
-  ).length;
+  // Single-pass O(N) Stage counts calculation
+  const stageCounts = useMemo(() => {
+    let unpicked = 0;
+    let empty = 0;
+    let waiting = 0;
+    let paidQc = 0;
+    let dispatched = 0;
+    let busy = 0;
+    const cleanPacker = packerName.trim().toLowerCase();
 
-  const emptyBasketsCount = invoices.filter(
-    i => i.status !== 'Dispatched' &&
-         i.status !== 'Packed' &&
-         i.packing_stage !== 'DISPATCHED' &&
-         i.status !== 'Paid' &&
-         i.payment_status !== 'Paid' &&
-         !i.paid_at &&
-         i.status !== 'Cancelled' &&
-         isBasketEmpty(i)
-  ).length;
+    for (let idx = 0; idx < invoices.length; idx++) {
+      const i = invoices[idx];
+      if (i.status === 'Cancelled') continue;
 
-  const waitingCount = invoices.filter(
-    i => i.packing_stage === 'STAGED' &&
-         i.status !== 'Paid' &&
-         i.payment_status !== 'Paid' &&
-         !i.paid_at &&
-         i.status !== 'Packed' &&
-         i.status !== 'Dispatched' &&
-         i.packing_stage !== 'DISPATCHED' &&
-         i.status !== 'Cancelled' &&
-         !isBasketEmpty(i)
-  ).length;
+      const isDispatched = i.status === 'Dispatched' || i.status === 'Packed' || i.packing_stage === 'DISPATCHED';
+      if (isDispatched) {
+        dispatched++;
+        continue;
+      }
 
-  const paidQcCount = invoices.filter(
-    i => (i.status === 'Paid' || i.payment_status === 'Paid' || Boolean(i.paid_at)) &&
-         i.status !== 'Packed' &&
-         i.status !== 'Dispatched' &&
-         i.packing_stage !== 'DISPATCHED' &&
-         i.status !== 'Cancelled'
-  ).length;
+      if (i.is_locked && i.locked_by && i.locked_by.trim().toLowerCase() !== cleanPacker) {
+        busy++;
+      }
 
-  const totalDispatched = invoices.filter(i => i.status === 'Dispatched' || i.status === 'Packed' || i.packing_stage === 'DISPATCHED').length;
-  useEffect(() => {
-    setDispatchedCount(totalDispatched);
-  }, [totalDispatched]);
+      const isPaid = i.status === 'Paid' || i.payment_status === 'Paid' || Boolean(i.paid_at);
+      if (isPaid) {
+        paidQc++;
+        continue;
+      }
 
-  // Busy Baskets Count (baskets locked by other packers in active session)
-  const busyBasketsCount = useMemo(() => {
-    return invoices.filter(inv =>
-      inv.is_locked &&
-      inv.locked_by &&
-      inv.locked_by.trim().toLowerCase() !== packerName.trim().toLowerCase() &&
-      inv.status !== 'Dispatched' &&
-      inv.status !== 'Cancelled'
-    ).length;
+      const emptyBasket = isBasketEmpty(i);
+      if (emptyBasket) {
+        empty++;
+      }
+
+      if (i.packing_stage === 'STAGED') {
+        if (!emptyBasket) waiting++;
+      } else if (i.packing_stage === 'UNPICKED' || !i.packing_stage) {
+        if (!emptyBasket) unpicked++;
+      }
+    }
+
+    return {
+      unpickedCount: unpicked,
+      emptyBasketsCount: empty,
+      waitingCount: waiting,
+      paidQcCount: paidQc,
+      totalDispatched: dispatched,
+      busyBasketsCount: busy
+    };
   }, [invoices, packerName]);
+
+  const {
+    unpickedCount,
+    emptyBasketsCount,
+    waitingCount,
+    paidQcCount,
+    totalDispatched,
+    busyBasketsCount
+  } = stageCounts;
 
   // Delayed payment orders from past live sessions waiting in QC
   const delayedPaidCount = useMemo(() => {
@@ -1618,180 +1662,186 @@ export default function App() {
     return allLivePaidInvoices.filter(i => i.live_id && i.live_id !== selectedLiveId).length;
   }, [allLivePaidInvoices, selectedLiveId]);
 
-  const sourceInvoices =
-    (currentMasterStage === 3 && isAllLiveQc)
-      ? allLivePaidInvoices
-      : (currentMasterStage === 4 && isAllLiveDispatched)
-        ? allLiveDispatchedInvoices
-        : invoices;
+  const sourceInvoices = useMemo(() => {
+    if (currentMasterStage === 3 && isAllLiveQc) return allLivePaidInvoices;
+    if (currentMasterStage === 4 && isAllLiveDispatched) return allLiveDispatchedInvoices;
+    return invoices;
+  }, [currentMasterStage, isAllLiveQc, isAllLiveDispatched, allLivePaidInvoices, allLiveDispatchedInvoices, invoices]);
 
-  // Filter invoices for display
-  let filtered = sourceInvoices.filter(inv => {
-    if (inv.status === 'Cancelled') return false;
+  // Memoized filtered invoices for ultra-smooth UI interactions
+  const filtered = useMemo(() => {
+    const cleanPacker = packerName.trim().toLowerCase();
+    const cleanSearch = searchQuery.trim().toLowerCase();
 
-    // 🔒 Smart Filter: Hide Busy Baskets (If enabled, hide baskets locked by other packers unless searching)
-    if (hideBusyBaskets && !searchQuery.trim()) {
-      const isLockedByOther =
-        inv.is_locked &&
-        inv.locked_by &&
-        inv.locked_by.trim().toLowerCase() !== packerName.trim().toLowerCase();
-      if (isLockedByOther) return false;
-    }
+    let list = sourceInvoices.filter(inv => {
+      if (inv.status === 'Cancelled') return false;
 
-    // 🗑️ Empty Filter (Applies when empty filter is active on either Stage 1 or Stage 2)
-    if (activeSubFilter === 'EMPTY') {
-      return inv.status !== 'Dispatched' &&
-             inv.status !== 'Packed' &&
-             inv.packing_stage !== 'DISPATCHED' &&
-             inv.status !== 'Paid' &&
-             inv.payment_status !== 'Paid' &&
-             !inv.paid_at &&
-             isBasketEmpty(inv);
-    }
+      // 🔒 Smart Filter: Hide Busy Baskets (If enabled, hide baskets locked by other packers unless searching)
+      if (hideBusyBaskets && !cleanSearch) {
+        const isLockedByOther =
+          inv.is_locked &&
+          inv.locked_by &&
+          inv.locked_by.trim().toLowerCase() !== cleanPacker;
+        if (isLockedByOther) return false;
+      }
 
-    if (currentMasterStage === 1) {
-      const isStage1 = (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) &&
-                       inv.status !== 'Paid' &&
-                       inv.payment_status !== 'Paid' &&
-                       !inv.paid_at &&
-                       inv.status !== 'Packed' &&
-                       inv.status !== 'Dispatched' &&
-                       inv.packing_stage !== 'DISPATCHED';
-      if (!isStage1) return false;
+      // 🗑️ Empty Filter (Applies when empty filter is active on either Stage 1 or Stage 2)
+      if (activeSubFilter === 'EMPTY') {
+        return inv.status !== 'Dispatched' &&
+               inv.status !== 'Packed' &&
+               inv.packing_stage !== 'DISPATCHED' &&
+               inv.status !== 'Paid' &&
+               inv.payment_status !== 'Paid' &&
+               !inv.paid_at &&
+               isBasketEmpty(inv);
+      }
 
-      return !isBasketEmpty(inv);
-    }
-    if (currentMasterStage === 2) {
-      const isStage2 = inv.packing_stage === 'STAGED' &&
-                       inv.status !== 'Paid' &&
-                       inv.payment_status !== 'Paid' &&
-                       !inv.paid_at &&
-                       inv.status !== 'Packed' &&
-                       inv.status !== 'Dispatched' &&
-                       inv.packing_stage !== 'DISPATCHED';
-      if (!isStage2) return false;
+      if (currentMasterStage === 1) {
+        const isStage1 = (inv.packing_stage === 'UNPICKED' || !inv.packing_stage) &&
+                         inv.status !== 'Paid' &&
+                         inv.payment_status !== 'Paid' &&
+                         !inv.paid_at &&
+                         inv.status !== 'Packed' &&
+                         inv.status !== 'Dispatched' &&
+                         inv.packing_stage !== 'DISPATCHED';
+        if (!isStage1) return false;
 
-      return !isBasketEmpty(inv);
-    }
-    if (currentMasterStage === 3) {
-      return (inv.status === 'Paid' || inv.payment_status === 'Paid' || Boolean(inv.paid_at)) && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
-    }
-    if (currentMasterStage === 4) {
-      const isDispatched = (inv.status === 'Dispatched' || inv.status === 'Packed' || inv.packing_stage === 'DISPATCHED');
-      if (!isDispatched) return false;
-      if (isAllLiveDispatched) {
-        if (dispatchedTimeFilter === 'TODAY') {
-          const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
-          const dispDate = (inv as any).dispatched_at || inv.created_at || '';
-          if (!dispDate) return false;
-          try {
-            const dispDateStr = new Date(dispDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
-            return dispDateStr === todayStr;
-          } catch {
-            return typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+        return !isBasketEmpty(inv);
+      }
+      if (currentMasterStage === 2) {
+        const isStage2 = inv.packing_stage === 'STAGED' &&
+                         inv.status !== 'Paid' &&
+                         inv.payment_status !== 'Paid' &&
+                         !inv.paid_at &&
+                         inv.status !== 'Packed' &&
+                         inv.status !== 'Dispatched' &&
+                         inv.packing_stage !== 'DISPATCHED';
+        if (!isStage2) return false;
+
+        return !isBasketEmpty(inv);
+      }
+      if (currentMasterStage === 3) {
+        return (inv.status === 'Paid' || inv.payment_status === 'Paid' || Boolean(inv.paid_at)) && inv.status !== 'Packed' && inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED';
+      }
+      if (currentMasterStage === 4) {
+        const isDispatched = (inv.status === 'Dispatched' || inv.status === 'Packed' || inv.packing_stage === 'DISPATCHED');
+        if (!isDispatched) return false;
+        if (isAllLiveDispatched) {
+          if (dispatchedTimeFilter === 'TODAY') {
+            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+            const dispDate = (inv as any).dispatched_at || inv.created_at || '';
+            if (!dispDate) return false;
+            try {
+              const dispDateStr = new Date(dispDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+              return dispDateStr === todayStr;
+            } catch {
+              return typeof dispDate === 'string' && dispDate.startsWith(todayStr);
+            }
+          }
+          if (dispatchedTimeFilter === 'PP') {
+            return inv.location_zone === 'PP';
+          }
+          if (dispatchedTimeFilter === 'PROVINCE') {
+            return inv.location_zone !== 'PP';
           }
         }
-        if (dispatchedTimeFilter === 'PP') {
-          return inv.location_zone === 'PP';
-        }
-        if (dispatchedTimeFilter === 'PROVINCE') {
-          return inv.location_zone !== 'PP';
-        }
+        return true;
       }
       return true;
-    }
-    return true;
-  });
+    });
 
-  // Sub-filter & Sorting (Sub-filters PP/PROVINCE/AMOUNT_DESC apply to Stage 1 & Stage 2)
-  if (currentMasterStage === 1 || currentMasterStage === 2) {
-    if (activeSubFilter === 'PP') {
-      filtered = filtered.filter(i => i.location_zone === 'PP');
-    } else if (activeSubFilter === 'PROVINCE') {
-      filtered = filtered.filter(i => i.location_zone !== 'PP');
-    }
+    // Sub-filter & Sorting (Sub-filters PP/PROVINCE/AMOUNT_DESC apply to Stage 1 & Stage 2)
+    if (currentMasterStage === 1 || currentMasterStage === 2) {
+      if (activeSubFilter === 'PP') {
+        list = list.filter(i => i.location_zone === 'PP');
+      } else if (activeSubFilter === 'PROVINCE') {
+        list = list.filter(i => i.location_zone !== 'PP');
+      }
 
-    if (activeSubFilter === 'AMOUNT_DESC') {
-      filtered = [...filtered].sort((a, b) => {
-        const qtyA = (a.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
-        const qtyB = (b.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
-        const amtA = Number(a.total_amount || 0);
-        const amtB = Number(b.total_amount || 0);
+      if (activeSubFilter === 'AMOUNT_DESC') {
+        list = [...list].sort((a, b) => {
+          const qtyA = (a.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+          const qtyB = (b.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+          const amtA = Number(a.total_amount || 0);
+          const amtB = Number(b.total_amount || 0);
 
-        // 1. 🎯 Primary: Sort by highest item quantity (ច្រើនមុខ/ច្រើនចំនួនមុន e.g. 107 -> 74 -> 58 -> ... -> 1)
-        if (qtyB !== qtyA) {
-          return qtyB - qtyA;
+          if (qtyB !== qtyA) return qtyB - qtyA;
+          if (Math.abs(amtB - amtA) > 0.001) return amtB - amtA;
+          return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+        });
+      } else {
+        list = [...list].sort((a, b) => {
+          const timeA = new Date(a.created_at || 0).getTime();
+          const timeB = new Date(b.created_at || 0).getTime();
+          if (timeB !== timeA) return timeB - timeA;
+          return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
+        });
+      }
+    } else if (currentMasterStage === 3) {
+      if (activeSubFilter === 'DELAYED_FIRST') {
+        list = list.filter(i => selectedLiveId && i.live_id && i.live_id !== selectedLiveId);
+      } else if (activeSubFilter === 'PP') {
+        list = list.filter(i => i.location_zone === 'PP');
+      } else if (activeSubFilter === 'PROVINCE') {
+        list = list.filter(i => i.location_zone !== 'PP');
+      }
+
+      list = [...list].sort((a, b) => {
+        if (isAllLiveQc && selectedLiveId) {
+          const isDelayedA = Boolean(a.live_id && a.live_id !== selectedLiveId);
+          const isDelayedB = Boolean(b.live_id && b.live_id !== selectedLiveId);
+          if (isDelayedA && !isDelayedB) return -1;
+          if (!isDelayedA && isDelayedB) return 1;
         }
-
-        // 2. 💰 Secondary: If total quantities are equal, sort by highest total amount (តម្លៃ/លុយច្រើនមុន)
-        if (Math.abs(amtB - amtA) > 0.001) {
-          return amtB - amtA;
-        }
-
-        // 3. 🔢 Tertiary: Stable tie-breaker by basket number descending
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        if (timeA !== timeB) return timeA - timeB;
         return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
       });
     } else {
-      filtered = [...filtered].sort((a, b) => {
-        const timeA = new Date(a.created_at || 0).getTime();
-        const timeB = new Date(b.created_at || 0).getTime();
-        if (timeB !== timeA) return timeB - timeA;
+      if (activeSubFilter === 'PP') {
+        list = list.filter(i => i.location_zone === 'PP');
+      } else if (activeSubFilter === 'PROVINCE') {
+        list = list.filter(i => i.location_zone !== 'PP');
+      }
+
+      list = [...list].sort((a, b) => {
+        const dispA = new Date((a as any).dispatched_at || a.created_at || 0).getTime();
+        const dispB = new Date((b as any).dispatched_at || b.created_at || 0).getTime();
+        if (dispB !== dispA) return dispB - dispA;
         return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
       });
     }
-  } else if (currentMasterStage === 3) {
-    // 🔍 Stage 3 (QC & Packaging): Sub-filters & Priority Aging Sort
-    if (activeSubFilter === 'DELAYED_FIRST') {
-      filtered = filtered.filter(i => selectedLiveId && i.live_id && i.live_id !== selectedLiveId);
-    } else if (activeSubFilter === 'PP') {
-      filtered = filtered.filter(i => i.location_zone === 'PP');
-    } else if (activeSubFilter === 'PROVINCE') {
-      filtered = filtered.filter(i => i.location_zone !== 'PP');
+
+    // Search filter
+    if (cleanSearch) {
+      list = list.filter(i =>
+        String(i.basket_no).includes(cleanSearch) ||
+        String(i.invoice_id).includes(cleanSearch) ||
+        i.facebook_name.toLowerCase().includes(cleanSearch) ||
+        i.phone_number.includes(cleanSearch) ||
+        i.items.some(it => it.product_code.toLowerCase().includes(cleanSearch) || it.product_name.toLowerCase().includes(cleanSearch))
+      );
     }
 
-    // Sort: In All Live QC, delayed orders (from older live sessions) are surfaced FIRST, followed by oldest orders
-    filtered = [...filtered].sort((a, b) => {
-      if (isAllLiveQc && selectedLiveId) {
-        const isDelayedA = Boolean(a.live_id && a.live_id !== selectedLiveId);
-        const isDelayedB = Boolean(b.live_id && b.live_id !== selectedLiveId);
-        if (isDelayedA && !isDelayedB) return -1;
-        if (!isDelayedA && isDelayedB) return 1;
-      }
-      const timeA = new Date(a.created_at || 0).getTime();
-      const timeB = new Date(b.created_at || 0).getTime();
-      if (timeA !== timeB) return timeA - timeB; // Oldest first to clear aging backlog
-      return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
-    });
-  } else {
-    // 🚚 Stage 4 (Dispatched): Sub-filter and newest dispatched first
-    if (activeSubFilter === 'PP') {
-      filtered = filtered.filter(i => i.location_zone === 'PP');
-    } else if (activeSubFilter === 'PROVINCE') {
-      filtered = filtered.filter(i => i.location_zone !== 'PP');
-    }
-
-    filtered = [...filtered].sort((a, b) => {
-      const dispA = new Date((a as any).dispatched_at || a.created_at || 0).getTime();
-      const dispB = new Date((b as any).dispatched_at || b.created_at || 0).getTime();
-      if (dispB !== dispA) return dispB - dispA;
-      return Number(b.basket_no || b.invoice_id) - Number(a.basket_no || a.invoice_id);
-    });
-  }
-
-  // Search filter
-  if (searchQuery.trim()) {
-    const q = searchQuery.trim().toLowerCase();
-    filtered = filtered.filter(i =>
-      String(i.basket_no).includes(q) ||
-      String(i.invoice_id).includes(q) ||
-      i.facebook_name.toLowerCase().includes(q) ||
-      i.phone_number.includes(q) ||
-      i.items.some(it => it.product_code.toLowerCase().includes(q) || it.product_name.toLowerCase().includes(q))
-    );
-  }
+    return list;
+  }, [
+    sourceInvoices,
+    hideBusyBaskets,
+    searchQuery,
+    packerName,
+    activeSubFilter,
+    currentMasterStage,
+    isAllLiveDispatched,
+    dispatchedTimeFilter,
+    selectedLiveId,
+    isAllLiveQc
+  ]);
 
   const totalFilteredBaskets = filtered.length;
-  const visibleBaskets = filtered.slice(0, displayedLimit);
+  const visibleBaskets = useMemo(() => {
+    return filtered.slice(0, displayedLimit);
+  }, [filtered, displayedLimit]);
 
   // Find if matching basket exists in another stage tab or another live session
   const otherStageMatch = useMemo(() => {
@@ -2171,14 +2221,24 @@ export default function App() {
         </div>
       </div>
 
-      {/* Network Status Indicator (Only floating alert if offline, otherwise subtle indicator) */}
+      {/* Network Status Indicator (Interactive Reconnect Button) */}
       {!networkOnline && (
-        <div
-          className="fixed bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full text-xs font-black z-[99999] shadow-2xl flex items-center gap-1.5 bg-rose-950/95 border border-rose-500 text-rose-200 animate-bounce"
+        <button
+          type="button"
+          onClick={() => {
+            playPureTone(880, 0.05);
+            networkFailureCountRef.current = 0;
+            isFetchingInvoicesRef.current = false;
+            fetchInvoices();
+            fetchStock();
+            showToast('🔄 កំពុងតភ្ជាប់បណ្តាញ WiFi ឡើងវិញ...', 'info');
+          }}
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-xs font-black z-[99999] shadow-2xl flex items-center gap-2 bg-rose-950/95 border-2 border-rose-500 text-rose-100 hover:bg-rose-900 active:scale-95 transition-all cursor-pointer animate-pulse hover:animate-none"
+          title="ចុចដើម្បីភ្ជាប់ឡើងវិញភ្លាមៗ"
         >
-          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
-          <span>⚠️ ដាច់សេវាបណ្តាញ WiFi!</span>
-        </div>
+          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+          <span>⚠️ ដាច់សេវាបណ្តាញ WiFi! [ចុចភ្ជាប់ឡើងវិញ 🔄]</span>
+        </button>
       )}
 
       {/* All Modals */}

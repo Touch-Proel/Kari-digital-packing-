@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FacebookPage } from '../../types';
 import { PWAInstallButton } from '../PWAInstallButton';
 import { playPureTone } from '../../utils/audio';
+import { parseResponseJson } from '../../utils/safeFetch';
 import { isSlipVoiceEnabled, setSlipVoiceEnabled, getSlipVoiceVolume, setSlipVoiceVolume, testKhmerVoicePlayback } from '../../utils/khmerVoice';
 
 interface SystemSettingsModalProps {
@@ -91,7 +92,7 @@ export function SystemSettingsModal({
   useEffect(() => {
     if (!isOpen) return;
     fetch('/api/parser/settings')
-      .then(res => res.json())
+      .then(parseResponseJson)
       .then(data => {
         if (data) {
           if (typeof data.parser_strict_catalog === 'boolean') {
@@ -114,7 +115,7 @@ export function SystemSettingsModal({
       .catch(() => {});
 
     fetch('/api/fast_check/gemini_status')
-      .then(res => res.json())
+      .then(parseResponseJson)
       .then(data => {
         if (data && data.success) {
           setGeminiStatus({
@@ -130,7 +131,7 @@ export function SystemSettingsModal({
       .catch(() => {});
 
     fetch('/api/telegram/config')
-      .then(res => res.json())
+      .then(parseResponseJson)
       .then(data => {
         if (data) {
           setTgConfig({

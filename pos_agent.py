@@ -52,6 +52,19 @@ else:
 if not SERVER_URL:
     SERVER_URL = DEFAULT_SERVER_URL
 
+# Multi-Server Mesh: Poll and Heartbeat to both Store VPS & AI Studio Cloud
+candidate_urls = [
+    SERVER_URL,
+    "http://185.2.103.93:3000",
+    "https://ais-pre-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app",
+    "https://ais-dev-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app"
+]
+ACTIVE_SERVERS = []
+for u in candidate_urls:
+    clean_u = u.rstrip("/") if u else ""
+    if clean_u and clean_u not in ACTIVE_SERVERS:
+        ACTIVE_SERVERS.append(clean_u)
+
 # Windows Spooler Helper for USB Thermal Printers
 IS_WINDOWS = sys.platform.startswith("win")
 import subprocess
@@ -372,28 +385,22 @@ def print_raw_escpos(binary_data):
             print(f"✂️ [SUCCESS] ព្រីនចេញ និងកាត់ក្រដាសស្វ័យប្រវត្តិរួចរាល់ (USB)!\n")
         return res
 
-    # TCP Socket network mode with Smart Auto-Retry & Flow-Controlled Chunking
-    max_retries = 3
+    # TCP Socket network mode with Smart Zero-Lag Direct Transmission
+    max_retries = 2
     for attempt in range(1, max_retries + 1):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.settimeout(6.0)
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        sock.settimeout(3.5)
         try:
             sock.connect((PRINTER_IP, PRINTER_PORT))
             print(f"🖨️ [SOCKET CONNECTED] Sending {len(binary_data)} bytes to {PRINTER_IP}:{PRINTER_PORT}...")
-            # Send in 4096-byte chunks with micro-delays to prevent printer RAM buffer overflow
-            chunk_size = 4096
-            for offset in range(0, len(binary_data), chunk_size):
-                chunk = binary_data[offset:offset + chunk_size]
-                sock.sendall(chunk)
-                if len(binary_data) > 16384:
-                    time.sleep(0.015)
-            
-            try:
-                sock.shutdown(socket.SHUT_WR)
-            except Exception:
-                pass
-            time.sleep(0.2)
+            sock.sendall(binary_data)
+            time.sleep(0.05)
+            sock.close()
             print(f"✂️ [SUCCESS] ព្រីនចេញ និងកាត់ក្រដាសស្វ័យប្រវត្តិរួចរាល់ (Network LAN)!\n")
             return True
         except socket.error as e:
@@ -401,16 +408,19 @@ def print_raw_escpos(binary_data):
                 sock.close()
             except Exception:
                 pass
+            # Smart Auto-Fallback: If LAN socket fails and running on Windows, try USB thermal printer directly
+            if IS_WINDOWS:
+                best_usb = find_best_usb_printer()
+                if best_usb:
+                    print(f"🔌 [AUTO-FALLBACK USB] មិនអាចភ្ជាប់ IP {PRINTER_IP} បាន តែរកឃើញ USB '{best_usb}'! កំពុងព្រីនតាម USB ជំនួស...")
+                    res = print_to_windows_usb(best_usb, binary_data)
+                    if res:
+                        print(f"✂️ [SUCCESS] ព្រីនចេញតាម USB '{best_usb}' ជោគជ័យ!\n")
+                        return True
             if attempt < max_retries:
-                print(f"⏳ [BUSY/RETRY {attempt}/{max_retries}] ម៉ាស៊ីនព្រីនកំពុងជាប់រវល់... រង់ចាំ {attempt * 1.5:.1f}s រួចសាកល្បងម្ដងទៀត...")
-                time.sleep(attempt * 1.5)
+                time.sleep(0.4)
             else:
                 print(f"❌ [PRINTER ERROR]: មិនអាចភ្ជាប់ទៅកាន់ {PRINTER_IP}:{PRINTER_PORT} បានទេ ៖ {e}")
-                print(f"   💡 មូលហេតុអាចបណ្ដាលមកពី ៖")
-                print(f"      1. ម៉ាស៊ីនព្រីនគាំង Buffer ក្រោយព្រីនចប់សន្លឹកមុន (សូមបិទកុងតាក់ម៉ាស៊ីនព្រីន ៥វិនាទី រួចបើកវិញ)")
-                print(f"      2. អស់ក្រដាស ឬគម្របម៉ាស៊ីនព្រីនរបើកចំហ (Cover Open / Paper Out)")
-                print(f"      3. ម៉ាស៊ីនព្រីនផ្លាស់ប្ដូរ IP Address (សូមចុចប៊ូតុង Feed + បើកកុងតាក់ដើម្បី Self-Test មើល IP)")
-                print(f"      4. បើមានដោតខ្សែ USB ទៅកុំព្យូទ័រ សូមដំណើរការ ៖ python pos_agent.py usb")
                 return False
         finally:
             try:
@@ -419,14 +429,22 @@ def print_raw_escpos(binary_data):
                 pass
 
 
+def _send_one_server_heartbeat(s_url, payload):
+    try:
+        req_app = urllib.request.Request(
+            f"{s_url}/api/print_agent/heartbeat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req_app, timeout=2.5):
+            pass
+    except Exception:
+        pass
+
+
 def send_heartbeat_once():
-    """Send heartbeat to both App Server API and ntfy.sh relay."""
-    headers = {
-        "Title": "heartbeat",
-        "Tags": "heartpulse",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    """Send heartbeat concurrently to App Servers in mesh and ntfy.sh relay."""
     payload = json.dumps({
         "agent_name": AGENT_NAME,
         "printer_target": TARGET_DISPLAY,
@@ -435,38 +453,40 @@ def send_heartbeat_once():
         "status": "online"
     }).encode("utf-8")
 
-    # 1. Send to Dedicated App Server
-    if SERVER_URL:
+    # 1. Concurrently ping App Servers in background threads (0ms blocking time!)
+    for s_url in ACTIVE_SERVERS:
+        t = threading.Thread(target=_send_one_server_heartbeat, args=(s_url, payload), daemon=True)
+        t.start()
+
+    # 2. Public Relay ping in background
+    def _ping_ntfy():
         try:
-            req_app = urllib.request.Request(
-                f"{SERVER_URL}/api/print_agent/heartbeat",
+            req = urllib.request.Request(
+                f"https://ntfy.sh/{HB_TOPIC}",
                 data=payload,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Title": "heartbeat",
+                    "Tags": "heartpulse",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0"
+                },
                 method="POST"
             )
-            with urllib.request.urlopen(req_app, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=3.5):
                 pass
         except Exception:
             pass
 
-    # 2. Send to Public Relay
-    try:
-        req = urllib.request.Request(f"https://ntfy.sh/{HB_TOPIC}", data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return resp.status == 200
-    except Exception:
-        return True
+    t_ntfy = threading.Thread(target=_ping_ntfy, daemon=True)
+    t_ntfy.start()
+    return True
 
 
-def app_server_poll_loop():
-    """Poll the dedicated App Server /api/print_agent/poll continuously (Zero Rate Limit)."""
-    if not SERVER_URL:
-        return
-    
-    print(f"🚀 [SERVER SYNC] ភ្ជាប់ទៅកាន់ App Server ៖ {SERVER_URL}")
+def app_server_poll_worker(target_server_url):
+    """Poll a dedicated App Server endpoint continuously (Zero Rate Limit)."""
     while True:
         try:
-            url = f"{SERVER_URL}/api/print_agent/poll"
+            url = f"{target_server_url}/api/print_agent/poll"
             req = urllib.request.Request(url, headers={"User-Agent": "POS-Agent-Python/1.0"})
             with urllib.request.urlopen(req, timeout=35) as resp:
                 if resp.status == 200:
@@ -482,36 +502,69 @@ def app_server_poll_loop():
                         raw_bytes = base64.b64decode(b64) if b64 else None
 
                         if is_duplicate_job(basket, raw_bytes, ttl_seconds=15):
-                            print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket} ( App Server Poll) ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
+                            print(f"⏩ [DUPLICATE BLOCKED] Basket #{basket} ត្រូវបានបដិសេធ (ព្រីនរួចរាល់ក្នុងរយៈពេល ១៥វិនាទីមុន)")
                             try:
                                 ack_payload = json.dumps({"job_id": job_id, "status": "SKIPPED_DUPLICATE"}).encode("utf-8")
-                                req_ack = urllib.request.Request(f"{SERVER_URL}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
-                                with urllib.request.urlopen(req_ack, timeout=5):
+                                req_ack = urllib.request.Request(f"{target_server_url}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
+                                with urllib.request.urlopen(req_ack, timeout=4):
                                     pass
                             except Exception:
                                 pass
                             continue
 
-                        print(f"\n⚡ [DIRECT APP JOB] Basket #{basket} - {cust} (ពីទូរស័ព្ទដៃ)")
+                        print(f"\n⚡ [DIRECT APP JOB] Basket #{basket} - {cust} (ពី {target_server_url})")
                         if raw_bytes:
                             success = print_raw_escpos(raw_bytes)
-                            # Ack
                             try:
                                 ack_payload = json.dumps({"job_id": job_id, "status": "PRINTED" if success else "FAILED"}).encode("utf-8")
-                                req_ack = urllib.request.Request(f"{SERVER_URL}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
-                                with urllib.request.urlopen(req_ack, timeout=5):
+                                req_ack = urllib.request.Request(f"{target_server_url}/api/print_agent/ack", data=ack_payload, headers={"Content-Type": "application/json"}, method="POST")
+                                with urllib.request.urlopen(req_ack, timeout=4):
                                     pass
                             except Exception:
                                 pass
-        except urllib.error.HTTPError as e:
-            if e.code != 504 and e.code != 502:
-                print(f"⚠️ Server poll HTTP error {e.code}: {e.reason}")
-            time.sleep(2)
+        except urllib.error.HTTPError:
+            time.sleep(3)
         except socket.timeout:
-            # Normal long-poll timeout, repeat immediately
             continue
-        except Exception as e:
-            time.sleep(2)
+        except Exception:
+            time.sleep(3)
+
+
+def ntfy_poll_worker():
+    """Rock-solid HTTP polling of public cloud relay every 2.5s — Zero 502 Bad Gateway streaming errors!"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    last_poll_time = int(time.time()) - 30
+    while True:
+        try:
+            poll_url = f"https://ntfy.sh/{JOBS_TOPIC}/json?poll=1&since={last_poll_time}"
+            req = urllib.request.Request(poll_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    raw = resp.read().decode("utf-8")
+                    lines = raw.strip().split("\n")
+                    for line in lines:
+                        if not line.strip():
+                            continue
+                        try:
+                            event_data = json.loads(line)
+                            if event_data.get("event") == "message":
+                                event_time = event_data.get("time")
+                                if event_time and event_time > last_poll_time:
+                                    last_poll_time = event_time
+                                threading.Thread(target=process_message, args=(event_data,), daemon=True).start()
+                        except json.JSONDecodeError:
+                            continue
+            last_poll_time = max(last_poll_time, int(time.time()) - 10)
+            time.sleep(2.5)
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                time.sleep(15)
+            else:
+                time.sleep(5)
+        except Exception:
+            time.sleep(5)
 
 
 def heartbeat_loop():
@@ -647,11 +700,17 @@ def main():
         print_raw_escpos(test_data)
         return
 
-    print("🚀 កំពុងដំណើរការ Local Wi-Fi Server & Cloud Relay...")
+    print("🚀 កំពុងដំណើរការ Multi-Server Mesh & Local Wi-Fi Server...")
     
-    # Start direct App Server Polling thread (Zero rate limits, dedicated to your store)
-    t_server = threading.Thread(target=app_server_poll_loop, daemon=True)
-    t_server.start()
+    # Start direct App Server Polling threads for all servers in mesh
+    for s_url in ACTIVE_SERVERS:
+        print(f"🚀 [SERVER SYNC] ភ្ជាប់ទៅកាន់ App Server ៖ {s_url}")
+        t_serv = threading.Thread(target=app_server_poll_worker, args=(s_url,), daemon=True)
+        t_serv.start()
+
+    # Start robust atomic ntfy.sh poll worker (Zero 502 Bad Gateway errors!)
+    t_ntfy = threading.Thread(target=ntfy_poll_worker, daemon=True)
+    t_ntfy.start()
 
     # Start local HTTP server thread in background (for 10+ staff phones on Wi-Fi)
     t_local = threading.Thread(target=start_local_server, daemon=True)
@@ -663,38 +722,13 @@ def main():
 
     print(f"🟢 [ONLINE] Print Agent បានភ្ជាប់ជោគជ័យ! រង់ចាំទទួលការបញ្ជាព្រីនពីទូរស័ព្ទដៃ...\n")
 
-    # Continuous stream listener
-    stream_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    # Clean keep-alive loop (Zero 502 Bad Gateway spam)
     while True:
         try:
-            stream_url = f"https://ntfy.sh/{JOBS_TOPIC}/json"
-            req = urllib.request.Request(stream_url, headers=stream_headers)
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                for line in resp:
-                    raw = line.decode("utf-8").strip()
-                    if not raw:
-                        continue
-                    try:
-                        event_data = json.loads(raw)
-                        if event_data.get("event") == "message":
-                            threading.Thread(target=process_message, args=(event_data,), daemon=True).start()
-                    except json.JSONDecodeError:
-                        continue
+            time.sleep(1)
         except KeyboardInterrupt:
             print("\n🛑 Agent stopped by user.")
             sys.exit(0)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                print("⏳ [429 RATE LIMIT] Stream កំពុងរវល់។ រង់ចាំ 20s មុននឹង Reconnect...")
-                time.sleep(20)
-            else:
-                print(f"⚠️ Stream HTTP error {e.code}: {e.reason}. Reconnecting in 3s...")
-                time.sleep(3)
-        except Exception as e:
-            # Reconnect after brief pause
-            time.sleep(3)
 
 
 if __name__ == "__main__":

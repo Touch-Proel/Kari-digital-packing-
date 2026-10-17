@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FacebookPage, FacebookPost } from '../../types';
 import { playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
+import { safeResponseJson } from '../../utils/safeFetch';
 
 interface FacebookAuthModalProps {
   isOpen: boolean;
@@ -48,10 +49,12 @@ export function FacebookAuthModal({
     try {
       const res = await fetch('/api/fb/status');
       if (res.ok) {
-        const data = await res.json();
-        setPages(data.pages || []);
-        if (data.activePage) {
-          onPageSelected(data.activePage);
+        const data = await safeResponseJson(res);
+        if (data) {
+          setPages(data.pages || []);
+          if (data.activePage) {
+            onPageSelected(data.activePage);
+          }
         }
       }
     } catch (e) {
@@ -64,7 +67,7 @@ export function FacebookAuthModal({
     try {
       const res = await fetch(`/api/fb/page_posts${activePage?.id ? `?page_id=${activePage.id}` : ''}`);
       if (res.ok) {
-        const list = await res.json();
+        const list = await safeResponseJson(res);
         setPosts(Array.isArray(list) ? list : []);
       }
     } catch (e) {

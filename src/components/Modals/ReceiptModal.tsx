@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import QRCode from 'qrcode';
+import { parseResponseJson } from '../../utils/safeFetch';
 import { Invoice } from '../../types';
 import { playPureTone, playSuccessFanfare } from '../../utils/audio';
 import {
@@ -127,9 +128,9 @@ export function ReceiptModal({
   useEffect(() => {
     if (!isOpen) return;
     fetch('/api/khqr/config')
-      .then(r => r.json())
+      .then(parseResponseJson)
       .then(data => {
-        if (data.success && data.config) {
+        if (data && data.success && data.config) {
           const cfg = saveKHQRConfig(data.config);
           setKhqrConfig(cfg);
           setTempKhqrConfig(cfg);
@@ -183,6 +184,10 @@ export function ReceiptModal({
           if (data.agent) {
             detectedTarget = data.agent.printer_target || '192.168.0.200:9100';
             detectedName = data.agent.agent_name || 'Store PC';
+            if (data.agent.local_url) {
+              setLocalAgentUrl(data.agent.local_url);
+              localStorage.setItem('pos_local_agent_url', data.agent.local_url);
+            }
           }
         }
       } catch {}
@@ -649,11 +654,12 @@ export function ReceiptModal({
 
       const data = await res.json();
       if (data.success || isAgentOnline || printedDirect) {
-        await triggerStagePack('ShopAgent');
+        // Fast optimistic stage transition without blocking UI
+        triggerStagePack('ShopAgent');
         playSuccessFanfare();
         const modeLabel = printedDirect ? 'Wi-Fi ផ្ទាល់ (0.05s)' : 'Shop Agent';
         onShowToast(`✅ បានបញ្ជូនទៅ ${modeLabel} (${agentTarget})! ម៉ាស៊ីនកំពុងព្រីន & កាត់ក្រដាស! កន្ត្រក #${invoice.basket_no || invoice.invoice_id} រត់ចូល «រង់ចាំលុយ»!`, 'success');
-        setTimeout(() => onClose(), 800);
+        setTimeout(() => onClose(), 350);
       } else {
         onShowToast(`❌ បរាជ័យ៖ ${data.error}`, 'error');
       }

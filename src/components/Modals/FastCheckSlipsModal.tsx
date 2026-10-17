@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
 import { isSlipVoiceEnabled, setSlipVoiceEnabled, testKhmerVoicePlayback, announceSlipScanned } from '../../utils/khmerVoice';
+import { safeResponseJson } from '../../utils/safeFetch';
 
 interface FastCheckSlipsModalProps {
   isOpen: boolean;
@@ -179,8 +180,8 @@ export function FastCheckSlipsModal({
       });
       clearTimeout(timeoutId);
       if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.slips)) {
+        const data = await safeResponseJson(res);
+        if (data && data.success && Array.isArray(data.slips)) {
           cachedSlipsMemory = data.slips;
           setSlips(data.slips);
           try {
@@ -203,15 +204,17 @@ export function FastCheckSlipsModal({
     try {
       const res = await fetch('/api/fast_check/gemini_status');
       if (res.ok) {
-        const data = await res.json();
-        setGeminiStatus({
-          hasKey: Boolean(data.hasKey),
-          maskedKey: data.maskedKey || '',
-          isFromEnv: Boolean(data.isFromEnv),
-          hasCustomKey: Boolean(data.hasCustomKey),
-          isCreditDepleted: Boolean(data.isCreditDepleted),
-          depletedMessage: data.depletedMessage || null
-        });
+        const data = await safeResponseJson(res);
+        if (data) {
+          setGeminiStatus({
+            hasKey: Boolean(data.hasKey),
+            maskedKey: data.maskedKey || '',
+            isFromEnv: Boolean(data.isFromEnv),
+            hasCustomKey: Boolean(data.hasCustomKey),
+            isCreditDepleted: Boolean(data.isCreditDepleted),
+            depletedMessage: data.depletedMessage || null
+          });
+        }
       }
     } catch {
       // fallback
@@ -225,8 +228,8 @@ export function FastCheckSlipsModal({
     try {
       const res = await fetch('/api/fast_check/unpaid_baskets');
       if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.baskets)) {
+        const data = await safeResponseJson(res);
+        if (data && data.success && Array.isArray(data.baskets)) {
           cachedUnpaidBasketsMemory = data.baskets;
           setUnpaidBaskets(data.baskets);
         }

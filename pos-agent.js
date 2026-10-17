@@ -33,10 +33,16 @@ console.log(`📡 ម៉ាស៊ីនព្រីន (Target Printer) : ${PRIN
 console.log(`🔗 Channel ID                   : ${CHANNEL_ID}`);
 console.log('-'.repeat(60));
 
+const http = require('http');
+
+const DEFAULT_SERVER_URL = process.env.SERVER_URL || 'https://ais-dev-i2xt5egdzckwi5de3soc6f-470363457077.asia-southeast1.run.app';
+const SERVER_URL = process.argv[3] || process.env.SERVER_URL || DEFAULT_SERVER_URL;
+
 function printRawEscpos(buffer) {
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
-    socket.setTimeout(5000);
+    socket.setNoDelay(true);
+    socket.setTimeout(4000);
 
     socket.connect(PRINTER_PORT, PRINTER_IP, () => {
       console.log(`🖨️ [SOCKET CONNECTED] Sending ${buffer.length} bytes to ${PRINTER_IP}:${PRINTER_PORT}...`);
@@ -45,7 +51,7 @@ function printRawEscpos(buffer) {
           socket.end();
           console.log(`✂️ [SUCCESS] ព្រីនចេញ និងកាត់ក្រដាសស្វ័យប្រវត្តិរួចរាល់!\n`);
           resolve(true);
-        }, 150);
+        }, 50);
       });
     });
 
@@ -249,8 +255,58 @@ function listenForJobs() {
   });
 }
 
-console.log('🚀 កំពុងតភ្ជាប់ទៅកាន់ Cloud Relay...');
+function pollAppServer() {
+  const urlObj = new URL(`${SERVER_URL}/api/print_agent/poll`);
+  const client = urlObj.protocol === 'https:' ? https : http;
+
+  const req = client.get(urlObj.href, {
+    headers: { 'User-Agent': 'Node-POS-Agent/1.0' }
+  }, (res) => {
+    let data = '';
+    res.on('data', chunk => data += chunk);
+    res.on('end', () => {
+      try {
+        if (res.statusCode === 200) {
+          const parsed = JSON.parse(data);
+          const jobs = parsed.jobs || [];
+          for (const job of jobs) {
+            if (job && job.escpos_base64) {
+              const buffer = Buffer.from(job.escpos_base64, 'base64');
+              const basketTitle = `Basket #${job.basket_no || job.invoice_id}`;
+              if (!isDuplicateJob(basketTitle, buffer, 15)) {
+                console.log(`\n⚡ [DIRECT APP JOB] ${basketTitle} - ${job.customer_name || ''}`);
+                printRawEscpos(buffer).then(() => {
+                  // Send ack
+                  try {
+                    const ackReq = client.request(`${SERVER_URL}/api/print_agent/ack`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' }
+                    });
+                    ackReq.write(JSON.stringify({ job_id: job.id, status: 'PRINTED' }));
+                    ackReq.end();
+                  } catch {}
+                }).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch {}
+      setTimeout(pollAppServer, 500);
+    });
+    res.on('error', () => {
+      setTimeout(pollAppServer, 2000);
+    });
+  });
+
+  req.on('error', () => {
+    setTimeout(pollAppServer, 2500);
+  });
+}
+
+console.log(`🚀 [SERVER SYNC] App Server ៖ ${SERVER_URL}`);
+console.log('🚀 កំពុងតភ្ជាប់ទៅកាន់ Cloud Relay & App Server...');
 sendHeartbeat();
 setInterval(sendHeartbeat, 15000);
 listenForJobs();
+pollAppServer();
 console.log('🟢 [ONLINE] Print Agent បានភ្ជាប់ជោគជ័យ! រង់ចាំទទួលការបញ្ជាព្រីនពីទូរស័ព្ទដៃ...\n');

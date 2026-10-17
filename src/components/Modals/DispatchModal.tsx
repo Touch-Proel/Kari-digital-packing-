@@ -41,8 +41,8 @@ export function DispatchModal({ isOpen, onClose, onShowToast }: DispatchModalPro
         const json = await res.json();
         setData(json);
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // silently ignore network blips
     } finally {
       setLoading(false);
     }
