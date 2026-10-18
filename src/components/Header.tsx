@@ -182,6 +182,24 @@ export function Header({
           <span>{isStreamOpen ? 'Live ខំមិន' : 'ខំមិន'}</span>
         </button>
       </div>
+
+      {/* Prominent Full-Width Button to Open Standalone Telegram Mini App */}
+      <button
+        type="button"
+        onClick={() => {
+          window.history.pushState({}, '', '/miniapp');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }}
+        className="w-full py-2 px-3 rounded-xl font-black text-xs border border-rose-400/70 bg-gradient-to-r from-[#DB1D43] via-[#E11D48] to-[#BE123C] hover:from-[#E11D48] hover:to-[#9F1239] text-white flex items-center justify-between gap-2 transition-all cursor-pointer shadow-[0_4px_15px_rgba(219,29,67,0.35)] active:scale-[0.98]"
+      >
+        <span className="flex items-center gap-1.5 truncate">
+          <span className="text-sm">🛍️</span>
+          <span>បើកហាងខោអាវ Telegram Mini App (ដាច់ដោយឡែក)</span>
+        </span>
+        <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[10px] font-extrabold whitespace-nowrap">
+          ចុចបើក ➔
+        </span>
+      </button>
     </div>
   );
 }

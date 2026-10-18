@@ -22,6 +22,15 @@
   </head>
   <body class="bg-[#030712] text-slate-100 antialiased selection:bg-cyan-500 selection:text-black">
     <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          for (var i = 0; i < regs.length; i++) {
+            regs[i].update();
+          }
+        }).catch(function() {});
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -10,6 +10,7 @@ import dotenv from 'dotenv';
 import packingRoutes from './server/packingRoutes';
 import fastCheckRoutes from './server/fastCheckRoutes';
 import chatbotRoutes from './server/chatbotRoutes';
+import miniAppRoutes from './server/miniAppRoutes';
 import { initChatbotStore } from './server/chatbotEngine';
 import {
   getFacebookOAuthUrl,
@@ -721,6 +722,7 @@ app.use('/api/fast_check', fastCheckRoutes);
 app.use('/api', fastCheckRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 app.use('/api', chatbotRoutes);
+app.use('/api/miniapp', miniAppRoutes);
 
 // Shortcut routes for printing slips and payment screen directly in any tab
 app.get(['/print/:invoice_id', '/print_slip/:invoice_id'], (req: Request, res: Response) => {
