@@ -388,38 +388,89 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   };
 
   const handleUploadFile = async (file: File, target: 'slip' | 'product') => {
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = String(reader.result || '');
-      try {
-        if (target === 'slip') setIsUploadingSlip(true);
-        else setIsUploadingProductImg(true);
+    if (target === 'slip') setIsUploadingSlip(true);
+    else setIsUploadingProductImg(true);
 
-        const res = await fetch('/api/miniapp/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: base64 })
-        });
+    const compressImageOnClient = (rawFile: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('File read error'));
+        reader.onload = event => {
+          const rawDataUrl = String(event.target?.result || '');
+          const img = new Image();
+          img.onerror = () => resolve(rawDataUrl);
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              const maxDim = 800;
+              let w = img.width;
+              let h = img.height;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                  h = Math.round((h * maxDim) / w);
+                  w = maxDim;
+                } else {
+                  w = Math.round((w * maxDim) / h);
+                  h = maxDim;
+                }
+              }
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL('image/jpeg', 0.84));
+              } else {
+                resolve(rawDataUrl);
+              }
+            } catch {
+              resolve(rawDataUrl);
+            }
+          };
+          img.src = rawDataUrl;
+        };
+        reader.readAsDataURL(rawFile);
+      });
+    };
+
+    try {
+      const compressedBase64 = await compressImageOnClient(file);
+
+      // Immediately preview the compressed image so user sees it right away
+      if (target === 'slip') {
+        setPaymentSlipUrl(compressedBase64);
+      } else {
+        setFormImageUrl(compressedBase64);
+      }
+
+      const res = await fetch('/api/miniapp/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: compressedBase64 })
+      });
+
+      if (res.ok) {
         const data = await res.json();
         if (data.success && data.url) {
           if (target === 'slip') {
             setPaymentSlipUrl(data.url);
-            showToast('បានភ្ជាប់រូបស្លីបបង់ប្រាក់រួចរាល់!');
           } else {
             setFormImageUrl(data.url);
-            showToast('បានបង្ហោះរូបម៉ូតខោអាវរួចរាល់!');
           }
-        } else {
-          showToast(data.error || 'បង្ហោះរូបភាពមិនបានសម្រេច', 'error');
         }
-      } catch {
-        showToast('កំហុសបណ្តាញពេលបង្ហោះរូបភាព', 'error');
-      } finally {
-        setIsUploadingSlip(false);
-        setIsUploadingProductImg(false);
       }
-    };
-    reader.readAsDataURL(file);
+
+      if (target === 'slip') {
+        showToast('✅ បានភ្ជាប់រូបស្លីបបង់ប្រាក់រួចរាល់!');
+      } else {
+        showToast('✅ បានបង្ហោះរូបម៉ូតខោអាវរួចរាល់!');
+      }
+    } catch {
+      showToast('មិនអាចអានរូបភាពបានទេ សូមជ្រើសរើសរូបផ្សេង', 'error');
+    } finally {
+      setIsUploadingSlip(false);
+      setIsUploadingProductImg(false);
+    }
   };
 
   const handleSubmitOrder = async (e: React.FormEvent) => {

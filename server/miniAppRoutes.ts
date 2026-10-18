@@ -353,7 +353,7 @@ router.get('/catalog', (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. UPLOAD IMAGE (Slip or Product Photo -> Compressed WebP)
+// 2. UPLOAD IMAGE (Slip or Product Photo -> Compressed WebP with JPEG Fallback)
 // ---------------------------------------------------------------------------
 router.post('/upload', async (req: Request, res: Response) => {
   try {
@@ -363,24 +363,33 @@ router.post('/upload', async (req: Request, res: Response) => {
     }
 
     const matches = imageBase64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+    const extType = matches ? matches[1].toLowerCase() : 'jpeg';
     const rawBase64 = matches ? matches[2] : imageBase64;
     const buffer = Buffer.from(rawBase64, 'base64');
 
-    const fileName = `miniapp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`;
+    let finalBuffer: Buffer = buffer;
+    let finalExt = extType === 'png' ? 'png' : extType === 'webp' ? 'webp' : 'jpg';
+
+    try {
+      finalBuffer = await sharp(buffer)
+        .rotate()
+        .resize({ width: 900, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 82 })
+        .toBuffer();
+      finalExt = 'webp';
+    } catch (sharpErr) {
+      console.warn('[MiniApp Upload] Sharp fallback to raw buffer:', sharpErr);
+    }
+
+    const fileName = `miniapp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${finalExt}`;
     const filePath = path.join(UPLOADS_DIR, fileName);
 
-    const optimized = await sharp(buffer)
-      .rotate()
-      .resize({ width: 1000, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 82 })
-      .toBuffer();
-
-    fs.writeFileSync(filePath, optimized);
+    fs.writeFileSync(filePath, finalBuffer);
 
     const distUploads = path.join(process.cwd(), 'dist', 'uploads');
     if (fs.existsSync(distUploads)) {
       try {
-        fs.writeFileSync(path.join(distUploads, fileName), optimized);
+        fs.writeFileSync(path.join(distUploads, fileName), finalBuffer);
       } catch {}
     }
 
