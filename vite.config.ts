@@ -10,6 +10,7 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
+        selfDestroying: true,
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
@@ -51,7 +52,7 @@ export default defineConfig(() => {
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
-          navigateFallbackDenylist: [/^\/api/],
+          navigateFallbackDenylist: [/^\/api/, /^\/miniapp/, /^\/shop/, /^\/tg-shop/],
         },
       })
     ],

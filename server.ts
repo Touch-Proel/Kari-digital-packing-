@@ -746,13 +746,46 @@ app.all('/api/*', (req: Request, res: Response) => {
   });
 });
 
+// Force-clear any stuck PWA Service Worker caches on mobile browsers
+app.get(['/sw.js', '/registerSW.js'], (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.send(`
+self.addEventListener('install', function() {
+  self.skipWaiting();
+});
+self.addEventListener('activate', function(event) {
+  event.waitUntil(
+    caches.keys().then(function(names) {
+      return Promise.all(names.map(function(name) { return caches.delete(name); }));
+    }).then(function() {
+      return self.registration.unregister();
+    }).then(function() {
+      return self.clients.matchAll();
+    }).then(function(clients) {
+      clients.forEach(function(client) {
+        if (client.url && 'navigate' in client) {
+          client.navigate(client.url);
+        }
+      });
+    })
+  );
+});
+  `.trim());
+});
+
 // -------------------------------------------------------------
 // 🚀 Vite Middleware (Dev) vs Static Dist (Production)
 // -------------------------------------------------------------
 async function startServer() {
   const distPath = path.join(process.cwd(), 'dist');
   const distIndexPath = path.join(distPath, 'index.html');
-  const isProduction = process.env.NODE_ENV === 'production' && fs.existsSync(distIndexPath);
+  const isRunningCompiledServer =
+    (typeof __filename !== 'undefined' && __filename.endsWith('.cjs')) ||
+    (process.argv[1] || '').endsWith('.cjs');
+  const isProduction = (process.env.NODE_ENV === 'production' || isRunningCompiledServer) && fs.existsSync(distIndexPath);
 
   if (!isProduction) {
     const vite = await createViteServer({
