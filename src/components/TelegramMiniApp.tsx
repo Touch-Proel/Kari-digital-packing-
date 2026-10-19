@@ -38,6 +38,12 @@ export interface MiniAppConfig {
   miniAppUrl?: string;
   menuButtonText?: string;
   botUsername?: string;
+  fbPageId?: string;
+  fbPageName?: string;
+  fbPageAccessToken?: string;
+  fbVerifyToken?: string;
+  fbAutoReplyEnabled?: boolean;
+  fbButtonText?: string;
 }
 
 export interface CartItem {
@@ -59,6 +65,8 @@ export interface MiniAppOrder {
   customerName: string;
   telegramUsername?: string;
   telegramUserId?: string;
+  channel?: 'TELEGRAM' | 'FACEBOOK' | 'WEB';
+  fbPsid?: string;
   phone: string;
   address: string;
   zone: 'PP' | 'PROVINCE';
@@ -167,6 +175,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [customerName, setCustomerName] = useState<string>(() => localStorage.getItem('tg_cust_name') || '');
   const [telegramUsername, setTelegramUsername] = useState<string>('');
   const [telegramUserId, setTelegramUserId] = useState<string>('');
+  const [fbPsid, setFbPsid] = useState<string>(() => localStorage.getItem('fb_cust_psid') || '');
+  const [isFbMessenger, setIsFbMessenger] = useState<boolean>(false);
   const [phone, setPhone] = useState<string>(() => localStorage.getItem('tg_cust_phone') || '');
   const [address, setAddress] = useState<string>(() => localStorage.getItem('tg_cust_address') || '');
   const [zone, setZone] = useState<'PP' | 'PROVINCE'>('PP');
@@ -209,6 +219,12 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [isSettingUpBot, setIsSettingUpBot] = useState<boolean>(false);
   const [isSendingShopCard, setIsSendingShopCard] = useState<boolean>(false);
 
+  // Facebook Page Messenger Admin States
+  const [connectedFbPages, setConnectedFbPages] = useState<Array<{ id: string; name: string; access_token: string }>>([]);
+  const [fbTokenInput, setFbTokenInput] = useState<string>('');
+  const [isSettingUpFbPage, setIsSettingUpFbPage] = useState<boolean>(false);
+  const [isSendingFbTestCard, setIsSendingFbTestCard] = useState<boolean>(false);
+
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToast({ text, type });
     setTimeout(() => {
@@ -216,9 +232,32 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     }, 2600);
   };
 
-  // Initialize Telegram WebApp SDK & load catalog
+  // Initialize Telegram WebApp SDK or Facebook Messenger Webview & load catalog
   useEffect(() => {
     try {
+      const params = new URLSearchParams(window.location.search);
+      const sourceParam = params.get('source');
+      const psidParam = params.get('psid');
+      const cnameParam = params.get('cname');
+      const ua = navigator.userAgent || '';
+      const isFbUa = /FBAN|FBAV|Messenger/i.test(ua);
+
+      if (sourceParam === 'fb' || psidParam || isFbUa) {
+        setIsFbMessenger(true);
+      }
+      if (psidParam) {
+        setFbPsid(psidParam);
+        try {
+          localStorage.setItem('fb_cust_psid', psidParam);
+        } catch {}
+      }
+      if (cnameParam && !customerName) {
+        setCustomerName(cnameParam);
+        try {
+          localStorage.setItem('tg_cust_name', cnameParam);
+        } catch {}
+      }
+
       const tg = window.Telegram?.WebApp;
       if (tg) {
         tg.ready();
@@ -276,6 +315,9 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         setConfig(data.config);
         setProducts(data.products || []);
         setAdminOrders(data.orders || []);
+        if (Array.isArray(data.connectedFbPages)) {
+          setConnectedFbPages(data.connectedFbPages);
+        }
       }
     } catch (err) {
       console.error('Failed to load admin data:', err);
@@ -520,9 +562,12 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerName: customerName.trim() || 'អតិថិជន Telegram',
+          customerName:
+            customerName.trim() || (isFbMessenger ? 'អតិថិជន Facebook Page' : 'អតិថិជន Telegram'),
           telegramUsername,
           telegramUserId,
+          channel: isFbMessenger ? 'FACEBOOK' : telegramUserId ? 'TELEGRAM' : 'WEB',
+          fbPsid: fbPsid || undefined,
           phone: phone.trim(),
           address: address.trim(),
           zone,
@@ -743,6 +788,57 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       showToast('មានបញ្ហាក្នុងការផ្ញើសារទៅ Telegram', 'error');
     } finally {
       setIsSendingShopCard(false);
+    }
+  };
+
+  const handleSetupFacebookPage = async () => {
+    setIsSettingUpFbPage(true);
+    try {
+      const targetUrl = (config.miniAppUrl || miniAppPublicUrl).trim();
+      const effectiveFbToken = (fbTokenInput.trim() || config.fbPageAccessToken || '').trim();
+      const res = await fetch('/api/miniapp/admin/setup-fb-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fbPageAccessToken: effectiveFbToken || undefined,
+          miniAppUrl: targetUrl,
+          fbButtonText: config.fbButtonText || '🛍️ ចុចទិញទំនិញ',
+          fbAutoReplyEnabled: config.fbAutoReplyEnabled ?? true,
+          fbVerifyToken: config.fbVerifyToken || '1688'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConfig(data.config);
+        showToast(`ភ្ជាប់ជោគជ័យជាមួយ Facebook Page "${data.pageName}"! ${data.note || ''}`);
+      } else {
+        showToast(data.error || 'មិនអាចភ្ជាប់ទៅ Facebook Page បានទេ', 'error');
+      }
+    } catch {
+      showToast('មានបញ្ហាក្នុងការភ្ជាប់ទៅ Facebook Page', 'error');
+    } finally {
+      setIsSettingUpFbPage(false);
+    }
+  };
+
+  const handleSendFbTestCard = async () => {
+    setIsSendingFbTestCard(true);
+    try {
+      const res = await fetch('/api/miniapp/admin/send-fb-test-card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`បានផ្ញើប៊ូតុងហាងទំនិញចូលឆាតភ្ញៀវ "${data.customerName}" រួចរាល់!`);
+      } else {
+        showToast(data.error || 'មិនអាចផ្ញើប៊ូតុងហាងទៅឆាតភ្ញៀវបានទេ', 'error');
+      }
+    } catch {
+      showToast('មានបញ្ហាក្នុងការផ្ញើសារទៅ Facebook Messenger', 'error');
+    } finally {
+      setIsSendingFbTestCard(false);
     }
   };
 
@@ -1849,8 +1945,19 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                                 className="bg-white p-3.5 rounded-2xl border border-slate-200 space-y-2 text-xs"
                               >
                                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-black text-sm text-[#DB1D43]">#{ord.id}</span>
+                                    <span
+                                      className={`px-2 py-0.5 rounded-md font-extrabold text-[10.5px] ${
+                                        ord.channel === 'FACEBOOK' || ord.id.startsWith('FB-')
+                                          ? 'bg-blue-100 text-blue-800'
+                                          : 'bg-sky-100 text-sky-800'
+                                      }`}
+                                    >
+                                      {ord.channel === 'FACEBOOK' || ord.id.startsWith('FB-')
+                                        ? '📘 Facebook Page'
+                                        : '✈️ Telegram'}
+                                    </span>
                                     <span
                                       className={`px-2 py-0.5 rounded-md font-extrabold text-[10.5px] ${
                                         ord.paymentMethod === 'KHQR'
@@ -2181,6 +2288,221 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
                           <p className="text-[11px] text-blue-900 leading-relaxed">
                             💡 គ្រាន់តែចុចប៊ូតុង <b>«🚀 ភ្ជាប់ប៊ូតុងហាងទៅ Telegram Bot ឥឡូវនេះ»</b> ប្រព័ន្ធនឹងបង្កើតប៊ូតុងពណ៌ខៀវ <b>«🛍️ ទិញទំនិញ»</b> នៅជ្រុងខាងក្រោមនៃ Telegram Bot របស់អ្នកដោយស្វ័យប្រវត្តិ និងឆ្លើយតបប៊ូតុងហាងភ្លាមៗរាល់ពេលភ្ញៀវចុច <b>START</b> ឬវាយ <b>/shop</b>!
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* FACEBOOK PAGE MESSENGER SHOP INTEGRATION (BOTH METHOD 1 & METHOD 2) */}
+                      <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50 via-blue-50 to-sky-50 border-2 border-indigo-200 space-y-4">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="font-extrabold text-xs text-indigo-950 flex items-center gap-1.5">
+                            <span>📘</span>
+                            <span>ប៊ូតុងហាងទំនិញក្នុង Facebook Page Messenger (ទាំង ២ របៀប)</span>
+                          </div>
+                          {config.fbPageName && (
+                            <a
+                              href={config.fbPageId ? `https://m.me/${config.fbPageId}` : '#'}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1 rounded-full bg-blue-600 text-white font-extrabold text-[11px] shadow-sm"
+                            >
+                              ✅ Page: {config.fbPageName}
+                            </a>
+                          )}
+                        </div>
+
+                        {/* METHOD 1: NO-CODE META BUSINESS SUITE INSTANT REPLY & BUTTON LINK */}
+                        <div className="p-3.5 rounded-xl bg-white border border-indigo-200 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-xs text-indigo-900">
+                              ✨ របៀបទី ១៖ ដាក់ក្នុង Meta Business Suite (សារស្វាគមន៍ & ប៊ូតុងហាង - មិនបាច់ប្រើ Token)
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px]">
+                              ស្រួលបំផុត ១០០%
+                            </span>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                🔗 Link ហាងសម្រាប់ដាក់ក្នុងប៊ូតុង Facebook Page / សារស្វាគមន៍ (បើកហាងក្នុង Messenger ផ្ទាល់)៖
+                              </label>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  readOnly
+                                  value={`${(config.miniAppUrl || miniAppPublicUrl).replace(/\/$/, '')}?source=fb`}
+                                  className="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono text-indigo-900"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const fbUrl = `${(config.miniAppUrl || miniAppPublicUrl).replace(/\/$/, '')}?source=fb`;
+                                    navigator.clipboard.writeText(fbUrl);
+                                    showToast('បានចម្លង Link ហាងសម្រាប់ Facebook Page!');
+                                  }}
+                                  className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs shrink-0 cursor-pointer"
+                                >
+                                  ចម្លង Link ហាង
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-100">
+                              <div className="text-[11px] text-slate-700">
+                                💬 ចម្លង <b>«សារស្វាគមន៍ + Link បើកហាង»</b> យកទៅដាក់ក្នុង <b>Meta Business Suite {'->'} Automations {'->'} Instant Reply</b>៖
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const fbUrl = `${(config.miniAppUrl || miniAppPublicUrl).replace(/\/$/, '')}?source=fb`;
+                                  const instantReplyText = [
+                                    `សួស្តីបង! 🙏✨ សូមស្វាគមន៍មកកាន់ ${config.storeName}`,
+                                    `${config.storeSubtitle}`,
+                                    `🔥 ${config.promoBannerText}`,
+                                    `👇 សូមចុចលីងខាងក្រោមដើម្បីមើលម៉ូត រើសពណ៌ រើស Size និងកម្ម៉ង់ទិញដោយខ្លួនឯងភ្លាមៗ៖`,
+                                    `🛍️ ចុចបើកហាងទិញទំនិញ៖ ${fbUrl}`
+                                  ].join('\n');
+                                  navigator.clipboard.writeText(instantReplyText);
+                                  showToast('បានចម្លងសារស្វាគមន៍សម្រាប់ដាក់ក្នុង Meta Business Suite!');
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-extrabold text-[11px] cursor-pointer shrink-0"
+                              >
+                                📋 ចម្លងសារស្វាគមន៍ទាំងមូល
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* METHOD 2: 1-CLICK FACEBOOK PAGE API AUTO-REPLY BUTTON CARD & PERSISTENT MENU */}
+                        <div className="p-3.5 rounded-xl bg-white border border-blue-200 space-y-3">
+                          <div className="flex items-center justify-between flex-wrap gap-1">
+                            <span className="font-extrabold text-xs text-blue-900">
+                              🤖 របៀបទី ២៖ ភ្ជាប់ Facebook Page Token (លោតប៊ូតុងចុចទិញក្នុងឆាតស្វ័យប្រវត្តិ + ផ្ញើវិក្កយបត្រចូលឆាតភ្ញៀវ)
+                            </span>
+                            <label className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={config.fbAutoReplyEnabled ?? true}
+                                onChange={e => setConfig({ ...config, fbAutoReplyEnabled: e.target.checked })}
+                                className="accent-emerald-600"
+                              />
+                              <span>ឆ្លើយតបប៊ូតុងហាងស្វ័យប្រវត្តិ</span>
+                            </label>
+                          </div>
+
+                          {/* If Live POS already has connected Facebook Pages, allow 1-click selection */}
+                          {connectedFbPages.length > 0 && (
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                ⚡ ជ្រើសរើស Facebook Page ដែលមានស្រាប់ក្នុងប្រព័ន្ធ (ឬបញ្ចូល Token ថ្មីខាងក្រោម)៖
+                              </label>
+                              <div className="flex flex-wrap gap-1.5">
+                                {connectedFbPages.map(pg => (
+                                  <button
+                                    key={pg.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setFbTokenInput(pg.access_token);
+                                      setConfig({
+                                        ...config,
+                                        fbPageId: pg.id,
+                                        fbPageName: pg.name,
+                                        fbPageAccessToken: pg.access_token
+                                      });
+                                      showToast(`បានជ្រើសរើស Page "${pg.name}"! សូមចុចប៊ូតុង 🚀 ភ្ជាប់ខាងក្រោមដើម្បីដំណើរការ`);
+                                    }}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition cursor-pointer ${
+                                      config.fbPageId === pg.id
+                                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                        : 'bg-blue-50 text-blue-900 border-blue-200 hover:bg-blue-100'
+                                    }`}
+                                  >
+                                    📘 {pg.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div className="sm:col-span-1">
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                ឈ្មោះប៊ូតុងទិញក្នុង Messenger
+                              </label>
+                              <input
+                                type="text"
+                                maxLength={20}
+                                value={config.fbButtonText || '🛍️ ចុចទិញទំនិញ'}
+                                onChange={e => setConfig({ ...config, fbButtonText: e.target.value })}
+                                placeholder="🛍️ ចុចទិញទំនិញ"
+                                className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold text-slate-900"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                                Facebook Page Access Token (សម្រាប់បង្កើតប៊ូតុងហាងក្នុងឆាត)
+                              </label>
+                              <input
+                                type="password"
+                                value={fbTokenInput || config.fbPageAccessToken || ''}
+                                onChange={e => {
+                                  setFbTokenInput(e.target.value);
+                                  setConfig({ ...config, fbPageAccessToken: e.target.value });
+                                }}
+                                placeholder="បិទភ្ជាប់ Page Access Token (EAAR...) នៅទីនេះ..."
+                                className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono text-slate-800"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                            <button
+                              type="button"
+                              disabled={isSettingUpFbPage}
+                              onClick={handleSetupFacebookPage}
+                              className="flex-1 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-sm cursor-pointer"
+                            >
+                              {isSettingUpFbPage
+                                ? '⏳ កំពុងភ្ជាប់ទៅ Facebook Page...'
+                                : '🚀 ភ្ជាប់ប៊ូតុងហាងទៅ Facebook Page ឥឡូវនេះ (1-Click)'}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isSendingFbTestCard}
+                              onClick={handleSendFbTestCard}
+                              className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-sm cursor-pointer"
+                            >
+                              {isSendingFbTestCard
+                                ? '⏳ កំពុងផ្ញើសាកល្បង...'
+                                : '📢 សាកល្បងផ្ញើប៊ូតុងហាងទៅភ្ញៀវឆាតចុងក្រោយ'}
+                            </button>
+                          </div>
+
+                          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+                            <div>
+                              🔗 Webhook URL (បើប្រើ Meta Developer App)៖{' '}
+                              <code className="font-mono text-indigo-700 font-bold">
+                                {(config.miniAppUrl || miniAppPublicUrl).replace(/\/miniapp.*$/, '')}/api/miniapp/fb-webhook
+                              </code>{' '}
+                              | Verify Token: <b className="text-slate-900">{config.fbVerifyToken || '1688'}</b>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const whUrl = `${(config.miniAppUrl || miniAppPublicUrl).replace(/\/miniapp.*$/, '')}/api/miniapp/fb-webhook`;
+                                navigator.clipboard.writeText(whUrl);
+                                showToast('បានចម្លង Webhook URL!');
+                              }}
+                              className="px-2 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-[10.5px] cursor-pointer"
+                            >
+                              ចម្លង Webhook
+                            </button>
+                          </div>
+
+                          <p className="text-[11px] text-indigo-950 leading-relaxed">
+                            💡 នៅពេលភ្ជាប់រួច រាល់ពេលភ្ញៀវឆាតចូល Page (ដូចជាវាយ <b>សួស្តី, ទិញ, ម៉ូត, តម្លៃ</b> ឬចុចសំណួរស្វ័យប្រវត្តិ) ប្រព័ន្ធនឹងផ្ញើ <b>កាតប៊ូតុង «🛍️ ចុចទិញទំនិញ»</b> ចូលក្នុងឆាត Messenger របស់ភ្ញៀវដោយស្វ័យប្រវត្តិ ហើយពេលភ្ញៀវកម្ម៉ង់រួច វិក្កយបត្រនឹងលោតចូលទាំង <b>ឆាត Messenger របស់ភ្ញៀវ</b> និង <b>Telegram Group របស់ហាង</b>!
                           </p>
                         </div>
                       </div>

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { settings, saveDatabaseToDisk } from './db';
+import { settings, saveDatabaseToDisk, getConnectedFacebookPages } from './db';
 import { sendTelegramMessage } from './telegramBotService';
 
 const router = Router();
@@ -50,6 +50,8 @@ export interface MiniAppOrder {
   customerName: string;
   telegramUsername?: string;
   telegramUserId?: string;
+  channel?: 'TELEGRAM' | 'FACEBOOK' | 'WEB';
+  fbPsid?: string;
   phone: string;
   address: string;
   zone: 'PP' | 'PROVINCE';
@@ -83,6 +85,12 @@ export interface MiniAppConfig {
   miniAppUrl?: string;
   menuButtonText?: string;
   botUsername?: string;
+  fbPageId?: string;
+  fbPageName?: string;
+  fbPageAccessToken?: string;
+  fbVerifyToken?: string;
+  fbAutoReplyEnabled?: boolean;
+  fbButtonText?: string;
 }
 
 interface MiniAppDatabase {
@@ -244,7 +252,13 @@ function getDefaultDatabase(): MiniAppDatabase {
       adminPin: '1688',
       miniAppUrl: 'https://chatbotkh.com/miniapp',
       menuButtonText: '🛍️ ទិញទំនិញ',
-      botUsername: ''
+      botUsername: '',
+      fbPageId: '',
+      fbPageName: '',
+      fbPageAccessToken: '',
+      fbVerifyToken: '1688',
+      fbAutoReplyEnabled: true,
+      fbButtonText: '🛍️ ចុចទិញទំនិញ'
     },
     products: [
       {
@@ -414,6 +428,8 @@ router.post('/orders', async (req: Request, res: Response) => {
       customerName,
       telegramUsername,
       telegramUserId,
+      channel,
+      fbPsid,
       phone,
       address,
       zone,
@@ -486,12 +502,23 @@ router.post('/orders', async (req: Request, res: Response) => {
     const totalAmount = Number((subtotal + shippingFee).toFixed(2));
 
     const orderNum = 1001 + miniAppDb.orders.length;
+    const resolvedChannel: 'TELEGRAM' | 'FACEBOOK' | 'WEB' =
+      channel === 'FACEBOOK' || fbPsid
+        ? 'FACEBOOK'
+        : telegramUserId || telegramUsername
+        ? 'TELEGRAM'
+        : 'WEB';
+    const orderPrefix = resolvedChannel === 'FACEBOOK' ? 'FB' : 'TG';
     const newOrder: MiniAppOrder = {
-      id: `TG-${orderNum}`,
+      id: `${orderPrefix}-${orderNum}`,
       createdAt: new Date().toISOString(),
-      customerName: String(customerName || 'អតិថិជន Telegram').trim(),
+      customerName: String(
+        customerName || (resolvedChannel === 'FACEBOOK' ? 'អតិថិជន Facebook Page' : 'អតិថិជន Telegram')
+      ).trim(),
       telegramUsername: telegramUsername ? String(telegramUsername).trim() : undefined,
       telegramUserId: telegramUserId ? String(telegramUserId).trim() : undefined,
+      channel: resolvedChannel,
+      fbPsid: fbPsid ? String(fbPsid).trim() : undefined,
       phone: String(phone).trim(),
       address: String(address).trim(),
       zone: normalizedZone,
@@ -521,8 +548,13 @@ router.post('/orders', async (req: Request, res: Response) => {
         ? (newOrder.paymentSlipUrl ? '💳 ស្កេនបង់ប្រាក់រួច (KHQR + មានស្លីប)' : '💳 ស្កេនបង់ប្រាក់ (KHQR)')
         : '🚚 បង់ប្រាក់ពេលអីវ៉ាន់ទៅដល់ (COD)';
 
+      const sourceTitle =
+        newOrder.channel === 'FACEBOOK'
+          ? `📘 <b>អর্ডারថ្មីពី Facebook Page Messenger! (#${newOrder.id})</b>`
+          : `🛍️ <b>អর্ডারថ្មីពី Telegram Mini App! (#${newOrder.id})</b>`;
+
       const tgMessage = [
-        `🛍️ <b>អর্ডারថ្មីពី Telegram Mini App! (#${newOrder.id})</b>`,
+        sourceTitle,
         `━━━━━━━━━━━━━━━━━━━━`,
         `👤 អតិថិជន: <b>${newOrder.customerName}</b> ${newOrder.telegramUsername ? `(@${newOrder.telegramUsername})` : ''}`,
         `📞 ទូរស័ព្ទ: <b>${newOrder.phone}</b>`,
@@ -537,6 +569,36 @@ router.post('/orders', async (req: Request, res: Response) => {
       ].filter(Boolean).join('\n');
 
       sendTelegramMessage(botToken, targetChatId, tgMessage).catch(() => {});
+    }
+
+    // 4. If customer ordered from Facebook Messenger (has fbPsid) and Page Token is configured,
+    // automatically send an Order Receipt confirmation message back into their Facebook Messenger chat!
+    const fbToken = (miniAppDb.config.fbPageAccessToken || '').trim();
+    if (fbToken && newOrder.fbPsid) {
+      const receiptLines = [
+        `🎉 អរគុណសម្រាប់ការកម្ម៉ង់ទិញពី ${miniAppDb.config.storeName}!`,
+        `🧾 លេខវិក្កយបត្រ៖ #${newOrder.id}`,
+        `━━━━━━━━━━━━━━━━`,
+        ...confirmedItems.map(
+          (it, idx) => `${idx + 1}. [${it.code}] ${it.name} (${it.color} - ${it.size}) x${it.qty} = $${(it.price * it.qty).toFixed(2)}`
+        ),
+        `━━━━━━━━━━━━━━━━`,
+        `🚚 ថ្លៃដឹក៖ $${newOrder.shippingFee.toFixed(2)} (${newOrder.deliveryCompany})`,
+        `💵 សរុបរួម៖ $${newOrder.totalAmount.toFixed(2)}`,
+        `📞 ទូរស័ព្ទ៖ ${newOrder.phone}`,
+        `📍 ទីតាំង៖ ${newOrder.address}`,
+        `✅ ក្រុមការងារហាងយើងខ្ញុំបានទទួលការកម្ម៉ង់របស់បងហើយ និងកំពុងរៀបចំវេចខ្ចប់ជូនបង! 🙏✨`
+      ].join('\n');
+
+      fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: newOrder.fbPsid },
+          messaging_type: 'RESPONSE',
+          message: { text: receiptLines }
+        })
+      }).catch(() => {});
     }
 
     return res.json({
@@ -563,11 +625,17 @@ router.post('/admin/verify-pin', (req: Request, res: Response) => {
 });
 
 router.get('/admin/data', (_req: Request, res: Response) => {
+  const connectedFbPages = (getConnectedFacebookPages() || []).map(p => ({
+    id: p.id,
+    name: p.name,
+    access_token: p.access_token
+  }));
   res.json({
     success: true,
     config: miniAppDb.config,
     products: miniAppDb.products,
-    orders: miniAppDb.orders
+    orders: miniAppDb.orders,
+    connectedFbPages
   });
 });
 
@@ -592,7 +660,13 @@ router.put('/admin/config', (req: Request, res: Response) => {
     adminPin: incoming.adminPin ? String(incoming.adminPin).trim() : miniAppDb.config.adminPin,
     miniAppUrl: incoming.miniAppUrl ? String(incoming.miniAppUrl).trim() : miniAppDb.config.miniAppUrl,
     menuButtonText: incoming.menuButtonText ? String(incoming.menuButtonText).trim() : miniAppDb.config.menuButtonText,
-    botUsername: incoming.botUsername ?? miniAppDb.config.botUsername
+    botUsername: incoming.botUsername ?? miniAppDb.config.botUsername,
+    fbPageId: incoming.fbPageId !== undefined ? String(incoming.fbPageId).trim() : miniAppDb.config.fbPageId,
+    fbPageName: incoming.fbPageName !== undefined ? String(incoming.fbPageName).trim() : miniAppDb.config.fbPageName,
+    fbPageAccessToken: incoming.fbPageAccessToken !== undefined ? String(incoming.fbPageAccessToken).trim() : miniAppDb.config.fbPageAccessToken,
+    fbVerifyToken: incoming.fbVerifyToken !== undefined ? String(incoming.fbVerifyToken).trim() : (miniAppDb.config.fbVerifyToken || '1688'),
+    fbAutoReplyEnabled: incoming.fbAutoReplyEnabled !== undefined ? Boolean(incoming.fbAutoReplyEnabled) : (miniAppDb.config.fbAutoReplyEnabled ?? true),
+    fbButtonText: incoming.fbButtonText ? String(incoming.fbButtonText).trim() : (miniAppDb.config.fbButtonText || '🛍️ ចុចទិញទំនិញ')
   };
   saveMiniAppDb();
   res.json({ success: true, config: miniAppDb.config });
@@ -964,5 +1038,489 @@ async function startDedicatedMiniAppBotPolling() {
 }
 
 startDedicatedMiniAppBotPolling();
+
+// ---------------------------------------------------------------------------
+// 6. FACEBOOK PAGE MESSENGER SHOP INTEGRATION (Method 1 & Method 2)
+// ---------------------------------------------------------------------------
+function buildFbMessengerShopUrl(baseMiniAppUrl: string, psid?: string, customerName?: string): string {
+  const cleanBase = (baseMiniAppUrl || miniAppDb.config.miniAppUrl || 'https://chatbotkh.com/miniapp').trim();
+  const sep = cleanBase.includes('?') ? '&' : '?';
+  const params = new URLSearchParams();
+  params.set('source', 'fb');
+  if (psid) params.set('psid', psid);
+  if (customerName) params.set('cname', customerName);
+  return `${cleanBase}${sep}${params.toString()}`;
+}
+
+export async function sendFacebookShopCard(
+  pageAccessToken: string,
+  recipientPsid: string,
+  customerName?: string
+): Promise<{ ok: boolean; error?: string }> {
+  const token = String(pageAccessToken || '').trim();
+  if (!token || !recipientPsid) {
+    return { ok: false, error: 'Missing Page Access Token or Recipient PSID' };
+  }
+
+  const shopUrl = buildFbMessengerShopUrl(
+    miniAppDb.config.miniAppUrl || 'https://chatbotkh.com/miniapp',
+    recipientPsid,
+    customerName
+  );
+  const btnTitle = String(miniAppDb.config.fbButtonText || '🛍️ ចុចទិញទំនិញ').trim().slice(0, 20);
+  const storeTitle = `🛍️ ${miniAppDb.config.storeName}`;
+  const cardText = [
+    `សួស្តី${customerName ? `បង ${customerName}` : ''}! 🙏✨ សូមស្វាគមន៍មកកាន់ ${miniAppDb.config.storeName}`,
+    `${miniAppDb.config.storeSubtitle}`,
+    `🔥 ${miniAppDb.config.promoBannerText}`,
+    `👇 សូមចុចប៊ូតុងខាងក្រោមដើម្បីមើលម៉ូត រើសពណ៌ រើស Size និងកម្ម៉ង់ទិញភ្លាមៗ៖`
+  ].join('\n');
+
+  // 1. Try sending Interactive Messenger Button Template (Displays text + clickable Webview Button inside Messenger!)
+  try {
+    const btnTemplateRes = await fetch(
+      `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(token)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientPsid },
+          messaging_type: 'RESPONSE',
+          message: {
+            attachment: {
+              type: 'template',
+              payload: {
+                template_type: 'button',
+                text: cardText.slice(0, 600),
+                buttons: [
+                  {
+                    type: 'web_url',
+                    url: shopUrl,
+                    title: btnTitle,
+                    webview_height_ratio: 'full'
+                  }
+                ]
+              }
+            }
+          }
+        })
+      }
+    );
+    const btnTemplateData = await btnTemplateRes.json();
+    if (btnTemplateRes.ok && !btnTemplateData.error) {
+      return { ok: true };
+    }
+
+    // 2. Fallback to Generic Template Card
+    const genericRes = await fetch(
+      `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(token)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientPsid },
+          messaging_type: 'RESPONSE',
+          message: {
+            attachment: {
+              type: 'template',
+              payload: {
+                template_type: 'generic',
+                elements: [
+                  {
+                    title: storeTitle.slice(0, 80),
+                    subtitle: `${miniAppDb.config.storeSubtitle} - ${miniAppDb.config.promoBannerText}`.slice(0, 80),
+                    default_action: {
+                      type: 'web_url',
+                      url: shopUrl,
+                      webview_height_ratio: 'full'
+                    },
+                    buttons: [
+                      {
+                        type: 'web_url',
+                        url: shopUrl,
+                        title: btnTitle,
+                        webview_height_ratio: 'full'
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        })
+      }
+    );
+    const genericData = await genericRes.json();
+    if (genericRes.ok && !genericData.error) {
+      return { ok: true };
+    }
+
+    // 3. Final fallback: Standard text message with clickable shop link
+    const textRes = await fetch(
+      `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(token)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { id: recipientPsid },
+          messaging_type: 'RESPONSE',
+          message: {
+            text: `${cardText}\n\n🛒 ${btnTitle}៖\n${shopUrl}`
+          }
+        })
+      }
+    );
+    const textData = await textRes.json();
+    if (textRes.ok && !textData.error) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      error: textData?.error?.message || btnTemplateData?.error?.message || 'Facebook Send API error'
+    };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Network error calling Facebook Send API' };
+  }
+}
+
+// 1-Click Setup Facebook Page Messenger Shop (Persistent Menu + Ice Breakers + Auto-Reply)
+router.post('/admin/setup-fb-page', async (req: Request, res: Response) => {
+  try {
+    const { fbPageAccessToken, miniAppUrl, fbButtonText, fbAutoReplyEnabled, fbVerifyToken } = req.body || {};
+    const activeToken = String(fbPageAccessToken || miniAppDb.config.fbPageAccessToken || '').trim();
+
+    if (!activeToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'សូមបញ្ចូល ឬជ្រើសរើស Facebook Page Access Token ជាមុនសិន'
+      });
+    }
+
+    const cleanUrl = String(miniAppUrl || miniAppDb.config.miniAppUrl || 'https://chatbotkh.com/miniapp').trim();
+    if (!cleanUrl.startsWith('https://')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Link សម្រាប់ហាង Mini App ត្រូវតែផ្តើមដោយ https://'
+      });
+    }
+
+    const cleanBtnText = String(fbButtonText || miniAppDb.config.fbButtonText || '🛍️ ចុចទិញទំនិញ').trim().slice(0, 20);
+
+    // 1. Verify Page Access Token via Graph API /me
+    const meRes = await fetch(
+      `https://graph.facebook.com/v19.0/me?fields=id,name&access_token=${encodeURIComponent(activeToken)}`
+    );
+    const meData = await meRes.json();
+    if (!meRes.ok || meData.error || !meData.id) {
+      return res.status(400).json({
+        success: false,
+        error: `Page Access Token មិនត្រឹមត្រូវទេ៖ ${meData?.error?.message || 'Invalid token'}`
+      });
+    }
+
+    const pageId = String(meData.id);
+    const pageName = String(meData.name || 'Facebook Page');
+    const fbShopUrl = buildFbMessengerShopUrl(cleanUrl);
+
+    // 2. Configure Messenger Profile (Get Started + Persistent Menu Web URL button + Ice Breakers)
+    let profileNote = 'បានដាក់ប៊ូតុងហាងក្នុង Messenger Menu និងប្រព័ន្ធឆ្លើយតបស្វ័យប្រវត្តិរួចរាល់!';
+    try {
+      const profileRes = await fetch(
+        `https://graph.facebook.com/v19.0/me/messenger_profile?access_token=${encodeURIComponent(activeToken)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            get_started: { payload: 'GET_STARTED_MINIAPP_SHOP' },
+            persistent_menu: [
+              {
+                locale: 'default',
+                composer_input_disabled: false,
+                call_to_actions: [
+                  {
+                    type: 'web_url',
+                    title: cleanBtnText,
+                    url: fbShopUrl,
+                    webview_height_ratio: 'full'
+                  }
+                ]
+              }
+            ],
+            ice_breakers: [
+              {
+                call_to_actions: [
+                  {
+                    question: '🛍️ មើលម៉ូតខោអាវ និងតម្លៃ (បើកហាងទិញ)',
+                    payload: 'OPEN_MINIAPP_SHOP'
+                  },
+                  {
+                    question: '📦 ចង់កម្ម៉ង់ទិញខោអាវ',
+                    payload: 'OPEN_MINIAPP_SHOP'
+                  }
+                ],
+                locale: 'default'
+              }
+            ]
+          })
+        }
+      );
+      const profileData = await profileRes.json();
+      if (profileData?.error) {
+        profileNote = 'បានភ្ជាប់ប្រព័ន្ធឆ្លើយតបប៊ូតុងហាងស្វ័យប្រវត្តិ (Auto-Reply Button Card) រួចរាល់!';
+      }
+    } catch {}
+
+    // 3. Subscribe page to webhook events if possible
+    fetch(
+      `https://graph.facebook.com/v19.0/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${encodeURIComponent(activeToken)}`,
+      { method: 'POST' }
+    ).catch(() => {});
+
+    miniAppDb.config.fbPageId = pageId;
+    miniAppDb.config.fbPageName = pageName;
+    miniAppDb.config.fbPageAccessToken = activeToken;
+    miniAppDb.config.miniAppUrl = cleanUrl;
+    miniAppDb.config.fbButtonText = cleanBtnText;
+    miniAppDb.config.fbAutoReplyEnabled = fbAutoReplyEnabled !== undefined ? Boolean(fbAutoReplyEnabled) : true;
+    if (fbVerifyToken) {
+      miniAppDb.config.fbVerifyToken = String(fbVerifyToken).trim();
+    }
+    saveMiniAppDb();
+
+    return res.json({
+      success: true,
+      pageId,
+      pageName,
+      messengerLink: `https://m.me/${pageId}`,
+      note: profileNote,
+      config: miniAppDb.config
+    });
+  } catch (err: any) {
+    console.error('[MiniApp Setup FB Page Error]:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'មានបញ្ហាក្នុងការភ្ជាប់ទៅ Facebook Page'
+    });
+  }
+});
+
+// Send a test Shop Button Card to the most recent customer in Facebook Page Inbox
+router.post('/admin/send-fb-test-card', async (req: Request, res: Response) => {
+  try {
+    const activeToken = String(miniAppDb.config.fbPageAccessToken || '').trim();
+    const pageId = String(miniAppDb.config.fbPageId || '').trim();
+    if (!activeToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'សូមភ្ជាប់ Facebook Page Access Token ជាមុនសិន'
+      });
+    }
+
+    let targetPsid = String(req.body?.psid || '').trim();
+    let targetName = '';
+
+    if (!targetPsid) {
+      const convRes = await fetch(
+        `https://graph.facebook.com/v19.0/me/conversations?fields=participants,updated_time&limit=5&access_token=${encodeURIComponent(activeToken)}`
+      );
+      const convData = await convRes.json();
+      if (!convRes.ok || convData.error) {
+        return res.status(400).json({
+          success: false,
+          error: `មិនអាចទាញបញ្ជីឆាតពី Page បានទេ៖ ${convData?.error?.message || 'Graph API Error'}`
+        });
+      }
+
+      const conversations = Array.isArray(convData.data) ? convData.data : [];
+      for (const conv of conversations) {
+        const participants = conv?.participants?.data || [];
+        const customer = participants.find((p: any) => String(p.id) !== pageId);
+        if (customer?.id) {
+          targetPsid = String(customer.id);
+          targetName = String(customer.name || '');
+          break;
+        }
+      }
+    }
+
+    if (!targetPsid) {
+      return res.status(400).json({
+        success: false,
+        error: 'រកមិនឃើញឆាតភ្ញៀវថ្មីៗក្នុង Page ទេ។ សូមឱ្យភ្ញៀវឆាតចូល Page ម្នាក់សិន!'
+      });
+    }
+
+    const sendRes = await sendFacebookShopCard(activeToken, targetPsid, targetName);
+    if (!sendRes.ok) {
+      return res.status(400).json({
+        success: false,
+        error: `មិនអាចផ្ញើប៊ូតុងហាងទៅឆាតភ្ញៀវបានទេ៖ ${sendRes.error}`
+      });
+    }
+
+    return res.json({
+      success: true,
+      customerName: targetName || targetPsid
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'មានបញ្ហាក្នុងការផ្ញើប៊ូតុងហាងទៅ Facebook Messenger'
+    });
+  }
+});
+
+// Meta Messenger Webhook Verification (GET /api/miniapp/fb-webhook)
+router.get('/fb-webhook', (req: Request, res: Response) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const expectedToken = (miniAppDb.config.fbVerifyToken || '1688').trim();
+
+  if (mode === 'subscribe' && (token === expectedToken || token === '1688')) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+// Meta Messenger Webhook Event Receiver (POST /api/miniapp/fb-webhook)
+const fbCustomerCooldownMap = new Map<string, number>();
+
+router.post('/fb-webhook', async (req: Request, res: Response) => {
+  res.status(200).send('EVENT_RECEIVED');
+  try {
+    const body = req.body;
+    if (body?.object !== 'page' || !Array.isArray(body.entry)) return;
+
+    const activeToken = (miniAppDb.config.fbPageAccessToken || '').trim();
+    if (!activeToken || miniAppDb.config.fbAutoReplyEnabled === false) return;
+
+    for (const entry of body.entry) {
+      const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
+      for (const evt of messagingEvents) {
+        const senderId = evt?.sender?.id ? String(evt.sender.id) : '';
+        const pageId = String(miniAppDb.config.fbPageId || entry.id || '');
+        if (!senderId || senderId === pageId || evt?.message?.is_echo) continue;
+
+        const postbackPayload = evt?.postback?.payload || '';
+        const text = typeof evt?.message?.text === 'string' ? evt.message.text.trim() : '';
+        const lower = text.toLowerCase();
+
+        const isExplicitTrigger =
+          postbackPayload === 'GET_STARTED_MINIAPP_SHOP' ||
+          postbackPayload === 'OPEN_MINIAPP_SHOP' ||
+          ['shop', 'order', 'menu', 'start', 'hi', 'hello', 'សួស្តី', 'ទិញ', 'ហាង', 'កម្ម៉ង់', 'ម៉ូត', 'តម្លៃ', 'មើល'].some(
+            kw => lower === kw || lower.includes(kw)
+          );
+
+        const lastSentAt = fbCustomerCooldownMap.get(senderId) || 0;
+        const cooldownExpired = Date.now() - lastSentAt > 4 * 60 * 60 * 1000; // 4 hours cooldown for general messages
+
+        if (isExplicitTrigger || cooldownExpired) {
+          fbCustomerCooldownMap.set(senderId, Date.now());
+          await sendFacebookShopCard(activeToken, senderId);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[FB Webhook Error]:', err);
+  }
+});
+
+// Zero-Webhook Background Facebook Page Conversation Poller
+// Automatically replies with the Shop Button Card when a customer messages the Page!
+const processedFbMsgIds = new Set<string>();
+let isFirstFbPollPass = true;
+
+async function startFacebookMessengerShopPoller() {
+  while (true) {
+    try {
+      const activeToken = (miniAppDb.config.fbPageAccessToken || '').trim();
+      const pageId = (miniAppDb.config.fbPageId || '').trim();
+      const autoReply = miniAppDb.config.fbAutoReplyEnabled !== false;
+
+      if (!activeToken || !pageId || !autoReply) {
+        await new Promise(r => setTimeout(r, 6000));
+        continue;
+      }
+
+      const url = `https://graph.facebook.com/v19.0/me/conversations?fields=participants,updated_time,messages.limit(2){id,message,from,created_time}&limit=6&access_token=${encodeURIComponent(activeToken)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        await new Promise(r => setTimeout(r, 12000));
+        continue;
+      }
+
+      const data = await res.json();
+      const conversations = Array.isArray(data?.data) ? data.data : [];
+
+      for (const conv of conversations) {
+        const msgs = conv?.messages?.data || [];
+        if (msgs.length === 0) continue;
+
+        const latestMsg = msgs[0];
+        const msgId = String(latestMsg?.id || '');
+        if (!msgId) continue;
+
+        // On first startup pass, seed existing message IDs so we don't reply to old historical messages
+        if (isFirstFbPollPass) {
+          processedFbMsgIds.add(msgId);
+          continue;
+        }
+
+        if (processedFbMsgIds.has(msgId)) continue;
+        processedFbMsgIds.add(msgId);
+
+        const fromId = String(latestMsg?.from?.id || '');
+        const fromName = String(latestMsg?.from?.name || '');
+        if (!fromId || fromId === pageId) continue;
+
+        // Check message age (only auto-reply to messages received within the last 3 minutes)
+        const createdTime = latestMsg?.created_time ? new Date(latestMsg.created_time).getTime() : Date.now();
+        if (Date.now() - createdTime > 3 * 60 * 1000) continue;
+
+        const text = String(latestMsg?.message || '').trim();
+        const lower = text.toLowerCase();
+
+        const isExplicitShopWord = [
+          'shop',
+          'order',
+          'menu',
+          'start',
+          'hi',
+          'hello',
+          'សួស្តី',
+          'ជម្រាបសួរ',
+          'ទិញ',
+          'ហាង',
+          'កម្ម៉ង់',
+          'ម៉ូត',
+          'តម្លៃ',
+          'មើល',
+          'អាវ',
+          'ខោ',
+          'រ៉ូប',
+          'មានក្នុងស្តុក',
+          'ប៉ុន្មាន'
+        ].some(kw => lower.includes(kw));
+
+        const lastSentAt = fbCustomerCooldownMap.get(fromId) || 0;
+        const cooldownExpired = Date.now() - lastSentAt > 4 * 60 * 60 * 1000;
+
+        if (isExplicitShopWord || cooldownExpired) {
+          fbCustomerCooldownMap.set(fromId, Date.now());
+          await sendFacebookShopCard(activeToken, fromId, fromName);
+        }
+      }
+
+      isFirstFbPollPass = false;
+    } catch {
+      // Ignore transient network errors
+    }
+    await new Promise(r => setTimeout(r, 10000));
+  }
+}
+
+startFacebookMessengerShopPoller();
 
 export default router;
