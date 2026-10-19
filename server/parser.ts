@@ -338,8 +338,9 @@ export function parseAndAllocateComment(
   const initialCustAddress = hasExplicitLocation ? (bestLocation || label) : undefined;
 
   if (!cust) {
+    const nextCustId = customers.reduce((m, c) => Math.max(m, Number(c.customer_id) || 0), 0) + 1;
     cust = {
-      customer_id: customers.length + 1,
+      customer_id: nextCustId,
       facebook_user_id: fbUserId || 'FB_USER_ID_STREAM',
       facebook_name: cleanFbName,
       picture_url: userPicUrl,
@@ -467,6 +468,9 @@ export function parseAndAllocateComment(
 
   if (!inv) {
     maxInvoiceIdTracker = Math.max(maxInvoiceIdTracker + 1, 101);
+    while (invoices.some(i => i.invoice_id === maxInvoiceIdTracker)) {
+      maxInvoiceIdTracker += 1;
+    }
     const nextId = maxInvoiceIdTracker;
 
     // SAFE AUTOFILL RULE:

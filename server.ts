@@ -35,7 +35,8 @@ import {
   clearAllConnectedPages,
   getConnectedFacebookPages,
   getFacebookUserAccessToken,
-  setFacebookUserAccessToken
+  setFacebookUserAccessToken,
+  saveDatabaseToDisk
 } from './server/db.ts';
 import { parseAndAllocateComment } from './server/parser.ts';
 import { startLiveCommentsAutoSync } from './server/liveSync.ts';
@@ -815,5 +816,22 @@ async function startServer() {
     }, 500);
   });
 }
+
+let isShuttingDown = false;
+async function handleGracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[Shutdown] Received ${signal}. Flushing database & workflow stages to disk before exit...`);
+  try {
+    await saveDatabaseToDisk(true);
+    console.log('[Shutdown] Database flushed successfully.');
+  } catch (err) {
+    console.error('[Shutdown] Error flushing database:', err);
+  }
+  process.exit(0);
+}
+
+process.on('SIGINT', () => handleGracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
 
 startServer();

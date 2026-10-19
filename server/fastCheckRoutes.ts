@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, type GenerateContentResponse } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, type AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db.ts';
+import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, type AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips, stampInvoiceWorkflowUpdate } from './db.ts';
 import type { Invoice } from './types.ts';
 import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine.ts';
 import { computeImageHash, getCachedOcr, setCachedOcr, isProcessed, markProcessed, markMultipleProcessed } from './ocrCache.ts';
@@ -1211,6 +1211,7 @@ router.post('/confirm_matches', (req: Request, res: Response) => {
         if (inv.packing_stage === 'UNPICKED') {
           inv.packing_stage = 'STAGED';
         }
+        stampInvoiceWorkflowUpdate(inv);
         updatedCount++;
 
         // Find associated slip in messengerSlips and update
@@ -2059,6 +2060,7 @@ router.post('/approve_slip', (req: Request, res: Response) => {
     if (inv.packing_stage === 'UNPICKED') {
       inv.packing_stage = 'STAGED';
     }
+    stampInvoiceWorkflowUpdate(inv);
 
     // Permanently record the TxID into invoice notes/comments to lock against future cross-account reuse
     const transRef = (slip && slip.extracted?.trans_ref) || '';

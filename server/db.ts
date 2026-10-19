@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import type {
   Product,
   Invoice,
@@ -20,6 +21,111 @@ let sqliteTimer: NodeJS.Timeout | null = null;
 let isDatabaseLoaded = false;
 
 const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
+const LOCAL_WORKFLOW_LEDGER_PATH = path.join(process.cwd(), 'server', 'workflow_ledger.json');
+
+// External directory outside the git repository so `git pull` / `git reset` on VPS never overwrites live state
+const EXTERNAL_DATA_DIR = path.join(os.homedir() || '/tmp', '.karishop_data');
+const EXTERNAL_DB_BACKUP_PATH = path.join(EXTERNAL_DATA_DIR, 'db_store_backup.json');
+const EXTERNAL_WORKFLOW_LEDGER_PATH = path.join(EXTERNAL_DATA_DIR, 'workflow_ledger.json');
+
+function ensureExternalDataDir() {
+  try {
+    if (!fs.existsSync(EXTERNAL_DATA_DIR)) {
+      fs.mkdirSync(EXTERNAL_DATA_DIR, { recursive: true });
+    }
+  } catch {}
+}
+
+export interface WorkflowLedgerEntry {
+  invoice_id: number;
+  basket_no: number | string;
+  live_id: string;
+  facebook_user_id?: string;
+  facebook_name?: string;
+  packing_stage: string;
+  status: string;
+  payment_status?: string;
+  staged_by?: string;
+  staged_at?: string;
+  verified_by?: string;
+  verified_at?: string;
+  paid_by?: string;
+  paid_at?: string;
+  dispatched_by?: string;
+  dispatched_at?: string;
+  msg_status?: string;
+  items_packed?: Record<string, boolean>;
+  updated_at: string;
+}
+
+const STAGE_RANK: Record<string, number> = {
+  UNPICKED: 0,
+  PACKING: 1,
+  STAGED: 2,
+  WAITING_PAYMENT: 2,
+  VERIFIED: 3,
+  DISPATCHED: 4
+};
+
+export function getStageRank(stage?: string, status?: string): number {
+  if (status === 'Dispatched' || stage === 'DISPATCHED') return 4;
+  if (status === 'Paid' && (stage === 'STAGED' || stage === 'VERIFIED')) return 3;
+  return STAGE_RANK[String(stage || 'UNPICKED').toUpperCase()] ?? 0;
+}
+
+function buildWorkflowLedgerMap(invs: Invoice[]): Record<string, WorkflowLedgerEntry> {
+  const ledger: Record<string, WorkflowLedgerEntry> = {};
+  for (const inv of invs) {
+    if (!inv) continue;
+    const rank = getStageRank(inv.packing_stage, inv.status);
+    const hasPackedItems = Array.isArray(inv.items) && inv.items.some(it => it.is_packed);
+    const hasUpdatedAt = Boolean((inv as any).updated_at);
+    if (rank > 0 || hasPackedItems || hasUpdatedAt || inv.status === 'Paid' || inv.paid_at || inv.staged_at) {
+      const itemsPacked: Record<string, boolean> = {};
+      for (const it of inv.items || []) {
+        if (it.product_code) {
+          itemsPacked[it.product_code.toUpperCase().trim()] = Boolean(it.is_packed);
+        }
+      }
+      const entry: WorkflowLedgerEntry = {
+        invoice_id: inv.invoice_id,
+        basket_no: inv.basket_no || inv.invoice_id,
+        live_id: inv.live_id || activeLiveId || '',
+        facebook_user_id: inv.facebook_user_id,
+        facebook_name: inv.facebook_name,
+        packing_stage: inv.packing_stage || 'UNPICKED',
+        status: inv.status || 'Pending',
+        payment_status: (inv as any).payment_status,
+        staged_by: inv.staged_by,
+        staged_at: inv.staged_at,
+        verified_by: inv.verified_by,
+        verified_at: inv.verified_at,
+        paid_by: inv.paid_by,
+        paid_at: inv.paid_at,
+        dispatched_by: (inv as any).dispatched_by,
+        dispatched_at: (inv as any).dispatched_at,
+        msg_status: inv.msg_status,
+        items_packed: itemsPacked,
+        updated_at: (inv as any).updated_at || inv.staged_at || inv.paid_at || (inv as any).dispatched_at || new Date().toISOString()
+      };
+      ledger[`id_${inv.invoice_id}`] = entry;
+      if (inv.live_id && inv.basket_no) {
+        ledger[`live_${inv.live_id}_b_${inv.basket_no}`] = entry;
+      }
+    }
+  }
+  return ledger;
+}
+
+export function stampInvoiceWorkflowUpdate(inv: Invoice) {
+  (inv as any).updated_at = new Date().toISOString();
+  try {
+    ensureExternalDataDir();
+    const ledgerJson = JSON.stringify(buildWorkflowLedgerMap(invoices));
+    fs.promises.writeFile(LOCAL_WORKFLOW_LEDGER_PATH, ledgerJson, 'utf8').catch(() => {});
+    fs.promises.writeFile(EXTERNAL_WORKFLOW_LEDGER_PATH, ledgerJson, 'utf8').catch(() => {});
+  } catch {}
+}
 
 let isSaving = false;
 let pendingSave = false;
@@ -36,6 +142,7 @@ async function executeDiskSave(forceSync = false) {
 
   isSaving = true;
   try {
+    ensureExternalDataDir();
     const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
     if (messengerSlips.length === 0 && fs.existsSync(BACKUP_SLIPS_PATH)) {
       try {
@@ -49,6 +156,7 @@ async function executeDiskSave(forceSync = false) {
     }
 
     const payload = {
+      savedAt: new Date().toISOString(),
       dataRevision,
       activeLiveId,
       settings,
@@ -61,13 +169,22 @@ async function executeDiskSave(forceSync = false) {
       messengerSlips
     };
     const jsonStr = JSON.stringify(payload);
+    const ledgerStr = JSON.stringify(buildWorkflowLedgerMap(invoices));
 
     if (forceSync) {
       fs.writeFileSync(DB_FILE_PATH, jsonStr, 'utf8');
+      try { fs.writeFileSync(EXTERNAL_DB_BACKUP_PATH, jsonStr, 'utf8'); } catch {}
+      try { fs.writeFileSync(LOCAL_WORKFLOW_LEDGER_PATH, ledgerStr, 'utf8'); } catch {}
+      try { fs.writeFileSync(EXTERNAL_WORKFLOW_LEDGER_PATH, ledgerStr, 'utf8'); } catch {}
+
       if (messengerSlips && messengerSlips.length > 0) {
         try {
           fs.writeFileSync(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8');
         } catch {}
+      }
+      if (sqliteTimer) {
+        clearTimeout(sqliteTimer);
+        sqliteTimer = null;
       }
       await persistToSqlite({
         activeLiveId,
@@ -84,27 +201,31 @@ async function executeDiskSave(forceSync = false) {
       await fs.promises.writeFile(DB_FILE_PATH, jsonStr, 'utf8').catch(err => {
         console.error('[DB] Async save error:', err);
       });
+      fs.promises.writeFile(EXTERNAL_DB_BACKUP_PATH, jsonStr, 'utf8').catch(() => {});
+      fs.promises.writeFile(LOCAL_WORKFLOW_LEDGER_PATH, ledgerStr, 'utf8').catch(() => {});
+      fs.promises.writeFile(EXTERNAL_WORKFLOW_LEDGER_PATH, ledgerStr, 'utf8').catch(() => {});
 
       if (messengerSlips && messengerSlips.length > 0) {
         fs.promises.writeFile(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8').catch(() => {});
       }
 
-      // Schedule SQLite binary persistence in idle background (6s debounce so active clicks/uploads never lag)
-      if (sqliteTimer) clearTimeout(sqliteTimer);
-      sqliteTimer = setTimeout(() => {
-        sqliteTimer = null;
-        persistToSqlite({
-          activeLiveId,
-          settings,
-          products,
-          invoices,
-          rawComments: rawComments.slice(-1500),
-          customers,
-          packerLogs,
-          activeFacebookPage,
-          messengerSlips
-        }).catch(err => console.error('[SQLite] Persist error:', err));
-      }, 6000);
+      // Schedule SQLite binary persistence in 1.2s WITHOUT resetting existing timer so continuous activity never starves pos.db!
+      if (!sqliteTimer) {
+        sqliteTimer = setTimeout(() => {
+          sqliteTimer = null;
+          persistToSqlite({
+            activeLiveId,
+            settings,
+            products,
+            invoices,
+            rawComments: rawComments.slice(-1500),
+            customers,
+            packerLogs,
+            activeFacebookPage,
+            messengerSlips
+          }).catch(err => console.error('[SQLite] Persist error:', err));
+        }, 1200);
+      }
     }
   } catch (err) {
     console.error('Failed to save database:', err);
@@ -112,7 +233,7 @@ async function executeDiskSave(forceSync = false) {
     isSaving = false;
     if (pendingSave) {
       pendingSave = false;
-      setTimeout(() => executeDiskSave(false), 800);
+      setTimeout(() => executeDiskSave(false), 300);
     }
   }
 }
@@ -125,11 +246,12 @@ export async function saveDatabaseToDisk(forceSync = false) {
     }
     return executeDiskSave(true);
   }
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    executeDiskSave(false);
-  }, 600);
+  if (!saveTimer) {
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      executeDiskSave(false);
+    }, 250);
+  }
 }
 
 export function bumpDataRevision(persist = true): number {
@@ -724,6 +846,209 @@ export function loadDatabaseFromDisk(): Promise<void> {
       console.log(`[SQLite Loaded] Loaded ${invoices.length} invoices, ${products.length} products from pos.db`);
     }
 
+    // 1a. Reconcile & merge with server/db_store.json, ~/.karishop_data/db_store_backup.json, and workflow_ledger.json!
+    // This guarantees that even if pos.db lagged behind or `git pull` touched files inside the repo,
+    // no picked/staged/paid/dispatched basket or newly created invoice ever reverts to UNPICKED!
+    const jsonStoreCandidates = [EXTERNAL_DB_BACKUP_PATH, DB_FILE_PATH];
+    const parsedStores: any[] = [];
+    for (const storePath of jsonStoreCandidates) {
+      if (fs.existsSync(storePath)) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+          if (parsed && typeof parsed === 'object') {
+            parsedStores.push(parsed);
+          }
+        } catch (err) {
+          console.warn(`[DB Reconcile] Warning reading ${storePath}:`, err);
+        }
+      }
+    }
+
+    // Load workflow ledgers (external Git-immune ledger + local ledger)
+    const mergedLedger: Record<string, WorkflowLedgerEntry> = {};
+    for (const ledgerPath of [LOCAL_WORKFLOW_LEDGER_PATH, EXTERNAL_WORKFLOW_LEDGER_PATH]) {
+      if (fs.existsSync(ledgerPath)) {
+        try {
+          const rawL = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+          if (rawL && typeof rawL === 'object') {
+            for (const [k, val] of Object.entries(rawL)) {
+              const entry = val as WorkflowLedgerEntry;
+              const existing = mergedLedger[k];
+              if (!existing) {
+                mergedLedger[k] = entry;
+              } else {
+                const newRank = getStageRank(entry.packing_stage, entry.status);
+                const oldRank = getStageRank(existing.packing_stage, existing.status);
+                const newTime = entry.updated_at ? new Date(entry.updated_at).getTime() : 0;
+                const oldTime = existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
+                if (newTime > oldTime || (newTime === oldTime && newRank > oldRank)) {
+                  mergedLedger[k] = entry;
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // Also incorporate invoices from parsedStores (db_store.json & external backup)
+    if (parsedStores.length > 0) {
+      const invById = new Map<number, Invoice>();
+      const invByLiveBasket = new Map<string, Invoice>();
+      for (const inv of invoices) {
+        invById.set(inv.invoice_id, inv);
+        if (inv.live_id && inv.basket_no) {
+          invByLiveBasket.set(`${inv.live_id}_b_${inv.basket_no}`, inv);
+        }
+      }
+
+      let restoredMissingCount = 0;
+      let restoredStageCount = 0;
+
+      for (const store of parsedStores) {
+        if (store.dataRevision && store.dataRevision > dataRevision) {
+          dataRevision = store.dataRevision;
+        }
+        if (Array.isArray(store.invoices)) {
+          // If store has an activeLiveId that has more invoices than current activeLiveId, adopt it
+          if (store.activeLiveId && (!activeLiveId || invoices.length <= 10)) {
+            activeLiveId = store.activeLiveId;
+          }
+          for (const sInv of store.invoices as Invoice[]) {
+            if (!sInv || !sInv.invoice_id) continue;
+            const liveBasketKey = sInv.live_id && sInv.basket_no ? `${sInv.live_id}_b_${sInv.basket_no}` : '';
+            const existing = invById.get(sInv.invoice_id) || (liveBasketKey ? invByLiveBasket.get(liveBasketKey) : undefined);
+
+            if (!existing) {
+              invoices.push(sInv);
+              invById.set(sInv.invoice_id, sInv);
+              if (liveBasketKey) invByLiveBasket.set(liveBasketKey, sInv);
+              restoredMissingCount++;
+            } else {
+              // Compare workflow stage & timestamps between existing (SQLite) and sInv (JSON store)
+              const existingRank = getStageRank(existing.packing_stage, existing.status);
+              const candidateRank = getStageRank(sInv.packing_stage, sInv.status);
+              const existingTime = (existing as any).updated_at ? new Date((existing as any).updated_at).getTime() : 0;
+              const candidateTime = (sInv as any).updated_at ? new Date((sInv as any).updated_at).getTime() : 0;
+
+              const shouldAdoptStage =
+                (candidateTime > existingTime && candidateTime > 0) ||
+                (candidateTime === existingTime && candidateRank > existingRank) ||
+                (existingRank === 0 && candidateRank > 0);
+
+              if (shouldAdoptStage) {
+                if (existing.packing_stage !== sInv.packing_stage || existing.status !== sInv.status) {
+                  restoredStageCount++;
+                }
+                existing.packing_stage = sInv.packing_stage || existing.packing_stage;
+                existing.status = sInv.status || existing.status;
+                if ((sInv as any).payment_status) (existing as any).payment_status = (sInv as any).payment_status;
+                if (sInv.staged_by) existing.staged_by = sInv.staged_by;
+                if (sInv.staged_at) existing.staged_at = sInv.staged_at;
+                if (sInv.verified_by) existing.verified_by = sInv.verified_by;
+                if (sInv.verified_at) existing.verified_at = sInv.verified_at;
+                if (sInv.paid_by) existing.paid_by = sInv.paid_by;
+                if (sInv.paid_at) existing.paid_at = sInv.paid_at;
+                if ((sInv as any).dispatched_by) (existing as any).dispatched_by = (sInv as any).dispatched_by;
+                if ((sInv as any).dispatched_at) (existing as any).dispatched_at = (sInv as any).dispatched_at;
+                if (sInv.msg_status && sInv.msg_status !== 'UNSENT') existing.msg_status = sInv.msg_status;
+                if ((sInv as any).updated_at) (existing as any).updated_at = (sInv as any).updated_at;
+              }
+
+              // Preserve packed flags on items
+              if (Array.isArray(sInv.items) && Array.isArray(existing.items)) {
+                for (const sItem of sInv.items) {
+                  if (sItem.is_packed) {
+                    const matchIt = existing.items.find(it => (it.product_code || '').toUpperCase().trim() === (sItem.product_code || '').toUpperCase().trim());
+                    if (matchIt && !matchIt.is_packed) {
+                      matchIt.is_packed = true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Merge any missing products from JSON store
+        if (Array.isArray(store.products) && store.products.length > 0) {
+          const existingProdKeys = new Set(products.map(p => `${p.live_id || activeLiveId}_${(p.code || '').toUpperCase().trim()}`));
+          let maxProdId = products.reduce((m, p) => Math.max(m, p.id || 0), 0);
+          for (const sp of store.products) {
+            if (!sp || !sp.code) continue;
+            const key = `${sp.live_id || activeLiveId}_${sp.code.toUpperCase().trim()}`;
+            if (!existingProdKeys.has(key)) {
+              products.push({ ...sp, id: sp.id || ++maxProdId });
+              existingProdKeys.add(key);
+            }
+          }
+        }
+
+        // Merge any missing packerLogs from JSON store
+        if (Array.isArray(store.packerLogs) && store.packerLogs.length > 0) {
+          const seenLogInvs = new Set(packerLogs.map(l => `${l.invoice_id}_${l.packed_at}`));
+          let maxLogId = packerLogs.reduce((m, l) => Math.max(m, l.log_id || 0), 0);
+          for (const sl of store.packerLogs) {
+            const key = `${sl.invoice_id}_${sl.packed_at}`;
+            if (!seenLogInvs.has(key)) {
+              packerLogs.push({ ...sl, log_id: sl.log_id || ++maxLogId });
+              seenLogInvs.add(key);
+            }
+          }
+        }
+      }
+
+      if (restoredMissingCount > 0 || restoredStageCount > 0) {
+        console.log(`[DB Reconcile] Restored ${restoredMissingCount} missing baskets and ${restoredStageCount} basket stages from JSON backup store.`);
+      }
+    }
+
+    // Reconcile every invoice against the Git-immune workflow ledger
+    let ledgerRestoredCount = 0;
+    for (const inv of invoices) {
+      const ledgerEntry =
+        mergedLedger[`id_${inv.invoice_id}`] ||
+        (inv.live_id && inv.basket_no ? mergedLedger[`live_${inv.live_id}_b_${inv.basket_no}`] : undefined);
+
+      if (ledgerEntry) {
+        const invRank = getStageRank(inv.packing_stage, inv.status);
+        const ledgerRank = getStageRank(ledgerEntry.packing_stage, ledgerEntry.status);
+        const invTime = (inv as any).updated_at ? new Date((inv as any).updated_at).getTime() : 0;
+        const ledgerTime = ledgerEntry.updated_at ? new Date(ledgerEntry.updated_at).getTime() : 0;
+
+        if ((ledgerTime > invTime && ledgerTime > 0) || (ledgerTime === invTime && ledgerRank > invRank) || (invRank === 0 && ledgerRank > 0)) {
+          if (inv.packing_stage !== ledgerEntry.packing_stage || inv.status !== ledgerEntry.status) {
+            ledgerRestoredCount++;
+          }
+          inv.packing_stage = (ledgerEntry.packing_stage as any) || inv.packing_stage;
+          inv.status = (ledgerEntry.status as any) || inv.status;
+          if (ledgerEntry.payment_status) (inv as any).payment_status = ledgerEntry.payment_status;
+          if (ledgerEntry.staged_by) inv.staged_by = ledgerEntry.staged_by;
+          if (ledgerEntry.staged_at) inv.staged_at = ledgerEntry.staged_at;
+          if (ledgerEntry.verified_by) inv.verified_by = ledgerEntry.verified_by;
+          if (ledgerEntry.verified_at) inv.verified_at = ledgerEntry.verified_at;
+          if (ledgerEntry.paid_by) inv.paid_by = ledgerEntry.paid_by;
+          if (ledgerEntry.paid_at) inv.paid_at = ledgerEntry.paid_at;
+          if (ledgerEntry.dispatched_by) (inv as any).dispatched_by = ledgerEntry.dispatched_by;
+          if (ledgerEntry.dispatched_at) (inv as any).dispatched_at = ledgerEntry.dispatched_at;
+          if (ledgerEntry.msg_status && ledgerEntry.msg_status !== 'UNSENT') inv.msg_status = ledgerEntry.msg_status as any;
+          (inv as any).updated_at = ledgerEntry.updated_at;
+        }
+
+        if (ledgerEntry.items_packed && Array.isArray(inv.items)) {
+          for (const it of inv.items) {
+            const cleanCode = (it.product_code || '').toUpperCase().trim();
+            if (cleanCode && ledgerEntry.items_packed[cleanCode]) {
+              it.is_packed = true;
+            }
+          }
+        }
+      }
+    }
+    if (ledgerRestoredCount > 0) {
+      console.log(`[Workflow Ledger] Restored ${ledgerRestoredCount} basket workflow stages from persistent ledger.`);
+    }
+
     // 1b. Auto-heal from live_invoices.json / live_products.json / all_real_comments.json if SQLite had only seed records
     const LIVE_INVOICES_PATH = path.join(process.cwd(), 'server', 'live_invoices.json');
     const LIVE_PRODUCTS_PATH = path.join(process.cwd(), 'server', 'live_products.json');
@@ -783,15 +1108,10 @@ export function loadDatabaseFromDisk(): Promise<void> {
     const BACKUP_SLIPS_PATH = path.join(process.cwd(), 'server', 'messenger_slips_backup.json');
     if (messengerSlips.length === 0) {
       let candidateSlips: any[] = [];
-      if (fs.existsSync(DB_FILE_PATH)) {
-        try {
-          const raw = fs.readFileSync(DB_FILE_PATH, 'utf8');
-          const parsed = JSON.parse(raw);
-          if (parsed.messengerSlips && Array.isArray(parsed.messengerSlips) && parsed.messengerSlips.length > 0) {
-            candidateSlips = parsed.messengerSlips;
-          }
-        } catch (err) {
-          console.error('Error reading messengerSlips from db_store.json:', err);
+      for (const store of parsedStores) {
+        if (store.messengerSlips && Array.isArray(store.messengerSlips) && store.messengerSlips.length > 0) {
+          candidateSlips = store.messengerSlips;
+          break;
         }
       }
 

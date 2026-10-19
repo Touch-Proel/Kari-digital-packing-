@@ -19,7 +19,8 @@ import {
   recalculateInvoice,
   saveDatabaseToDisk,
   activeFacebookPage,
-  syncAllActiveInvoicesWithStock
+  syncAllActiveInvoicesWithStock,
+  stampInvoiceWorkflowUpdate
 } from './db.ts';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite.ts';
 import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment } from './parser.ts';
@@ -1287,6 +1288,7 @@ router.post(['/mark_invoice_paid', '/api/mark_invoice_paid'], (req: Request, res
     inv.staged_at = new Date().toISOString();
   }
 
+  stampInvoiceWorkflowUpdate(inv);
   activeInvoiceLocks.delete(cleanId);
   const rev = bumpDataRevision();
   saveDatabaseToDisk();
@@ -1320,6 +1322,7 @@ router.post(['/mark_invoice_unpaid', '/api/mark_invoice_unpaid'], (req: Request,
   (inv as any).payment_status = 'Unpaid';
   delete inv.paid_at;
   delete inv.paid_by;
+  stampInvoiceWorkflowUpdate(inv);
   const rev = bumpDataRevision();
   saveDatabaseToDisk();
 
@@ -1364,6 +1367,7 @@ router.post('/stage_pack', (req: Request, res: Response) => {
   inv.packing_stage = 'STAGED';
   inv.staged_by = pName;
   inv.staged_at = new Date().toISOString();
+  stampInvoiceWorkflowUpdate(inv);
   activeInvoiceLocks.delete(cleanId);
 
   const rev = bumpDataRevision();
@@ -1424,12 +1428,14 @@ router.post('/dispatch_pack', (req: Request, res: Response) => {
   (inv as any).dispatched_at = new Date().toISOString();
   (inv as any).dispatched_by = pName;
   inv.items.forEach(it => { it.is_packed = true; });
+  stampInvoiceWorkflowUpdate(inv);
 
   const totalQty = inv.items.reduce((s, it) => s + it.quantity, 0);
 
   // Record packer log
+  const nextLogId = packerLogs.reduce((m, l) => Math.max(m, Number(l.log_id) || 0), 0) + 1;
   packerLogs.unshift({
-    log_id: packerLogs.length + 1,
+    log_id: nextLogId,
     invoice_id: cleanId,
     packer_name: pName,
     items_count: totalQty,
@@ -1471,6 +1477,7 @@ router.post('/undispatch_pack', (req: Request, res: Response) => {
   (inv as any).dispatched_at = undefined;
   (inv as any).dispatched_by = undefined;
   inv.items.forEach(it => { it.is_packed = false; });
+  stampInvoiceWorkflowUpdate(inv);
   bumpDataRevision();
   saveDatabaseToDisk();
   res.json({ success: true, message: `បានត្រឡប់កន្ត្រក #${cleanId} មកផ្ទាំង QC វិញជោគជ័យ!` });
@@ -3379,8 +3386,9 @@ router.post('/comments/create_basket_for_user', (req: Request, res: Response) =>
   // Find or create customer
   let cust = customers.find(c => c.facebook_name.toLowerCase() === cleanName.toLowerCase());
   if (!cust) {
+    const nextCustId = customers.reduce((m, c) => Math.max(m, Number(c.customer_id) || 0), 0) + 1;
     cust = {
-      customer_id: customers.length + 1,
+      customer_id: nextCustId,
       facebook_user_id: user_id || 'FB_MANUAL_USER',
       facebook_name: cleanName,
       picture_url: picture_url || undefined,
@@ -3750,7 +3758,9 @@ router.get('/print_slip/:invoice_id', (req: Request, res: Response) => {
     invoice.packing_stage = 'STAGED';
     invoice.staged_by = 'ព្រីនវិក្កយបត្រ';
     invoice.staged_at = new Date().toISOString();
+    stampInvoiceWorkflowUpdate(invoice);
     bumpDataRevision();
+    saveDatabaseToDisk();
   }
 
   const subtotal = invoice.items.reduce((s, it) => s + (it.price * it.quantity), 0);
@@ -4339,7 +4349,9 @@ router.post('/print_lan', async (req: Request, res: Response) => {
         inv.packing_stage = 'STAGED';
         inv.staged_by = packer_name || 'POS Wi-Fi/LAN';
         inv.staged_at = new Date().toISOString();
+        stampInvoiceWorkflowUpdate(inv);
         bumpDataRevision();
+        saveDatabaseToDisk();
       }
     }
 
@@ -4612,7 +4624,9 @@ router.post('/print_agent/job', (req: Request, res: Response) => {
         inv.packing_stage = 'STAGED';
         inv.staged_by = packer_name || 'Shop Print Agent';
         inv.staged_at = new Date().toISOString();
+        stampInvoiceWorkflowUpdate(inv);
         bumpDataRevision();
+        saveDatabaseToDisk();
       }
     }
 

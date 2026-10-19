@@ -360,33 +360,64 @@ export async function persistToSqlite(data: {
 
       // 3. Customers
       db.run('DELETE FROM customers;');
-      const stmtCust = db.prepare('INSERT INTO customers (customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist, notes, tags, picture_url, last_interaction_at, last_remarketed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
+      const stmtCust = db.prepare('INSERT OR REPLACE INTO customers (customer_id, facebook_user_id, facebook_name, phone_number, address, location_zone, location_label, is_zone_locked, is_vip, is_blacklist, notes, tags, picture_url, last_interaction_at, last_remarketed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);');
+      let maxCustId = 0;
       for (const c of data.customers) {
+        if (c.customer_id && c.customer_id > maxCustId) maxCustId = c.customer_id;
+      }
+      const seenCustIds = new Set<number>();
+      for (const c of data.customers) {
+        let custId = Number(c.customer_id) || ++maxCustId;
+        if (seenCustIds.has(custId)) {
+          custId = ++maxCustId;
+          c.customer_id = custId;
+        }
+        seenCustIds.add(custId);
         stmtCust.run([
-          c.customer_id,
-          c.facebook_user_id,
-          c.facebook_name,
-          c.phone_number || '',
-          c.address || '',
+          custId,
+          String(c.facebook_user_id || ''),
+          String(c.facebook_name || 'អតិថិជន Facebook'),
+          String(c.phone_number || ''),
+          String(c.address || ''),
           c.location_zone || 'PROVINCE',
           c.location_label || (c.location_zone === 'PP' ? '🏙️ ភ្នំពេញ' : '🏞️ តាមខេត្ត'),
           c.is_zone_locked ? 1 : 0,
           c.is_vip ? 1 : 0,
           c.is_blacklist ? 1 : 0,
-          c.notes || '',
+          String(c.notes || ''),
           c.tags ? JSON.stringify(c.tags) : '[]',
-          c.picture_url || '',
-          c.last_interaction_at || '',
-          c.last_remarketed_at || ''
+          String(c.picture_url || ''),
+          String(c.last_interaction_at || ''),
+          String(c.last_remarketed_at || '')
         ]);
       }
       stmtCust.free();
 
       // 4. Packer Logs
       db.run('DELETE FROM packer_logs;');
-      const stmtLog = db.prepare('INSERT INTO packer_logs (log_id, invoice_id, packer_name, items_count, duration_seconds, packed_at, facebook_name, total_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?);');
+      const stmtLog = db.prepare('INSERT OR REPLACE INTO packer_logs (log_id, invoice_id, packer_name, items_count, duration_seconds, packed_at, facebook_name, total_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?);');
+      let maxLogId = 0;
       for (const l of data.packerLogs) {
-        stmtLog.run([l.log_id, l.invoice_id, l.packer_name, l.items_count, l.duration_seconds, l.packed_at, l.facebook_name, l.total_amount]);
+        if (l.log_id && l.log_id > maxLogId) maxLogId = l.log_id;
+      }
+      const seenLogIds = new Set<number>();
+      for (const l of data.packerLogs) {
+        let logId = Number(l.log_id) || ++maxLogId;
+        if (seenLogIds.has(logId)) {
+          logId = ++maxLogId;
+          l.log_id = logId;
+        }
+        seenLogIds.add(logId);
+        stmtLog.run([
+          logId,
+          Number(l.invoice_id || 0),
+          String(l.packer_name || 'បុគ្គលិក'),
+          Number(l.items_count || 0),
+          Number(l.duration_seconds || 0),
+          String(l.packed_at || new Date().toISOString()),
+          String(l.facebook_name || ''),
+          Number(l.total_amount || 0)
+        ]);
       }
       stmtLog.free();
 
@@ -395,7 +426,7 @@ export async function persistToSqlite(data: {
       db.run('DELETE FROM invoices;');
 
       const stmtInv = db.prepare(`
-        INSERT INTO invoices (
+        INSERT OR REPLACE INTO invoices (
           invoice_id, basket_no, live_id, created_at, created_date,
           facebook_user_id, facebook_name, phone_number, address,
           location_zone, location_label, total_amount, shipping_fee,
@@ -530,7 +561,7 @@ export async function persistToSqlite(data: {
 
       // 8. Live sessions
       db.run('DELETE FROM live_sessions;');
-      const stmtLive = db.prepare('INSERT INTO live_sessions (live_id, title, live_date, created_at, total_baskets, total_revenue) VALUES (?, ?, ?, ?, ?, ?);');
+      const stmtLive = db.prepare('INSERT OR REPLACE INTO live_sessions (live_id, title, live_date, created_at, total_baskets, total_revenue) VALUES (?, ?, ?, ?, ?, ?);');
       for (const [liveId, stat] of liveStats.entries()) {
         stmtLive.run([
           liveId,
