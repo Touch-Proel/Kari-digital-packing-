@@ -1406,17 +1406,17 @@ router.post('/fb-webhook', async (req: Request, res: Response) => {
         const text = typeof evt?.message?.text === 'string' ? evt.message.text.trim() : '';
         const lower = text.toLowerCase();
 
-        const isExplicitTrigger =
+        const isExplicitShopCommand =
           postbackPayload === 'GET_STARTED_MINIAPP_SHOP' ||
           postbackPayload === 'OPEN_MINIAPP_SHOP' ||
-          ['shop', 'order', 'menu', 'start', 'hi', 'hello', 'សួស្តី', 'ទិញ', 'ហាង', 'កម្ម៉ង់', 'ម៉ូត', 'តម្លៃ', 'មើល'].some(
-            kw => lower === kw || lower.includes(kw)
+          ['បើកហាង', 'មើលហាង', 'ទិញទំនិញ', '/shop', 'shop', 'menu'].some(
+            kw => lower === kw
           );
 
         const lastSentAt = fbCustomerCooldownMap.get(senderId) || 0;
-        const cooldownExpired = Date.now() - lastSentAt > 4 * 60 * 60 * 1000; // 4 hours cooldown for general messages
+        const cooldownExpired = Date.now() - lastSentAt > 24 * 60 * 60 * 1000; // 24 hours anti-spam cooldown per customer
 
-        if (isExplicitTrigger || cooldownExpired) {
+        if (isExplicitShopCommand || cooldownExpired) {
           fbCustomerCooldownMap.set(senderId, Date.now());
           await sendFacebookShopCard(activeToken, senderId);
         }
@@ -1428,7 +1428,8 @@ router.post('/fb-webhook', async (req: Request, res: Response) => {
 });
 
 // Zero-Webhook Background Facebook Page Conversation Poller
-// Automatically replies with the Shop Button Card when a customer messages the Page!
+// Automatically replies with the Shop Button Card ONCE per 24h when a customer starts a chat,
+// and stays silent if the Page Admin is actively chatting with the customer!
 const processedFbMsgIds = new Set<string>();
 let isFirstFbPollPass = true;
 
@@ -1444,7 +1445,7 @@ async function startFacebookMessengerShopPoller() {
         continue;
       }
 
-      const url = `https://graph.facebook.com/v19.0/me/conversations?fields=participants,updated_time,messages.limit(2){id,message,from,created_time}&limit=6&access_token=${encodeURIComponent(activeToken)}`;
+      const url = `https://graph.facebook.com/v19.0/me/conversations?fields=participants,updated_time,messages.limit(5){id,message,from,created_time}&limit=6&access_token=${encodeURIComponent(activeToken)}`;
       const res = await fetch(url);
       if (!res.ok) {
         await new Promise(r => setTimeout(r, 12000));
@@ -1482,32 +1483,22 @@ async function startFacebookMessengerShopPoller() {
         const text = String(latestMsg?.message || '').trim();
         const lower = text.toLowerCase();
 
-        const isExplicitShopWord = [
-          'shop',
-          'order',
-          'menu',
-          'start',
-          'hi',
-          'hello',
-          'សួស្តី',
-          'ជម្រាបសួរ',
-          'ទិញ',
-          'ហាង',
-          'កម្ម៉ង់',
-          'ម៉ូត',
-          'តម្លៃ',
-          'មើល',
-          'អាវ',
-          'ខោ',
-          'រ៉ូប',
-          'មានក្នុងស្តុក',
-          'ប៉ុន្មាន'
-        ].some(kw => lower.includes(kw));
+        // Explicit command to re-open the shop at any time
+        const isExplicitShopCommand = ['បើកហាង', 'មើលហាង', 'ទិញទំនិញ', '/shop', 'shop', 'menu'].some(
+          kw => lower === kw
+        );
+
+        // Check if Page Admin has actively replied in the last 45 minutes (Smart Pause so we don't interrupt human chat)
+        const adminRepliedRecently = msgs.slice(1).some((m: any) => {
+          const sender = String(m?.from?.id || '');
+          const mTime = m?.created_time ? new Date(m.created_time).getTime() : 0;
+          return sender === pageId && Date.now() - mTime < 45 * 60 * 1000;
+        });
 
         const lastSentAt = fbCustomerCooldownMap.get(fromId) || 0;
-        const cooldownExpired = Date.now() - lastSentAt > 4 * 60 * 60 * 1000;
+        const cooldownExpired = Date.now() - lastSentAt > 24 * 60 * 60 * 1000; // 24-hour anti-spam cooldown
 
-        if (isExplicitShopWord || cooldownExpired) {
+        if (isExplicitShopCommand || (cooldownExpired && !adminRepliedRecently)) {
           fbCustomerCooldownMap.set(fromId, Date.now());
           await sendFacebookShopCard(activeToken, fromId, fromName);
         }

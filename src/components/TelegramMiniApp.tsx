@@ -330,9 +330,9 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     }
   }, [isAdminOpen, isAdminUnlocked]);
 
-  // Filter products based on search, category, and size
+  // Filter products based on search, category, and size (Always sort In-Stock items first!)
   const filteredProducts = useMemo(() => {
-    return products.filter(p => {
+    const filtered = products.filter(p => {
       const totalStock = p.variants.reduce((acc, v) => acc + v.stock, 0);
 
       // Search filter
@@ -360,6 +360,15 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       }
 
       return true;
+    });
+
+    // Sort in-stock items before sold-out items so customers see available clothes first
+    return [...filtered].sort((a, b) => {
+      const stockA = a.variants.reduce((acc, v) => acc + v.stock, 0);
+      const stockB = b.variants.reduce((acc, v) => acc + v.stock, 0);
+      if (stockA > 0 && stockB <= 0) return -1;
+      if (stockA <= 0 && stockB > 0) return 1;
+      return 0;
     });
   }, [products, searchQuery, activeCategory, activeSize]);
 
@@ -860,27 +869,27 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
       {/* Main Mobile-First Container (expands cleanly on desktop) */}
       <div className="w-full max-w-[480px] bg-white min-h-screen shadow-sm flex flex-col pb-28 relative">
-        {/* 1. TOP HEADER (Matches reference screenshot 100%) */}
-        <header className="px-3.5 pt-3.5 pb-2.5 flex items-center justify-between gap-2 bg-white sticky top-0 z-30 border-b border-slate-100">
-          <div className="flex items-center gap-2.5 min-w-0">
+        {/* 1. TOP HEADER (Clean, spacious brand header without cluttered text pills) */}
+        <header className="px-3.5 pt-3 pb-2.5 flex items-center justify-between gap-2 bg-white/95 backdrop-blur-md sticky top-0 z-30 border-b border-slate-100">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
             {onBackToPos && (
               <button
                 type="button"
                 onClick={onBackToPos}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-bold shrink-0 cursor-pointer"
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-bold shrink-0 cursor-pointer active:scale-95 transition-transform"
                 title="ត្រឡប់ទៅផ្ទាំង POS"
               >
                 ←
               </button>
             )}
-            {/* Circular Brand Avatar (Supports uploaded photo or letter fallback) */}
+            {/* Circular Brand Avatar */}
             <button
               type="button"
               onClick={() => {
                 setAdminTab('settings');
                 setIsAdminOpen(true);
               }}
-              className="w-11 h-11 rounded-full bg-[#DB1D43] text-white font-black text-lg flex items-center justify-center shadow-sm shrink-0 cursor-pointer active:scale-95 transition-transform overflow-hidden border border-rose-200"
+              className="w-11 h-11 rounded-full bg-[#DB1D43] text-white font-black text-lg flex items-center justify-center shadow-xs shrink-0 cursor-pointer active:scale-95 transition-transform overflow-hidden ring-2 ring-rose-100"
               title="ចុចដើម្បីដូររូបឡូហ្គោ និងកែឈ្មោះហាង (Admin)"
             >
               {config.storeLogoUrl ? (
@@ -894,33 +903,41 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               )}
             </button>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <h1 className="font-extrabold text-[17px] leading-tight text-[#0F172A] truncate">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1">
+                <h1 className="font-extrabold text-[16.5px] leading-tight text-[#0F172A] truncate">
                   {config.storeName}
                 </h1>
-                <button
-                  type="button"
-                  onClick={() => setIsAdminOpen(true)}
-                  className="text-[11px] text-slate-500 hover:text-slate-800 px-2 py-0.5 rounded-md bg-slate-100 font-bold shrink-0 cursor-pointer"
-                  title="គ្រប់គ្រងហាង (Admin)"
-                >
-                  ⚙️ Admin
-                </button>
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white text-[9px] font-black shrink-0" title="ហាងផ្លូវការ">
+                  ✓
+                </span>
               </div>
-              <p className="text-[12px] font-bold text-[#D97706] truncate mt-0.5">
+              <p className="text-[11.5px] font-bold text-[#D97706] truncate mt-0.5">
                 {config.storeSubtitle}
               </p>
             </div>
           </div>
 
-          {/* Right Cart Circle Button + History */}
+          {/* Right Action Buttons: Admin Gear + Order History + Cart */}
           <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsAdminOpen(true)}
+              className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 cursor-pointer active:scale-95 transition-transform"
+              title="គ្រប់គ្រងហាង (Admin)"
+              aria-label="គ្រប់គ្រងហាង (Admin)"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+
             {myOrders.length > 0 && (
               <button
                 type="button"
                 onClick={() => setIsMyOrdersOpen(true)}
-                className="w-10 h-10 rounded-full bg-[#F1F5F9] hover:bg-slate-200 flex items-center justify-center text-slate-700 text-sm font-bold cursor-pointer relative"
+                className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-bold cursor-pointer active:scale-95 transition-transform relative"
                 title="វិក្កយបត្ររបស់ខ្ញុំ"
               >
                 📋
@@ -930,29 +947,33 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             <button
               type="button"
               onClick={() => setIsCheckoutOpen(true)}
-              className="relative w-12 h-12 rounded-full bg-[#F1F5F9] hover:bg-slate-200 flex items-center justify-center text-[#475569] cursor-pointer active:scale-95 transition-transform"
+              className="relative w-11 h-11 rounded-full bg-[#FFF1F2] hover:bg-rose-100 border border-rose-200/80 flex items-center justify-center text-[#DB1D43] cursor-pointer active:scale-95 transition-transform"
               aria-label="មើលកន្ត្រកទំនិញ"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2 5h12m-9 3a1 1 0 100-2 1 1 0 000 2zm8 0a1 1 0 100-2 1 1 0 000 2z" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.1} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
               </svg>
-              <span className="absolute -top-0.5 -right-0.5 min-w-[22px] h-[22px] px-1 rounded-full bg-[#DB1D43] text-white font-extrabold text-[11px] flex items-center justify-center shadow-sm tabular-nums">
-                {totalCartItems}
-              </span>
+              {totalCartItems > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[#DB1D43] text-white font-extrabold text-[10.5px] flex items-center justify-center shadow-xs tabular-nums ring-2 ring-white">
+                  {totalCartItems}
+                </span>
+              )}
             </button>
           </div>
         </header>
 
         {/* 2. SEARCH BAR */}
-        <div className="px-3.5 pb-3 pt-1 bg-white">
+        <div className="px-3.5 pb-2.5 pt-2 bg-white">
           <div className="relative flex items-center">
-            <span className="absolute left-4 text-slate-400 text-sm pointer-events-none">🔍</span>
+            <svg className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="ស្វែងរកកូដ ឬឈ្មោះម៉ូត (ឧ. A01, រ៉ូប, អាវយឺត)..."
-              className="w-full pl-10 pr-9 py-2.5 rounded-full bg-[#F1F5F9] border border-[#E2E8F0] text-xs font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:border-[#DB1D43] focus:bg-white transition-colors"
+              placeholder="ស្វែងរកកូដ ឬឈ្មោះម៉ូត (ឧ. A05, រ៉ូប, អាវយឺត)..."
+              className="w-full pl-9 pr-9 py-2 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] text-xs font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:border-[#DB1D43] focus:bg-white transition-colors"
             />
             {searchQuery && (
               <button
@@ -967,37 +988,37 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         </div>
 
         {/* 3. FULL-WIDTH ORANGE-RED URGENCY PROMO BANNER */}
-        <div className="bg-gradient-to-r from-[#EA8D1B] via-[#E3462F] to-[#DB1D43] px-3.5 py-2.5 flex items-center justify-between gap-2 text-white shadow-inner">
-          <div className="text-[12.5px] font-extrabold truncate">
+        <div className="bg-gradient-to-r from-[#EA8D1B] via-[#E3462F] to-[#DB1D43] px-3.5 py-2 flex items-center justify-between gap-2 text-white shadow-2xs">
+          <div className="text-[12px] font-extrabold truncate">
             {config.promoBannerText}
           </div>
-          <span className="bg-white/25 backdrop-blur-sm text-white text-[11px] font-extrabold px-2.5 py-1 rounded-lg shrink-0 whitespace-nowrap">
+          <span className="bg-white/25 backdrop-blur-xs text-white text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full shrink-0 whitespace-nowrap">
             {config.promoBadgeText}
           </span>
         </div>
 
-        {/* 4. CATEGORY FILTER TABS */}
-        <div className="px-3.5 pt-3 pb-2.5 flex items-center gap-2 overflow-x-auto no-scrollbar bg-white border-b border-slate-100">
+        {/* 4. CATEGORY FILTER TABS (Hidden scrollbar for clean mobile look) */}
+        <div className="px-3.5 pt-2.5 pb-2 flex items-center gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] bg-white border-b border-slate-100">
           <button
             type="button"
             onClick={() => setActiveCategory('all')}
-            className={`px-4 py-2 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
               activeCategory === 'all'
-                ? 'bg-[#DB1D43] text-white shadow-sm'
-                : 'bg-[#F1F5F9] text-[#1E293B] hover:bg-slate-200'
+                ? 'bg-[#DB1D43] text-white shadow-xs'
+                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
             }`}
           >
             <span>🛍️</span>
-            <span>ម៉ូតសល់ទាំងអស់</span>
+            <span>ម៉ូតទាំងអស់</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveCategory('last1')}
-            className={`px-4 py-2 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
               activeCategory === 'last1'
-                ? 'bg-[#DB1D43] text-white shadow-sm'
-                : 'bg-[#F1F5F9] text-[#1E293B] hover:bg-slate-200'
+                ? 'bg-[#DB1D43] text-white shadow-xs'
+                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
             }`}
           >
             <span>⚡</span>
@@ -1007,10 +1028,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           <button
             type="button"
             onClick={() => setActiveCategory('women')}
-            className={`px-4 py-2 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
               activeCategory === 'women'
-                ? 'bg-[#DB1D43] text-white shadow-sm'
-                : 'bg-[#F1F5F9] text-[#1E293B] hover:bg-slate-200'
+                ? 'bg-[#DB1D43] text-white shadow-xs'
+                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
             }`}
           >
             <span>👗</span>
@@ -1020,10 +1041,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           <button
             type="button"
             onClick={() => setActiveCategory('men')}
-            className={`px-4 py-2 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
               activeCategory === 'men'
-                ? 'bg-[#DB1D43] text-white shadow-sm'
-                : 'bg-[#F1F5F9] text-[#1E293B] hover:bg-slate-200'
+                ? 'bg-[#DB1D43] text-white shadow-xs'
+                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
             }`}
           >
             <span>👕</span>
@@ -1031,29 +1052,32 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           </button>
         </div>
 
-        {/* 5. SIZE FILTER ROW */}
-        <div className="px-3.5 py-2.5 flex items-center gap-1.5 overflow-x-auto no-scrollbar bg-white border-b border-slate-100">
-          <span className="text-xs font-bold text-[#64748B] shrink-0 mr-1">រើសទំហំ:</span>
-          {SIZE_OPTIONS.map(sz => (
-            <button
-              key={sz}
-              type="button"
-              onClick={() => setActiveSize(sz)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
-                activeSize === sz
-                  ? 'bg-[#111827] text-white shadow-xs'
-                  : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
-              }`}
-            >
-              {sz}
-            </button>
-          ))}
+        {/* 5. SIZE FILTER ROW (Hidden scrollbar for clean mobile look) */}
+        <div className="px-3.5 py-2 flex items-center gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] bg-white border-b border-slate-100">
+          <span className="text-[11px] font-bold text-[#64748B] shrink-0 mr-0.5">ទំហំ:</span>
+          {SIZE_OPTIONS.map(sz => {
+            const shortLabel = sz === 'ទាំងអស់' ? 'ទាំងអស់' : sz.replace(/^Size\s+/i, '');
+            return (
+              <button
+                key={sz}
+                type="button"
+                onClick={() => setActiveSize(sz)}
+                className={`px-3 py-1 rounded-lg text-[11.5px] font-extrabold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                  activeSize === sz
+                    ? 'bg-[#0F172A] text-white shadow-2xs'
+                    : 'bg-[#F1F5F9] text-[#475569] hover:bg-slate-200'
+                }`}
+              >
+                {shortLabel === 'ទាំងអស់' ? 'ទាំងអស់' : `Size ${shortLabel}`}
+              </button>
+            );
+          })}
         </div>
 
-        {/* 6. 2-COLUMN PRODUCT GRID (Matches screenshot card layout) */}
-        <div className="p-3 bg-[#F8FAFC] flex-1">
+        {/* 6. 2-COLUMN PRODUCT GRID */}
+        <div className="p-2.5 bg-[#F8FAFC] flex-1">
           {loading ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5">
               {[1, 2, 3, 4].map(n => (
                 <div key={n} className="bg-white rounded-2xl border border-slate-200 p-2.5 h-80 animate-pulse flex flex-col justify-between">
                   <div className="w-full h-48 bg-slate-200 rounded-xl" />
@@ -1080,19 +1104,28 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5">
               {filteredProducts.map(product => {
                 const totalStock = product.variants.reduce((acc, v) => acc + v.stock, 0);
-                const selectedVarId = selectedVariants[product.id] || product.variants[0]?.id;
-                const activeVariant = product.variants.find(v => v.id === selectedVarId) || product.variants[0];
+                const firstAvailableVariant = product.variants.find(v => v.stock > 0) || product.variants[0];
+                const selectedVarId = selectedVariants[product.id] || firstAvailableVariant?.id;
+                const activeVariant = product.variants.find(v => v.id === selectedVarId) || firstAvailableVariant;
                 const qtyInCart = cart
                   .filter(c => c.productId === product.id)
                   .reduce((sum, c) => sum + c.qty, 0);
+                const discountPct =
+                  product.originalPrice > product.price && product.originalPrice > 0
+                    ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
+                    : 0;
 
                 return (
                   <div
                     key={product.id}
-                    className="bg-white rounded-2xl border border-[#E2E8F0] overflow-hidden shadow-xs flex flex-col justify-between transition-all hover:shadow-md"
+                    className={`bg-white rounded-2xl border overflow-hidden flex flex-col justify-between transition-all ${
+                      totalStock <= 0
+                        ? 'border-slate-200/80 opacity-80'
+                        : 'border-[#E2E8F0] shadow-2xs hover:shadow-md'
+                    }`}
                   >
                     <div>
                       {/* Product Photo Container (3:4 Aspect Ratio) */}
@@ -1104,53 +1137,72 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                           src={product.imageUrl}
                           alt={product.name}
                           referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
+                            totalStock <= 0 ? 'grayscale-[25%]' : ''
+                          }`}
                         />
 
-                        {/* Top-Left Code Pill */}
-                        <div className="absolute top-2.5 left-2.5 bg-[#0F172A]/85 backdrop-blur-xs text-white px-2.5 py-1 rounded-full text-[11px] font-extrabold tracking-tight shadow-xs">
+                        {/* Top-Left Code Badge */}
+                        <div className="absolute top-2 left-2 bg-[#0F172A]/85 backdrop-blur-xs text-white px-2.5 py-0.5 rounded-lg text-[10.5px] font-extrabold tracking-tight shadow-2xs">
                           កូដ: {product.code}
                         </div>
 
-                        {/* Top-Right Stock Urgency Pill */}
+                        {/* Top-Right Stock Urgency Badge */}
                         {totalStock <= 0 ? (
-                          <div className="absolute top-2.5 right-2.5 bg-slate-900/90 text-white px-2.5 py-1 rounded-full text-[10.5px] font-extrabold">
-                            អស់ស្តុក
+                          <div className="absolute inset-0 bg-slate-900/35 flex items-center justify-center">
+                            <span className="bg-slate-900/90 text-white px-3 py-1.5 rounded-full text-xs font-extrabold shadow-md border border-white/20">
+                              អស់ស្តុកហើយ
+                            </span>
                           </div>
                         ) : totalStock === 1 ? (
-                          <div className="absolute top-2.5 right-2.5 bg-[#E11D48]/85 backdrop-blur-xs text-white px-2.5 py-1 rounded-full text-[10.5px] font-extrabold shadow-xs">
-                            ⚡ សល់ 1 ចុងក្រោយ!
+                          <div className="absolute top-2 right-2 bg-[#E11D48] text-white px-2 py-0.5 rounded-lg text-[10px] font-extrabold shadow-2xs">
+                            ⚡ សល់ 1 ឈុត!
                           </div>
                         ) : (
-                          <div className="absolute top-2.5 right-2.5 bg-[#F59E0B] text-[#0F172A] px-2.5 py-1 rounded-full text-[10.5px] font-extrabold shadow-xs">
-                            🔥 សល់ {totalStock} ឈុត
+                          <div className="absolute top-2 right-2 bg-[#F59E0B] text-[#0F172A] px-2 py-0.5 rounded-lg text-[10px] font-extrabold shadow-2xs">
+                            🔥 សល់ {totalStock}
                           </div>
                         )}
+
+                        {/* Subtle Bottom-Right Zoom Hint */}
+                        <div className="absolute bottom-2 right-2 w-6 h-6 rounded-full bg-black/45 backdrop-blur-xs text-white flex items-center justify-center pointer-events-none">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+                          </svg>
+                        </div>
                       </div>
 
                       {/* Product Info & Interactive Variant Chips */}
                       <div className="p-2.5">
-                        <h2 className="font-bold text-[13px] text-[#0F172A] truncate" title={product.name}>
+                        <h2 className="font-bold text-[13px] leading-snug text-[#0F172A] truncate" title={product.name}>
                           {product.name}
                         </h2>
 
-                        {/* Price & Strikethrough Original Price */}
-                        <div className="flex items-baseline gap-1.5 mt-1 tabular-nums">
-                          <span className="font-extrabold text-[17px] text-[#DB1D43]">
-                            ${product.price.toFixed(2)}
-                          </span>
-                          {product.originalPrice > product.price && (
-                            <span className="text-[11.5px] text-[#94A3B8] line-through font-medium">
-                              ${product.originalPrice.toFixed(2)}
+                        {/* Price & Strikethrough Original Price + Discount % */}
+                        <div className="flex items-center justify-between gap-1 mt-1 tabular-nums">
+                          <div className="flex items-baseline gap-1.5">
+                            <span className={`font-extrabold text-[17px] ${totalStock <= 0 ? 'text-slate-500' : 'text-[#DB1D43]'}`}>
+                              ${product.price.toFixed(2)}
+                            </span>
+                            {product.originalPrice > product.price && (
+                              <span className="text-[11px] text-[#94A3B8] line-through font-medium">
+                                ${product.originalPrice.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                          {discountPct > 0 && totalStock > 0 && (
+                            <span className="text-[10px] font-extrabold text-[#BE123C] bg-[#FFF1F2] px-1.5 py-0.5 rounded-md">
+                              -{discountPct}%
                             </span>
                           )}
                         </div>
 
-                        {/* Variant Chips (Color - Size (Stock)) */}
-                        <div className="mt-2 flex flex-col gap-1.5">
+                        {/* Variant Chips (Compact wrap grid so customers can tap with 1 thumb) */}
+                        <div className="mt-2 flex flex-wrap gap-1">
                           {product.variants.map(variant => {
-                            const isSelected = activeVariant?.id === variant.id;
+                            const isSelected = activeVariant?.id === variant.id && variant.stock > 0;
                             const isOut = variant.stock <= 0;
+                            const cleanSize = variant.size.replace(/^Size\s+/i, '');
                             return (
                               <button
                                 key={variant.id}
@@ -1162,15 +1214,16 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                                     [product.id]: variant.id
                                   }))
                                 }
-                                className={`w-fit max-w-full text-left px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all truncate cursor-pointer ${
+                                className={`px-2 py-1 rounded-lg text-[10.5px] font-bold border transition-all truncate max-w-full cursor-pointer ${
                                   isOut
-                                    ? 'bg-slate-100 text-slate-400 border-slate-200 line-through cursor-not-allowed'
+                                    ? 'bg-slate-50 text-slate-300 border-slate-200/80 line-through cursor-not-allowed'
                                     : isSelected
-                                    ? 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] shadow-2xs'
-                                    : 'bg-[#F8FAFC] text-[#1E293B] border-[#E2E8F0] hover:border-slate-300'
+                                    ? 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] ring-1 ring-[#FB7185]/30'
+                                    : 'bg-[#F8FAFC] text-[#334155] border-[#E2E8F0] hover:border-slate-300'
                                 }`}
                               >
-                                {variant.color} - {variant.size} ({variant.stock})
+                                {isSelected ? '✓ ' : ''}
+                                {variant.color} · {cleanSize} ({variant.stock})
                               </button>
                             );
                           })}
@@ -1178,21 +1231,30 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                       </div>
                     </div>
 
-                    {/* Bottom Add To Cart CTA inside Card */}
-                    <div className="px-2.5 pb-2.5 pt-1">
+                    {/* Bottom Add To Cart CTA inside Card (Crisp White SVG Icon instead of dark red emoji) */}
+                    <div className="px-2.5 pb-2.5 pt-0.5">
                       <button
                         type="button"
                         disabled={totalStock <= 0}
                         onClick={() => handleAddToCart(product, activeVariant)}
                         className={`w-full py-2 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                           totalStock <= 0
-                            ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                             : 'bg-[#DB1D43] hover:bg-[#BE123C] text-white shadow-xs active:scale-[0.98]'
                         }`}
                       >
-                        <span>{totalStock <= 0 ? 'អស់ស្តុកហើយ' : '🛒 ដាក់ចូលកន្ត្រក'}</span>
+                        {totalStock <= 0 ? (
+                          <span>អស់ស្តុកហើយ</span>
+                        ) : (
+                          <>
+                            <svg className="w-3.5 h-3.5 stroke-[2.5] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            <span>ដាក់ចូលកន្ត្រក</span>
+                          </>
+                        )}
                         {qtyInCart > 0 && (
-                          <span className="bg-white text-[#DB1D43] px-1.5 py-0.2 rounded-full text-[10px] font-black tabular-nums">
+                          <span className="bg-white text-[#DB1D43] min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center tabular-nums">
                             {qtyInCart}
                           </span>
                         )}
@@ -1205,18 +1267,38 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           )}
         </div>
 
-        {/* 7. STICKY BOTTOM CHECKOUT BAR (Matches reference screenshot 100%) */}
+        {/* 7. STICKY BOTTOM CHECKOUT BAR (Crisp white icons + Free shipping progress) */}
         <div className="fixed bottom-3 left-1/2 -translate-x-1/2 w-full max-w-[460px] px-3 z-40">
           <button
             type="button"
             onClick={() => setIsCheckoutOpen(true)}
-            className="w-full bg-[#DB1D43] hover:bg-[#BE123C] text-white rounded-2xl px-4 py-3.5 shadow-[0_12px_28px_rgba(219,29,67,0.42)] flex items-center justify-between gap-2 active:scale-[0.99] transition-all cursor-pointer"
+            className="w-full bg-[#DB1D43] hover:bg-[#BE123C] text-white rounded-2xl px-4 py-3 shadow-[0_12px_28px_rgba(219,29,67,0.38)] border border-rose-400/30 flex items-center justify-between gap-2 active:scale-[0.99] transition-all cursor-pointer"
           >
-            <div className="flex items-center gap-2 font-extrabold text-[15px] whitespace-nowrap">
-              <span className="text-lg">🛍️</span>
-              <span>មើលកន្ត្រក & កម្ម៉ង់ទិញ</span>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0 relative">
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                </svg>
+                {totalCartItems > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white text-[#DB1D43] text-[10px] font-black flex items-center justify-center tabular-nums">
+                    {totalCartItems}
+                  </span>
+                )}
+              </div>
+              <div className="text-left min-w-0">
+                <div className="font-extrabold text-[14px] leading-tight whitespace-nowrap">
+                  មើលកន្ត្រក & កម្ម៉ង់ទិញ
+                </div>
+                <div className="text-[10.5px] text-rose-100 font-medium truncate mt-0.5">
+                  {config.freeShippingThreshold > 0 && cartSubtotal >= config.freeShippingThreshold
+                    ? '🎉 ទទួលបានការដឹកជញ្ជូនឥតគិតថ្លៃ (Free ដឹក)!'
+                    : config.freeShippingThreshold > 0 && cartSubtotal > 0
+                    ? `ទិញថែម $${(config.freeShippingThreshold - cartSubtotal).toFixed(2)} ទៀតដើម្បី Free ដឹកជញ្ជូន`
+                    : 'ស្កេន KHQR ក៏បាន • បង់ពេលដឹកដល់ (COD) ក៏បាន'}
+                </div>
+              </div>
             </div>
-            <div className="bg-[#9F1239] px-3.5 py-1.5 rounded-xl font-extrabold text-xs sm:text-sm tabular-nums whitespace-nowrap">
+            <div className="bg-[#9F1239] px-3.5 py-2 rounded-xl font-extrabold text-xs sm:text-sm tabular-nums whitespace-nowrap shrink-0 shadow-inner">
               ${cartSubtotal.toFixed(2)} ({totalCartItems} មុខ)
             </div>
           </button>
