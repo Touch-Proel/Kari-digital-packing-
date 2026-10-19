@@ -7,6 +7,7 @@ coverage/
 .env*
 !.env.example
 server/db_store.json
+server/miniapp_store.json
 server/pos.db
 server/*.db
 server/ocr_cache.json
@@ -15,6 +16,7 @@ server/synced_attachments.json
 data/
 data/*.json
 public/uploads/slip_*
+public/uploads/miniapp_*
 public/uploads/*.jpg
 public/uploads/*.png
 public/uploads/*.jpeg
