@@ -393,43 +393,42 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
     const compressImageOnClient = (rawFile: File): Promise<string> => {
       return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('File read error'));
-        reader.onload = event => {
-          const rawDataUrl = String(event.target?.result || '');
-          const img = new Image();
-          img.onerror = () => resolve(rawDataUrl);
-          img.onload = () => {
-            try {
-              const canvas = document.createElement('canvas');
-              const maxDim = 800;
-              let w = img.width;
-              let h = img.height;
-              if (w > maxDim || h > maxDim) {
-                if (w > h) {
-                  h = Math.round((h * maxDim) / w);
-                  w = maxDim;
-                } else {
-                  w = Math.round((w * maxDim) / h);
-                  h = maxDim;
-                }
-              }
-              canvas.width = w;
-              canvas.height = h;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                ctx.drawImage(img, 0, 0, w, h);
-                resolve(canvas.toDataURL('image/jpeg', 0.84));
-              } else {
-                resolve(rawDataUrl);
-              }
-            } catch {
-              resolve(rawDataUrl);
-            }
-          };
-          img.src = rawDataUrl;
+        const objectUrl = URL.createObjectURL(rawFile);
+        const img = new Image();
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('Image load error'));
         };
-        reader.readAsDataURL(rawFile);
+        img.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          try {
+            const canvas = document.createElement('canvas');
+            const maxDim = 750;
+            let w = img.width || 600;
+            let h = img.height || 600;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
+            }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              resolve(canvas.toDataURL('image/jpeg', 0.84));
+            } else {
+              reject(new Error('Canvas context error'));
+            }
+          } catch (e) {
+            reject(e);
+          }
+        };
+        img.src = objectUrl;
       });
     };
 

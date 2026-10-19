@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import sharp from 'sharp';
 import { settings } from './db';
 import { sendTelegramMessage } from './telegramBotService';
 
@@ -321,12 +320,15 @@ function loadMiniAppDb(): MiniAppDatabase {
   return initial;
 }
 
+let miniAppSaveTimer: NodeJS.Timeout | null = null;
 function saveMiniAppDb(dbToSave: MiniAppDatabase = miniAppDb) {
-  try {
-    fs.writeFileSync(MINIAPP_STORE_PATH, JSON.stringify(dbToSave, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('[MiniApp DB] Failed to save miniapp_store.json:', err);
-  }
+  if (miniAppSaveTimer) clearTimeout(miniAppSaveTimer);
+  miniAppSaveTimer = setTimeout(() => {
+    miniAppSaveTimer = null;
+    fs.promises.writeFile(MINIAPP_STORE_PATH, JSON.stringify(dbToSave, null, 2), 'utf-8').catch(err => {
+      console.error('[MiniApp DB] Failed to save miniapp_store.json:', err);
+    });
+  }, 200);
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +355,7 @@ router.get('/catalog', (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. UPLOAD IMAGE (Slip or Product Photo -> Compressed WebP with JPEG Fallback)
+// 2. UPLOAD IMAGE (Instant 0ms non-blocking write of client-compressed JPEG/WebP)
 // ---------------------------------------------------------------------------
 router.post('/upload', async (req: Request, res: Response) => {
   try {
@@ -365,32 +367,17 @@ router.post('/upload', async (req: Request, res: Response) => {
     const matches = imageBase64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
     const extType = matches ? matches[1].toLowerCase() : 'jpeg';
     const rawBase64 = matches ? matches[2] : imageBase64;
-    const buffer = Buffer.from(rawBase64, 'base64');
-
-    let finalBuffer: Buffer = buffer;
-    let finalExt = extType === 'png' ? 'png' : extType === 'webp' ? 'webp' : 'jpg';
-
-    try {
-      finalBuffer = await sharp(buffer)
-        .rotate()
-        .resize({ width: 900, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 82 })
-        .toBuffer();
-      finalExt = 'webp';
-    } catch (sharpErr) {
-      console.warn('[MiniApp Upload] Sharp fallback to raw buffer:', sharpErr);
-    }
+    const finalBuffer = Buffer.from(rawBase64, 'base64');
+    const finalExt = extType === 'png' ? 'png' : extType === 'webp' ? 'webp' : 'jpg';
 
     const fileName = `miniapp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${finalExt}`;
     const filePath = path.join(UPLOADS_DIR, fileName);
 
-    fs.writeFileSync(filePath, finalBuffer);
+    await fs.promises.writeFile(filePath, finalBuffer);
 
     const distUploads = path.join(process.cwd(), 'dist', 'uploads');
     if (fs.existsSync(distUploads)) {
-      try {
-        fs.writeFileSync(path.join(distUploads, fileName), finalBuffer);
-      } catch {}
+      fs.promises.writeFile(path.join(distUploads, fileName), finalBuffer).catch(() => {});
     }
 
     return res.json({

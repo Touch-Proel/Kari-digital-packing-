@@ -476,11 +476,12 @@ export async function persistToSqlite(data: {
       stmtInv.free();
       stmtItem.free();
 
-      // 6. Raw Comments
+      // 6. Raw Comments (keep latest 1500 in SQLite to prevent event-loop blocking)
       if (data.rawComments && Array.isArray(data.rawComments) && data.rawComments.length > 0) {
         db.run('DELETE FROM raw_comments;');
         const stmtRaw = db.prepare('INSERT OR REPLACE INTO raw_comments (comment_id, live_id, invoice_id, facebook_user_id, facebook_name, comment_text, created_at, picture_url, is_matched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);');
-        for (const rc of data.rawComments) {
+        const recentComments = data.rawComments.slice(-1500);
+        for (const rc of recentComments) {
           if (rc && rc.comment_id) {
             stmtRaw.run([
               String(rc.comment_id),
@@ -544,10 +545,10 @@ export async function persistToSqlite(data: {
 
       db.run('COMMIT;');
 
-      // Export binary SQLite database to server/pos.db
+      // Export binary SQLite database to server/pos.db asynchronously
       const binaryArray = db.export();
       const buffer = Buffer.from(binaryArray);
-      fs.writeFileSync(SQLITE_DB_PATH, buffer);
+      await fs.promises.writeFile(SQLITE_DB_PATH, buffer);
     } catch (txErr) {
       try {
         db.run('ROLLBACK;');

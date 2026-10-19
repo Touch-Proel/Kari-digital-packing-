@@ -66,82 +66,74 @@ export function StockModal({
     playPureTone(600 + amount * 10, 0.04);
   };
 
-  // Compress image on client side using Canvas before uploading
-  // Compress image on client side using Canvas before uploading
+  // Compress image on client side using zero-copy URL.createObjectURL + Canvas before uploading
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (e.target) e.target.value = '';
 
     setUploading(true);
-    try {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = async () => {
-          try {
-            const canvas = document.createElement('canvas');
-            const maxDim = 800;
-            let w = img.width;
-            let h = img.height;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) {
-                h = Math.round((h * maxDim) / w);
-                w = maxDim;
-              } else {
-                w = Math.round((w * maxDim) / h);
-                h = maxDim;
-              }
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, w, h);
-              const compressedBase64 = canvas.toDataURL('image/jpeg', 0.88);
-              setImageFile(compressedBase64);
-
-              // Upload to server immediately to get persistent URL on disk
-              const cleanCode = (code.trim().toUpperCase() || product?.code || 'item').replace(/^\[|\]$/g, '');
-              const targetLive = activeLiveId || product?.live_id;
-              const uploadRes = await fetch('/api/upload_product_image', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  product_id: product?.id,
-                  code: cleanCode,
-                  image_data: compressedBase64,
-                  live_id: targetLive
-                })
-              });
-              const uploadData = await uploadRes.json();
-              if (uploadData.success && uploadData.image_url) {
-                const freshUrl = `${uploadData.image_url}?t=${Date.now()}`;
-                setImageFile(freshUrl);
-                setUrlInput(freshUrl);
-                onShowToast('📸 បានបង្ហោះរូបភាពទំនិញជោគជ័យ!');
-                playPureTone(880, 0.06);
-              } else {
-                onShowToast(uploadData.error || 'បរាជ័យក្នុងការរក្សាទុករូបភាព', 'error');
-              }
-            }
-          } catch (err: any) {
-            onShowToast('⚠️ បរាជ័យក្នុងការ Upload រូបភាព', 'error');
-          } finally {
-            setUploading(false);
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = async () => {
+      URL.revokeObjectURL(objectUrl);
+      try {
+        const canvas = document.createElement('canvas');
+        const maxDim = 600;
+        let w = img.width || 600;
+        let h = img.height || 600;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
           }
-        };
-        img.onerror = () => {
-          setUploading(false);
-          onShowToast('រូបភាពមិនត្រឹមត្រូវ', 'error');
-        };
-        img.src = event.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.84);
+          setImageFile(compressedBase64);
+
+          const cleanCode = (code.trim().toUpperCase() || product?.code || 'item').replace(/^\[|\]$/g, '');
+          const targetLive = activeLiveId || product?.live_id;
+          const uploadRes = await fetch('/api/upload_product_image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product_id: product?.id,
+              code: cleanCode,
+              image_data: compressedBase64,
+              live_id: targetLive
+            })
+          });
+          const uploadData = await uploadRes.json();
+          if (uploadData.success && uploadData.image_url) {
+            const freshUrl = `${uploadData.image_url}?t=${Date.now()}`;
+            setImageFile(freshUrl);
+            setUrlInput(freshUrl);
+            onShowToast('📸 បានបង្ហោះរូបភាពទំនិញជោគជ័យ!');
+            playPureTone(880, 0.06);
+          } else {
+            onShowToast(uploadData.error || 'បរាជ័យក្នុងការរក្សាទុករូបភាព', 'error');
+          }
+        }
+      } catch {
+        onShowToast('⚠️ បរាជ័យក្នុងការ Upload រូបភាព', 'error');
+      } finally {
+        setUploading(false);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
       setUploading(false);
-      onShowToast('បរាជ័យក្នុងការអានរូបភាព', 'error');
-    }
+      onShowToast('រូបភាពមិនត្រឹមត្រូវ', 'error');
+    };
+    img.src = objectUrl;
   };
 
   // Submit product edits or creation

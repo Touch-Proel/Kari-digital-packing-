@@ -286,71 +286,65 @@ export function FullStockManagerModal({
 
     setUploadingCode(p.code);
     onShowToast(`⏳ កំពុងបង្ហោះរូបភាព [${p.code}]...`);
-    try {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = async () => {
-          try {
-            const canvas = document.createElement('canvas');
-            const maxDim = 800;
-            let w = img.width;
-            let h = img.height;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) {
-                h = Math.round((h * maxDim) / w);
-                w = maxDim;
-              } else {
-                w = Math.round((w * maxDim) / h);
-                h = maxDim;
-              }
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, w, h);
-              const compressedBase64 = canvas.toDataURL('image/jpeg', 0.88);
-              const cleanCode = (p.code || 'item').replace(/^\[|\]$/g, '');
-              const targetLive = activeLiveId || p.live_id;
-              const uploadRes = await fetch('/api/upload_product_image', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  product_id: p.id,
-                  code: cleanCode,
-                  image_data: compressedBase64,
-                  live_id: targetLive
-                })
-              });
-              const uploadData = await uploadRes.json();
-              if (uploadData.success && uploadData.image_url) {
-                p.image_file = `${uploadData.image_url}?t=${Date.now()}`;
-                onShowToast(`📸 បានប្តូររូបភាព [${p.code}] ជោគជ័យ!`);
-                playSuccessFanfare();
-                onStockUpdated();
-              } else {
-                onShowToast(uploadData.error || 'បរាជ័យក្នុងការ Upload រូបភាព', 'error');
-                playWarningBuzzer();
-              }
-            }
-          } catch (err: any) {
-            onShowToast('⚠️ បរាជ័យក្នុងការ Upload រូបភាព', 'error');
-          } finally {
-            setUploadingCode(null);
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = async () => {
+      URL.revokeObjectURL(objectUrl);
+      try {
+        const canvas = document.createElement('canvas');
+        const maxDim = 600;
+        let w = img.width || 600;
+        let h = img.height || 600;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
           }
-        };
-        img.onerror = () => {
-          setUploadingCode(null);
-          onShowToast('រូបភាពមិនត្រឹមត្រូវ', 'error');
-        };
-        img.src = event.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    } catch {
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.84);
+          const cleanCode = (p.code || 'item').replace(/^\[|\]$/g, '');
+          const targetLive = activeLiveId || p.live_id;
+          const uploadRes = await fetch('/api/upload_product_image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product_id: p.id,
+              code: cleanCode,
+              image_data: compressedBase64,
+              live_id: targetLive
+            })
+          });
+          const uploadData = await uploadRes.json();
+          if (uploadData.success && uploadData.image_url) {
+            p.image_file = `${uploadData.image_url}?t=${Date.now()}`;
+            onShowToast(`📸 បានប្តូររូបភាព [${p.code}] ជោគជ័យ!`);
+            playSuccessFanfare();
+            onStockUpdated();
+          } else {
+            onShowToast(uploadData.error || 'បរាជ័យក្នុងការ Upload រូបភាព', 'error');
+            playWarningBuzzer();
+          }
+        }
+      } catch {
+        onShowToast('⚠️ បរាជ័យក្នុងការ Upload រូបភាព', 'error');
+      } finally {
+        setUploadingCode(null);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
       setUploadingCode(null);
-      onShowToast('បរាជ័យក្នុងការអានរូបភាព', 'error');
-    }
+      onShowToast('រូបភាពមិនត្រឹមត្រូវ', 'error');
+    };
+    img.src = objectUrl;
   };
 
   if (!isOpen) return null;

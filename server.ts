@@ -54,8 +54,6 @@ app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 
 
-import sharp from 'sharp';
-
 // ⚡ In-Memory High Speed Buffer Cache for instant 0ms responses
 interface MemoryImageCacheItem {
   buffer: Buffer;
@@ -78,20 +76,17 @@ function setMemoryCache(key: string, buffer: Buffer, contentType: string, etag: 
 // In-flight deduplication to avoid redundant parallel network fetches
 const inFlightFetches = new Map<string, Promise<{ buffer: Buffer; contentType: string } | null>>();
 
-// ⚡ Ultra-Fast Cached Image Proxy (Fixes slow loading, CDN throttling & mobile lag)
+// ⚡ Ultra-Fast Cached Image Proxy (Zero native C++ dependency, 0ms RAM cache)
 app.get('/api/image_proxy', async (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
 
   const targetUrl = String(req.query.url || '').trim();
-  const widthParam = parseInt(String(req.query.w || '0'), 10);
-  const targetWidth = !isNaN(widthParam) && widthParam > 0 ? Math.min(widthParam, 1800) : 0;
-
   if (!targetUrl) {
     return res.status(400).send('Missing url');
   }
 
-  const cacheKey = `${targetUrl}_w${targetWidth}`;
+  const cacheKey = targetUrl;
 
   // 1. Check ultra-fast In-Memory RAM Cache (0ms latency)
   const memHit = memoryImageCache.get(cacheKey);
@@ -125,26 +120,12 @@ app.get('/api/image_proxy', async (req: Request, res: Response) => {
 
     if (localPath) {
       try {
-        let fileBuf = fs.readFileSync(localPath);
+        const fileBuf = await fs.promises.readFile(localPath);
         let contentType = 'image/jpeg';
         const ext = path.extname(filename).toLowerCase();
         if (ext === '.png') contentType = 'image/png';
         else if (ext === '.webp') contentType = 'image/webp';
         else if (ext === '.svg') contentType = 'image/svg+xml';
-
-        // If thumbnail width is requested and image is raster, resize with Sharp
-        if (targetWidth > 0 && ext !== '.svg') {
-          try {
-            fileBuf = await sharp(fileBuf)
-              .rotate()
-              .resize({ width: targetWidth, fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 80, effort: 3 })
-              .toBuffer();
-            contentType = 'image/webp';
-          } catch {
-            // fallback to original buffer if sharp fails
-          }
-        }
 
         const etag = `"${crypto.createHash('md5').update(fileBuf).digest('hex')}"`;
         setMemoryCache(cacheKey, fileBuf, contentType, etag);
@@ -167,19 +148,19 @@ app.get('/api/image_proxy', async (req: Request, res: Response) => {
   const urlHash = crypto.createHash('md5').update(cacheKey).digest('hex');
   const cacheDir = path.join(process.cwd(), 'public', 'uploads', 'cache');
   if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-  const cachedFile = path.join(cacheDir, `${urlHash}.webp`);
+  const cachedFile = path.join(cacheDir, `${urlHash}.img`);
 
   if (fs.existsSync(cachedFile)) {
     try {
-      const buf = fs.readFileSync(cachedFile);
+      const buf = await fs.promises.readFile(cachedFile);
       const etag = `"${crypto.createHash('md5').update(buf).digest('hex')}"`;
-      setMemoryCache(cacheKey, buf, 'image/webp', etag);
+      setMemoryCache(cacheKey, buf, 'image/jpeg', etag);
 
       if (req.headers['if-none-match'] === etag) {
         return res.status(304).end();
       }
 
-      res.setHeader('Content-Type', 'image/webp');
+      res.setHeader('Content-Type', 'image/jpeg');
       res.setHeader('ETag', etag);
       res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
       return res.end(buf);
@@ -209,29 +190,12 @@ app.get('/api/image_proxy', async (req: Request, res: Response) => {
 
           const arrayBuf = await remoteRes.arrayBuffer();
           const rawBuf = Buffer.from(arrayBuf);
+          const outContentType = remoteRes.headers.get('content-type') || 'image/jpeg';
 
-          // Optimize & compress with Sharp
-          let optimizedBuf: Buffer;
-          let outContentType = 'image/webp';
-          try {
-            let sharpPipeline = sharp(rawBuf).rotate();
-            if (targetWidth > 0) {
-              sharpPipeline = sharpPipeline.resize({ width: targetWidth, fit: 'inside', withoutEnlargement: true });
-            } else {
-              sharpPipeline = sharpPipeline.resize({ width: 1400, fit: 'inside', withoutEnlargement: true });
-            }
-            optimizedBuf = await sharpPipeline.webp({ quality: 80, effort: 3 }).toBuffer();
-          } catch {
-            optimizedBuf = rawBuf;
-            outContentType = remoteRes.headers.get('content-type') || 'image/jpeg';
-          }
+          fs.promises.writeFile(cachedFile, rawBuf).catch(() => {});
 
-          try {
-            fs.writeFileSync(cachedFile, optimizedBuf);
-          } catch {}
-
-          return { buffer: optimizedBuf, contentType: outContentType };
-        } catch (fetchErr) {
+          return { buffer: rawBuf, contentType: outContentType };
+        } catch {
           clearTimeout(timeoutId);
           return null;
         } finally {

@@ -1074,17 +1074,13 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
     const filename = `${safeCode}_${safeLiveTag}_${Date.now()}.jpg`;
     const filePath = path.join(uploadDir, filename);
 
-    // Process image to 500x500 Square HD Center Crop using Sharp
-    const processedBuffer = await sharp(fileBuffer)
-      .rotate()
-      .resize(500, 500, {
-        fit: 'cover',
-        position: 'center'
-      })
-      .jpeg({ quality: 90, mozjpeg: true })
-      .toBuffer();
+    // Save the already client-compressed 500x500 JPEG directly (< 2ms, zero native CPU crash risk)
+    await fs.promises.writeFile(filePath, fileBuffer);
 
-    fs.writeFileSync(filePath, processedBuffer);
+    const distUploads = path.join(process.cwd(), 'dist', 'uploads');
+    if (fs.existsSync(distUploads)) {
+      fs.promises.writeFile(path.join(distUploads, filename), fileBuffer).catch(() => {});
+    }
 
     const publicUrl = `/uploads/${filename}`;
 
@@ -1102,7 +1098,6 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
       // Cascade to all active baskets in this target live session
       syncAllActiveInvoicesWithStock(targetProd?.live_id || targetLive);
       bumpDataRevision();
-      saveDatabaseToDisk();
     }
 
     res.json({

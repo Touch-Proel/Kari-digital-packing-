@@ -16,7 +16,7 @@ import { extractPhoneNumber, extractCodeQtyPairsFromComment, extractSizeAndColor
 
 let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;
-let lastSqlitePersistTime = 0;
+let sqliteTimer: NodeJS.Timeout | null = null;
 let isDatabaseLoaded = false;
 
 const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
@@ -24,7 +24,7 @@ const DB_FILE_PATH = path.join(process.cwd(), 'server', 'db_store.json');
 let isSaving = false;
 let pendingSave = false;
 
-export async function saveDatabaseToDisk(forceSync = false) {
+async function executeDiskSave(forceSync = false) {
   if (!isDatabaseLoaded && !forceSync) {
     return;
   }
@@ -54,7 +54,7 @@ export async function saveDatabaseToDisk(forceSync = false) {
       settings,
       products,
       invoices,
-      rawComments,
+      rawComments: rawComments.slice(-1500),
       customers,
       packerLogs,
       activeFacebookPage,
@@ -69,6 +69,17 @@ export async function saveDatabaseToDisk(forceSync = false) {
           fs.writeFileSync(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8');
         } catch {}
       }
+      await persistToSqlite({
+        activeLiveId,
+        settings,
+        products,
+        invoices,
+        rawComments: rawComments.slice(-1500),
+        customers,
+        packerLogs,
+        activeFacebookPage,
+        messengerSlips
+      }).catch(err => console.error('[SQLite] Persist error:', err));
     } else {
       await fs.promises.writeFile(DB_FILE_PATH, jsonStr, 'utf8').catch(err => {
         console.error('[DB] Async save error:', err);
@@ -77,23 +88,23 @@ export async function saveDatabaseToDisk(forceSync = false) {
       if (messengerSlips && messengerSlips.length > 0) {
         fs.promises.writeFile(BACKUP_SLIPS_PATH, JSON.stringify(messengerSlips, null, 2), 'utf8').catch(() => {});
       }
-    }
 
-    // Persist to binary SQLite database pos.db with 4-second throttle to save CPU
-    const now = Date.now();
-    if (now - lastSqlitePersistTime > 4000 || forceSync) {
-      lastSqlitePersistTime = now;
-      persistToSqlite({
-        activeLiveId,
-        settings,
-        products,
-        invoices,
-        rawComments,
-        customers,
-        packerLogs,
-        activeFacebookPage,
-        messengerSlips
-      }).catch(err => console.error('[SQLite] Persist error:', err));
+      // Schedule SQLite binary persistence in idle background (6s debounce so active clicks/uploads never lag)
+      if (sqliteTimer) clearTimeout(sqliteTimer);
+      sqliteTimer = setTimeout(() => {
+        sqliteTimer = null;
+        persistToSqlite({
+          activeLiveId,
+          settings,
+          products,
+          invoices,
+          rawComments: rawComments.slice(-1500),
+          customers,
+          packerLogs,
+          activeFacebookPage,
+          messengerSlips
+        }).catch(err => console.error('[SQLite] Persist error:', err));
+      }, 6000);
     }
   } catch (err) {
     console.error('Failed to save database:', err);
@@ -101,17 +112,29 @@ export async function saveDatabaseToDisk(forceSync = false) {
     isSaving = false;
     if (pendingSave) {
       pendingSave = false;
-      setTimeout(() => saveDatabaseToDisk(), 500);
+      setTimeout(() => executeDiskSave(false), 800);
     }
   }
 }
 
-export function bumpDataRevision(): number {
-  dataRevision += 1;
+export async function saveDatabaseToDisk(forceSync = false) {
+  if (forceSync) {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    return executeDiskSave(true);
+  }
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    saveDatabaseToDisk();
-  }, 1000);
+    saveTimer = null;
+    executeDiskSave(false);
+  }, 600);
+}
+
+export function bumpDataRevision(): number {
+  dataRevision += 1;
+  saveDatabaseToDisk(false);
   return dataRevision;
 }
 
