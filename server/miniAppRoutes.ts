@@ -67,6 +67,7 @@ export interface MiniAppOrder {
 export interface MiniAppConfig {
   storeName: string;
   storeLogoLetter: string;
+  storeLogoUrl?: string;
   storeSubtitle: string;
   promoBannerText: string;
   promoBadgeText: string;
@@ -353,6 +354,7 @@ router.get('/catalog', (_req: Request, res: Response) => {
     config: {
       storeName: miniAppDb.config.storeName,
       storeLogoLetter: miniAppDb.config.storeLogoLetter,
+      storeLogoUrl: miniAppDb.config.storeLogoUrl || '',
       storeSubtitle: miniAppDb.config.storeSubtitle,
       promoBannerText: miniAppDb.config.promoBannerText,
       promoBadgeText: miniAppDb.config.promoBadgeText,
@@ -575,6 +577,7 @@ router.put('/admin/config', (req: Request, res: Response) => {
     ...miniAppDb.config,
     storeName: incoming.storeName ?? miniAppDb.config.storeName,
     storeLogoLetter: incoming.storeLogoLetter ?? miniAppDb.config.storeLogoLetter,
+    storeLogoUrl: incoming.storeLogoUrl !== undefined ? String(incoming.storeLogoUrl) : miniAppDb.config.storeLogoUrl,
     storeSubtitle: incoming.storeSubtitle ?? miniAppDb.config.storeSubtitle,
     promoBannerText: incoming.promoBannerText ?? miniAppDb.config.promoBannerText,
     promoBadgeText: incoming.promoBadgeText ?? miniAppDb.config.promoBadgeText,

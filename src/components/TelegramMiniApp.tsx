@@ -22,6 +22,7 @@ export interface MiniAppProduct {
 export interface MiniAppConfig {
   storeName: string;
   storeLogoLetter: string;
+  storeLogoUrl?: string;
   storeSubtitle: string;
   promoBannerText: string;
   promoBadgeText: string;
@@ -394,7 +395,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     );
   };
 
-  const handleUploadFile = async (file: File, target: 'slip' | 'product') => {
+  const handleUploadFile = async (file: File, target: 'slip' | 'product' | 'logo') => {
     if (target === 'slip') setIsUploadingSlip(true);
     else setIsUploadingProductImg(true);
 
@@ -410,7 +411,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           URL.revokeObjectURL(objectUrl);
           try {
             const canvas = document.createElement('canvas');
-            const maxDim = 750;
+            const maxDim = target === 'logo' ? 400 : 750;
             let w = img.width || 600;
             let h = img.height || 600;
             if (w > maxDim || h > maxDim) {
@@ -427,7 +428,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             const ctx = canvas.getContext('2d');
             if (ctx) {
               ctx.drawImage(img, 0, 0, w, h);
-              resolve(canvas.toDataURL('image/jpeg', 0.84));
+              resolve(canvas.toDataURL('image/jpeg', 0.86));
             } else {
               reject(new Error('Canvas context error'));
             }
@@ -445,6 +446,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       // Immediately preview the compressed image so user sees it right away
       if (target === 'slip') {
         setPaymentSlipUrl(compressedBase64);
+      } else if (target === 'logo') {
+        setConfig(prev => ({ ...prev, storeLogoUrl: compressedBase64 }));
       } else {
         setFormImageUrl(compressedBase64);
       }
@@ -455,11 +458,15 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         body: JSON.stringify({ imageBase64: compressedBase64 })
       });
 
+      let finalUploadedUrl = compressedBase64;
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.url) {
+          finalUploadedUrl = data.url;
           if (target === 'slip') {
             setPaymentSlipUrl(data.url);
+          } else if (target === 'logo') {
+            setConfig(prev => ({ ...prev, storeLogoUrl: data.url }));
           } else {
             setFormImageUrl(data.url);
           }
@@ -468,6 +475,15 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
       if (target === 'slip') {
         showToast('✅ បានភ្ជាប់រូបស្លីបបង់ប្រាក់រួចរាល់!');
+      } else if (target === 'logo') {
+        // Auto-save logo to server config immediately
+        const updatedCfg = { ...config, storeLogoUrl: finalUploadedUrl };
+        await fetch('/api/miniapp/admin/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedCfg)
+        }).catch(() => null);
+        showToast('✅ បានប្តូររូបឡូហ្គោហាងរួចរាល់!');
       } else {
         showToast('✅ បានបង្ហោះរូបម៉ូតខោអាវរួចរាល់!');
       }
@@ -761,14 +777,25 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                 ←
               </button>
             )}
-            {/* Red Circular Brand Avatar */}
+            {/* Circular Brand Avatar (Supports uploaded photo or letter fallback) */}
             <button
               type="button"
-              onClick={() => setIsAdminOpen(true)}
-              className="w-11 h-11 rounded-full bg-[#DB1D43] text-white font-black text-lg flex items-center justify-center shadow-sm shrink-0 cursor-pointer active:scale-95 transition-transform"
-              title="ចុចដើម្បីបើកផ្ទាំងគ្រប់គ្រងហាង (Admin)"
+              onClick={() => {
+                setAdminTab('settings');
+                setIsAdminOpen(true);
+              }}
+              className="w-11 h-11 rounded-full bg-[#DB1D43] text-white font-black text-lg flex items-center justify-center shadow-sm shrink-0 cursor-pointer active:scale-95 transition-transform overflow-hidden border border-rose-200"
+              title="ចុចដើម្បីដូររូបឡូហ្គោ និងកែឈ្មោះហាង (Admin)"
             >
-              {config.storeLogoLetter || 'K'}
+              {config.storeLogoUrl ? (
+                <img
+                  src={config.storeLogoUrl}
+                  alt={config.storeName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                config.storeLogoLetter || 'K'
+              )}
             </button>
 
             <div className="min-w-0">
@@ -779,7 +806,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                 <button
                   type="button"
                   onClick={() => setIsAdminOpen(true)}
-                  className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded bg-slate-100 font-semibold shrink-0 cursor-pointer"
+                  className="text-[11px] text-slate-500 hover:text-slate-800 px-2 py-0.5 rounded-md bg-slate-100 font-bold shrink-0 cursor-pointer"
                   title="គ្រប់គ្រងហាង (Admin)"
                 >
                   ⚙️ Admin
@@ -1927,6 +1954,115 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                   {/* TAB 3: STORE SETTINGS & TELEGRAM BOT LINK */}
                   {adminTab === 'settings' && (
                     <form onSubmit={handleSaveConfig} className="space-y-4">
+                      {/* TOP CARD: STORE LOGO PHOTO, STORE NAME & SUBTITLE */}
+                      <div className="bg-white p-4 rounded-2xl border-2 border-rose-200 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
+                            <span>🏪</span>
+                            <span>រូបឡូហ្គោហាង និងឈ្មោះហាង (បង្ហាញនៅក្បាលខាងលើ)</span>
+                          </div>
+                          <button
+                            type="submit"
+                            className="px-3 py-1.5 rounded-xl bg-[#DB1D43] text-white font-extrabold text-[11px] shadow-sm cursor-pointer"
+                          >
+                            💾 រក្សាទុកភ្លាម
+                          </button>
+                        </div>
+
+                        {/* Logo Upload Row */}
+                        <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                          <div className="w-16 h-16 rounded-full bg-[#DB1D43] text-white font-black text-2xl flex items-center justify-center shadow-md shrink-0 overflow-hidden border-2 border-white">
+                            {config.storeLogoUrl ? (
+                              <img
+                                src={config.storeLogoUrl}
+                                alt={config.storeName}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              config.storeLogoLetter || 'K'
+                            )}
+                          </div>
+
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <div className="text-xs font-extrabold text-slate-800">
+                              រូបឡូហ្គោហាង (Logo រង្វង់ខាងលើ)
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[11px] cursor-pointer shadow-sm">
+                                <span>📷 {isUploadingProductImg ? 'កំពុងបង្ហោះ...' : 'ដាក់រូបឡូហ្គោហាង'}</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={e => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handleUploadFile(file, 'logo');
+                                  }}
+                                />
+                              </label>
+                              {config.storeLogoUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfig({ ...config, storeLogoUrl: '' })}
+                                  className="px-2.5 py-1.5 rounded-xl bg-rose-100 text-rose-700 font-bold text-[11px] cursor-pointer"
+                                >
+                                  🗑️ លុបរូប (ប្រើអក្សរវិញ)
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="sm:col-span-2">
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                              ឈ្មោះហាង (Store Name)
+                            </label>
+                            <input
+                              type="text"
+                              value={config.storeName}
+                              onChange={e => setConfig({ ...config, storeName: e.target.value })}
+                              placeholder="ឧ. ហាងខោអាវ Kari Around"
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-extrabold text-slate-900 focus:border-[#DB1D43] focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                              អក្សរឡូហ្គោ (បើមិនដាក់រូប)
+                            </label>
+                            <input
+                              type="text"
+                              maxLength={2}
+                              value={config.storeLogoLetter}
+                              onChange={e => setConfig({ ...config, storeLogoLetter: e.target.value })}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-center"
+                            />
+                          </div>
+                          <div className="sm:col-span-3">
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                              អក្សរពិពណ៌នាខាងក្រោមឈ្មោះហាង
+                            </label>
+                            <input
+                              type="text"
+                              value={config.storeSubtitle}
+                              onChange={e => setConfig({ ...config, storeSubtitle: e.target.value })}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium"
+                            />
+                          </div>
+                          <div className="sm:col-span-3">
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                              អក្សររបារប្រូម៉ូសិនពណ៌ក្រហម
+                            </label>
+                            <input
+                              type="text"
+                              value={config.promoBannerText}
+                              onChange={e => setConfig({ ...config, promoBannerText: e.target.value })}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
                       {/* 1-Click Automatic Telegram Bot Menu Button & WebApp Setup */}
                       <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 space-y-3">
                         <div className="flex items-center justify-between gap-2">
@@ -2050,43 +2186,6 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white p-4 rounded-2xl border border-slate-200">
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">ឈ្មោះហាង</label>
-                          <input
-                            type="text"
-                            value={config.storeName}
-                            onChange={e => setConfig({ ...config, storeName: e.target.value })}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">អក្សរឡូហ្គោ (1 តួ)</label>
-                          <input
-                            type="text"
-                            maxLength={2}
-                            value={config.storeLogoLetter}
-                            onChange={e => setConfig({ ...config, storeLogoLetter: e.target.value })}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">អក្សរពិពណ៌នាខាងក្រោមឈ្មោះហាង</label>
-                          <input
-                            type="text"
-                            value={config.storeSubtitle}
-                            onChange={e => setConfig({ ...config, storeSubtitle: e.target.value })}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">អក្សររបារប្រូម៉ូសិនពណ៌ក្រហម</label>
-                          <input
-                            type="text"
-                            value={config.promoBannerText}
-                            onChange={e => setConfig({ ...config, promoBannerText: e.target.value })}
-                            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
-                          />
-                        </div>
                         <div>
                           <label className="block text-[11px] font-bold text-slate-600 mb-1">ថ្លៃដឹកភ្នំពេញ ($)</label>
                           <input
