@@ -32,6 +32,7 @@ export interface MiniAppConfig {
   khqrAccountInfo: string;
   khqrImageUrl: string;
   telegramNotifyChatId?: string;
+  telegramBotToken?: string;
   adminPin?: string;
   miniAppUrl?: string;
   menuButtonText?: string;
@@ -684,11 +685,12 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     setIsSettingUpBot(true);
     try {
       const targetUrl = (config.miniAppUrl || miniAppPublicUrl).trim();
+      const effectiveToken = (botTokenInput.trim() || config.telegramBotToken || '').trim();
       const res = await fetch('/api/miniapp/admin/setup-bot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          botToken: botTokenInput.trim() || undefined,
+          botToken: effectiveToken || undefined,
           miniAppUrl: targetUrl,
           menuButtonText: config.menuButtonText || '🛍️ ទិញទំនិញ'
         })
@@ -1985,13 +1987,16 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                             </div>
                             <div>
                               <label className="block text-[11px] font-bold text-blue-900 mb-1">
-                                3. Bot Token (ទុកទទេបើដាក់ក្នុង POS រួចហើយ)
+                                3. Bot Token សម្រាប់ Mini App (ដាច់ដោយឡែកពី Live POS)
                               </label>
                               <input
                                 type="password"
-                                value={botTokenInput}
-                                onChange={e => setBotTokenInput(e.target.value)}
-                                placeholder="ប្រើ Bot Token ក្នុងប្រព័ន្ធ POS ស្រាប់..."
+                                value={botTokenInput || config.telegramBotToken || ''}
+                                onChange={e => {
+                                  setBotTokenInput(e.target.value);
+                                  setConfig({ ...config, telegramBotToken: e.target.value });
+                                }}
+                                placeholder="បញ្ចូល Bot Token សម្រាប់តែហាង Mini App..."
                                 className="w-full px-3 py-2 rounded-xl bg-white border border-blue-300 text-xs font-mono text-slate-800"
                               />
                             </div>
