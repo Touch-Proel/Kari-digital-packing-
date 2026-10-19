@@ -13,7 +13,7 @@ export interface MiniAppProduct {
   name: string;
   price: number;
   originalPrice: number;
-  category: 'women' | 'men' | 'unisex';
+  category: 'women' | 'men' | 'kids' | 'unisex';
   imageUrl: string;
   images?: string[];
   variants: MiniAppVariant[];
@@ -24,6 +24,13 @@ function getProductImages(p: MiniAppProduct): string[] {
   const arr = Array.isArray(p.images) ? p.images.map(u => String(u || '').trim()).filter(Boolean) : [];
   if (arr.length > 0) return arr;
   return p.imageUrl ? [p.imageUrl] : [];
+}
+
+export interface SizeGuideRow {
+  size: string;
+  weightRange: string;
+  bustRange: string;
+  note?: string;
 }
 
 export interface MiniAppConfig {
@@ -51,6 +58,7 @@ export interface MiniAppConfig {
   fbVerifyToken?: string;
   fbAutoReplyEnabled?: boolean;
   fbButtonText?: string;
+  sizeGuide?: SizeGuideRow[];
 }
 
 export interface CartItem {
@@ -96,6 +104,7 @@ export interface MiniAppOrder {
   totalAmount: number;
   status: 'NEW' | 'CONFIRMED' | 'SHIPPED' | 'CANCELLED';
   note?: string;
+  trackingInfo?: string;
 }
 
 declare global {
@@ -127,6 +136,14 @@ const SIZE_OPTIONS: Array<'ទាំងអស់' | 'Size S' | 'Size M' | 'Size 
   'Free Size'
 ];
 
+const DEFAULT_SIZE_GUIDE: SizeGuideRow[] = [
+  { size: 'Size S', weightRange: '40kg – 47kg', bustRange: '32" – 34"', note: 'រាងតូច / ស្លីម' },
+  { size: 'Size M', weightRange: '48kg – 54kg', bustRange: '34" – 36"', note: 'ទំហំពេញនិយម' },
+  { size: 'Size L', weightRange: '55kg – 62kg', bustRange: '36" – 38"', note: 'ពាក់ស្រួលខ្លួន' },
+  { size: 'Size XL', weightRange: '63kg – 72kg', bustRange: '38" – 41"', note: 'រាងធំ / ទូលាយ' },
+  { size: 'Free Size', weightRange: '42kg – 60kg', bustRange: '32" – 38"', note: 'សាច់យឺត ពាក់បានទូទៅ' }
+];
+
 export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [config, setConfig] = useState<MiniAppConfig>({
     storeName: 'ហាងខោអាវ Kari Arnett',
@@ -139,14 +156,29 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     freeShippingThreshold: 30.0,
     khqrMerchantName: 'KARI ARNETT SHOP',
     khqrAccountInfo: 'ABA / KHQR (USD)',
-    khqrImageUrl: ''
+    khqrImageUrl: '',
+    sizeGuide: DEFAULT_SIZE_GUIDE
   });
 
   const [products, setProducts] = useState<MiniAppProduct[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeCategory, setActiveCategory] = useState<'all' | 'last1' | 'women' | 'men'>('all');
+  const [activeCategory, setActiveCategory] = useState<'all' | 'women' | 'men' | 'kids'>('all');
   const [activeSize, setActiveSize] = useState<string>('ទាំងអស់');
+  const [sortBy, setSortBy] = useState<'default' | 'price_asc' | 'price_desc' | 'discount'>('default');
+  const [onlyWishlist, setOnlyWishlist] = useState<boolean>(false);
+  const [orderLookupQuery, setOrderLookupQuery] = useState<string>('');
+  const [isLookingUpOrder, setIsLookingUpOrder] = useState<boolean>(false);
+
+  // Customer Wishlist persisted in localStorage
+  const [wishlistIds, setWishlistIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('tg_miniapp_wishlist');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Track which variant is currently selected on each product card
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
@@ -174,6 +206,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   // Modals
   const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
   const [isMyOrdersOpen, setIsMyOrdersOpen] = useState<boolean>(false);
+  const [isSizeGuideOpen, setIsSizeGuideOpen] = useState<boolean>(false);
+  const [deliverySlipOrder, setDeliverySlipOrder] = useState<MiniAppOrder | null>(null);
+  const [trackingInputs, setTrackingInputs] = useState<Record<string, string>>({});
+  const [isInquiring, setIsInquiring] = useState<boolean>(false);
   const [zoomProduct, setZoomProduct] = useState<MiniAppProduct | null>(null);
   const [zoomImageIdx, setZoomImageIdx] = useState<number>(0);
   const [cardImageIdx, setCardImageIdx] = useState<Record<string, number>>({});
@@ -218,7 +254,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [formName, setFormName] = useState<string>('');
   const [formPrice, setFormPrice] = useState<string>('6.50');
   const [formOrigPrice, setFormOrigPrice] = useState<string>('10.00');
-  const [formCategory, setFormCategory] = useState<'women' | 'men' | 'unisex'>('women');
+  const [formCategory, setFormCategory] = useState<'women' | 'men' | 'kids' | 'unisex'>('women');
   const [formImageUrl, setFormImageUrl] = useState<string>('');
   const [formImages, setFormImages] = useState<string[]>([]);
   const [formVariants, setFormVariants] = useState<MiniAppVariant[]>([
@@ -290,6 +326,93 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     } catch {}
   }, [cart]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('tg_miniapp_wishlist', JSON.stringify(wishlistIds));
+    } catch {}
+  }, [wishlistIds]);
+
+  const toggleWishlist = (productId: string, code: string) => {
+    setWishlistIds(prev => {
+      const exists = prev.includes(productId);
+      if (exists) {
+        showToast(`បានដកកូដ ${code} ចេញពីបញ្ជីពេញចិត្ត`);
+        return prev.filter(id => id !== productId);
+      } else {
+        showToast(`❤️ បានរក្សាទុកកូដ ${code} ក្នុងបញ្ជីពេញចិត្ត!`);
+        return [...prev, productId];
+      }
+    });
+  };
+
+  const handleAskAboutProduct = async (product: MiniAppProduct) => {
+    if (isInquiring) return;
+    setIsInquiring(true);
+    try {
+      const res = await fetch('/api/miniapp/inquire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: product.code,
+          name: product.name,
+          price: product.price,
+          customerName: customerName || (isFbMessenger ? 'អតិថិជន Facebook' : 'អតិថិជន Telegram'),
+          telegramUsername,
+          telegramUserId,
+          fbPsid
+        })
+      });
+      const data = await res.json();
+
+      if (data.sentToCustomerChat) {
+        showToast(`💬 បានផ្ញើម៉ូតកូដ [${product.code}] ចូលឆាតរបស់បងហើយ! សូមចូលឆាតវាយសំណួរបានភ្លាម`);
+        setZoomProduct(null);
+        if (window.Telegram?.WebApp?.close && telegramUserId) {
+          setTimeout(() => {
+            try {
+              window.Telegram?.WebApp?.close();
+            } catch {}
+          }, 1200);
+        }
+        return;
+      }
+
+      // If opened in browser or without user ID yet, redirect cleanly to Bot or FB Page link
+      if (isFbMessenger && config.fbPageId) {
+        window.location.href = `https://m.me/${config.fbPageId}`;
+        return;
+      }
+      if (config.botUsername) {
+        window.location.href = `https://t.me/${config.botUsername}?start=ask_${encodeURIComponent(product.code)}`;
+        return;
+      }
+      if (config.fbPageId) {
+        window.location.href = `https://m.me/${config.fbPageId}`;
+        return;
+      }
+
+      // Fallback: copy inquiry text to clipboard
+      const askText = `សួស្តីបង! ខ្ញុំចង់សួរអំពីម៉ូតកូដ [${product.code}] — ${product.name} ($${product.price.toFixed(2)})`;
+      navigator.clipboard.writeText(askText).catch(() => {});
+      showToast(`💬 បានផ្ញើដំណឹងទៅម្ចាស់ហាង និងចម្លងកូដ [${product.code}] រួចរាល់!`);
+    } catch {
+      showToast('បានផ្ញើដំណឹងពីម៉ូតនេះទៅកាន់ម្ចាស់ហាង!', 'success');
+    } finally {
+      setIsInquiring(false);
+    }
+  };
+
+  const activeSizeGuide = useMemo(() => {
+    return Array.isArray(config.sizeGuide) && config.sizeGuide.length > 0
+      ? config.sizeGuide
+      : DEFAULT_SIZE_GUIDE;
+  }, [config.sizeGuide]);
+
+  const getWeightHintForSize = (sizeName: string): string => {
+    const found = activeSizeGuide.find(r => r.size.toLowerCase() === sizeName.toLowerCase());
+    return found?.weightRange || '';
+  };
+
   const fetchCatalog = async () => {
     try {
       setLoading(true);
@@ -308,6 +431,18 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             }
           }
           setSelectedVariants(prev => ({ ...initialSelections, ...prev }));
+
+          // If deep-linked via ?code=A02, auto-open that product's zoom modal
+          const codeParam = new URLSearchParams(window.location.search).get('code');
+          if (codeParam) {
+            const matched = data.products.find(
+              (p: MiniAppProduct) => p.code.toUpperCase() === codeParam.trim().toUpperCase()
+            );
+            if (matched) {
+              setZoomProduct(matched);
+              setZoomImageIdx(0);
+            }
+          }
         }
       }
     } catch (err) {
@@ -322,9 +457,16 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       const res = await fetch('/api/miniapp/admin/data');
       const data = await res.json();
       if (data.success) {
-        setConfig(data.config);
+        setConfig(prev => ({ ...prev, ...data.config }));
         setProducts(data.products || []);
         setAdminOrders(data.orders || []);
+        if (Array.isArray(data.orders)) {
+          const initialTrack: Record<string, string> = {};
+          for (const o of data.orders) {
+            if (o.trackingInfo) initialTrack[o.id] = o.trackingInfo;
+          }
+          setTrackingInputs(prev => ({ ...initialTrack, ...prev }));
+        }
         if (Array.isArray(data.connectedFbPages)) {
           setConnectedFbPages(data.connectedFbPages);
         }
@@ -340,10 +482,12 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     }
   }, [isAdminOpen, isAdminUnlocked]);
 
-  // Filter products based on search, category, and size (Always sort In-Stock items first!)
+  // Filter products based on search, category, wishlist, and size (Always sort In-Stock items first!)
   const filteredProducts = useMemo(() => {
     const filtered = products.filter(p => {
-      const totalStock = p.variants.reduce((acc, v) => acc + v.stock, 0);
+      if (onlyWishlist && !wishlistIds.includes(p.id)) {
+        return false;
+      }
 
       // Search filter
       if (searchQuery.trim()) {
@@ -355,12 +499,12 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       }
 
       // Category filter
-      if (activeCategory === 'last1') {
-        if (totalStock !== 1) return false;
-      } else if (activeCategory === 'women') {
+      if (activeCategory === 'women') {
         if (p.category !== 'women' && p.category !== 'unisex') return false;
       } else if (activeCategory === 'men') {
         if (p.category !== 'men' && p.category !== 'unisex') return false;
+      } else if (activeCategory === 'kids') {
+        if (p.category !== 'kids') return false;
       }
 
       // Size filter
@@ -372,15 +516,65 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       return true;
     });
 
-    // Sort in-stock items before sold-out items so customers see available clothes first
+    // Sort in-stock items before sold-out items, then apply user sort preference
     return [...filtered].sort((a, b) => {
       const stockA = a.variants.reduce((acc, v) => acc + v.stock, 0);
       const stockB = b.variants.reduce((acc, v) => acc + v.stock, 0);
       if (stockA > 0 && stockB <= 0) return -1;
       if (stockA <= 0 && stockB > 0) return 1;
+
+      if (sortBy === 'price_asc') return a.price - b.price;
+      if (sortBy === 'price_desc') return b.price - a.price;
+      if (sortBy === 'discount') {
+        const discA = a.originalPrice > a.price ? (a.originalPrice - a.price) / a.originalPrice : 0;
+        const discB = b.originalPrice > b.price ? (b.originalPrice - b.price) / b.originalPrice : 0;
+        return discB - discA;
+      }
       return 0;
     });
-  }, [products, searchQuery, activeCategory, activeSize]);
+  }, [products, searchQuery, activeCategory, activeSize, sortBy, onlyWishlist, wishlistIds]);
+
+  const handleLookupOrders = async (queryOverride?: string) => {
+    const q = (queryOverride ?? orderLookupQuery ?? phone).trim();
+    if (!q) {
+      showToast('សូមបញ្ចូលលេខទូរស័ព្ទ ឬលេខវិក្កយបត្រដើម្បីស្វែងរក', 'error');
+      return;
+    }
+    setIsLookingUpOrder(true);
+    try {
+      const res = await fetch(`/api/miniapp/orders/lookup?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.orders)) {
+        if (data.orders.length === 0 && queryOverride === undefined) {
+          showToast('មិនឃើញវិក្កយបត្រត្រូវនឹងលេខនេះទេ', 'error');
+          return;
+        }
+        if (data.orders.length > 0) {
+          setMyOrders(prev => {
+            const map = new Map<string, MiniAppOrder>();
+            for (const o of data.orders) map.set(o.id, o);
+            for (const o of prev) {
+              if (!map.has(o.id)) map.set(o.id, o);
+            }
+            const merged = Array.from(map.values()).slice(0, 25);
+            try {
+              localStorage.setItem('tg_miniapp_my_orders', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+          if (queryOverride === undefined) {
+            showToast(`✅ រកឃើញវិក្កយបត្រចំនួន ${data.orders.length}!`);
+          }
+        }
+      }
+    } catch {
+      if (queryOverride === undefined) {
+        showToast('មិនអាចភ្ជាប់ស្វែងរកវិក្កយបត្របានទេ', 'error');
+      }
+    } finally {
+      setIsLookingUpOrder(false);
+    }
+  };
 
   // Cart calculations
   const totalCartItems = useMemo(() => cart.reduce((sum, item) => sum + item.qty, 0), [cart]);
@@ -456,7 +650,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     );
   };
 
-  const handleUploadFile = async (file: File, target: 'slip' | 'product' | 'logo') => {
+  const handleUploadFile = async (file: File, target: 'slip' | 'product' | 'logo' | 'khqr') => {
     if (target === 'slip') setIsUploadingSlip(true);
     else setIsUploadingProductImg(true);
 
@@ -487,8 +681,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           URL.revokeObjectURL(objectUrl);
           try {
             const canvas = document.createElement('canvas');
-            // Use Full HD / Retina resolution (1800px for products, 1000px for logos, 1400px for payment slips)
-            const maxDim = target === 'logo' ? 1000 : target === 'slip' ? 1400 : 1800;
+            // Use Full HD / Retina resolution (1800px for products, 1000px for logos/khqr, 1400px for payment slips)
+            const maxDim = target === 'logo' || target === 'khqr' ? 1000 : target === 'slip' ? 1400 : 1800;
             let w = img.naturalWidth || img.width || 1200;
             let h = img.naturalHeight || img.height || 1200;
             if (w > maxDim || h > maxDim) {
@@ -507,8 +701,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               ctx.imageSmoothingEnabled = true;
               ctx.imageSmoothingQuality = 'high';
               ctx.drawImage(img, 0, 0, w, h);
-              // Preserve lossless PNG for logos/transparent graphics, otherwise use 0.95 Ultra-HD JPEG
-              const outputMime = (target === 'logo' && rawFile.type === 'image/png') ? 'image/png' : 'image/jpeg';
+              // Preserve lossless PNG for logos/QR codes/transparent graphics, otherwise use 0.95 Ultra-HD JPEG
+              const outputMime = ((target === 'logo' || target === 'khqr') && rawFile.type === 'image/png') ? 'image/png' : 'image/jpeg';
               resolve(outputMime === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.95));
             } else {
               reject(new Error('Canvas context error'));
@@ -529,6 +723,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         setPaymentSlipUrl(compressedBase64);
       } else if (target === 'logo') {
         setConfig(prev => ({ ...prev, storeLogoUrl: compressedBase64 }));
+      } else if (target === 'khqr') {
+        setConfig(prev => ({ ...prev, khqrImageUrl: compressedBase64 }));
       } else {
         setFormImageUrl(compressedBase64);
       }
@@ -548,6 +744,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             setPaymentSlipUrl(data.url);
           } else if (target === 'logo') {
             setConfig(prev => ({ ...prev, storeLogoUrl: data.url }));
+          } else if (target === 'khqr') {
+            setConfig(prev => ({ ...prev, khqrImageUrl: data.url }));
           } else {
             setFormImageUrl(data.url);
           }
@@ -565,7 +763,6 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       if (target === 'slip') {
         showToast('✅ បានភ្ជាប់រូបស្លីបបង់ប្រាក់រួចរាល់!');
       } else if (target === 'logo') {
-        // Auto-save logo to server config immediately
         const updatedCfg = { ...config, storeLogoUrl: finalUploadedUrl };
         await fetch('/api/miniapp/admin/config', {
           method: 'PUT',
@@ -573,6 +770,14 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           body: JSON.stringify(updatedCfg)
         }).catch(() => null);
         showToast('✅ បានប្តូររូបឡូហ្គោហាងរួចរាល់!');
+      } else if (target === 'khqr') {
+        const updatedCfg = { ...config, khqrImageUrl: finalUploadedUrl };
+        await fetch('/api/miniapp/admin/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedCfg)
+        }).catch(() => null);
+        showToast('✅ បានដាក់រូប KHQR ធនាគាររបស់ហាងរួចរាល់!');
       } else {
         showToast('✅ បានបង្ហោះរូបម៉ូតខោអាវរួចរាល់!');
       }
@@ -767,18 +972,50 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     }
   };
 
+  const handleQuickRestockProduct = async (id: string, code: string) => {
+    try {
+      const res = await fetch(`/api/miniapp/admin/products/${id}/restock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addQty: 3 })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProducts(data.products);
+        showToast(`✅ បានបន្ថែមស្តុក +3 គ្រប់ Size សម្រាប់កូដ ${code}!`);
+      }
+    } catch {
+      showToast('មិនអាចបន្ថែមស្តុកបានទេ', 'error');
+    }
+  };
+
   const handleUpdateOrderStatus = async (orderId: string, status: MiniAppOrder['status']) => {
     try {
+      const trackingInfo = trackingInputs[orderId];
       const res = await fetch(`/api/miniapp/admin/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ status, trackingInfo })
       });
       const data = await res.json();
       if (data.success) {
         setAdminOrders(data.orders);
         setProducts(data.products);
-        showToast(`បានប្តូរស្ថានភាពអর্ডার #${orderId} ទៅជា ${status}`);
+        // Also update local customer order history if testing on same device
+        setMyOrders(prev => {
+          const next = prev.map(o =>
+            o.id === orderId ? { ...o, status, trackingInfo: trackingInfo ?? o.trackingInfo } : o
+          );
+          try {
+            localStorage.setItem('tg_miniapp_my_orders', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        if (data.notifiedCustomer) {
+          showToast(`🔔 បានប្តូរស្ថានភាព #${orderId} និងផ្ញើសារជូនដំណឹងចូលឆាតភ្ញៀវរួចរាល់!`);
+        } else {
+          showToast(`✅ បានប្តូរស្ថានភាពអর্ডার #${orderId} ទៅជា ${status}`);
+        }
       }
     } catch {
       showToast('មិនអាចប្តូរស្ថានភាពបានទេ', 'error');
@@ -925,15 +1162,15 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       )}
 
       {/* Main Mobile-First Container (expands cleanly on desktop) */}
-      <div className="w-full max-w-[480px] bg-white min-h-screen shadow-sm flex flex-col pb-28 relative">
-        {/* 1. TOP HEADER (Clean, spacious brand header without cluttered text pills) */}
+      <div className={`w-full max-w-[480px] bg-white min-h-screen shadow-sm flex flex-col relative ${totalCartItems > 0 ? 'pb-28' : 'pb-8'}`}>
+        {/* 1. TOP HEADER (Spacious brand title + uniform SVG customer icons) */}
         <header className="px-3.5 pt-3 pb-2.5 flex items-center justify-between gap-2 bg-white/95 backdrop-blur-md sticky top-0 z-30 border-b border-slate-100">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             {onBackToPos && (
               <button
                 type="button"
                 onClick={onBackToPos}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-bold shrink-0 cursor-pointer active:scale-95 transition-transform"
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-bold shrink-0 cursor-pointer active:scale-95 transition-transform"
                 title="ត្រឡប់ទៅផ្ទាំង POS"
               >
                 ←
@@ -946,7 +1183,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                 setAdminTab('settings');
                 setIsAdminOpen(true);
               }}
-              className="w-11 h-11 rounded-full bg-[#DB1D43] text-white font-black text-lg flex items-center justify-center shadow-xs shrink-0 cursor-pointer active:scale-95 transition-transform overflow-hidden ring-2 ring-rose-100"
+              className="w-10 h-10 rounded-full bg-[#DB1D43] text-white font-black text-base flex items-center justify-center shadow-xs shrink-0 cursor-pointer active:scale-95 transition-transform overflow-hidden ring-2 ring-rose-100"
               title="ចុចដើម្បីដូររូបឡូហ្គោ និងកែឈ្មោះហាង (Admin)"
             >
               {config.storeLogoUrl ? (
@@ -962,56 +1199,79 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1">
-                <h1 className="font-extrabold text-[16.5px] leading-tight text-[#0F172A] truncate">
+                <h1 className="font-extrabold text-[15.5px] leading-tight text-[#0F172A] truncate">
                   {config.storeName}
                 </h1>
                 <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white text-[9px] font-black shrink-0" title="ហាងផ្លូវការ">
                   ✓
                 </span>
               </div>
-              <p className="text-[11.5px] font-bold text-[#D97706] truncate mt-0.5">
+              <p className="text-[11px] font-bold text-[#D97706] truncate mt-0.5">
                 {config.storeSubtitle}
               </p>
             </div>
           </div>
 
-          {/* Right Action Buttons: Admin Gear + Order History + Cart */}
+          {/* Right Customer Action Buttons: Wishlist + Order History + Cart (All matching SVG icons) */}
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={() => setIsAdminOpen(true)}
-              className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 cursor-pointer active:scale-95 transition-transform"
-              title="គ្រប់គ្រងហាង (Admin)"
-              aria-label="គ្រប់គ្រងហាង (Admin)"
+              onClick={() => setOnlyWishlist(prev => !prev)}
+              className={`relative w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                onlyWishlist
+                  ? 'bg-[#DB1D43] text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-rose-50 text-rose-500'
+              }`}
+              title="ម៉ូតដែលខ្ញុំពេញចិត្ត (Wishlist)"
+              aria-label="ម៉ូតដែលខ្ញុំពេញចិត្ត"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <svg className="w-4 h-4" fill={onlyWishlist || wishlistIds.length > 0 ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
               </svg>
+              {wishlistIds.length > 0 && (
+                <span
+                  className={`absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full text-[9.5px] font-black flex items-center justify-center tabular-nums ring-2 ring-white ${
+                    onlyWishlist ? 'bg-slate-900 text-white' : 'bg-[#DB1D43] text-white'
+                  }`}
+                >
+                  {wishlistIds.length}
+                </span>
+              )}
             </button>
 
-            {myOrders.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setIsMyOrdersOpen(true)}
-                className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 text-xs font-bold cursor-pointer active:scale-95 transition-transform relative"
-                title="វិក្កយបត្ររបស់ខ្ញុំ"
-              >
-                📋
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                setIsMyOrdersOpen(true);
+                if (phone.trim()) {
+                  handleLookupOrders(phone.trim());
+                }
+              }}
+              className="relative w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 cursor-pointer active:scale-95 transition-transform"
+              title="វិក្កយបត្រ និងតាមដានអីវ៉ាន់របស់ខ្ញុំ"
+              aria-label="វិក្កយបត្រ និងតាមដានអីវ៉ាន់របស់ខ្ញុំ"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {myOrders.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-slate-800 text-white text-[9.5px] font-black flex items-center justify-center tabular-nums ring-2 ring-white">
+                  {myOrders.length}
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
               onClick={() => setIsCheckoutOpen(true)}
-              className="relative w-11 h-11 rounded-full bg-[#FFF1F2] hover:bg-rose-100 border border-rose-200/80 flex items-center justify-center text-[#DB1D43] cursor-pointer active:scale-95 transition-transform"
+              className="relative w-10 h-10 rounded-full bg-[#FFF1F2] hover:bg-rose-100 border border-rose-200/80 flex items-center justify-center text-[#DB1D43] cursor-pointer active:scale-95 transition-transform"
               aria-label="មើលកន្ត្រកទំនិញ"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.1} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
               </svg>
               {totalCartItems > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[#DB1D43] text-white font-extrabold text-[10.5px] flex items-center justify-center shadow-xs tabular-nums ring-2 ring-white">
+                <span className="absolute -top-1 -right-1 min-w-[19px] h-[19px] px-1 rounded-full bg-[#DB1D43] text-white font-extrabold text-[10px] flex items-center justify-center shadow-xs tabular-nums ring-2 ring-white">
                   {totalCartItems}
                 </span>
               )}
@@ -1019,9 +1279,9 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           </div>
         </header>
 
-        {/* 2. SEARCH BAR */}
-        <div className="px-3.5 pb-2.5 pt-2 bg-white">
-          <div className="relative flex items-center">
+        {/* 2. SEARCH BAR + DISCREET ADMIN GEAR */}
+        <div className="px-3.5 pb-2.5 pt-2 bg-white flex items-center gap-2">
+          <div className="relative flex items-center flex-1">
             <svg className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -1029,8 +1289,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="ស្វែងរកកូដ ឬឈ្មោះម៉ូត (ឧ. A05, រ៉ូប, អាវយឺត)..."
-              className="w-full pl-9 pr-9 py-2 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] text-xs font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:border-[#DB1D43] focus:bg-white transition-colors"
+              placeholder="ស្វែងរកកូដ ឬឈ្មោះម៉ូត (ឧ. A01, រ៉ូប, អាវយឺត)..."
+              className="w-full pl-9 pr-8 py-2 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] text-xs font-medium text-[#0F172A] placeholder-[#94A3B8] focus:outline-none focus:border-[#DB1D43] focus:bg-white transition-colors"
             />
             {searchQuery && (
               <button
@@ -1042,6 +1302,19 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               </button>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setIsAdminOpen(true)}
+            className="w-8 h-8 rounded-full bg-[#F8FAFC] hover:bg-slate-100 border border-[#E2E8F0] flex items-center justify-center text-slate-400 hover:text-slate-700 shrink-0 cursor-pointer active:scale-95 transition-all"
+            title="គ្រប់គ្រងហាង (Admin)"
+            aria-label="គ្រប់គ្រងហាង (Admin)"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-1.543.94-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
         </div>
 
         {/* 3. FULL-WIDTH ORANGE-RED URGENCY PROMO BANNER */}
@@ -1054,82 +1327,202 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           </span>
         </div>
 
-        {/* 4. CATEGORY FILTER TABS (Hidden scrollbar for clean mobile look) */}
-        <div className="px-3.5 pt-2.5 pb-2 flex items-center gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] bg-white border-b border-slate-100">
-          <button
-            type="button"
-            onClick={() => setActiveCategory('all')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeCategory === 'all'
-                ? 'bg-[#DB1D43] text-white shadow-xs'
-                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
-            }`}
-          >
-            <span>🛍️</span>
-            <span>ម៉ូតទាំងអស់</span>
-          </button>
+        {/* 4. BOUTIQUE 4-COLUMN CATEGORY MENU (All 4 fit symmetrically without cut-off) */}
+        <div className="px-3 pt-3 pb-2.5 bg-white border-b border-slate-100">
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              {
+                id: 'all' as const,
+                label: 'ម៉ូតទាំងអស់',
+                count: products.length,
+                icon: (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.1} viewBox="0 0 24 24">
+                    <rect x="3" y="3" width="7" height="7" rx="2" />
+                    <rect x="14" y="3" width="7" height="7" rx="2" />
+                    <rect x="3" y="14" width="7" height="7" rx="2" />
+                    <rect x="14" y="14" width="7" height="7" rx="2" />
+                  </svg>
+                )
+              },
+              {
+                id: 'women' as const,
+                label: 'ខោអាវនារី',
+                count: products.filter(p => p.category === 'women' || p.category === 'unisex').length,
+                icon: (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3l1.5 4h3L15 3m-4.5 4L8 12l-3 8h14l-3-8-2.5-5" />
+                  </svg>
+                )
+              },
+              {
+                id: 'men' as const,
+                label: 'ខោអាវបុរស',
+                count: products.filter(p => p.category === 'men' || p.category === 'unisex').length,
+                icon: (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 4L4 7.5 6 11l2-1v10h8V10l2 1 2-3.5L15.5 4c-.8 1.5-2 2.2-3.5 2.2S9.3 5.5 8.5 4z" />
+                  </svg>
+                )
+              },
+              {
+                id: 'kids' as const,
+                label: 'ខោអាវក្មេង',
+                count: products.filter(p => p.category === 'kids').length,
+                icon: (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l1.9 3.8 4.2.6-3 3 .7 4.2-3.8-2-3.8 2 .7-4.2-3-3 4.2-.6L12 3z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 18.5c1.5-1.2 3.2-1.8 5-1.8s3.5.6 5 1.8" />
+                  </svg>
+                )
+              }
+            ].map(tab => {
+              const isActive = activeCategory === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveCategory(tab.id)}
+                  className={`relative py-2 px-1.5 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+                    isActive
+                      ? 'bg-gradient-to-br from-[#E11D48] to-[#BE123C] text-white shadow-sm shadow-rose-500/20 ring-1 ring-[#BE123C]'
+                      : 'bg-[#F8FAFC] hover:bg-rose-50/60 text-[#334155] border border-slate-200/80'
+                  }`}
+                >
+                  {tab.count > 0 && (
+                    <span
+                      className={`absolute top-1.5 right-1.5 min-w-[16px] h-[16px] px-1 rounded-full text-[9.5px] font-extrabold flex items-center justify-center tabular-nums ${
+                        isActive
+                          ? 'bg-white text-[#DB1D43]'
+                          : 'bg-slate-200/90 text-slate-600'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                  <div
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                      isActive
+                        ? 'bg-white/20 text-white'
+                        : 'bg-white text-[#DB1D43] shadow-2xs border border-rose-100/80'
+                    }`}
+                  >
+                    {tab.icon}
+                  </div>
+                  <span
+                    className={`text-[11px] font-extrabold leading-tight whitespace-nowrap ${
+                      isActive ? 'text-white' : 'text-[#1E293B]'
+                    }`}
+                  >
+                    {tab.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 5. SIZE FILTER ROW + SIZE GUIDE BY WEIGHT BUTTON (All compact so nothing is clipped) */}
+        <div className="px-3 py-2 flex items-center justify-between gap-1.5 bg-white border-b border-slate-100">
+          <div className="flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] flex-1">
+            <span className="text-[11px] font-bold text-[#64748B] shrink-0 mr-0.5">ទំហំ:</span>
+            {SIZE_OPTIONS.map(sz => {
+              const shortLabel =
+                sz === 'ទាំងអស់'
+                  ? 'ទាំងអស់'
+                  : sz === 'Free Size'
+                  ? 'Free'
+                  : sz.replace(/^Size\s+/i, '');
+              const kgHint = sz === 'ទាំងអស់' ? '' : getWeightHintForSize(sz);
+              return (
+                <button
+                  key={sz}
+                  type="button"
+                  onClick={() => setActiveSize(sz)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold whitespace-nowrap shrink-0 transition-all cursor-pointer flex items-center gap-1 ${
+                    activeSize === sz
+                      ? 'bg-[#0F172A] text-white shadow-2xs'
+                      : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
+                  }`}
+                >
+                  <span>{shortLabel}</span>
+                  {activeSize === sz && kgHint && (
+                    <span className="text-[9.5px] font-bold text-amber-300">({kgHint})</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
           <button
             type="button"
-            onClick={() => setActiveCategory('last1')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeCategory === 'last1'
-                ? 'bg-[#DB1D43] text-white shadow-xs'
-                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
-            }`}
+            onClick={() => setIsSizeGuideOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-[#FFF1F2] hover:bg-rose-100 border border-rose-200 text-[#BE123C] text-[10.5px] font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer active:scale-95 transition-transform"
           >
-            <span>⚡</span>
-            <span>សល់ 1 ឈុតចុងក្រោយ</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveCategory('women')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeCategory === 'women'
-                ? 'bg-[#DB1D43] text-white shadow-xs'
-                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
-            }`}
-          >
-            <span>👗</span>
-            <span>ខោអាវនារី</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveCategory('men')}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeCategory === 'men'
-                ? 'bg-[#DB1D43] text-white shadow-xs'
-                : 'bg-[#F1F5F9] text-[#334155] hover:bg-slate-200'
-            }`}
-          >
-            <span>👕</span>
-            <span>ខោអាវបុរស</span>
+            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 6l3-3 15 15-3 3L3 6zm5-1l2 2m3 1l2 2m3 1l2 2" />
+            </svg>
+            <span>តារាងគីឡូ</span>
           </button>
         </div>
 
-        {/* 5. SIZE FILTER ROW (Hidden scrollbar for clean mobile look) */}
-        <div className="px-3.5 py-2 flex items-center gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] bg-white border-b border-slate-100">
-          <span className="text-[11px] font-bold text-[#64748B] shrink-0 mr-0.5">ទំហំ:</span>
-          {SIZE_OPTIONS.map(sz => {
-            const shortLabel = sz === 'ទាំងអស់' ? 'ទាំងអស់' : sz.replace(/^Size\s+/i, '');
-            return (
+        {/* 5B. QUICK SORT & CATALOG STATUS BAR */}
+        <div className="px-3.5 py-1.5 bg-[#F8FAFC] border-b border-slate-200/70 flex items-center justify-between gap-2">
+          <div className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
+            <span>បង្ហាញ <b className="text-slate-900">{filteredProducts.length}</b> ម៉ូត</span>
+            {(activeCategory !== 'all' || activeSize !== 'ទាំងអស់' || searchQuery || sortBy !== 'default') && (
               <button
-                key={sz}
                 type="button"
-                onClick={() => setActiveSize(sz)}
-                className={`px-3 py-1 rounded-lg text-[11.5px] font-extrabold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
-                  activeSize === sz
-                    ? 'bg-[#0F172A] text-white shadow-2xs'
-                    : 'bg-[#F1F5F9] text-[#475569] hover:bg-slate-200'
+                onClick={() => {
+                  setActiveCategory('all');
+                  setActiveSize('ទាំងអស់');
+                  setSearchQuery('');
+                  setSortBy('default');
+                }}
+                className="text-[10px] font-extrabold text-[#DB1D43] hover:underline cursor-pointer"
+              >
+                (លុបតម្រង)
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            {[
+              { id: 'default' as const, label: '✨ ពេញនិយម' },
+              { id: 'price_asc' as const, label: '💲 តម្លៃទាប' },
+              { id: 'discount' as const, label: '🔥 បញ្ចុះតម្លៃខ្លាំង' }
+            ].map(srt => (
+              <button
+                key={srt.id}
+                type="button"
+                onClick={() => setSortBy(srt.id)}
+                className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold transition-colors cursor-pointer ${
+                  sortBy === srt.id
+                    ? 'bg-rose-100 text-[#BE123C] border border-rose-200'
+                    : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                {shortLabel === 'ទាំងអស់' ? 'ទាំងអស់' : `Size ${shortLabel}`}
+                {srt.label}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
+
+        {/* Active Wishlist Banner when filtering by Favorites */}
+        {onlyWishlist && (
+          <div className="px-3.5 py-2 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
+            <div className="text-xs font-extrabold text-[#BE123C] flex items-center gap-1.5">
+              <span>❤️</span>
+              <span>កំពុងបង្ហាញម៉ូតដែលអ្នកបានរក្សាទុក ({wishlistIds.length})</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOnlyWishlist(false)}
+              className="text-[11px] font-extrabold text-slate-700 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 cursor-pointer"
+            >
+              បង្ហាញទាំងអស់វិញ ✕
+            </button>
+          </div>
+        )}
 
         {/* 6. 2-COLUMN PRODUCT GRID */}
         <div className="p-2.5 bg-[#F8FAFC] flex-1">
@@ -1145,15 +1538,22 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             </div>
           ) : filteredProducts.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center my-4">
-              <div className="text-3xl mb-2">👗</div>
-              <div className="font-bold text-slate-800 text-sm">មិនមានម៉ូតខោអាវត្រូវនឹងការស្វែងរកទេ</div>
-              <p className="text-xs text-slate-500 mt-1">សូមសាកល្បងជ្រើសរើសទំហំ «ទាំងអស់» ឬស្វែងរកកូដផ្សេង</p>
+              <div className="text-3xl mb-2">{onlyWishlist ? '❤️' : '👗'}</div>
+              <div className="font-bold text-slate-800 text-sm">
+                {onlyWishlist ? 'មិនទាន់មានម៉ូតក្នុងបញ្ជីពេញចិត្តទេ' : 'មិនមានម៉ូតខោអាវត្រូវនឹងការស្វែងរកទេ'}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                {onlyWishlist
+                  ? 'សូមចុចរូបបេះដូង ❤️ លើម៉ូតណាមួយដើម្បីរក្សាទុកមើលពេលក្រោយ'
+                  : 'សូមសាកល្បងជ្រើសរើសទំហំ «ទាំងអស់» ឬស្វែងរកកូដផ្សេង'}
+              </p>
               <button
                 type="button"
                 onClick={() => {
                   setSearchQuery('');
                   setActiveCategory('all');
                   setActiveSize('ទាំងអស់');
+                  setOnlyWishlist(false);
                 }}
                 className="mt-3 px-4 py-2 rounded-xl bg-[#DB1D43] text-white text-xs font-bold cursor-pointer"
               >
@@ -1265,11 +1665,42 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                           </>
                         )}
 
-                        {/* Subtle Bottom-Right Zoom Hint */}
-                        <div className="absolute bottom-2 right-2 w-6 h-6 rounded-full bg-black/45 backdrop-blur-xs text-white flex items-center justify-center pointer-events-none">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
-                          </svg>
+                        {/* Bottom-Right Wishlist Heart & Zoom Hint */}
+                        <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={e => {
+                              e.stopPropagation();
+                              toggleWishlist(product.id, product.code);
+                            }}
+                            className={`w-7 h-7 rounded-full backdrop-blur-xs flex items-center justify-center transition-transform active:scale-90 cursor-pointer shadow-2xs ${
+                              wishlistIds.includes(product.id)
+                                ? 'bg-[#DB1D43] text-white'
+                                : 'bg-white/85 text-slate-700 hover:text-[#DB1D43]'
+                            }`}
+                            aria-label="រក្សាទុកក្នុងបញ្ជីពេញចិត្ត"
+                            title="រក្សាទុកក្នុងបញ្ជីពេញចិត្ត"
+                          >
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill={wishlistIds.includes(product.id) ? 'currentColor' : 'none'}
+                              stroke="currentColor"
+                              strokeWidth={2.2}
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                              />
+                            </svg>
+                          </button>
+
+                          <div className="w-6 h-6 rounded-full bg-black/45 backdrop-blur-xs text-white flex items-center justify-center pointer-events-none">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+                            </svg>
+                          </div>
                         </div>
                       </div>
 
@@ -1366,44 +1797,84 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               })}
             </div>
           )}
+
+          {/* Customer Storefront Trust & Quick Help Footer */}
+          <div className="mt-5 mb-2 p-3.5 rounded-2xl bg-white border border-slate-200/80 space-y-2.5 text-center shadow-2xs">
+            <div className="grid grid-cols-3 gap-2 text-[10.5px] font-extrabold text-slate-700">
+              <div className="p-2 rounded-xl bg-slate-50 flex flex-col items-center gap-0.5">
+                <span className="text-sm">⚡</span>
+                <span>ដឹករហ័ស ២៥ ខេត្ត-ក្រុង</span>
+              </div>
+              <div className="p-2 rounded-xl bg-slate-50 flex flex-col items-center gap-0.5">
+                <span className="text-sm">💳</span>
+                <span>ស្កេន KHQR / COD</span>
+              </div>
+              <div className="p-2 rounded-xl bg-slate-50 flex flex-col items-center gap-0.5">
+                <span className="text-sm">💯</span>
+                <span>ធានាសាច់ក្រណាត់ស្អាត</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMyOrdersOpen(true);
+                  if (phone.trim()) handleLookupOrders(phone.trim());
+                }}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-[11px] flex items-center gap-1 cursor-pointer"
+              >
+                <span>📋</span>
+                <span>ឆែកមើលអីវ៉ាន់ដែលបានកម្ម៉ង់</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsSizeGuideOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#BE123C] font-extrabold text-[11px] flex items-center gap-1 cursor-pointer"
+              >
+                <span>📏</span>
+                <span>មើលតារាងគីឡូ</span>
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* 7. STICKY BOTTOM CHECKOUT BAR (Crisp white icons + Free shipping progress) */}
-        <div className="fixed bottom-3 left-1/2 -translate-x-1/2 w-full max-w-[460px] px-3 z-40">
-          <button
-            type="button"
-            onClick={() => setIsCheckoutOpen(true)}
-            className="w-full bg-[#DB1D43] hover:bg-[#BE123C] text-white rounded-2xl px-4 py-3 shadow-[0_12px_28px_rgba(219,29,67,0.38)] border border-rose-400/30 flex items-center justify-between gap-2 active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0 relative">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-                </svg>
-                {totalCartItems > 0 && (
+        {/* 7. STICKY BOTTOM CHECKOUT BAR (Only appears when cart has items so it never covers Add-to-Cart buttons!) */}
+        {totalCartItems > 0 && (
+          <div className="fixed bottom-3 left-1/2 -translate-x-1/2 w-full max-w-[460px] px-3 z-40">
+            <button
+              type="button"
+              onClick={() => setIsCheckoutOpen(true)}
+              className="w-full bg-[#DB1D43] hover:bg-[#BE123C] text-white rounded-2xl px-4 py-3 shadow-[0_12px_28px_rgba(219,29,67,0.38)] border border-rose-400/30 flex items-center justify-between gap-2 active:scale-[0.99] transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center shrink-0 relative">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  </svg>
                   <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white text-[#DB1D43] text-[10px] font-black flex items-center justify-center tabular-nums">
                     {totalCartItems}
                   </span>
-                )}
-              </div>
-              <div className="text-left min-w-0">
-                <div className="font-extrabold text-[14px] leading-tight whitespace-nowrap">
-                  មើលកន្ត្រក & កម្ម៉ង់ទិញ
                 </div>
-                <div className="text-[10.5px] text-rose-100 font-medium truncate mt-0.5">
-                  {config.freeShippingThreshold > 0 && cartSubtotal >= config.freeShippingThreshold
-                    ? '🎉 ទទួលបានការដឹកជញ្ជូនឥតគិតថ្លៃ (Free ដឹក)!'
-                    : config.freeShippingThreshold > 0 && cartSubtotal > 0
-                    ? `ទិញថែម $${(config.freeShippingThreshold - cartSubtotal).toFixed(2)} ទៀតដើម្បី Free ដឹកជញ្ជូន`
-                    : 'ស្កេន KHQR ក៏បាន • បង់ពេលដឹកដល់ (COD) ក៏បាន'}
+                <div className="text-left min-w-0">
+                  <div className="font-extrabold text-[14px] leading-tight whitespace-nowrap">
+                    មើលកន្ត្រក & កម្ម៉ង់ទិញ
+                  </div>
+                  <div className="text-[10.5px] text-rose-100 font-medium truncate mt-0.5">
+                    {config.freeShippingThreshold > 0 && cartSubtotal >= config.freeShippingThreshold
+                      ? '🎉 ទទួលបានការដឹកជញ្ជូនឥតគិតថ្លៃ (Free ដឹក)!'
+                      : config.freeShippingThreshold > 0 && cartSubtotal > 0
+                      ? `ទិញថែម $${(config.freeShippingThreshold - cartSubtotal).toFixed(2)} ទៀតដើម្បី Free ដឹកជញ្ជូន`
+                      : 'ស្កេន KHQR ក៏បាន • បង់ពេលដឹកដល់ (COD) ក៏បាន'}
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="bg-[#9F1239] px-3.5 py-2 rounded-xl font-extrabold text-xs sm:text-sm tabular-nums whitespace-nowrap shrink-0 shadow-inner">
-              ${cartSubtotal.toFixed(2)} ({totalCartItems} មុខ)
-            </div>
-          </button>
-        </div>
+              <div className="bg-[#9F1239] px-3.5 py-2 rounded-xl font-extrabold text-xs sm:text-sm tabular-nums whitespace-nowrap shrink-0 shadow-inner">
+                ${cartSubtotal.toFixed(2)} ({totalCartItems} មុខ)
+              </div>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* =====================================================================
@@ -1481,28 +1952,80 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                 </div>
               )}
 
-              <div className="p-4">
-                <h3 className="font-extrabold text-base text-slate-900">{zoomProduct.name}</h3>
-                <p className="text-xs text-slate-500 mt-1">ចុចជ្រើសរើសពណ៌ និងទំហំខាងក្រោមដើម្បីដាក់ចូលកន្ត្រក៖</p>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {zoomProduct.variants.map(v => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      disabled={v.stock <= 0}
-                      onClick={() => {
-                        handleAddToCart(zoomProduct, v);
-                        setZoomProduct(null);
-                      }}
-                      className={`px-3 py-2 rounded-xl text-xs font-extrabold border cursor-pointer ${
-                        v.stock <= 0
-                          ? 'bg-slate-100 text-slate-400 border-slate-200 line-through'
-                          : 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] hover:bg-[#DB1D43] hover:text-white'
-                      }`}
-                    >
-                      + {v.color} - {v.size} (សល់ {v.stock})
-                    </button>
-                  ))}
+              <div className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-extrabold text-base text-slate-900">{zoomProduct.name}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      ចុចជ្រើសរើសពណ៌ និងទំហំខាងក្រោមដើម្បីដាក់ចូលកន្ត្រក៖
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setZoomProduct(null);
+                      setIsSizeGuideOpen(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-rose-50 text-[#BE123C] border border-rose-200 text-[10.5px] font-extrabold shrink-0 cursor-pointer"
+                  >
+                    📏 តារាងគីឡូ
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {zoomProduct.variants.map(v => {
+                    const weightHint = getWeightHintForSize(v.size);
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        disabled={v.stock <= 0}
+                        onClick={() => {
+                          handleAddToCart(zoomProduct, v);
+                          setZoomProduct(null);
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-extrabold border cursor-pointer text-left ${
+                          v.stock <= 0
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 line-through'
+                            : 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] hover:bg-[#DB1D43] hover:text-white'
+                        }`}
+                      >
+                        <div>+ {v.color} - {v.size} (សល់ {v.stock})</div>
+                        {weightHint && (
+                          <div className="text-[10px] opacity-85 font-bold">⚖️ {weightHint}</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Direct Chat Inquiry & Wishlist Actions */}
+                <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isInquiring}
+                    onClick={() => handleAskAboutProduct(zoomProduct)}
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 transition-transform"
+                  >
+                    <span>💬</span>
+                    <span>
+                      {isInquiring
+                        ? 'កំពុងបើកឆាត...'
+                        : `ឆាតសួរម្ចាស់ហាងពីកូដ ${zoomProduct.code}`}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleWishlist(zoomProduct.id, zoomProduct.code)}
+                    className={`py-2.5 px-3 rounded-xl font-extrabold text-xs border flex items-center justify-center gap-1 cursor-pointer ${
+                      wishlistIds.includes(zoomProduct.id)
+                        ? 'bg-[#FFF1F2] text-[#DB1D43] border-rose-300'
+                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <span>{wishlistIds.includes(zoomProduct.id) ? '❤️ រក្សាទុកហើយ' : '🤍 រក្សាទុក'}</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1690,6 +2213,36 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                         placeholder="ឧ. ផ្ទះលេខ... ផ្លូវ... សង្កាត់/ខេត្ត..."
                         className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium focus:outline-none focus:border-[#DB1D43]"
                       />
+                    </div>
+
+                    {/* Customer Note / Delivery Instructions */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        ចំណាំបន្ថែមសម្រាប់អ្នកដឹក (មិនបាច់បំពេញក៏បាន)
+                      </label>
+                      <input
+                        type="text"
+                        value={orderNote}
+                        onChange={e => setOrderNote(e.target.value)}
+                        placeholder="ឧ. សូមតេមុនដឹក ១៥ នាទី, ផ្ញើពេលរសៀល..."
+                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium focus:outline-none focus:border-[#DB1D43]"
+                      />
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {['📞 សូមតេមុនដឹក', '🌅 ដឹកពេលព្រឹក', '🌇 ដឹកពេលរសៀល', '🏠 ដាក់មុខផ្ទះ'].map(chip => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() =>
+                              setOrderNote(prev =>
+                                prev.includes(chip) ? prev : prev ? `${prev}, ${chip}` : chip
+                              )
+                            }
+                            className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-[#BE123C] border border-slate-200 text-[10px] font-bold cursor-pointer"
+                          >
+                            + {chip}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -1921,6 +2474,36 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const summary = [
+                    `🧾 វិក្កយបត្រ #${completedOrder.id} — ${config.storeName}`,
+                    `👤 អតិថិជន: ${completedOrder.customerName} (${completedOrder.phone})`,
+                    `📍 ទីតាំង: ${completedOrder.address}`,
+                    `👗 ទំនិញ: ${completedOrder.items.map(i => `[${i.code}] ${i.color}-${i.size} x${i.qty}`).join(', ')}`,
+                    `💵 សរុបរួម: $${completedOrder.totalAmount.toFixed(2)} (${completedOrder.paymentMethod})`
+                  ].join('\n');
+                  navigator.clipboard.writeText(summary);
+                  showToast('📋 បានចម្លងវិក្កយបត្រទុករួចរាល់!');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs cursor-pointer"
+              >
+                📋 ចម្លងវិក្កយបត្រ
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCompletedOrder(null);
+                  setIsMyOrdersOpen(true);
+                }}
+                className="py-2.5 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#BE123C] font-extrabold text-xs cursor-pointer"
+              >
+                🚚 តាមដានអីវ៉ាន់
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setCompletedOrder(null)}
@@ -1933,7 +2516,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       )}
 
       {/* =====================================================================
-          MODAL 4: CUSTOMER ORDER HISTORY
+          MODAL 4: CUSTOMER ORDER HISTORY & LIVE TRACKING BY PHONE
          ===================================================================== */}
       {isMyOrdersOpen && (
         <div
@@ -1944,34 +2527,95 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             className="bg-white rounded-3xl max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="font-extrabold text-sm text-slate-900">📋 វិក្កយបត្រដែលខ្ញុំបានកម្ម៉ង់</h3>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div>
+                <h3 className="font-extrabold text-sm text-slate-900">📋 វិក្កយបត្រ & តាមដានអីវ៉ាន់របស់ខ្ញុំ</h3>
+                <p className="text-[10.5px] text-slate-500">ពិនិត្យស្ថានភាពដឹកជញ្ជូន និងលេខកូដផ្ញើអីវ៉ាន់</p>
+              </div>
               <button
                 type="button"
                 onClick={() => setIsMyOrdersOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 text-slate-700 font-bold text-xs cursor-pointer"
+                className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
               >
                 ✕
               </button>
             </div>
-            <div className="p-4 overflow-y-auto space-y-3">
-              {myOrders.map(ord => (
+
+            {/* Live Order Lookup Bar by Phone Number or Order ID */}
+            <div className="p-3 bg-white border-b border-slate-100 flex items-center gap-2">
+              <input
+                type="text"
+                value={orderLookupQuery}
+                onChange={e => setOrderLookupQuery(e.target.value)}
+                placeholder="វាយលេខទូរស័ព្ទ ឬលេខវិក្កយបត្រ (ឧ. 012... ឬ TG-1001)"
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold focus:outline-none focus:border-[#DB1D43]"
+              />
+              <button
+                type="button"
+                disabled={isLookingUpOrder}
+                onClick={() => handleLookupOrders()}
+                className="px-3.5 py-2 rounded-xl bg-[#DB1D43] hover:bg-[#BE123C] text-white font-extrabold text-xs shrink-0 cursor-pointer disabled:opacity-50"
+              >
+                {isLookingUpOrder ? 'កំពុងឆែក...' : '🔍 ឆែកមើល'}
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-3 flex-1">
+              {myOrders.length === 0 ? (
+                <div className="text-center py-8 space-y-2">
+                  <div className="text-3xl">📦</div>
+                  <div className="font-extrabold text-xs text-slate-800">
+                    មិនទាន់មានវិក្កយបត្រនៅលើទូរស័ព្ទនេះទេ
+                  </div>
+                  <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                    ប្រសិនបើបងធ្លាប់កម្ម៉ង់រួច សូមវាយលេខទូរស័ព្ទរបស់បងនៅប្រអប់ខាងលើ រួចចុច «🔍 ឆែកមើល» ដើម្បីមើលស្ថានភាពដឹកជញ្ជូន!
+                  </p>
+                </div>
+              ) : (
+                myOrders.map(ord => (
                 <div key={ord.id} className="p-3 rounded-2xl border border-slate-200 bg-slate-50 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between font-extrabold">
                     <span className="text-[#DB1D43]">#{ord.id}</span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-900 text-white text-[10px]">
-                      {ord.paymentMethod === 'KHQR' ? '💳 KHQR' : '🚚 COD'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${
+                          ord.status === 'SHIPPED'
+                            ? 'bg-blue-100 text-blue-800'
+                            : ord.status === 'CONFIRMED'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : ord.status === 'CANCELLED'
+                            ? 'bg-rose-100 text-rose-700'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {ord.status === 'SHIPPED'
+                          ? '🚚 បានដាក់ផ្ញើចេញ'
+                          : ord.status === 'CONFIRMED'
+                          ? '✅ ហាងបានទទួលអর্ডার'
+                          : ord.status === 'CANCELLED'
+                          ? '❌ បានបោះបង់'
+                          : '⏳ រង់ចាំបញ្ជាក់'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 text-white text-[10px]">
+                        {ord.paymentMethod === 'KHQR' ? '💳 KHQR' : '🚚 COD'}
+                      </span>
+                    </div>
                   </div>
                   <div className="text-slate-600">
                     {ord.items.map(i => `[${i.code}] ${i.color}-${i.size} x${i.qty}`).join(', ')}
                   </div>
+                  {ord.trackingInfo && (
+                    <div className="p-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 font-bold text-[11px]">
+                      🔖 លេខដឹកជញ្ជូន / តៃកុង៖ {ord.trackingInfo}
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200">
                     <span>{new Date(ord.createdAt).toLocaleString('km-KH')}</span>
                     <span>${ord.totalAmount.toFixed(2)}</span>
                   </div>
                 </div>
-              ))}
+              ))
+              )}
             </div>
           </div>
         </div>
@@ -2023,6 +2667,38 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               </form>
             ) : (
               <>
+                {/* Admin KPI Summary Strip */}
+                <div className="grid grid-cols-4 gap-2 px-4 py-2.5 bg-slate-900 text-white border-b border-slate-800 text-center">
+                  <div className="bg-slate-800/90 rounded-xl p-2">
+                    <div className="text-[10px] text-slate-400 font-bold">ចំណូលសរុប</div>
+                    <div className="font-black text-xs sm:text-sm text-emerald-400 tabular-nums">
+                      $
+                      {adminOrders
+                        .filter(o => o.status !== 'CANCELLED')
+                        .reduce((sum, o) => sum + o.totalAmount, 0)
+                        .toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-slate-800/90 rounded-xl p-2">
+                    <div className="text-[10px] text-slate-400 font-bold">អর্ডারថ្មី</div>
+                    <div className="font-black text-xs sm:text-sm text-amber-400 tabular-nums">
+                      {adminOrders.filter(o => o.status === 'NEW').length} អর্ডার
+                    </div>
+                  </div>
+                  <div className="bg-slate-800/90 rounded-xl p-2">
+                    <div className="text-[10px] text-slate-400 font-bold">ស្តុកសរុប</div>
+                    <div className="font-black text-xs sm:text-sm text-sky-400 tabular-nums">
+                      {products.reduce((s, p) => s + p.variants.reduce((vs, v) => vs + v.stock, 0), 0)} ឈុត
+                    </div>
+                  </div>
+                  <div className="bg-slate-800/90 rounded-xl p-2">
+                    <div className="text-[10px] text-slate-400 font-bold">ម៉ូតអស់ស្តុក</div>
+                    <div className="font-black text-xs sm:text-sm text-rose-400 tabular-nums">
+                      {products.filter(p => p.variants.reduce((vs, v) => vs + v.stock, 0) <= 0).length} ម៉ូត
+                    </div>
+                  </div>
+                </div>
+
                 {/* Admin Navigation Tabs */}
                 <div className="flex border-b border-slate-200 bg-slate-100 px-3 pt-2 gap-2">
                   <button
@@ -2076,62 +2752,78 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {products.map(p => (
-                          <div
-                            key={p.id}
-                            className="bg-white p-3 rounded-2xl border border-slate-200 flex gap-3 items-center justify-between"
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="relative w-14 h-16 shrink-0">
-                                <img
-                                  src={p.imageUrl}
-                                  alt={p.name}
-                                  referrerPolicy="no-referrer"
-                                  className="w-14 h-16 rounded-xl object-cover bg-slate-100"
-                                />
-                                {getProductImages(p).length > 1 && (
-                                  <span className="absolute bottom-1 right-1 bg-black/75 text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-md">
-                                    📸 {getProductImages(p).length}
-                                  </span>
-                                )}
+                        {products.map(p => {
+                          const totalProdStock = p.variants.reduce((acc, v) => acc + v.stock, 0);
+                          return (
+                            <div
+                              key={p.id}
+                              className="bg-white p-3 rounded-2xl border border-slate-200 flex gap-3 items-center justify-between"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="relative w-14 h-16 shrink-0">
+                                  <img
+                                    src={p.imageUrl}
+                                    alt={p.name}
+                                    referrerPolicy="no-referrer"
+                                    className="w-14 h-16 rounded-xl object-cover bg-slate-100"
+                                  />
+                                  {getProductImages(p).length > 1 && (
+                                    <span className="absolute bottom-1 right-1 bg-black/75 text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-md">
+                                      📸 {getProductImages(p).length}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="bg-slate-900 text-white text-[10px] font-extrabold px-2 py-0.5 rounded">
+                                      {p.code}
+                                    </span>
+                                    <span className="font-bold text-xs text-slate-900 truncate">{p.name}</span>
+                                  </div>
+                                  <div className="text-xs font-extrabold text-[#DB1D43] mt-0.5">
+                                    ${p.price.toFixed(2)}{' '}
+                                    <span className="text-slate-400 line-through text-[10px]">
+                                      ${p.originalPrice.toFixed(2)}
+                                    </span>
+                                    {totalProdStock <= 0 && (
+                                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[9.5px] font-extrabold">
+                                        អស់ស្តុក
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                                    {p.variants.map(v => `${v.color}-${v.size}(${v.stock})`).join(', ')}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="bg-slate-900 text-white text-[10px] font-extrabold px-2 py-0.5 rounded">
-                                    {p.code}
-                                  </span>
-                                  <span className="font-bold text-xs text-slate-900 truncate">{p.name}</span>
-                                </div>
-                                <div className="text-xs font-extrabold text-[#DB1D43] mt-0.5">
-                                  ${p.price.toFixed(2)}{' '}
-                                  <span className="text-slate-400 line-through text-[10px]">
-                                    ${p.originalPrice.toFixed(2)}
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                  {p.variants.map(v => `${v.color}-${v.size}(${v.stock})`).join(', ')}
-                                </div>
-                              </div>
-                            </div>
 
-                            <div className="flex flex-col gap-1.5 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => openEditProductModal(p)}
-                                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[11px] cursor-pointer"
-                              >
-                                កែប្រែ
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteProduct(p.id)}
-                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-[11px] cursor-pointer"
-                              >
-                                លុប
-                              </button>
+                              <div className="flex flex-col gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditProductModal(p)}
+                                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[11px] cursor-pointer"
+                                >
+                                  កែប្រែ
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickRestockProduct(p.id, p.code)}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold text-[10.5px] cursor-pointer"
+                                  title="បន្ថែមស្តុក +3 គ្រប់ Size ភ្លាមៗ"
+                                >
+                                  +បន្ថែមស្តុក
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteProduct(p.id)}
+                                  className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-[11px] cursor-pointer"
+                                >
+                                  លុប
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2264,27 +2956,57 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                                   </div>
                                 )}
 
-                                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                                {/* Tracking Info Input for Auto-Notify on Shipped */}
+                                <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={trackingInputs[ord.id] ?? ord.trackingInfo ?? ''}
+                                    onChange={e =>
+                                      setTrackingInputs(prev => ({
+                                        ...prev,
+                                        [ord.id]: e.target.value
+                                      }))
+                                    }
+                                    placeholder="🔖 លេខកូដផ្ញើ J&T / VET ឬលេខតៃកុងឡាន (បើមាន)..."
+                                    className="flex-1 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] font-medium focus:outline-none focus:border-blue-500"
+                                  />
+                                  <span className="text-[10px] text-slate-400">
+                                    (នឹងផ្ញើចូលឆាតភ្ញៀវពេលចុច «🚚 បានផ្ញើចេញ»)
+                                  </span>
+                                </div>
+
+                                <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateOrderStatus(ord.id, 'CONFIRMED')}
+                                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer shadow-2xs"
+                                    >
+                                      ✅ ទទួលអর্ডার (ជូនដំណឹងភ្ញៀវ)
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateOrderStatus(ord.id, 'SHIPPED')}
+                                      className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] cursor-pointer shadow-2xs"
+                                    >
+                                      🚚 បានផ្ញើចេញ (ជូនដំណឹងភ្ញៀវ)
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateOrderStatus(ord.id, 'CANCELLED')}
+                                      className="px-3 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold text-[11px] cursor-pointer"
+                                    >
+                                      ❌ បោះបង់ (បង្វិលស្តុក)
+                                    </button>
+                                  </div>
+
                                   <button
                                     type="button"
-                                    onClick={() => handleUpdateOrderStatus(ord.id, 'CONFIRMED')}
-                                    className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-[11px] cursor-pointer"
+                                    onClick={() => setDeliverySlipOrder(ord)}
+                                    className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-2xs"
                                   >
-                                    ✅ ទទួលអর্ডার
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateOrderStatus(ord.id, 'SHIPPED')}
-                                    className="px-3 py-1.5 rounded-xl bg-blue-600 text-white font-bold text-[11px] cursor-pointer"
-                                  >
-                                    🚚 បានផ្ញើចេញ
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateOrderStatus(ord.id, 'CANCELLED')}
-                                    className="px-3 py-1.5 rounded-xl bg-rose-100 text-rose-700 font-bold text-[11px] cursor-pointer"
-                                  >
-                                    ❌ បោះបង់ (បង្វិលស្តុកវិញ)
+                                    <span>🖨️</span>
+                                    <span>ព្រីនស្លាកដឹកជញ្ជូន (Slip)</span>
                                   </button>
                                 </div>
                               </div>
@@ -2743,7 +3465,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white p-4 rounded-2xl border border-slate-200">
                         <div>
                           <label className="block text-[11px] font-bold text-slate-600 mb-1">ថ្លៃដឹកភ្នំពេញ ($)</label>
                           <input
@@ -2765,6 +3487,16 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                           />
                         </div>
                         <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">Free ដឹកពេលទិញគ្រប់ ($)</label>
+                          <input
+                            type="number"
+                            step="1"
+                            value={config.freeShippingThreshold}
+                            onChange={e => setConfig({ ...config, freeShippingThreshold: parseFloat(e.target.value) || 0 })}
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-extrabold text-[#DB1D43]"
+                          />
+                        </div>
+                        <div>
                           <label className="block text-[11px] font-bold text-slate-600 mb-1">ឈ្មោះគណនី KHQR</label>
                           <input
                             type="text"
@@ -2773,7 +3505,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                             className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
                           />
                         </div>
-                        <div>
+                        <div className="sm:col-span-2">
                           <label className="block text-[11px] font-bold text-slate-600 mb-1">ព័ត៌មានលេខគណនីធនាគារ</label>
                           <input
                             type="text"
@@ -2781,6 +3513,122 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                             onChange={e => setConfig({ ...config, khqrAccountInfo: e.target.value })}
                             className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
                           />
+                        </div>
+
+                        {/* Upload Custom Bank KHQR Image */}
+                        <div className="sm:col-span-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-3">
+                            {config.khqrImageUrl ? (
+                              <img
+                                src={config.khqrImageUrl}
+                                alt="KHQR"
+                                className="w-14 h-14 rounded-xl object-contain border border-slate-200 bg-slate-50 p-1"
+                              />
+                            ) : (
+                              <div className="w-14 h-14 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-lg">
+                                💳
+                              </div>
+                            )}
+                            <div>
+                              <div className="text-xs font-extrabold text-slate-800">
+                                រូបភាព QR ធនាគារផ្ទាល់របស់ហាង (ABA / ACLEDA KHQR)
+                              </div>
+                              <div className="text-[10.5px] text-slate-500">
+                                បើដាក់រូប QR ផ្ទាល់ ភ្ញៀវនឹងឃើញរូប QR នេះពេលជ្រើសរើសបង់ប្រាក់តាម KHQR
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <label className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[11px] cursor-pointer">
+                              <span>📷 បង្ហោះរូប KHQR</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={e => {
+                                  const f = e.target.files?.[0];
+                                  if (f) handleUploadFile(f, 'khqr');
+                                }}
+                              />
+                            </label>
+                            {config.khqrImageUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setConfig({ ...config, khqrImageUrl: '' })}
+                                className="px-2.5 py-1.5 rounded-xl bg-rose-100 text-rose-700 font-bold text-[11px] cursor-pointer"
+                              >
+                                លុប
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* SIZE GUIDE EDITOR IN ADMIN SETTINGS */}
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5">
+                            <span>📏</span>
+                            <span>តារាងទំហំខោអាវតាមគីឡូ (Size Guide សម្រាប់ភ្ញៀវមើល)</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setConfig({ ...config, sizeGuide: DEFAULT_SIZE_GUIDE })}
+                            className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                          >
+                            កំណត់ដើមវិញ
+                          </button>
+                        </div>
+
+                        <div className="space-y-2">
+                          {activeSizeGuide.map((row, idx) => (
+                            <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                              <input
+                                type="text"
+                                value={row.size}
+                                onChange={e => {
+                                  const next = [...activeSizeGuide];
+                                  next[idx] = { ...row, size: e.target.value };
+                                  setConfig({ ...config, sizeGuide: next });
+                                }}
+                                placeholder="Size M"
+                                className="col-span-3 px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-extrabold text-slate-900"
+                              />
+                              <input
+                                type="text"
+                                value={row.weightRange}
+                                onChange={e => {
+                                  const next = [...activeSizeGuide];
+                                  next[idx] = { ...row, weightRange: e.target.value };
+                                  setConfig({ ...config, sizeGuide: next });
+                                }}
+                                placeholder="48kg – 54kg"
+                                className="col-span-3 px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-bold text-[#DB1D43]"
+                              />
+                              <input
+                                type="text"
+                                value={row.bustRange}
+                                onChange={e => {
+                                  const next = [...activeSizeGuide];
+                                  next[idx] = { ...row, bustRange: e.target.value };
+                                  setConfig({ ...config, sizeGuide: next });
+                                }}
+                                placeholder='34" – 36"'
+                                className="col-span-3 px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs font-medium"
+                              />
+                              <input
+                                type="text"
+                                value={row.note || ''}
+                                onChange={e => {
+                                  const next = [...activeSizeGuide];
+                                  next[idx] = { ...row, note: e.target.value };
+                                  setConfig({ ...config, sizeGuide: next });
+                                }}
+                                placeholder="សម្គាល់..."
+                                className="col-span-3 px-2.5 py-1.5 rounded-xl border border-slate-300 text-xs text-slate-600"
+                              />
+                            </div>
+                          ))}
                         </div>
                       </div>
 
@@ -2795,6 +3643,253 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL 7: SIZE GUIDE BY WEIGHT (តារាងទំហំខោអាវតាមគីឡូ kg)
+         ===================================================================== */}
+      {isSizeGuideOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setIsSizeGuideOpen(false)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-4 py-3.5 bg-gradient-to-r from-[#E11D48] to-[#BE123C] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📏</span>
+                <div>
+                  <h3 className="font-extrabold text-sm">តារាងទំហំខោអាវតាមគីឡូ (Size Guide)</h3>
+                  <p className="text-[10.5px] text-rose-100">ចុចលើទំហំដើម្បីបង្ហាញម៉ូតដែលត្រូវនឹងគីឡូរបស់អ្នក</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSizeGuideOpen(false)}
+                className="w-7 h-7 rounded-full bg-white/20 text-white font-bold text-xs flex items-center justify-center cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 space-y-2.5">
+              <div className="grid grid-cols-12 text-[11px] font-extrabold text-slate-500 px-2.5 pb-1 border-b border-slate-100">
+                <div className="col-span-3">ទំហំ (Size)</div>
+                <div className="col-span-4">ទម្ងន់ (គីឡូ)</div>
+                <div className="col-span-3">ទំហំទ្រូង</div>
+                <div className="col-span-2 text-right">ជ្រើសរើស</div>
+              </div>
+
+              {activeSizeGuide.map((row, idx) => {
+                const isSelected = activeSize === row.size;
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      if (SIZE_OPTIONS.includes(row.size as any)) {
+                        setActiveSize(row.size);
+                      }
+                      setIsSizeGuideOpen(false);
+                      showToast(`កំពុងបង្ហាញម៉ូតសម្រាប់ ${row.size} (${row.weightRange})`);
+                    }}
+                    className={`grid grid-cols-12 items-center p-2.5 rounded-2xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#FFF1F2] border-[#DB1D43] ring-1 ring-[#DB1D43]/30'
+                        : 'bg-slate-50 hover:bg-rose-50/50 border-slate-200/90'
+                    }`}
+                  >
+                    <div className="col-span-3">
+                      <span className="font-extrabold text-xs text-slate-900">{row.size}</span>
+                      {row.note && (
+                        <div className="text-[9.5px] text-slate-500 truncate">{row.note}</div>
+                      )}
+                    </div>
+                    <div className="col-span-4 font-extrabold text-xs text-[#DB1D43]">
+                      ⚖️ {row.weightRange}
+                    </div>
+                    <div className="col-span-3 text-xs font-bold text-slate-700">
+                      {row.bustRange}
+                    </div>
+                    <div className="col-span-2 text-right">
+                      <span className="px-2 py-1 rounded-lg bg-white border border-slate-200 text-[10px] font-extrabold text-[#DB1D43]">
+                        មើលម៉ូត
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200/80 text-[11px] text-amber-900 leading-relaxed">
+                💡 <b>គន្លឹះ៖</b> បើបងចូលចិត្តពាក់រលុងស្រួលខ្លួន ឬសាច់ក្រណាត់មិនយឺត សូមជ្រើសរើសធំជាងគីឡូធម្មតា ១ លេខ។
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL 8: 1-CLICK PRINTABLE DELIVERY SLIP (ស្លាកដឹកជញ្ជូនបិទលើកញ្ចប់អីវ៉ាន់)
+         ===================================================================== */}
+      {deliverySlipOrder && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-xs flex items-center justify-center p-3"
+          onClick={() => setDeliverySlipOrder(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh]"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header (Hidden when printing) */}
+            <div className="px-4 py-3 bg-slate-900 text-white flex items-center justify-between print:hidden">
+              <div className="flex items-center gap-2">
+                <span>🖨️</span>
+                <h3 className="font-extrabold text-xs">
+                  ស្លាកដឹកជញ្ជូនបិទលើកញ្ចប់អីវ៉ាន់ (#{deliverySlipOrder.id})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeliverySlipOrder(null)}
+                className="w-7 h-7 rounded-full bg-slate-800 text-white font-bold text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Printable Shipping Label Area */}
+            <div className="p-4 overflow-y-auto flex-1 bg-slate-100 print:bg-white print:p-0">
+              <div
+                id="printable-delivery-slip"
+                className="bg-white border-2 border-slate-900 rounded-2xl p-4 space-y-3 text-slate-900 shadow-xs print:shadow-none print:rounded-none"
+              >
+                {/* Store Header & Order ID */}
+                <div className="flex items-start justify-between border-b-2 border-slate-900 pb-2.5">
+                  <div>
+                    <div className="font-black text-base text-slate-900">{config.storeName}</div>
+                    <div className="text-[11px] font-bold text-slate-600">
+                      កាលបរិច្ឆេទ៖ {new Date(deliverySlipOrder.createdAt).toLocaleString('km-KH')}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] font-extrabold uppercase text-slate-500">លេខវិក្កយបត្រ</div>
+                    <div className="font-black text-lg text-[#DB1D43]">#{deliverySlipOrder.id}</div>
+                  </div>
+                </div>
+
+                {/* Big Recipient Phone & Address Box */}
+                <div className="p-3 rounded-xl bg-slate-50 border-2 border-slate-900 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-slate-500 uppercase">ព័ត៌មានអ្នកទទួលអីវ៉ាន់៖</span>
+                    <span className="px-2.5 py-0.5 rounded-md bg-slate-900 text-white font-extrabold text-xs">
+                      🚚 {deliverySlipOrder.deliveryCompany} ({deliverySlipOrder.zone === 'PP' ? 'ភ្នំពេញ' : 'ខេត្ត'})
+                    </span>
+                  </div>
+
+                  <div className="text-2xl font-black tracking-wide text-slate-900 tabular-nums">
+                    📞 {deliverySlipOrder.phone}
+                  </div>
+                  <div className="text-sm font-extrabold text-slate-900">
+                    👤 អតិថិជន៖ {deliverySlipOrder.customerName}
+                  </div>
+                  <div className="text-sm font-bold text-slate-800 leading-snug pt-0.5 border-t border-slate-200">
+                    📍 ទីតាំង៖ {deliverySlipOrder.address}
+                  </div>
+                  {(trackingInputs[deliverySlipOrder.id] || deliverySlipOrder.trackingInfo) && (
+                    <div className="text-xs font-extrabold text-blue-800 pt-0.5">
+                      🔖 លេខកូដដឹកជញ្ជូន / តៃកុង៖ {trackingInputs[deliverySlipOrder.id] || deliverySlipOrder.trackingInfo}
+                    </div>
+                  )}
+                </div>
+
+                {/* Big COD vs PAID Banner */}
+                <div
+                  className={`p-3 rounded-xl border-2 text-center ${
+                    deliverySlipOrder.paymentMethod === 'COD'
+                      ? 'bg-amber-50 border-slate-900 text-slate-900'
+                      : 'bg-emerald-50 border-emerald-700 text-emerald-950'
+                  }`}
+                >
+                  {deliverySlipOrder.paymentMethod === 'COD' ? (
+                    <>
+                      <div className="text-xs font-extrabold uppercase">🚚 ទឹកប្រាក់ត្រូវប្រមូលពីភ្ញៀវ (COD)</div>
+                      <div className="text-2xl font-black text-[#DB1D43] tabular-nums mt-0.5">
+                        ${deliverySlipOrder.totalAmount.toFixed(2)}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm font-black text-emerald-800">
+                        ✅ បង់ប្រាក់រួចហើយ (PAID តាម KHQR)
+                      </div>
+                      <div className="text-xs font-bold text-emerald-700 mt-0.5">
+                        សូមកុំប្រមូលលុយថែមពីភ្ញៀវ! (ត្រូវប្រមូល៖ $0.00)
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Items Packing Checklist */}
+                <div className="space-y-1.5">
+                  <div className="text-xs font-extrabold text-slate-700">
+                    📦 បញ្ជីម៉ូតខោអាវក្នុងកញ្ចប់ ({deliverySlipOrder.items.reduce((s, i) => s + i.qty, 0)} ឈុត)៖
+                  </div>
+                  <div className="divide-y divide-slate-200 border border-slate-300 rounded-xl overflow-hidden">
+                    {deliverySlipOrder.items.map((it, idx) => (
+                      <div key={idx} className="p-2 bg-white flex items-center justify-between text-xs">
+                        <div className="font-bold text-slate-900">
+                          ☐ <span className="font-black">[{it.code}]</span> {it.name} ({it.color} · {it.size})
+                        </div>
+                        <div className="font-black text-slate-900 shrink-0 ml-2">
+                          x{it.qty} (${(it.price * it.qty).toFixed(2)})
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-xs font-bold text-slate-600 pt-1">
+                    <span>ថ្លៃដឹកជញ្ជូន៖ ${deliverySlipOrder.shippingFee.toFixed(2)}</span>
+                    <span>សរុបរួម៖ ${deliverySlipOrder.totalAmount.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions (Print & Copy Text for Driver) */}
+            <div className="p-3.5 border-t border-slate-200 bg-white flex items-center gap-2 print:hidden">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-[#DB1D43] hover:bg-[#BE123C] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <span>🖨️</span>
+                <span>បោះពុម្ពស្លាកនេះ (Print)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const slipText = [
+                    `📦 ស្លាកដឹកជញ្ជូន — ${config.storeName} (#${deliverySlipOrder.id})`,
+                    `📞 ទូរស័ព្ទភ្ញៀវ៖ ${deliverySlipOrder.phone}`,
+                    `👤 អតិថិជន៖ ${deliverySlipOrder.customerName}`,
+                    `📍 ទីតាំង៖ ${deliverySlipOrder.address} (${deliverySlipOrder.deliveryCompany})`,
+                    deliverySlipOrder.paymentMethod === 'COD'
+                      ? `💵 ត្រូវប្រមូលលុយ (COD)៖ $${deliverySlipOrder.totalAmount.toFixed(2)}`
+                      : `✅ បង់ប្រាក់រួចហើយ (PAID តាម KHQR) — កុំយកលុយថែម!`,
+                    `👗 មុខទំនិញ៖ ${deliverySlipOrder.items.map(i => `[${i.code}] ${i.color}-${i.size} x${i.qty}`).join(', ')}`
+                  ].join('\n');
+                  navigator.clipboard.writeText(slipText);
+                  showToast('📋 បានចម្លងព័ត៌មានដឹកជញ្ជូនសម្រាប់ផ្ញើឱ្យអ្នកដឹក!');
+                }}
+                className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <span>📋</span>
+                <span>ចម្លងផ្ញើឱ្យអ្នកដឹក</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2872,12 +3967,13 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">ប្រភេទ</label>
                 <select
                   value={formCategory}
-                  onChange={e => setFormCategory(e.target.value as 'women' | 'men' | 'unisex')}
+                  onChange={e => setFormCategory(e.target.value as 'women' | 'men' | 'kids' | 'unisex')}
                   className="w-full px-2 py-2 rounded-xl border border-slate-300 text-xs font-bold"
                 >
-                  <option value="women">👗 នារី</option>
-                  <option value="men">👕 បុរស</option>
-                  <option value="unisex">✨ ទាំងពីរ</option>
+                  <option value="women">👗 ខោអាវនារី</option>
+                  <option value="men">👕 ខោអាវបុរស</option>
+                  <option value="kids">🧸 ខោអាវក្មេង</option>
+                  <option value="unisex">✨ ទាំងពីរ (Unisex)</option>
                 </select>
               </div>
             </div>

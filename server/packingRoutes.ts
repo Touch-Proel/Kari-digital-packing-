@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import net from 'net';
@@ -20,13 +20,13 @@ import {
   saveDatabaseToDisk,
   activeFacebookPage,
   syncAllActiveInvoicesWithStock
-} from './db';
-import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite';
-import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment } from './parser';
-import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper';
-import { Invoice, Product, OrderItem } from './types';
-import { sendFacebookReply, fetchFacebookComments } from './fbAuth';
-import { generateServerKHQRPNG } from './khqrServer';
+} from './db.ts';
+import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite.ts';
+import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment } from './parser.ts';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper.ts';
+import type { Invoice, Product, OrderItem } from './types.ts';
+import { sendFacebookReply, fetchFacebookComments } from './fbAuth.ts';
+import { generateServerKHQRPNG } from './khqrServer.ts';
 import {
   testTelegramBotToken,
   fetchTelegramStockUpdates,
@@ -37,15 +37,15 @@ import {
   getTelegramAutoSyncStatus,
   executeTelegramAutoSyncOnce,
   deleteTelegramWebhook
-} from './telegramSync';
+} from './telegramSync.ts';
 import {
   startLiveCommentsAutoSync,
   stopLiveCommentsAutoSync,
   getLiveCommentsAutoSyncStatus,
   executeLiveCommentsSyncOnce,
   recordRecentOrder
-} from './liveSync';
-import { aiSmartAuditFullBasket } from './aiSmartParser';
+} from './liveSync.ts';
+import { aiSmartAuditFullBasket } from './aiSmartParser.ts';
 
 const router = Router();
 

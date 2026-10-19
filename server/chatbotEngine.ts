@@ -1,9 +1,9 @@
 import { GoogleGenAI } from '@google/genai';
-import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage, messengerSlips, AutoScannedMessengerSlip } from './db';
-import { broadcastSSE } from './packingRoutes';
-import { Invoice } from './types';
-import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini, evaluateSlipFraudAndDuplicates } from './fastCheckRoutes';
-import { computeImageHash, getCachedOcr, setCachedOcr } from './ocrCache';
+import { invoices, products, settings, saveDatabaseToDisk, bumpDataRevision, activeFacebookPage, messengerSlips, type AutoScannedMessengerSlip } from './db.ts';
+import { broadcastSSE } from './packingRoutes.ts';
+import type { Invoice } from './types.ts';
+import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini, evaluateSlipFraudAndDuplicates } from './fastCheckRoutes.ts';
+import { computeImageHash, getCachedOcr, setCachedOcr } from './ocrCache.ts';
 import fs from 'fs';
 import path from 'path';
 

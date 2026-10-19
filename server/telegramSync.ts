@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db';
-import { Product } from './types';
-import { broadcastSSE } from './packingRoutes';
+import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
+import type { Product } from './types.ts';
+import { broadcastSSE } from './packingRoutes.ts';
 
 export interface TelegramItemParsed {
   code: string;

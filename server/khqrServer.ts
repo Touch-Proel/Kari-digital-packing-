@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import sharp from 'sharp';
-import { settings, invoices } from './db';
+import { settings, invoices } from './db.ts';
 
 // CRC-16 / CCITT Lookup Table
 const CRC_TABLE = [

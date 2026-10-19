@@ -1,5 +1,5 @@
-import { fetchFacebookComments } from './fbAuth';
-import { parseAndAllocateComment } from './parser';
+import { fetchFacebookComments } from './fbAuth.ts';
+import { parseAndAllocateComment } from './parser.ts';
 import {
   activeLiveId,
   setActiveLiveId,
@@ -7,7 +7,7 @@ import {
   bumpDataRevision,
   saveDatabaseToDisk,
   settings
-} from './db';
+} from './db.ts';
 
 export interface RecentLiveOrder {
   id: string;

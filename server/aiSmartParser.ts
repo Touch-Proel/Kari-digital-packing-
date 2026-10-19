@@ -1,8 +1,8 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { Product } from './types';
-import { detectDeliveryZone, extractCleanAddressFromComment } from './locationHelper';
-import { convertKhmerDigitsToArabic, extractPhoneNumber } from './parser';
-import { settings } from './db';
+import type { Product } from './types.ts';
+import { detectDeliveryZone, extractCleanAddressFromComment } from './locationHelper.ts';
+import { convertKhmerDigitsToArabic, extractPhoneNumber } from './parser.ts';
+import { settings } from './db.ts';
 
 export interface BasketAuditResult {
   verified_items: Array<{

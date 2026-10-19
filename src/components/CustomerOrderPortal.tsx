@@ -103,9 +103,13 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
         setIsEditingInfo(false);
         setSaveSuccessMsg('✅ បានរក្សាទុកព័ត៌មានដឹកជញ្ជូនជោគជ័យ!');
         setTimeout(() => setSaveSuccessMsg(null), 4000);
+      } else {
+        setSaveSuccessMsg('⚠️ មិនអាចរក្សាទុកព័ត៌មានបានទេ សូមព្យាយាមម្តងទៀត');
+        setTimeout(() => setSaveSuccessMsg(null), 4000);
       }
     } catch {
-      alert('បរាជ័យក្នុងការរក្សាទុកព័ត៌មាន');
+      setSaveSuccessMsg('⚠️ បរាជ័យក្នុងការរក្សាទុកព័ត៌មាន');
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
     } finally {
       setSavingInfo(false);
     }
@@ -476,6 +480,17 @@ export function CustomerOrderPortal({ orderId, onBackToApp }: CustomerOrderPorta
               <span>ការកុម្ម៉ង់នេះបានទូទាត់ប្រាក់រួចរាល់ហើយ! អរគុណច្រើនបង!</span>
             </div>
           )}
+
+          {/* Browse More in Mini App Shop CTA */}
+          <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+            <a
+              href="/miniapp"
+              className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition-all"
+            >
+              <span>🛍️</span>
+              <span>ចូលមើលម៉ូតខោអាវបន្ថែមក្នុងហាង Mini App</span>
+            </a>
+          </div>
         </div>
       </main>
 

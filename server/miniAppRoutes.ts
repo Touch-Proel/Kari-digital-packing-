@@ -1,8 +1,8 @@
-import { Router, Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { settings, saveDatabaseToDisk, getConnectedFacebookPages } from './db';
-import { sendTelegramMessage } from './telegramBotService';
+import { settings, saveDatabaseToDisk, getConnectedFacebookPages } from './db.ts';
+import { sendTelegramMessage } from './telegramBotService.ts';
 
 const router = Router();
 
@@ -26,7 +26,7 @@ export interface MiniAppProduct {
   name: string;
   price: number;
   originalPrice: number;
-  category: 'women' | 'men' | 'unisex';
+  category: 'women' | 'men' | 'kids' | 'unisex';
   imageUrl: string;
   images?: string[];
   variants: MiniAppVariant[];
@@ -65,6 +65,14 @@ export interface MiniAppOrder {
   totalAmount: number;
   status: 'NEW' | 'CONFIRMED' | 'SHIPPED' | 'CANCELLED';
   note?: string;
+  trackingInfo?: string;
+}
+
+export interface SizeGuideRow {
+  size: string;
+  weightRange: string;
+  bustRange: string;
+  note?: string;
 }
 
 export interface MiniAppConfig {
@@ -92,6 +100,7 @@ export interface MiniAppConfig {
   fbVerifyToken?: string;
   fbAutoReplyEnabled?: boolean;
   fbButtonText?: string;
+  sizeGuide?: SizeGuideRow[];
 }
 
 interface MiniAppDatabase {
@@ -235,6 +244,103 @@ const SVG_A04_DENIM_SHIRT = `data:image/svg+xml;utf8,` + encodeURIComponent(`
   </g>
 </svg>`);
 
+const SVG_A01_BLACK_TEE = `data:image/svg+xml;utf8,` + encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" width="600" height="750">
+  <defs>
+    <linearGradient id="bg1b" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <linearGradient id="shirt1b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <filter id="shadow1b" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#0f172a" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="600" height="750" fill="url(#bg1b)"/>
+  <circle cx="480" cy="180" r="95" fill="#94a3b8" opacity="0.25"/>
+  <path d="M195 125 C235 115, 250 148, 300 148 C350 148, 365 115, 405 125 L505 215 L455 335 L405 295 L415 620 C340 632, 260 632, 185 620 L195 295 L145 335 L95 215 Z" fill="url(#shirt1b)" filter="url(#shadow1b)"/>
+  <path d="M242 124 C265 162, 335 162, 358 124 C345 145, 255 145, 242 124 Z" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+  <rect x="335" y="235" width="46" height="54" rx="6" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+</svg>`);
+
+const SVG_A05_KIDS_DRESS = `data:image/svg+xml;utf8,` + encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" width="600" height="750">
+  <defs>
+    <linearGradient id="bgKids1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff1f2"/>
+      <stop offset="100%" stop-color="#ffe4e6"/>
+    </linearGradient>
+    <linearGradient id="kidsDress" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fb7185"/>
+      <stop offset="100%" stop-color="#e11d48"/>
+    </linearGradient>
+    <filter id="shadowKids1" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#881337" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  <rect width="600" height="750" fill="url(#bgKids1)"/>
+  <circle cx="110" cy="140" r="70" fill="#fda4af" opacity="0.35"/>
+  <circle cx="490" cy="580" r="85" fill="#fecdd3" opacity="0.45"/>
+  <g filter="url(#shadowKids1)">
+    <!-- Peter Pan Collar Kids Dress -->
+    <path d="M210 170 L390 170 L415 310 L185 310 Z" fill="#fff1f2"/>
+    <circle cx="200" cy="215" r="42" fill="#ffe4e6"/>
+    <circle cx="400" cy="215" r="42" fill="#ffe4e6"/>
+    <!-- Flared Pinafore Skirt -->
+    <path d="M205 295 L395 295 L465 565 Q300 595 135 565 Z" fill="url(#kidsDress)"/>
+    <!-- Cute Ribbon Bow at Waist -->
+    <path d="M265 295 L300 312 L265 330 Z" fill="#ffffff"/>
+    <path d="M335 295 L300 312 L335 330 Z" fill="#ffffff"/>
+    <circle cx="300" cy="312" r="9" fill="#ffe4e6"/>
+    <!-- Polka dots on dress -->
+    <circle cx="250" cy="400" r="8" fill="#ffffff" opacity="0.75"/>
+    <circle cx="345" cy="390" r="8" fill="#ffffff" opacity="0.75"/>
+    <circle cx="295" cy="465" r="8" fill="#ffffff" opacity="0.75"/>
+    <circle cx="220" cy="505" r="8" fill="#ffffff" opacity="0.75"/>
+    <circle cx="380" cy="500" r="8" fill="#ffffff" opacity="0.75"/>
+  </g>
+</svg>`);
+
+const SVG_A06_KIDS_SET = `data:image/svg+xml;utf8,` + encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" width="600" height="750">
+  <defs>
+    <linearGradient id="bgKids2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fef9c3"/>
+      <stop offset="100%" stop-color="#fde68a"/>
+    </linearGradient>
+    <linearGradient id="kidsTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+    <linearGradient id="kidsShorts" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <filter id="shadowKids2" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#78350f" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="600" height="750" fill="url(#bgKids2)"/>
+  <circle cx="490" cy="130" r="75" fill="#fcd34d" opacity="0.4"/>
+  <g filter="url(#shadowKids2)">
+    <!-- Kids T-Shirt -->
+    <path d="M210 140 L390 140 L460 225 L420 285 L390 255 L395 430 L205 430 L210 255 L180 285 L140 225 Z" fill="url(#kidsTop)"/>
+    <path d="M255 140 Q300 175 345 140" fill="none" stroke="#f59e0b" stroke-width="8" stroke-linecap="round"/>
+    <!-- Cute Bear Badge on Chest -->
+    <circle cx="275" cy="255" r="12" fill="#d97706"/>
+    <circle cx="325" cy="255" r="12" fill="#d97706"/>
+    <circle cx="300" cy="280" r="32" fill="#f59e0b"/>
+    <circle cx="290" cy="274" r="4" fill="#0f172a"/>
+    <circle cx="310" cy="274" r="4" fill="#0f172a"/>
+    <ellipse cx="300" cy="286" rx="10" ry="7" fill="#fef3c7"/>
+    <!-- Kids Denim Shorts -->
+    <path d="M212 445 L388 445 L410 610 L312 610 L300 525 L288 610 L190 610 Z" fill="url(#kidsShorts)"/>
+  </g>
+</svg>`);
+
 function getDefaultDatabase(): MiniAppDatabase {
   return {
     config: {
@@ -259,7 +365,14 @@ function getDefaultDatabase(): MiniAppDatabase {
       fbPageAccessToken: '',
       fbVerifyToken: '1688',
       fbAutoReplyEnabled: true,
-      fbButtonText: '🛍️ ចុចទិញទំនិញ'
+      fbButtonText: '🛍️ ចុចទិញទំនិញ',
+      sizeGuide: [
+        { size: 'Size S', weightRange: '40kg – 47kg', bustRange: '32" – 34"', note: 'រាងតូច / ស្លីម' },
+        { size: 'Size M', weightRange: '48kg – 54kg', bustRange: '34" – 36"', note: 'ទំហំពេញនិយម' },
+        { size: 'Size L', weightRange: '55kg – 62kg', bustRange: '36" – 38"', note: 'ពាក់ស្រួលខ្លួន' },
+        { size: 'Size XL', weightRange: '63kg – 72kg', bustRange: '38" – 41"', note: 'រាងធំ / ទូលាយ' },
+        { size: 'Free Size', weightRange: '42kg – 60kg', bustRange: '32" – 38"', note: 'សាច់យឺត ពាក់បានទូទៅ' }
+      ]
     },
     products: [
       {
@@ -270,8 +383,9 @@ function getDefaultDatabase(): MiniAppDatabase {
         originalPrice: 10.00,
         category: 'men',
         imageUrl: SVG_A01_WHITE_TEE,
+        images: [SVG_A01_WHITE_TEE, SVG_A01_BLACK_TEE],
         variants: [
-          { id: 'v-a01-1', color: 'ស', size: 'Size M', stock: 1 },
+          { id: 'v-a01-1', color: 'ស', size: 'Size M', stock: 2 },
           { id: 'v-a01-2', color: 'ខ្មៅ', size: 'Size L', stock: 1 }
         ],
         createdAt: new Date().toISOString()
@@ -284,8 +398,10 @@ function getDefaultDatabase(): MiniAppDatabase {
         originalPrice: 15.00,
         category: 'women',
         imageUrl: SVG_A02_KOREAN_DRESS,
+        images: [SVG_A02_KOREAN_DRESS, SVG_A03_BLAZER_SET],
         variants: [
-          { id: 'v-a02-1', color: 'ស', size: 'Size S', stock: 1 }
+          { id: 'v-a02-1', color: 'ស', size: 'Size S', stock: 1 },
+          { id: 'v-a02-2', color: 'ស', size: 'Size M', stock: 1 }
         ],
         createdAt: new Date().toISOString()
       },
@@ -297,8 +413,9 @@ function getDefaultDatabase(): MiniAppDatabase {
         originalPrice: 18.00,
         category: 'women',
         imageUrl: SVG_A03_BLAZER_SET,
+        images: [SVG_A03_BLAZER_SET, SVG_A02_KOREAN_DRESS],
         variants: [
-          { id: 'v-a03-1', color: 'ครีม (Beige)', size: 'Size M', stock: 2 },
+          { id: 'v-a03-1', color: 'គ្រីម (Beige)', size: 'Size M', stock: 2 },
           { id: 'v-a03-2', color: 'ខ្មៅ', size: 'Size L', stock: 1 }
         ],
         createdAt: new Date().toISOString()
@@ -311,8 +428,39 @@ function getDefaultDatabase(): MiniAppDatabase {
         originalPrice: 13.50,
         category: 'women',
         imageUrl: SVG_A04_DENIM_SHIRT,
+        images: [SVG_A04_DENIM_SHIRT, SVG_A01_WHITE_TEE],
         variants: [
-          { id: 'v-a04-1', color: 'ខៀវស្រាល', size: 'Free Size', stock: 1 }
+          { id: 'v-a04-1', color: 'ខៀវស្រាល', size: 'Free Size', stock: 2 }
+        ],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'prod-a05',
+        code: 'A05',
+        name: 'រ៉ូបក្មេងស្រីម៉ូតកូរ៉េ បូរសាច់កប្បាសទន់',
+        price: 5.50,
+        originalPrice: 9.00,
+        category: 'kids',
+        imageUrl: SVG_A05_KIDS_DRESS,
+        images: [SVG_A05_KIDS_DRESS, SVG_A06_KIDS_SET],
+        variants: [
+          { id: 'v-a05-1', color: 'ផ្កាឈូក', size: 'Size S', stock: 2 },
+          { id: 'v-a05-2', color: 'ផ្កាឈូក', size: 'Size M', stock: 1 }
+        ],
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'prod-a06',
+        code: 'A06',
+        name: 'ឈុតអាវយឺតរូបខ្លាឃ្មុំ + ខោខ្លីក្មេងប្រុស',
+        price: 6.00,
+        originalPrice: 9.50,
+        category: 'kids',
+        imageUrl: SVG_A06_KIDS_SET,
+        images: [SVG_A06_KIDS_SET, SVG_A05_KIDS_DRESS],
+        variants: [
+          { id: 'v-a06-1', color: 'លឿង-ខៀវ', size: 'Size S', stock: 1 },
+          { id: 'v-a06-2', color: 'លឿង-ខៀវ', size: 'Size M', stock: 2 }
         ],
         createdAt: new Date().toISOString()
       }
@@ -340,11 +488,47 @@ function loadMiniAppDb(): MiniAppDatabase {
       const raw = fs.readFileSync(MINIAPP_STORE_PATH, 'utf-8');
       const parsed = JSON.parse(raw);
       const defaults = getDefaultDatabase();
-      return {
+      const loadedProducts: MiniAppProduct[] = Array.isArray(parsed.products) ? parsed.products : defaults.products;
+      let needsSave = false;
+
+      for (const p of loadedProducts) {
+        if (Array.isArray(p.variants)) {
+          for (const v of p.variants) {
+            if (v.color && v.color.includes('ครีม')) {
+              v.color = v.color.replace('ครีม', 'គ្រីម');
+              needsSave = true;
+            }
+          }
+        }
+        // Populate default multi-image gallery if missing on default items
+        if (!Array.isArray(p.images) || p.images.length === 0) {
+          const defProd = defaults.products.find(dp => dp.code === p.code);
+          p.images = defProd?.images || (p.imageUrl ? [p.imageUrl] : []);
+          needsSave = true;
+        }
+      }
+
+      // Ensure kids products exist so the Kids tab is never empty by default
+      const hasKidsProducts = loadedProducts.some(p => p.category === 'kids');
+      if (!hasKidsProducts) {
+        const defaultKids = defaults.products.filter(p => p.category === 'kids');
+        for (const kp of defaultKids) {
+          if (!loadedProducts.some(p => p.code === kp.code)) {
+            loadedProducts.push(kp);
+            needsSave = true;
+          }
+        }
+      }
+
+      const dbObj: MiniAppDatabase = {
         config: { ...defaults.config, ...(parsed.config || {}) },
-        products: Array.isArray(parsed.products) ? parsed.products : defaults.products,
+        products: loadedProducts,
         orders: Array.isArray(parsed.orders) ? parsed.orders : []
       };
+      if (needsSave) {
+        saveMiniAppDb(dbObj);
+      }
+      return dbObj;
     }
   } catch (err) {
     console.error('[MiniApp DB] Failed to load miniapp_store.json, using defaults:', err);
@@ -378,9 +562,46 @@ router.get('/catalog', (_req: Request, res: Response) => {
       freeShippingThreshold: miniAppDb.config.freeShippingThreshold,
       khqrMerchantName: miniAppDb.config.khqrMerchantName,
       khqrAccountInfo: miniAppDb.config.khqrAccountInfo,
-      khqrImageUrl: miniAppDb.config.khqrImageUrl
+      khqrImageUrl: miniAppDb.config.khqrImageUrl,
+      botUsername: miniAppDb.config.botUsername || '',
+      fbPageId: miniAppDb.config.fbPageId || '',
+      fbPageName: miniAppDb.config.fbPageName || '',
+      sizeGuide: Array.isArray(miniAppDb.config.sizeGuide) && miniAppDb.config.sizeGuide.length > 0
+        ? miniAppDb.config.sizeGuide
+        : getDefaultDatabase().config.sizeGuide
     },
     products: miniAppDb.products
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1B. CUSTOMER LIVE ORDER STATUS LOOKUP (By Order IDs or Phone Number)
+// ---------------------------------------------------------------------------
+router.get('/orders/lookup', (req: Request, res: Response) => {
+  const idsParam = String(req.query.ids || '').trim();
+  const phoneParam = String(req.query.phone || '').replace(/\s+/g, '').trim();
+
+  const idSet = new Set(
+    idsParam
+      .split(',')
+      .map(s => s.trim().toUpperCase())
+      .filter(Boolean)
+  );
+
+  const matched = miniAppDb.orders.filter(o => {
+    if (idSet.has(o.id.toUpperCase())) return true;
+    if (phoneParam.length >= 6) {
+      const cleanOrderPhone = String(o.phone || '').replace(/\s+/g, '');
+      if (cleanOrderPhone.includes(phoneParam) || phoneParam.includes(cleanOrderPhone)) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  res.json({
+    success: true,
+    orders: matched.slice(0, 25)
   });
 });
 
@@ -667,7 +888,15 @@ router.put('/admin/config', (req: Request, res: Response) => {
     fbPageAccessToken: incoming.fbPageAccessToken !== undefined ? String(incoming.fbPageAccessToken).trim() : miniAppDb.config.fbPageAccessToken,
     fbVerifyToken: incoming.fbVerifyToken !== undefined ? String(incoming.fbVerifyToken).trim() : (miniAppDb.config.fbVerifyToken || '1688'),
     fbAutoReplyEnabled: incoming.fbAutoReplyEnabled !== undefined ? Boolean(incoming.fbAutoReplyEnabled) : (miniAppDb.config.fbAutoReplyEnabled ?? true),
-    fbButtonText: incoming.fbButtonText ? String(incoming.fbButtonText).trim() : (miniAppDb.config.fbButtonText || '🛍️ ចុចទិញទំនិញ')
+    fbButtonText: incoming.fbButtonText ? String(incoming.fbButtonText).trim() : (miniAppDb.config.fbButtonText || '🛍️ ចុចទិញទំនិញ'),
+    sizeGuide: Array.isArray(incoming.sizeGuide) && incoming.sizeGuide.length > 0
+      ? incoming.sizeGuide.map((row: any) => ({
+          size: String(row.size || '').trim(),
+          weightRange: String(row.weightRange || '').trim(),
+          bustRange: String(row.bustRange || '').trim(),
+          note: String(row.note || '').trim()
+        }))
+      : miniAppDb.config.sizeGuide
   };
   saveMiniAppDb();
   res.json({ success: true, config: miniAppDb.config });
@@ -859,7 +1088,7 @@ router.post('/admin/products', (req: Request, res: Response) => {
       name: String(name).trim(),
       price: Number(price) || 0,
       originalPrice: Number(originalPrice) || Number(price) || 0,
-      category: ['women', 'men', 'unisex'].includes(category) ? category : 'women',
+      category: ['women', 'men', 'kids', 'unisex'].includes(category) ? category : 'women',
       imageUrl: primaryImg,
       images: finalImages,
       variants: normalizedVariants
@@ -874,7 +1103,7 @@ router.post('/admin/products', (req: Request, res: Response) => {
       name: String(name).trim(),
       price: Number(price) || 0,
       originalPrice: Number(originalPrice) || Number(price) || 0,
-      category: ['women', 'men', 'unisex'].includes(category) ? category : 'women',
+      category: ['women', 'men', 'kids', 'unisex'].includes(category) ? category : 'women',
       imageUrl: primaryImg,
       images: finalImages,
       variants: normalizedVariants,
@@ -894,16 +1123,29 @@ router.delete('/admin/products/:id', (req: Request, res: Response) => {
   res.json({ success: true, products: miniAppDb.products });
 });
 
-router.patch('/admin/orders/:id', (req: Request, res: Response) => {
+router.post('/admin/products/:id/restock', (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const prod = miniAppDb.products.find(p => p.id === id);
+  if (!prod) {
+    return res.status(404).json({ success: false, error: 'រកមិនឃើញម៉ូតនេះទេ' });
+  }
+  for (const v of prod.variants) {
+    v.stock = Math.max(1, v.stock + 1);
+  }
+  saveMiniAppDb();
+  res.json({ success: true, products: miniAppDb.products });
+});
+
+router.patch('/admin/orders/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status, trackingInfo } = req.body || {};
   const order = miniAppDb.orders.find(o => o.id === id);
   if (!order) {
     return res.status(404).json({ success: false, error: 'រកមិនឃើញវិក្កយបត្រនេះទេ' });
   }
 
   const prevStatus = order.status;
-  const nextStatus = status as MiniAppOrder['status'];
+  const nextStatus = (status || order.status) as MiniAppOrder['status'];
 
   // Restore stock if cancelling an active order
   if (prevStatus !== 'CANCELLED' && nextStatus === 'CANCELLED') {
@@ -925,9 +1167,95 @@ router.patch('/admin/orders/:id', (req: Request, res: Response) => {
   }
 
   order.status = nextStatus;
+  if (trackingInfo !== undefined) {
+    order.trackingInfo = String(trackingInfo).trim() || undefined;
+  }
   saveMiniAppDb();
+
+  // Auto-notify customer via Telegram or Facebook Messenger when status changes
+  let notifiedCustomer = false;
+  const itemsSummary = order.items
+    .map(it => `• [${it.code}] ${it.name} (${it.color} - ${it.size}) x${it.qty}`)
+    .join('\n');
+
+  let statusHeadline = '';
+  let statusFooter = '';
+  if (nextStatus === 'CONFIRMED') {
+    statusHeadline = `✅ ហាង ${miniAppDb.config.storeName} បានទទួលការកម្ម៉ង់ #${order.id} របស់បងហើយ!`;
+    statusFooter = `📦 ក្រុមការងារកំពុងរៀបចំវេចខ្ចប់ជូនបង។ អរគុណសម្រាប់ការគាំទ្រ! 🙏✨`;
+  } else if (nextStatus === 'SHIPPED') {
+    statusHeadline = `🚚 អីវ៉ាន់របស់បង (#${order.id}) បានដាក់ផ្ញើចេញហើយ!`;
+    statusFooter = [
+      `🏢 ដឹកជញ្ជូនតាម៖ ${order.deliveryCompany} (${order.zone === 'PP' ? 'ភ្នំពេញ' : 'ខេត្ត'})`,
+      order.trackingInfo ? `🔖 លេខកូដដឹកជញ្ជូន / តៃកុង៖ ${order.trackingInfo}` : '',
+      `📞 សូមបងត្រៀមទទួលទូរស័ព្ទពីអ្នកដឹកជញ្ជូនណាបង! 🙏✨`
+    ].filter(Boolean).join('\n');
+  } else if (nextStatus === 'CANCELLED') {
+    statusHeadline = `❌ ការកម្ម៉ង់ #${order.id} ត្រូវបានបោះបង់`;
+    statusFooter = `ប្រសិនបើមានចម្ងល់ សូមឆាតទាក់ទងមកកាន់ហាងយើងខ្ញុំផ្ទាល់។`;
+  }
+
+  if (statusHeadline) {
+    const fullCustomerMsg = [
+      statusHeadline,
+      `━━━━━━━━━━━━━━━━`,
+      itemsSummary,
+      `💵 សរុបរួម៖ $${order.totalAmount.toFixed(2)} (${order.paymentMethod === 'KHQR' ? 'បង់តាម KHQR' : 'បង់ពេលដឹកដល់ COD'})`,
+      `📍 ទីតាំង៖ ${order.address}`,
+      `━━━━━━━━━━━━━━━━`,
+      statusFooter
+    ].join('\n');
+
+    // 1. Send to Telegram customer if telegramUserId is present
+    const botToken = (miniAppDb.config.telegramBotToken || settings.telegram_token || '').trim();
+    if (botToken && order.telegramUserId) {
+      try {
+        await sendTelegramMessage(botToken, order.telegramUserId, fullCustomerMsg);
+        notifiedCustomer = true;
+      } catch {}
+    }
+
+    // 2. Send to Facebook Messenger customer if fbPsid is present
+    const fbToken = (miniAppDb.config.fbPageAccessToken || '').trim();
+    if (fbToken && order.fbPsid) {
+      try {
+        const fbRes = await fetch(
+          `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              recipient: { id: order.fbPsid },
+              messaging_type: 'UPDATE',
+              message: { text: fullCustomerMsg }
+            })
+          }
+        );
+        if (!fbRes.ok) {
+          // Fallback to RESPONSE messaging_type within 24h window
+          const retryRes = await fetch(
+            `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                recipient: { id: order.fbPsid },
+                messaging_type: 'RESPONSE',
+                message: { text: fullCustomerMsg }
+              })
+            }
+          );
+          if (retryRes.ok) notifiedCustomer = true;
+        } else {
+          notifiedCustomer = true;
+        }
+      } catch {}
+    }
+  }
+
   res.json({
     success: true,
+    notifiedCustomer,
     orders: miniAppDb.orders,
     products: miniAppDb.products
   });
@@ -1003,6 +1331,37 @@ async function startDedicatedMiniAppBotPolling() {
         if (!text) continue;
 
         const lower = text.toLowerCase();
+        if (lower.startsWith('/start ask_')) {
+          const askedCode = text.slice('/start ask_'.length).trim().toUpperCase();
+          const matchedProd = miniAppDb.products.find(p => p.code.toUpperCase() === askedCode);
+          const cleanUrl = (miniAppDb.config.miniAppUrl || 'https://chatbotkh.com/miniapp').trim();
+          const btnText = (miniAppDb.config.menuButtonText || '🛍️ បើកហាងទិញទំនិញ').trim();
+          const replyMarkup = {
+            inline_keyboard: [[{ text: `${btnText} (កូដ ${askedCode})`, web_app: { url: `${cleanUrl}?code=${encodeURIComponent(askedCode)}` } }]]
+          };
+
+          const prodInfoText = matchedProd
+            ? [
+                `💬 <b>បងកំពុងសាកសួរអំពីម៉ូតកូដ [${matchedProd.code}] — ${matchedProd.name}</b>`,
+                `💵 តម្លៃពិសេស៖ <b>$${matchedProd.price.toFixed(2)}</b>`,
+                `🎨 ពណ៌ និងទំហំក្នុងស្តុក៖ ${matchedProd.variants.map(v => `${v.color}-${v.size}(សល់ ${v.stock})`).join(', ')}`,
+                `━━━━━━━━━━━━━━━━━━━━`,
+                `✍️ សូមបងវាយសំណួររបស់បងនៅទីនេះ (ឧ. សួរពីសាច់ក្រណាត់ ឬទំហំគីឡូ) ម្ចាស់ហាងនឹងឆ្លើយតបជូនបងភ្លាមៗ! 👇`
+              ].join('\n')
+            : `💬 សូមបងវាយសំណួរអំពីម៉ូតកូដ <b>${askedCode}</b> នៅទីនេះ ម្ចាស់ហាងនឹងឆ្លើយតបជូនបងភ្លាមៗ!`;
+
+          sendTelegramMessage(dedicatedToken, chatId, prodInfoText, msg.message_id, undefined, replyMarkup).catch(() => {});
+
+          const targetGroupChatId = (miniAppDb.config.telegramNotifyChatId || settings.telegram_chat_id || '').trim();
+          if (targetGroupChatId && String(targetGroupChatId) !== String(chatId)) {
+            const custLabel = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || 'អតិថិជន';
+            const userHandle = msg.from?.username ? `(@${msg.from.username})` : '';
+            const adminAlert = `💬 <b>ភ្ញៀវសួរពីម៉ូតខោអាវ!</b>\n👤 អតិថិជន៖ <b>${custLabel}</b> ${userHandle}\n👗 ម៉ូតកូដ៖ <b>[${askedCode}] ${matchedProd?.name || ''}</b>`;
+            sendTelegramMessage(dedicatedToken, targetGroupChatId, adminAlert).catch(() => {});
+          }
+          continue;
+        }
+
         const isShopTrigger =
           lower.startsWith('/start') ||
           lower.startsWith('/shop') ||
@@ -1530,4 +1889,71 @@ async function startFacebookMessengerShopPoller() {
 
 startFacebookMessengerShopPoller();
 
+// Customer Product Inquiry Endpoint (Triggered when clicking "💬 ឆាតសួរម្ចាស់ហាងពីម៉ូតនេះ")
+router.post('/inquire', async (req: Request, res: Response) => {
+  try {
+    const { code, name, price, customerName, telegramUsername, telegramUserId, fbPsid } = req.body || {};
+    const cleanCode = String(code || '').trim().toUpperCase();
+    const cleanName = String(name || '').trim();
+    const custLabel = String(customerName || 'អតិថិជន').trim();
+
+    let sentToCustomerChat = false;
+
+    // 1. If customer is in Facebook Messenger Webview (has fbPsid)
+    const fbToken = (miniAppDb.config.fbPageAccessToken || '').trim();
+    if (fbToken && fbPsid) {
+      const fbMsg = [
+        `💬 បងកំពុងសាកសួរអំពីម៉ូតកូដ [${cleanCode}] — ${cleanName} ($${Number(price || 0).toFixed(2)})`,
+        `✍️ សូមបងវាយសំណួររបស់បងនៅក្នុងឆាតនេះ (ឧ. សួរពីសាច់ក្រណាត់ ឬទំហំគីឡូ) ក្រុមការងារហាងនឹងឆ្លើយតបជូនបងភ្លាមៗ! 🙏✨`
+      ].join('\n');
+      try {
+        const fbRes = await fetch(
+          `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              recipient: { id: String(fbPsid) },
+              messaging_type: 'RESPONSE',
+              message: { text: fbMsg }
+            })
+          }
+        );
+        if (fbRes.ok) sentToCustomerChat = true;
+      } catch {}
+    }
+
+    // 2. If customer has Telegram User ID
+    const botToken = (miniAppDb.config.telegramBotToken || settings.telegram_token || '').trim();
+    if (botToken && telegramUserId) {
+      const tgMsg = [
+        `💬 <b>បងកំពុងសាកសួរអំពីម៉ូតកូដ [${cleanCode}] — ${cleanName} ($${Number(price || 0).toFixed(2)})</b>`,
+        `✍️ សូមបងវាយសំណួររបស់បងនៅក្នុងឆាតនេះ ម្ចាស់ហាងនឹងឆ្លើយតបជូនបងភ្លាមៗ! 🙏✨`
+      ].join('\n');
+      try {
+        await sendTelegramMessage(botToken, String(telegramUserId), tgMsg);
+        sentToCustomerChat = true;
+      } catch {}
+    }
+
+    // 3. Notify Shop Admin Group on Telegram
+    const targetChatId = (miniAppDb.config.telegramNotifyChatId || settings.telegram_chat_id || '').trim();
+    if (botToken && targetChatId) {
+      const channelBadge = fbPsid ? '📘 Facebook Page' : '✈️ Telegram';
+      const handleStr = telegramUsername ? `(@${telegramUsername})` : '';
+      const alertMsg = [
+        `💬 <b>ភ្ញៀវចុចសួរពីម៉ូតខោអាវ! (${channelBadge})</b>`,
+        `👤 អតិថិជន៖ <b>${custLabel}</b> ${handleStr}`,
+        `👗 ម៉ូតដែលសួរ៖ <b>[${cleanCode}] ${cleanName}</b> ($${Number(price || 0).toFixed(2)})`
+      ].join('\n');
+      sendTelegramMessage(botToken, targetChatId, alertMsg).catch(() => {});
+    }
+
+    return res.json({ success: true, sentToCustomerChat });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Error sending inquiry' });
+  }
+});
+
 export default router;
+

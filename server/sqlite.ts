@@ -1,14 +1,14 @@
 import fs from 'fs';
 import path from 'path';
-import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
-import {
+import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
+import type {
   Invoice,
   Product,
   Customer,
   PackerLog,
   AppSettings,
   FacebookPage
-} from './types';
+} from './types.ts';
 
 const SQLITE_DB_PATH = path.join(process.cwd(), 'server', 'pos.db');
 

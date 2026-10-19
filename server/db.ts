@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import {
+import type {
   Product,
   Invoice,
   OrderItem,
@@ -9,10 +9,10 @@ import {
   PackerLog,
   AppSettings,
   FacebookPage
-} from './types';
-import { persistToSqlite, loadFromSqlite } from './sqlite';
-import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment, isQuestionOrLiveChatter } from './locationHelper';
-import { extractPhoneNumber, extractCodeQtyPairsFromComment, extractSizeAndColorNotes } from '../src/utils/commentParser';
+} from './types.ts';
+import { persistToSqlite, loadFromSqlite } from './sqlite.ts';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment, isQuestionOrLiveChatter } from './locationHelper.ts';
+import { extractPhoneNumber, extractCodeQtyPairsFromComment, extractSizeAndColorNotes } from '../src/utils/commentParser.ts';
 
 let dataRevision = 1;
 let saveTimer: NodeJS.Timeout | null = null;

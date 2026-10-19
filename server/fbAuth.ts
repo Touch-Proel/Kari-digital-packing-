@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import {
   activeFacebookPage,
   setActiveFacebookPage,
@@ -12,8 +12,8 @@ import {
   facebookUserAccessToken,
   getFacebookUserAccessToken,
   setFacebookUserAccessToken
-} from './db';
-import { FacebookPage, FacebookPost } from './types';
+} from './db.ts';
+import type { FacebookPage, FacebookPost } from './types.ts';
 
 export const DEFAULT_APP_ID = process.env.FB_APP_ID || '1240481003109421';
 export const DEFAULT_APP_SECRET = process.env.FB_APP_SECRET || '482483f6d5890d34442ef6558b1cf8d2';

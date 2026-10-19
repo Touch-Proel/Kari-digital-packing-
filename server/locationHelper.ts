@@ -1,4 +1,4 @@
-import { DeliveryZone } from './types';
+import type { DeliveryZone } from './types.ts';
 
 export interface DeliveryZoneResult {
   zone: DeliveryZone;

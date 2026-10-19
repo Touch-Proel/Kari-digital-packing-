@@ -1,11 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db';
-import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, ExtractedSlipData } from './fastCheckRoutes';
-import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode, addMediaToBuffer, recentTelegramMediaBuffer } from './telegramSync';
-import { broadcastSSE } from './packingRoutes';
-import { getMiniAppConfig } from './miniAppRoutes';
-import { Invoice, Product } from './types';
+import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
+import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, type ExtractedSlipData } from './fastCheckRoutes.ts';
+import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode, addMediaToBuffer, recentTelegramMediaBuffer } from './telegramSync.ts';
+import { broadcastSSE } from './packingRoutes.ts';
+import { getMiniAppConfig } from './miniAppRoutes.ts';
+import type { Invoice, Product } from './types.ts';
 
 // State tracker for Telegram Bot Service
 let botRunning = false;

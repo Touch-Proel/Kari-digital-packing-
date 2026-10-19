@@ -8,10 +8,10 @@ import {
   saveDatabaseToDisk,
   activeLiveId,
   settings
-} from './db';
-import { sendFacebookReply } from './fbAuth';
-import { DeliveryZone, Invoice, OrderItem, CustomerComment } from './types';
-import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment, isQuestionOrLiveChatter } from './locationHelper';
+} from './db.ts';
+import { sendFacebookReply } from './fbAuth.ts';
+import type { DeliveryZone, Invoice, OrderItem, CustomerComment } from './types.ts';
+import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment, isQuestionOrLiveChatter } from './locationHelper.ts';
 import {
   CLOTHING_SIZES,
   CLOTHING_SIZES_SET,
@@ -27,8 +27,8 @@ import {
   extractSizeAndColorNotes,
   normalizeKhmerText,
   extractCodeQtyPairsFromComment,
-  ExtractedItemPair
-} from '../src/utils/commentParser';
+  type ExtractedItemPair
+} from '../src/utils/commentParser.ts';
 
 export {
   detectDeliveryZone,

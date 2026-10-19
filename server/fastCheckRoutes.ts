@@ -1,12 +1,12 @@
-import { Router, Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db';
-import { Invoice } from './types';
-import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine';
-import { computeImageHash, getCachedOcr, setCachedOcr, isProcessed, markProcessed, markMultipleProcessed } from './ocrCache';
-import { broadcastSSE } from './packingRoutes';
+import { GoogleGenAI, type GenerateContentResponse } from '@google/genai';
+import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, type AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db.ts';
+import type { Invoice } from './types.ts';
+import { sendFacebookMessengerReply, addChatbotLog } from './chatbotEngine.ts';
+import { computeImageHash, getCachedOcr, setCachedOcr, isProcessed, markProcessed, markMultipleProcessed } from './ocrCache.ts';
+import { broadcastSSE } from './packingRoutes.ts';
 
 const router = Router();
 

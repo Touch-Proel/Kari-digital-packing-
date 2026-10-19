@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import {
   getChatbotConfig,
   saveChatbotConfigToDisk,
@@ -11,8 +11,8 @@ import {
   processCustomerFaq,
   sendFacebookMessengerReply,
   resolveCustomerFacebookName
-} from './chatbotEngine';
-import { activeFacebookPage } from './db';
+} from './chatbotEngine.ts';
+import { activeFacebookPage } from './db.ts';
 
 const router = Router();
 

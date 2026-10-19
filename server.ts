@@ -1,17 +1,17 @@
 // Set timezone to Cambodia (Asia/Phnom_Penh - UTC+7) for the entire server
 process.env.TZ = 'Asia/Phnom_Penh';
 
-import express, { Request, Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
-import packingRoutes from './server/packingRoutes';
-import fastCheckRoutes from './server/fastCheckRoutes';
-import chatbotRoutes from './server/chatbotRoutes';
-import miniAppRoutes from './server/miniAppRoutes';
-import { initChatbotStore } from './server/chatbotEngine';
+import packingRoutes from './server/packingRoutes.ts';
+import fastCheckRoutes from './server/fastCheckRoutes.ts';
+import chatbotRoutes from './server/chatbotRoutes.ts';
+import miniAppRoutes from './server/miniAppRoutes.ts';
+import { initChatbotStore } from './server/chatbotEngine.ts';
 import {
   getFacebookOAuthUrl,
   handleOAuthCallback,
@@ -21,7 +21,7 @@ import {
   fetchPageVideosAndPosts,
   fetchFacebookComments,
   fetchAllManagedFacebookPages
-} from './server/fbAuth';
+} from './server/fbAuth.ts';
 import {
   activeFacebookPage,
   setActiveFacebookPage,
@@ -36,15 +36,15 @@ import {
   getConnectedFacebookPages,
   getFacebookUserAccessToken,
   setFacebookUserAccessToken
-} from './server/db';
-import { parseAndAllocateComment } from './server/parser';
-import { startLiveCommentsAutoSync } from './server/liveSync';
-import { initTelegramBotService } from './server/telegramBotService';
+} from './server/db.ts';
+import { parseAndAllocateComment } from './server/parser.ts';
+import { startLiveCommentsAutoSync } from './server/liveSync.ts';
+import { initTelegramBotService } from './server/telegramBotService.ts';
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Enable trust proxy for Nginx / Cloudflare reverse proxies (crucial for https://chatbotkh.com)
 app.set('trust proxy', true);
