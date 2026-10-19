@@ -33,6 +33,9 @@ export interface MiniAppConfig {
   khqrImageUrl: string;
   telegramNotifyChatId?: string;
   adminPin?: string;
+  miniAppUrl?: string;
+  menuButtonText?: string;
+  botUsername?: string;
 }
 
 export interface CartItem {
@@ -200,6 +203,9 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     { id: 'v-1', color: 'ស', size: 'Size M', stock: 1 }
   ]);
   const [isUploadingProductImg, setIsUploadingProductImg] = useState<boolean>(false);
+  const [botTokenInput, setBotTokenInput] = useState<string>('');
+  const [isSettingUpBot, setIsSettingUpBot] = useState<boolean>(false);
+  const [isSendingShopCard, setIsSendingShopCard] = useState<boolean>(false);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToast({ text, type });
@@ -669,7 +675,58 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     }
   };
 
-  const miniAppPublicUrl = typeof window !== 'undefined' ? `${window.location.origin}/miniapp` : '';
+  const miniAppPublicUrl =
+    typeof window !== 'undefined' && window.location.origin.startsWith('https://')
+      ? `${window.location.origin}/miniapp`
+      : 'https://chatbotkh.com/miniapp';
+
+  const handleSetupTelegramBot = async () => {
+    setIsSettingUpBot(true);
+    try {
+      const targetUrl = (config.miniAppUrl || miniAppPublicUrl).trim();
+      const res = await fetch('/api/miniapp/admin/setup-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          botToken: botTokenInput.trim() || undefined,
+          miniAppUrl: targetUrl,
+          menuButtonText: config.menuButtonText || '🛍️ ទិញទំនិញ'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConfig(data.config);
+        showToast(`ភ្ជាប់ជោគជ័យជាមួយ @${data.botUsername}! ភ្ញៀវអាចចុចប៊ូតុងហាងក្នុង Bot បានភ្លាមៗ!`);
+      } else {
+        showToast(data.error || 'មិនអាចភ្ជាប់ទៅ Telegram Bot បានទេ', 'error');
+      }
+    } catch {
+      showToast('មានបញ្ហាក្នុងការភ្ជាប់ទៅ Telegram Bot', 'error');
+    } finally {
+      setIsSettingUpBot(false);
+    }
+  };
+
+  const handleSendShopCardToGroup = async () => {
+    setIsSendingShopCard(true);
+    try {
+      const res = await fetch('/api/miniapp/admin/send-shop-card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('បានផ្ញើប៊ូតុងហាងទំនិញចូល Telegram រួចរាល់!');
+      } else {
+        showToast(data.error || 'មិនអាចផ្ញើសារចូល Telegram បានទេ', 'error');
+      }
+    } catch {
+      showToast('មានបញ្ហាក្នុងការផ្ញើសារទៅ Telegram', 'error');
+    } finally {
+      setIsSendingShopCard(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] flex justify-center antialiased selection:bg-[#DB1D43] selection:text-white">
@@ -1868,32 +1925,123 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                   {/* TAB 3: STORE SETTINGS & TELEGRAM BOT LINK */}
                   {adminTab === 'settings' && (
                     <form onSubmit={handleSaveConfig} className="space-y-4">
-                      {/* Copy Link for Telegram BotFather */}
-                      <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 space-y-2">
-                        <div className="font-extrabold text-xs text-blue-950">
-                          🔗 Link សម្រាប់ដាក់ក្នុង Telegram Mini App (@BotFather)៖
+                      {/* 1-Click Automatic Telegram Bot Menu Button & WebApp Setup */}
+                      <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-extrabold text-xs text-blue-950 flex items-center gap-1.5">
+                            <span>🤖</span>
+                            <span>ភ្ជាប់ Mini App ទៅ Telegram Bot ស្វ័យប្រវត្តិ (1-Click Setup)</span>
+                          </div>
+                          {config.botUsername && (
+                            <a
+                              href={`https://t.me/${config.botUsername}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-[11px] border border-emerald-300"
+                            >
+                              ✅ @{config.botUsername}
+                            </a>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            readOnly
-                            value={miniAppPublicUrl}
-                            className="flex-1 px-3 py-2 rounded-xl bg-white border border-blue-300 text-xs font-mono text-slate-800"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(miniAppPublicUrl);
-                              showToast('បានចម្លង Link សម្រាប់ Telegram Mini App!');
-                            }}
-                            className="px-3.5 py-2 rounded-xl bg-blue-600 text-white font-extrabold text-xs shrink-0 cursor-pointer"
-                          >
-                            ចម្លង Link
-                          </button>
+
+                        <div className="space-y-2">
+                          <div>
+                            <label className="block text-[11px] font-bold text-blue-900 mb-1">
+                              1. Link ហាង Mini App (ត្រូវតែជា https:// ឧ. https://chatbotkh.com/miniapp)
+                            </label>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={config.miniAppUrl || miniAppPublicUrl}
+                                onChange={e => setConfig({ ...config, miniAppUrl: e.target.value })}
+                                placeholder="https://chatbotkh.com/miniapp"
+                                className="flex-1 px-3 py-2 rounded-xl bg-white border border-blue-300 text-xs font-mono text-slate-800"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(config.miniAppUrl || miniAppPublicUrl);
+                                  showToast('បានចម្លង Link ហាង Mini App!');
+                                }}
+                                className="px-3 py-2 rounded-xl bg-slate-800 text-white font-extrabold text-xs shrink-0 cursor-pointer"
+                              >
+                                ចម្លង
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-blue-900 mb-1">
+                                2. ឈ្មោះប៊ូតុង Menu ក្នុង Telegram
+                              </label>
+                              <input
+                                type="text"
+                                value={config.menuButtonText || '🛍️ ទិញទំនិញ'}
+                                onChange={e => setConfig({ ...config, menuButtonText: e.target.value })}
+                                placeholder="🛍️ ទិញទំនិញ"
+                                className="w-full px-3 py-2 rounded-xl bg-white border border-blue-300 text-xs font-bold text-slate-800"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-blue-900 mb-1">
+                                3. Bot Token (ទុកទទេបើដាក់ក្នុង POS រួចហើយ)
+                              </label>
+                              <input
+                                type="password"
+                                value={botTokenInput}
+                                onChange={e => setBotTokenInput(e.target.value)}
+                                placeholder="ប្រើ Bot Token ក្នុងប្រព័ន្ធ POS ស្រាប់..."
+                                className="w-full px-3 py-2 rounded-xl bg-white border border-blue-300 text-xs font-mono text-slate-800"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                            <button
+                              type="button"
+                              disabled={isSettingUpBot}
+                              onClick={handleSetupTelegramBot}
+                              className="flex-1 py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-sm cursor-pointer"
+                            >
+                              {isSettingUpBot
+                                ? '⏳ កំពុងភ្ជាប់ទៅ Telegram Bot...'
+                                : '🚀 ភ្ជាប់ប៊ូតុងហាងទៅ Telegram Bot ឥឡូវនេះ (1-Click)'}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isSendingShopCard}
+                              onClick={handleSendShopCardToGroup}
+                              className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-extrabold text-xs shadow-sm cursor-pointer"
+                            >
+                              {isSendingShopCard ? '⏳ កំពុងផ្ញើ...' : '📢 ផ្ញើប៊ូតុងហាងចូល Group'}
+                            </button>
+                          </div>
+
+                          {config.botUsername && (
+                            <div className="p-2.5 rounded-xl bg-white/90 border border-blue-200 flex items-center justify-between gap-2">
+                              <div className="text-[11px] text-slate-700 truncate">
+                                🔗 Link ផ្ញើឱ្យភ្ញៀវចុចបើក Bot៖{' '}
+                                <b className="text-blue-700 font-mono">https://t.me/{config.botUsername}?start=shop</b>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`https://t.me/${config.botUsername}?start=shop`);
+                                  showToast('បានចម្លង Link សម្រាប់ផ្ញើឱ្យភ្ញៀវ!');
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-blue-100 text-blue-800 font-bold text-[11px] shrink-0 cursor-pointer"
+                              >
+                                ចម្លង Link ភ្ញៀវ
+                              </button>
+                            </div>
+                          )}
+
+                          <p className="text-[11px] text-blue-900 leading-relaxed">
+                            💡 គ្រាន់តែចុចប៊ូតុង <b>«🚀 ភ្ជាប់ប៊ូតុងហាងទៅ Telegram Bot ឥឡូវនេះ»</b> ប្រព័ន្ធនឹងបង្កើតប៊ូតុងពណ៌ខៀវ <b>«🛍️ ទិញទំនិញ»</b> នៅជ្រុងខាងក្រោមនៃ Telegram Bot របស់អ្នកដោយស្វ័យប្រវត្តិ និងឆ្លើយតបប៊ូតុងហាងភ្លាមៗរាល់ពេលភ្ញៀវចុច <b>START</b> ឬវាយ <b>/shop</b>!
+                          </p>
                         </div>
-                        <p className="text-[11px] text-blue-800">
-                          យក Link ខាងលើទៅដាក់ក្នុង Telegram Menu Button ឬផ្ញើឱ្យភ្ញៀវចុចបើកទិញខោអាវបានភ្លាមៗ!
-                        </p>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white p-4 rounded-2xl border border-slate-200">

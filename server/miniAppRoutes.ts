@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { settings } from './db';
+import { settings, saveDatabaseToDisk } from './db';
 import { sendTelegramMessage } from './telegramBotService';
 
 const router = Router();
@@ -78,6 +78,9 @@ export interface MiniAppConfig {
   khqrImageUrl: string;
   telegramNotifyChatId: string;
   adminPin: string;
+  miniAppUrl?: string;
+  menuButtonText?: string;
+  botUsername?: string;
 }
 
 interface MiniAppDatabase {
@@ -236,7 +239,10 @@ function getDefaultDatabase(): MiniAppDatabase {
       khqrAccountInfo: 'ABA / KHQR (ដុល្លារ USD)',
       khqrImageUrl: '',
       telegramNotifyChatId: '',
-      adminPin: '1688'
+      adminPin: '1688',
+      miniAppUrl: 'https://chatbotkh.com/miniapp',
+      menuButtonText: '🛍️ ទិញទំនិញ',
+      botUsername: ''
     },
     products: [
       {
@@ -332,6 +338,10 @@ function loadMiniAppDb(): MiniAppDatabase {
 }
 
 miniAppDb = loadMiniAppDb();
+
+export function getMiniAppConfig(): MiniAppConfig {
+  return miniAppDb.config;
+}
 
 // ---------------------------------------------------------------------------
 // 1. PUBLIC CATALOG ENDPOINT (Ultra-fast 0ms in-memory response)
@@ -573,10 +583,151 @@ router.put('/admin/config', (req: Request, res: Response) => {
     khqrAccountInfo: incoming.khqrAccountInfo ?? miniAppDb.config.khqrAccountInfo,
     khqrImageUrl: incoming.khqrImageUrl ?? miniAppDb.config.khqrImageUrl,
     telegramNotifyChatId: incoming.telegramNotifyChatId ?? miniAppDb.config.telegramNotifyChatId,
-    adminPin: incoming.adminPin ? String(incoming.adminPin).trim() : miniAppDb.config.adminPin
+    adminPin: incoming.adminPin ? String(incoming.adminPin).trim() : miniAppDb.config.adminPin,
+    miniAppUrl: incoming.miniAppUrl ? String(incoming.miniAppUrl).trim() : miniAppDb.config.miniAppUrl,
+    menuButtonText: incoming.menuButtonText ? String(incoming.menuButtonText).trim() : miniAppDb.config.menuButtonText,
+    botUsername: incoming.botUsername ?? miniAppDb.config.botUsername
   };
   saveMiniAppDb();
   res.json({ success: true, config: miniAppDb.config });
+});
+
+router.post('/admin/setup-bot', async (req: Request, res: Response) => {
+  try {
+    const { botToken, miniAppUrl, menuButtonText } = req.body || {};
+    const activeToken = String(botToken || settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+    if (!activeToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'សូមបញ្ចូល Telegram Bot Token ជាមុនសិន (យកពី @BotFather)'
+      });
+    }
+
+    const cleanUrl = String(miniAppUrl || miniAppDb.config.miniAppUrl || 'https://chatbotkh.com/miniapp').trim();
+    if (!cleanUrl.startsWith('https://')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Link សម្រាប់ Telegram Mini App ត្រូវតែផ្តើមដោយ https:// (ឧ. https://chatbotkh.com/miniapp)'
+      });
+    }
+
+    const cleanBtnText = String(menuButtonText || miniAppDb.config.menuButtonText || '🛍️ ទិញទំនិញ').trim().slice(0, 32);
+
+    // 1. Verify Bot Token via getMe
+    const meRes = await fetch(`https://api.telegram.org/bot${activeToken}/getMe`);
+    const meData = await meRes.json();
+    if (!meData.ok || !meData.result?.username) {
+      return res.status(400).json({
+        success: false,
+        error: `Bot Token មិនត្រឹមត្រូវទេ៖ ${meData.description || 'Invalid token'}`
+      });
+    }
+
+    const botUsername = meData.result.username;
+
+    // Save token to global POS settings if provided
+    if (botToken && String(botToken).trim() !== settings.telegram_token) {
+      settings.telegram_token = activeToken;
+      saveDatabaseToDisk();
+    }
+
+    // 2. Set Telegram Chat Menu Button (WebApp button next to customer message bar)
+    const menuRes = await fetch(`https://api.telegram.org/bot${activeToken}/setChatMenuButton`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        menu_button: {
+          type: 'web_app',
+          text: cleanBtnText,
+          web_app: { url: cleanUrl }
+        }
+      })
+    });
+    const menuData = await menuRes.json();
+    if (!menuData.ok) {
+      return res.status(400).json({
+        success: false,
+        error: `មិនអាចដាក់ Menu Button បានទេ៖ ${menuData.description || 'Telegram API error'}`
+      });
+    }
+
+    // 3. Register /shop and /start commands on the bot
+    await fetch(`https://api.telegram.org/bot${activeToken}/setMyCommands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        commands: [
+          { command: 'shop', description: '🛍️ បើកហាងទិញខោអាវ (Open Mini App Shop)' },
+          { command: 'start', description: '🏠 ចាប់ផ្ដើម និងបើកហាងទំនិញ' }
+        ]
+      })
+    }).catch(() => null);
+
+    miniAppDb.config.miniAppUrl = cleanUrl;
+    miniAppDb.config.menuButtonText = cleanBtnText;
+    miniAppDb.config.botUsername = botUsername;
+    saveMiniAppDb();
+
+    return res.json({
+      success: true,
+      botUsername,
+      miniAppUrl: cleanUrl,
+      menuButtonText: cleanBtnText,
+      botLink: `https://t.me/${botUsername}`,
+      config: miniAppDb.config
+    });
+  } catch (err: any) {
+    console.error('[MiniApp Setup Bot Error]:', err);
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'មានបញ្ហាក្នុងការភ្ជាប់ទៅ Telegram Bot'
+    });
+  }
+});
+
+router.post('/admin/send-shop-card', async (req: Request, res: Response) => {
+  try {
+    const activeToken = String(settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
+    const targetChatId = String(req.body?.chatId || miniAppDb.config.telegramNotifyChatId || settings.telegram_chat_id || '').trim();
+    if (!activeToken || !targetChatId) {
+      return res.status(400).json({
+        success: false,
+        error: 'សូមភ្ជាប់ Telegram Bot Token និង Group Chat ID ជាមុនសិន'
+      });
+    }
+
+    const cleanUrl = String(miniAppDb.config.miniAppUrl || 'https://chatbotkh.com/miniapp').trim();
+    const botUsername = miniAppDb.config.botUsername;
+    const isGroupChat = targetChatId.startsWith('-');
+
+    // Note: Telegram inline web_app buttons work directly in private chats; in groups, link to bot ?start=shop or direct URL
+    const buttonMarkup = isGroupChat && botUsername
+      ? {
+          inline_keyboard: [
+            [{ text: `🛍️ ចុចទីនេះដើម្បីបើកហាង (${miniAppDb.config.storeName})`, url: `https://t.me/${botUsername}?start=shop` }],
+            [{ text: '🌐 បើកមើលម៉ូតខោអាវផ្ទាល់', url: cleanUrl }]
+          ]
+        }
+      : {
+          inline_keyboard: [
+            [{ text: `🛍️ បើកហាងទិញទំនិញ (${miniAppDb.config.storeName})`, web_app: { url: cleanUrl } }]
+          ]
+        };
+
+    const captionText = [
+      `🛍️ <b>${miniAppDb.config.storeName}</b>`,
+      `${miniAppDb.config.storeSubtitle}`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `🔥 ${miniAppDb.config.promoBannerText}`,
+      `✅ មើលរូបភាពម៉ូតខោអាវច្បាស់ៗ រើសពណ៌ រើសទំហំ (Size S, M, L, XL) និងកម្ម៉ង់ទិញដោយខ្លួនឯងបានភ្លាមៗ!`,
+      `👇 <b>សូមចុចប៊ូតុងខាងក្រោមដើម្បីបើកហាងទិញទំនិញ៖</b>`
+    ].join('\n');
+
+    await sendTelegramMessage(activeToken, targetChatId, captionText, undefined, undefined, buttonMarkup);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'បរាជ័យក្នុងការផ្ញើសារទៅ Telegram' });
+  }
 });
 
 router.post('/admin/products', (req: Request, res: Response) => {

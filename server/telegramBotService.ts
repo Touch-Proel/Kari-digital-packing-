@@ -4,6 +4,7 @@ import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDat
 import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, ExtractedSlipData } from './fastCheckRoutes';
 import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode, addMediaToBuffer, recentTelegramMediaBuffer } from './telegramSync';
 import { broadcastSSE } from './packingRoutes';
+import { getMiniAppConfig } from './miniAppRoutes';
 import { Invoice, Product } from './types';
 
 // State tracker for Telegram Bot Service
@@ -26,7 +27,8 @@ export async function sendTelegramMessage(
   chatId: number | string,
   text: string,
   replyToMessageId?: number,
-  messageThreadId?: number
+  messageThreadId?: number,
+  replyMarkup?: any
 ) {
   try {
     const payload: any = {
@@ -39,6 +41,9 @@ export async function sendTelegramMessage(
     }
     if (messageThreadId) {
       payload.message_thread_id = messageThreadId;
+    }
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup;
     }
 
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -262,32 +267,86 @@ async function handleIncomingSlipPhoto(token: string, chatId: number | string, m
 }
 
 
-async function handleIncomingTextCommand(token: string, chatId: number | string, messageId: number, text: string) {
+async function handleIncomingTextCommand(
+  token: string,
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  chatType?: string
+) {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
+  const miniAppCfg = getMiniAppConfig();
+  const miniAppUrl = (miniAppCfg?.miniAppUrl || 'https://chatbotkh.com/miniapp').trim();
+  const storeName = miniAppCfg?.storeName || 'ហាងខោអាវ Kari Arnett';
+  const storeSubtitle = miniAppCfg?.storeSubtitle || '⚡ ប្រមូលផ្តុំម៉ូតស្អាតៗសល់ពីឡាយ (សល់ 1-3 ឈុត)';
+  const promoText = miniAppCfg?.promoBannerText || '🔥 ម៉ូតសល់តិចពីឡាយ កម្ម៉ង់មុនបានមុន!';
+  const isPrivateChat = chatType === 'private' || !String(chatId).startsWith('-');
 
-  // 1. /start or /help
-  if (lower === '/start' || lower === '/help' || lower === 'help' || lower === 'ជំនួយ') {
+  // 0. /shop or /miniapp or /start in private chat (Customer Mini App Launcher)
+  if (
+    lower === '/shop' ||
+    lower.startsWith('/shop@') ||
+    lower === '/miniapp' ||
+    lower.startsWith('/miniapp@') ||
+    lower.startsWith('/start shop') ||
+    (isPrivateChat && (lower === '/start' || lower.startsWith('/start ') || lower === 'shop' || lower === 'ទិញ' || lower === 'ហាង' || lower === 'កម្ម៉ង់'))
+  ) {
+    const shopWelcomeMsg = [
+      `🛍️ <b>សូមស្វាគមន៍មកកាន់ ${storeName}!</b>`,
+      `${storeSubtitle}`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `${promoText}`,
+      ``,
+      `✅ មើលរូបភាពម៉ូតខោអាវច្បាស់ៗ និងចំនួនស្តុកជាក់ស្ដែង`,
+      `✅ រើសពណ៌ រើសទំហំ (Size S, M, L, XL, Free Size)`,
+      `✅ គិតលុយតាម KHQR ឬបង់ពេលអីវ៉ាន់ទៅដល់ (COD)`,
+      ``,
+      `👇 <b>សូមចុចប៊ូតុងខាងក្រោមដើម្បីបើកហាងទិញទំនិញ៖</b>`
+    ].join('\n');
+
+    const replyMarkup = isPrivateChat
+      ? {
+          inline_keyboard: [
+            [
+              {
+                text: `🛍️ ចុចទីនេះដើម្បីបើកហាង (${storeName})`,
+                web_app: { url: miniAppUrl }
+              }
+            ]
+          ]
+        }
+      : {
+          inline_keyboard: [
+            [
+              {
+                text: `🛍️ បើកហាងទិញទំនិញ (${storeName})`,
+                url: miniAppCfg?.botUsername ? `https://t.me/${miniAppCfg.botUsername}?start=shop` : miniAppUrl
+              }
+            ]
+          ]
+        };
+
+    await sendTelegramMessage(token, chatId, shopWelcomeMsg, messageId, undefined, replyMarkup);
+    return;
+  }
+
+  // 1. /start (in group) or /help
+  if (lower === '/start' || lower.startsWith('/start@') || lower === '/help' || lower.startsWith('/help@') || lower === 'help' || lower === 'ជំនួយ') {
     const helpMsg = `🤖 <b>សួស្តី! ខ្ញុំជាជំនួយការ Telegram Stock &amp; Live POS</b>
 ━━━━━━━━━━━━━━━━━━
+🛍️ <b>បើកហាងទិញទំនិញ (Telegram Mini App) ៖</b>
+• វាយ <code>/shop</code> ដើម្បីបើកប៊ូតុងហាងទិញខោអាវអនឡាញ
+
 ✨ <b>មុខងារទាញស្តុកទំនិញស្វ័យប្រវត្តិ (Stock Auto-Sync) ៖</b>
 👉 <b>ផ្ញើរូបភាពទំនិញ ជាមួយកូដ និងតម្លៃ</b> (ឧ. <code>A01 5$</code> ឬ <code>B02 12$</code>) ប្រព័ន្ធនឹងបញ្ចូលទំនិញ រូបភាព និងតម្លៃទៅក្នុងស្តុក POS ភ្លាមៗដោយស្វ័យប្រវត្តិ!
 
 💬 <b>បញ្ជាពិនិត្យ និងគ្រប់គ្រងតាម Chat ៖</b>
 • <code>/stock &lt;កូដទំនិញ&gt;</code> ៖ ស្វែងរកស្តុក និងតម្លៃទំនិញ (ឧ. <code>/stock A01</code>)
 • <code>/check &lt;លេខកន្ត្រក ឬ ឈ្មោះ&gt;</code> ៖ មើលព័ត៌មានកន្ត្រក និងមុខទំនិញ (ឧ. <code>/check 1511</code>)
-
-• <code>/paid &lt;លេខកន្ត្រក&gt;</code> ៖ Tick បង់រួចលើកន្ត្រកភ្លាមៗ
-  <i>(ឧ. <code>/paid 1511</code>)</i>
-
-• <code>/unpaid &lt;លេខកន្ត្រក&gt;</code> ៖ ដោះចេញពីស្ថានភាពបង់រួច
-  <i>(ឧ. <code>/unpaid 1511</code>)</i>
-
-• <code>/today</code> ឬ <code>/summary</code> ៖ មើលរបាយការណ៍សរុបប្រចាំថ្ងៃ (ចំណូល, កន្ត្រក, វេចខ្ចប់)
-
-• <code>/stock &lt;កូដទំនិញ&gt;</code> ៖ ស្វែងរកស្តុក និងតម្លៃទំនិញ
-  <i>(ឧ. <code>/stock A12</code>)</i>
-
+• <code>/paid &lt;លេខកន្ត្រក&gt;</code> ៖ Tick បង់រួចលើកន្ត្រកភ្លាមៗ (ឧ. <code>/paid 1511</code>)
+• <code>/unpaid &lt;លេខកន្ត្រក&gt;</code> ៖ ដោះចេញពីស្ថានភាពបង់រួច (ឧ. <code>/unpaid 1511</code>)
+• <code>/today</code> ឬ <code>/summary</code> ៖ មើលរបាយការណ៍សរុបប្រចាំថ្ងៃ
 • <code>/live</code> ៖ មើលវគ្គ Live បច្ចុប្បន្នដែលកំពុងដំណើរការ`;
 
     await sendTelegramMessage(token, chatId, helpMsg, messageId);
@@ -612,13 +671,21 @@ async function startPollingLoop() {
           // Case B: Text Message (Command or Stock Item Codes)
           if (typeof msg.text === 'string' && msg.text.trim()) {
             const trimmed = msg.text.trim();
+            const chatType = msg.chat?.type;
 
             if (trimmed.startsWith('/')) {
-              // Bot Command (/check, /paid, /stock, /today, etc.)
+              // Bot Command (/shop, /start, /check, /paid, /stock, /today, etc.)
               telegramQueue.add(async () => {
-                await handleIncomingTextCommand(token, chatId, messageId, trimmed);
+                await handleIncomingTextCommand(token, chatId, messageId, trimmed, chatType);
               });
             } else {
+              const lowerPlain = trimmed.toLowerCase();
+              if (chatType === 'private' && (lowerPlain === 'shop' || lowerPlain === 'ទិញ' || lowerPlain === 'ហាង' || lowerPlain === 'កម្ម៉ង់' || lowerPlain === 'start' || lowerPlain === 'សួស្តី' || lowerPlain === 'hi' || lowerPlain === 'hello')) {
+                telegramQueue.add(async () => {
+                  await handleIncomingTextCommand(token, chatId, messageId, '/shop', chatType);
+                });
+                continue;
+              }
               // Check if plain text contains stock item codes (e.g. A01 5$, B02 10$)
               const stockItems = parseLinesForStockItems(trimmed);
               if (stockItems.length > 0) {
