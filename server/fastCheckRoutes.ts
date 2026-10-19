@@ -1,9 +1,6 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import sharp from 'sharp';
-// @ts-ignore
-import jsQR from 'jsqr';
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 import { invoices, saveDatabaseToDisk, bumpDataRevision, settings, messengerSlips, AutoScannedMessengerSlip, activeFacebookPage, customers, rawComments, cleanupNonSlipMessengerEntries, deduplicateAndSanitizeMessengerSlips } from './db';
 import { Invoice } from './types';
@@ -786,79 +783,7 @@ export function matchInvoiceForSlip(
  * Cambodian bank slips (ABA, ACLEDA, Bakong, Wing) frequently contain KHQR codes.
  * This runs locally in ~5ms without needing external API credits!
  */
-export async function tryExtractSlipFromQR(imageBuffer: Buffer): Promise<ExtractedSlipData | null> {
-  try {
-    const { data, info } = await sharp(imageBuffer)
-      .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const code = jsQR(new Uint8ClampedArray(data), info.width, info.height);
-    if (!code || !code.data) return null;
-
-    const rawQr = String(code.data).trim();
-    let bankName = '';
-    let amount = 0;
-    let currency: 'USD' | 'KHR' = 'USD';
-    let transRef = '';
-    let basketNo: string | undefined = undefined;
-
-    if (rawQr.includes('abaa') || rawQr.includes('payway.com.kh') || rawQr.includes('aba')) {
-      bankName = 'ABA Bank';
-    } else if (rawQr.includes('aclb') || rawQr.includes('acleda')) {
-      bankName = 'ACLEDA Bank';
-    } else if (rawQr.includes('wing')) {
-      bankName = 'Wing Bank';
-    } else if (rawQr.includes('bakong')) {
-      bankName = 'Bakong';
-    } else if (rawQr.includes('cadi') || rawQr.includes('canadia')) {
-      bankName = 'Canadia Bank';
-    }
-
-    // Try parsing EMV KHQR tags if present (Tag 54 = amount, Tag 53 = 840/116)
-    const amtMatch = rawQr.match(/54(\d{2})([0-9.]+)/);
-    if (amtMatch && amtMatch[2]) {
-      const parsedAmt = parseFloat(amtMatch[2]);
-      if (!isNaN(parsedAmt) && parsedAmt > 0) {
-        amount = parsedAmt;
-      }
-    }
-
-    const currMatch = rawQr.match(/53(\d{2})(\d{3})/);
-    if (currMatch && currMatch[2]) {
-      if (currMatch[2] === '116') {
-        currency = 'KHR';
-      } else if (currMatch[2] === '840') {
-        currency = 'USD';
-      }
-    }
-
-    // Reference / Bill number in Tag 62 (Additional Data Field)
-    const refMatch = rawQr.match(/62(\d{2})(.*?)(?:63[0-9A-Fa-f]{4}|$)/);
-    if (refMatch && refMatch[2]) {
-      transRef = refMatch[2].substring(0, 32);
-      const bMatch = transRef.match(/(?:basket|b|order|#)?\s*(\d{2,5})/i);
-      if (bMatch) {
-        basketNo = bMatch[1];
-      }
-    }
-
-    if (amount > 0 || bankName) {
-      return {
-        customer_name: '',
-        paid_amount: currency === 'KHR' && amount > 500 ? Math.round((amount / 4100) * 100) / 100 : amount,
-        currency: 'USD',
-        bank_name: bankName || 'Bakong KHQR',
-        trans_ref: transRef || undefined,
-        basket_no: basketNo,
-        fraud_suspected: false,
-        fraud_reasons: []
-      };
-    }
-  } catch {
-    // Fail silently to normal flow
-  }
+export async function tryExtractSlipFromQR(_imageBuffer: Buffer): Promise<ExtractedSlipData | null> {
   return null;
 }
 
@@ -945,27 +870,17 @@ router.post('/scan_slips', async (req: Request, res: Response) => {
       const item = images[idx];
       const rawBase64 = item.data ? item.data.replace(/^data:image\/\w+;base64,/, '') : '';
       const mimeType = item.mimeType || 'image/jpeg';
-      const fileName = `slip_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}.webp`;
+      const fileName = `slip_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}.jpg`;
       const filePath = path.join(uploadsDir, fileName);
 
       let slipUrl = '';
       if (rawBase64) {
         try {
           const rawBuf = Buffer.from(rawBase64, 'base64');
-          let optBuf = rawBuf;
-          try {
-            optBuf = await sharp(rawBuf)
-              .rotate()
-              .resize({ width: 1400, fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 82, effort: 3 })
-              .toBuffer();
-          } catch {
-            optBuf = rawBuf;
-          }
-          await fs.promises.writeFile(filePath, optBuf);
+          await fs.promises.writeFile(filePath, rawBuf);
           slipUrl = `/uploads/${fileName}`;
           // ⚡ Yield event loop so concurrent requests from other users are never blocked
-          await new Promise(r => setTimeout(r, 20));
+          await new Promise(r => setTimeout(r, 10));
         } catch (err) {
           console.error('Failed to save slip image:', err);
         }

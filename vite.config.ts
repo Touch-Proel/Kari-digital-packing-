@@ -52,10 +52,16 @@ export default defineConfig(() => {
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
+          globIgnores: ['**/uploads/**', '**/server.cjs*', '**/*.map'],
           navigateFallbackDenylist: [/^\/api/, /^\/miniapp/, /^\/shop/, /^\/tg-shop/],
         },
       })
     ],
+    build: {
+      emptyOutDir: false,
+      copyPublicDir: false,
+      sourcemap: false,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

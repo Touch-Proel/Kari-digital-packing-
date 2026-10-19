@@ -132,9 +132,11 @@ export async function saveDatabaseToDisk(forceSync = false) {
   }, 600);
 }
 
-export function bumpDataRevision(): number {
+export function bumpDataRevision(persist = true): number {
   dataRevision += 1;
-  saveDatabaseToDisk(false);
+  if (persist) {
+    saveDatabaseToDisk(false);
+  }
   return dataRevision;
 }
 
@@ -624,7 +626,7 @@ export function recalculateInvoice(inv: Invoice) {
 // Auto-Sync Active (Non-Dispatched) Basket Items with Stock Catalog
 // Ensures that whenever stock prices/photos change, all active baskets reflect real prices immediately!
 // -------------------------------------------------------------
-export function syncAllActiveInvoicesWithStock(targetLiveId?: string): number {
+export function syncAllActiveInvoicesWithStock(targetLiveId?: string, persist = true): number {
   let updatedInvoicesCount = 0;
 
   for (const inv of invoices) {
@@ -669,8 +671,7 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string): number {
   }
 
   if (updatedInvoicesCount > 0) {
-    bumpDataRevision();
-    saveDatabaseToDisk();
+    bumpDataRevision(persist);
     console.log(`[Stock Sync] Successfully synced ${updatedInvoicesCount} active basket(s) with latest stock prices & photos.`);
   }
 
@@ -1031,8 +1032,19 @@ export function loadDatabaseFromDisk(): Promise<void> {
       }
     });
 
-    // Migrate all loaded invoices: normalize live_id, ensure shipping fee is strictly $2.00 flat, discounts removed
-    invoices.forEach(inv => {
+    // Immediately mark database as loaded and ready so HTTP requests are served with 0ms delay on restart
+    products.sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
+    isDatabaseLoaded = true;
+    bumpDataRevision(false);
+
+    // Migrate loaded invoices in non-blocking async chunks of 25 so the Node.js event loop never freezes on restart
+    for (let invIdx = 0; invIdx < invoices.length; invIdx++) {
+      if (invIdx > 0 && invIdx % 25 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      const inv = invoices[invIdx];
+      if (!inv) continue;
+
       if (inv.live_id && inv.live_id.includes('_') && !inv.live_id.startsWith('LIVE_')) {
         inv.live_id = inv.live_id.split('_').pop() || inv.live_id;
       }
@@ -1040,6 +1052,22 @@ export function loadDatabaseFromDisk(): Promise<void> {
       (inv as any).discount_amount = 0;
       if (!inv.shipping_fee || inv.shipping_fee <= 0 || inv.shipping_fee === 2.5) {
         inv.shipping_fee = 2.0;
+      }
+
+      // Populate / preserve payment_status
+      if (inv.status === 'Paid' || inv.paid_at || inv.paid_by) {
+        inv.payment_status = 'Paid';
+      } else if (inv.status === 'Dispatched' || inv.packing_stage === 'DISPATCHED') {
+        inv.payment_status = (inv.paid_at || inv.paid_by) ? 'Paid' : 'COD';
+      } else {
+        inv.payment_status = inv.payment_status || 'Unpaid';
+      }
+
+      // Skip heavy regex re-auditing for already completed/dispatched historical invoices
+      const isHistoricalCompleted = inv.status === 'Dispatched' || inv.packing_stage === 'DISPATCHED';
+      if (isHistoricalCompleted) {
+        recalculateInvoice(inv);
+        continue;
       }
 
       // Auto-heal missing phone number from comments
@@ -1084,7 +1112,6 @@ export function loadDatabaseFromDisk(): Promise<void> {
       }
 
       // Core Routing Rule: Accurate Phnom Penh detection, all remaining baskets are Province!
-      // "ex 200 កន្រ្តក់ ប្រពន្ធ័ ចាប់ភ្នំពេញបាន 50 ក្រៅពីនឹងដាក់ចូលខេត្ត 150"
       const zoneCheckTarget = (inv.address && !inv.address.includes('មិនទាន់មាន') && !isQuestionOrLiveChatter(inv.address)) ? inv.address : (inv.comments || []).join(' ');
       const zoneRes = detectDeliveryZone(zoneCheckTarget);
 
@@ -1104,7 +1131,7 @@ export function loadDatabaseFromDisk(): Promise<void> {
         }
       }
 
-      // Clean unclosed parenthesis if any (e.g. "បាត់ដំបង (BTB" or "ឈូក (កំពត")
+      // Clean unclosed parenthesis if any
       if (inv.address) {
         inv.address = inv.address.replace(/\s*\([A-Za-z0-9\s]*$/, '').trim();
         const openP = (inv.address.match(/\(/g) || []).length;
@@ -1124,185 +1151,156 @@ export function loadDatabaseFromDisk(): Promise<void> {
           }
         });
 
-        // Clean up erroneous waist size items (e.g. 34, 35, 36) and quantity-reextracted items in active baskets
-        if (inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED') {
-          const allCommentsText = ((inv.comments || []).join(' ') + ' ' + (inv.items || []).map(it => it.item_comment || '').join(' ')).replace(/[\u200B\u200C\u200D\uFEFF]/g, ' ');
-          inv.items = inv.items.filter(it => {
-            const cleanC = (it.product_code || '').toUpperCase().trim();
-            const isWaistNum = parseInt(cleanC, 10);
-            if (!isNaN(isWaistNum) && isWaistNum >= 24 && isWaistNum <= 46) {
-              const waistInCommentPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក|[-_\\/\\\\])\\s*${cleanC}\\b`, 'i');
-              const waistListPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក)\\s*[:=\\s\\-]?\\s*(?:(?:2[4-9]|3[0-9]|4[0-6])(?:\\s*[\\/+,.,និង\\-_]\\s*|\\s+))*${cleanC}\\b`, 'i');
-              if (waistInCommentPattern.test(allCommentsText) || waistListPattern.test(allCommentsText)) {
-                return false;
-              }
-              // If item's own comment starts with a different code (e.g. item code is 30, but comment is "87Size29, 30,31,32")
-              if (it.item_comment && /^[A-Za-z0-9]{2,5}\s*(?:size|សាយ|ចង្កេះ)/i.test(it.item_comment.trim())) {
-                const commentParentCode = it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase();
-                if (commentParentCode && commentParentCode !== cleanC) {
-                  return false;
-                }
-              }
-            }
-            // If this item code was accidentally extracted from the quantity of another item (e.g. [10] from "145យក10")
-            const isQtyNum = parseInt(cleanC, 10);
-            if (!isNaN(isQtyNum) && isQtyNum >= 1 && isQtyNum <= 20) {
-              const falseQtyFromAction = new RegExp(`[A-Za-z0-9]{2,5}\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|=)\\s*${cleanC}\\b`, 'i');
-              if (falseQtyFromAction.test(allCommentsText)) {
-                const parentItem = inv.items.find(other => other.quantity === isQtyNum && other.product_code !== it.product_code);
-                if (parentItem) {
-                  return false;
-                }
-              }
-            }
-
-            // If this item code was accidentally extracted from an address (e.g. [19] from "គំរោង19", "ផ្លូវទី2", "ផ្ទះលេខ...")
-            const cleanCommentForAddress = allCommentsText;
-            const addressMatch = new RegExp(`(?:គំរោង|គម្រោង|ផ្លូវ|ផ្ទះ|បន្ទប់|ជាន់ទី)\\s*(?:លេខ|ទី)?\\s*${cleanC}\\b`, 'i');
-            if (addressMatch.test(cleanCommentForAddress)) {
+        const allCommentsText = ((inv.comments || []).join(' ') + ' ' + (inv.items || []).map(it => it.item_comment || '').join(' ')).replace(/[\u200B\u200C\u200D\uFEFF]/g, ' ');
+        inv.items = inv.items.filter(it => {
+          const cleanC = (it.product_code || '').toUpperCase().trim();
+          const isWaistNum = parseInt(cleanC, 10);
+          if (!isNaN(isWaistNum) && isWaistNum >= 24 && isWaistNum <= 46) {
+            const waistInCommentPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក|[-_\\/\\\\])\\s*${cleanC}\\b`, 'i');
+            const waistListPattern = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|សាយ|size|ស្លឹក)\\s*[:=\\s\\-]?\\s*(?:(?:2[4-9]|3[0-9]|4[0-6])(?:\\s*[\\/+,.,និង\\-_]\\s*|\\s+))*${cleanC}\\b`, 'i');
+            if (waistInCommentPattern.test(allCommentsText) || waistListPattern.test(allCommentsText)) {
               return false;
             }
-
-            // If this item code was accidentally extracted from customer weight / kilo notes (e.g. [68] from "73=1គឺឡូ68" or "76=1 គីឡូ 75" or "157គីឡូ 65")
-            const kiloPattern = new RegExp(`(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|kg|kilo)\\s*[:=\\s\\-_/]?\\s*${cleanC}\\b`, 'i');
-            const kiloAfterPattern = new RegExp(`\\b${cleanC}\\s*(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គក)\\b`, 'i');
-            if (kiloPattern.test(allCommentsText) || kiloAfterPattern.test(allCommentsText)) {
-              const otherItemsWithThisWeight = inv.items.filter(other => other.product_code !== cleanC && (
-                (other.item_comment && (kiloPattern.test(other.item_comment) || kiloAfterPattern.test(other.item_comment)))
-              ));
-              const ownCommentParentCode = it.item_comment ? it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase() : null;
-
-              if (otherItemsWithThisWeight.length > 0 || (ownCommentParentCode && ownCommentParentCode !== cleanC)) {
+            if (it.item_comment && /^[A-Za-z0-9]{2,5}\s*(?:size|សាយ|ចង្កេះ)/i.test(it.item_comment.trim())) {
+              const commentParentCode = it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase();
+              if (commentParentCode && commentParentCode !== cleanC) {
                 return false;
               }
             }
-
-            // If this item code was accidentally extracted from customer chest/bust notes (e.g. [38] from "73 ទ្រូង 38")
-            const chestPattern = new RegExp(`(?:ដើមទ្រូង|ទ្រូង)\\s*[:=\\s\\-]?\\s*${cleanC}\\b`, 'i');
-            if (chestPattern.test(allCommentsText)) {
-              const otherItemsWithThisChest = inv.items.filter(other => other.product_code !== cleanC && (
-                (other.item_comment && chestPattern.test(other.item_comment))
-              ));
-              const ownCommentParentCode = it.item_comment ? it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase() : null;
-              if (otherItemsWithThisChest.length > 0 || (ownCommentParentCode && ownCommentParentCode !== cleanC)) {
+          }
+          const isQtyNum = parseInt(cleanC, 10);
+          if (!isNaN(isQtyNum) && isQtyNum >= 1 && isQtyNum <= 20) {
+            const falseQtyFromAction = new RegExp(`[A-Za-z0-9]{2,5}\\s*(?:យក|កាត់|ថែម|ដាក់|កក់|=)\\s*${cleanC}\\b`, 'i');
+            if (falseQtyFromAction.test(allCommentsText)) {
+              const parentItem = inv.items.find(other => other.quantity === isQtyNum && other.product_code !== it.product_code);
+              if (parentItem) {
                 return false;
-              }
-            }
-
-            return true;
-          });
-
-          // Ensure multi-size / multi-waist items have the full combined quantity
-          for (const it of inv.items) {
-            const rawComment = it.item_comment || '';
-            if (rawComment) {
-              const multiWaistRegex = new RegExp(`(?:(?<![A-Za-z0-9])${it.product_code}\\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)\\s*[:=\\s\\-]?\\s*((?:(?:2[4-9]|3[0-9]|4[0-6])\\s*(?:[:=xX]\\s*\\d{1,2})?(?:\\s*[\\/+,.,និង\\-_]\\s*|\\s+)?)+))`, 'i');
-              const m = rawComment.match(multiWaistRegex);
-              if (m && m[1]) {
-                const singleWaistRegex = /(2[4-9]|3[0-9]|4[0-6])(?:\s*[:=xX]\s*(\d{1,2}))?/gi;
-                let totalWaistQty = 0;
-                let wm: RegExpExecArray | null;
-                while ((wm = singleWaistRegex.exec(m[1])) !== null) {
-                  totalWaistQty += (wm[2] ? (parseInt(wm[2], 10) || 1) : 1);
-                }
-                if (totalWaistQty > it.quantity) {
-                  it.quantity = totalWaistQty;
-                }
               }
             }
           }
 
-          // Verify each item with item_comment against extractCodeQtyPairsFromComment
-          // to eliminate false extractions (e.g. "21នឹងមានច្រើនពណអត់", "10" from "28-10គ្រុបពណ", "2" from "ថែ45-2សាយ31")
-          // and sync accurate quantities (e.g. 28-10 -> qty 10) and notes!
-          inv.items = inv.items.filter(it => {
-            if (!it.item_comment) return true;
-            const cleanCode = (it.product_code || '').toUpperCase().trim();
-            const subComments = it.item_comment.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
-            const seenNorm = new Set<string>();
-            let matchedQty = 0;
-            let matchedAny = false;
-            for (const sc of subComments) {
-              const normKey = sc.replace(/0\d{8,9}|\*+/g, '').replace(/\s+/g, ' ').trim();
-              const pairs = extractCodeQtyPairsFromComment(sc, products, false);
-              const found = pairs.find(p => p.code.toUpperCase() === cleanCode || p.code.replace(/^0+/, '') === cleanCode.replace(/^0+/, ''));
-              if (found) {
-                matchedAny = true;
-                if (!seenNorm.has(normKey)) {
-                  seenNorm.add(normKey);
-                  matchedQty += found.qty;
-                }
-              }
-            }
-            if (!matchedAny) {
+          const addressMatch = new RegExp(`(?:គំរោង|គម្រោង|ផ្លូវ|ផ្ទះ|បន្ទប់|ជាន់ទី)\\s*(?:លេខ|ទី)?\\s*${cleanC}\\b`, 'i');
+          if (addressMatch.test(allCommentsText)) {
+            return false;
+          }
+
+          const kiloPattern = new RegExp(`(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|kg|kilo)\\s*[:=\\s\\-_/]?\\s*${cleanC}\\b`, 'i');
+          const kiloAfterPattern = new RegExp(`\\b${cleanC}\\s*(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គក)\\b`, 'i');
+          if (kiloPattern.test(allCommentsText) || kiloAfterPattern.test(allCommentsText)) {
+            const otherItemsWithThisWeight = inv.items.filter(other => other.product_code !== cleanC && (
+              (other.item_comment && (kiloPattern.test(other.item_comment) || kiloAfterPattern.test(other.item_comment)))
+            ));
+            const ownCommentParentCode = it.item_comment ? it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase() : null;
+
+            if (otherItemsWithThisWeight.length > 0 || (ownCommentParentCode && ownCommentParentCode !== cleanC)) {
               return false;
             }
-            if (matchedQty > 0 && matchedQty !== it.quantity) {
-              it.quantity = matchedQty;
-            }
-            const cleanNote = extractSizeAndColorNotes(it.item_comment);
-            if (cleanNote) {
-              it.note = cleanNote;
-            } else if (it.note && it.note.includes('ពណ៌ស') && !/(?:^|\s)ស(?:\s|$)|ពណ៌\s*ស|ពណ៍\s*ស/.test(it.item_comment)) {
-              it.note = it.note.replace(/\s*\|\s*ពណ៌ស|ពណ៌ស\s*\|\s*|ពណ៌ស/g, '').trim() || undefined;
-            }
-            return true;
-          });
+          }
 
-          // Recover any dash/underscore order items from inv.comments that were previously missed (e.g. "8-10" -> code 8, qty 10)
-          for (const rawC of inv.comments || []) {
-            if (/[-_]/.test(rawC)) {
-              const pairs = extractCodeQtyPairsFromComment(rawC, products, false);
-              for (const p of pairs) {
-                const alreadyHas = inv.items.some(it => (it.product_code || '').toUpperCase().trim() === p.code.toUpperCase());
-                if (!alreadyHas) {
-                  const stockProd = products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase() && (pr.live_id || activeLiveId) === (inv.live_id || activeLiveId)) ||
-                                    products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase());
-                  const note = extractSizeAndColorNotes(rawC);
-                  inv.items.push({
-                    id: Date.now() + Math.floor(Math.random() * 10000),
-                    invoice_id: inv.invoice_id,
-                    product_id: stockProd ? stockProd.id : 0,
-                    product_code: p.code.toUpperCase(),
-                    product_name: stockProd ? stockProd.name : `កូដ ${p.code.toUpperCase()}`,
-                    quantity: p.qty,
-                    price: stockProd ? stockProd.price : 0,
-                    is_packed: false,
-                    item_comment: rawC,
-                    image_file: stockProd?.image_file || '',
-                    ...(note ? { note } : {})
-                  });
-                }
+          const chestPattern = new RegExp(`(?:ដើមទ្រូង|ទ្រូង)\\s*[:=\\s\\-]?\\s*${cleanC}\\b`, 'i');
+          if (chestPattern.test(allCommentsText)) {
+            const otherItemsWithThisChest = inv.items.filter(other => other.product_code !== cleanC && (
+              (other.item_comment && chestPattern.test(other.item_comment))
+            ));
+            const ownCommentParentCode = it.item_comment ? it.item_comment.trim().match(/^([A-Za-z0-9]{2,5})/i)?.[1]?.toUpperCase() : null;
+            if (otherItemsWithThisChest.length > 0 || (ownCommentParentCode && ownCommentParentCode !== cleanC)) {
+              return false;
+            }
+          }
+
+          return true;
+        });
+
+        for (const it of inv.items) {
+          const rawComment = it.item_comment || '';
+          if (rawComment) {
+            const multiWaistRegex = new RegExp(`(?:(?<![A-Za-z0-9])${it.product_code}\\s*(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ស្លឹក)\\s*[:=\\s\\-]?\\s*((?:(?:2[4-9]|3[0-9]|4[0-6])\\s*(?:[:=xX]\\s*\\d{1,2})?(?:\\s*[\\/+,.,និង\\-_]\\s*|\\s+)?)+))`, 'i');
+            const m = rawComment.match(multiWaistRegex);
+            if (m && m[1]) {
+              const singleWaistRegex = /(2[4-9]|3[0-9]|4[0-6])(?:\s*[:=xX]\s*(\d{1,2}))?/gi;
+              let totalWaistQty = 0;
+              let wm: RegExpExecArray | null;
+              while ((wm = singleWaistRegex.exec(m[1])) !== null) {
+                totalWaistQty += (wm[2] ? (parseInt(wm[2], 10) || 1) : 1);
+              }
+              if (totalWaistQty > it.quantity) {
+                it.quantity = totalWaistQty;
+              }
+            }
+          }
+        }
+
+        inv.items = inv.items.filter(it => {
+          if (!it.item_comment) return true;
+          const cleanCode = (it.product_code || '').toUpperCase().trim();
+          const subComments = it.item_comment.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
+          const seenNorm = new Set<string>();
+          let matchedQty = 0;
+          let matchedAny = false;
+          for (const sc of subComments) {
+            const normKey = sc.replace(/0\d{8,9}|\*+/g, '').replace(/\s+/g, ' ').trim();
+            const pairs = extractCodeQtyPairsFromComment(sc, products, false);
+            const found = pairs.find(p => p.code.toUpperCase() === cleanCode || p.code.replace(/^0+/, '') === cleanCode.replace(/^0+/, ''));
+            if (found) {
+              matchedAny = true;
+              if (!seenNorm.has(normKey)) {
+                seenNorm.add(normKey);
+                matchedQty += found.qty;
+              }
+            }
+          }
+          if (!matchedAny) {
+            return false;
+          }
+          if (matchedQty > 0 && matchedQty !== it.quantity) {
+            it.quantity = matchedQty;
+          }
+          const cleanNote = extractSizeAndColorNotes(it.item_comment);
+          if (cleanNote) {
+            it.note = cleanNote;
+          } else if (it.note && it.note.includes('ពណ៌ស') && !/(?:^|\s)ស(?:\s|$)|ពណ៌\s*ស|ពណ៍\s*ស/.test(it.item_comment)) {
+            it.note = it.note.replace(/\s*\|\s*ពណ៌ស|ពណ៌ស\s*\|\s*|ពណ៌ស/g, '').trim() || undefined;
+          }
+          return true;
+        });
+
+        for (const rawC of inv.comments || []) {
+          if (/[-_]/.test(rawC)) {
+            const pairs = extractCodeQtyPairsFromComment(rawC, products, false);
+            for (const p of pairs) {
+              const alreadyHas = inv.items.some(it => (it.product_code || '').toUpperCase().trim() === p.code.toUpperCase());
+              if (!alreadyHas) {
+                const stockProd = products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase() && (pr.live_id || activeLiveId) === (inv.live_id || activeLiveId)) ||
+                                  products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase());
+                const note = extractSizeAndColorNotes(rawC);
+                inv.items.push({
+                  id: Date.now() + Math.floor(Math.random() * 10000),
+                  invoice_id: inv.invoice_id,
+                  product_id: stockProd ? stockProd.id : 0,
+                  product_code: p.code.toUpperCase(),
+                  product_name: stockProd ? stockProd.name : `កូដ ${p.code.toUpperCase()}`,
+                  quantity: p.qty,
+                  price: stockProd ? stockProd.price : 0,
+                  is_packed: false,
+                  item_comment: rawC,
+                  image_file: stockProd?.image_file || '',
+                  ...(note ? { note } : {})
+                });
               }
             }
           }
         }
       }
 
-      // Populate / preserve payment_status
-      if (inv.status === 'Paid' || inv.paid_at || inv.paid_by) {
-        inv.payment_status = 'Paid';
-      } else if (inv.status === 'Dispatched' || inv.packing_stage === 'DISPATCHED') {
-        inv.payment_status = (inv.paid_at || inv.paid_by) ? 'Paid' : 'COD';
-      } else {
-        inv.payment_status = inv.payment_status || 'Unpaid';
-      }
-
       recalculateInvoice(inv);
-    });
+    }
 
     // Remove any leftover 0-item empty baskets from previous question comments
-    cleanupEmptyZeroItemInvoices();
-
-    // Natural sort products by code (1, 2, 3... 10... 100... A1, B1...)
-    products.sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
+    cleanupEmptyZeroItemInvoices(false);
 
     // Automatically sync all active (non-dispatched) basket prices & photos strictly within their own live sessions
-    syncAllActiveInvoicesWithStock();
-
-    isDatabaseLoaded = true;
-    // Persist normalized data to disk and SQLite
-    await saveDatabaseToDisk(true);
+    syncAllActiveInvoicesWithStock(undefined, false);
+    bumpDataRevision(false);
   } catch (err) {
     isDatabaseLoaded = true;
     console.error('Failed to load database on startup:', err);
@@ -1318,7 +1316,7 @@ export function getProductsForLive(liveId?: string): Product[] {
     .sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
 }
 
-export function deduplicateAndSanitizeMessengerSlips(): number {
+export function deduplicateAndSanitizeMessengerSlips(persist = true): number {
   let removed = 0;
   const seenIds = new Set<string>();
   const seenMids = new Set<string>();
@@ -1375,8 +1373,7 @@ export function deduplicateAndSanitizeMessengerSlips(): number {
   }
 
   if (removed > 0) {
-    bumpDataRevision();
-    saveDatabaseToDisk();
+    bumpDataRevision(persist);
     console.log(`[DB Deduplicate] Safely sanitized ${removed} invalid/webhook-duplicate slips from queue.`);
   }
 
@@ -1387,7 +1384,7 @@ export function cleanupNonSlipMessengerEntries(): number {
   return deduplicateAndSanitizeMessengerSlips();
 }
 
-export function cleanupEmptyZeroItemInvoices() {
+export function cleanupEmptyZeroItemInvoices(persist = true) {
   let removed = 0;
   for (let i = invoices.length - 1; i >= 0; i--) {
     if ((!invoices[i].items || invoices[i].items.length === 0) && (!invoices[i].total_amount || invoices[i].total_amount === 0)) {
@@ -1396,14 +1393,13 @@ export function cleanupEmptyZeroItemInvoices() {
     }
   }
   if (removed > 0) {
-    bumpDataRevision();
+    bumpDataRevision(persist);
     console.log(`[DB Clean] Removed ${removed} empty 0-item baskets.`);
   }
 }
 
 // Load from disk on startup
 loadDatabaseFromDisk().then(() => {
-  deduplicateAndSanitizeMessengerSlips();
-  invoices.forEach(recalculateInvoice);
-  bumpDataRevision();
+  deduplicateAndSanitizeMessengerSlips(false);
+  bumpDataRevision(false);
 }).catch(err => console.error(err));

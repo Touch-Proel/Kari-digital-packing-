@@ -744,12 +744,21 @@ self.addEventListener('activate', function(event) {
 // 🚀 Vite Middleware (Dev) vs Static Dist (Production)
 // -------------------------------------------------------------
 async function startServer() {
+  const publicPath = path.join(process.cwd(), 'public');
   const distPath = path.join(process.cwd(), 'dist');
   const distIndexPath = path.join(distPath, 'index.html');
   const isRunningCompiledServer =
     (typeof __filename !== 'undefined' && __filename.endsWith('.cjs')) ||
     (process.argv[1] || '').endsWith('.cjs');
-  const isProduction = (process.env.NODE_ENV === 'production' || isRunningCompiledServer) && fs.existsSync(distIndexPath);
+  const isAiStudioPreview = process.env.DISABLE_HMR === 'true';
+
+  // On VPS / Production, always use fast pre-built dist/ whenever dist/index.html exists
+  const isProduction =
+    (process.env.NODE_ENV === 'production' || isRunningCompiledServer || !isAiStudioPreview) &&
+    fs.existsSync(distIndexPath);
+
+  // Serve public root assets (icons, manifest, uploads) directly
+  app.use(express.static(publicPath, { maxAge: '7d' }));
 
   if (!isProduction) {
     const vite = await createViteServer({
@@ -800,8 +809,10 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT} (${isProduction ? 'Production Static Build' : 'Vite Dev Mode'})`);
-    initChatbotStore();
-    initTelegramBotService();
+    setTimeout(() => {
+      initChatbotStore();
+      initTelegramBotService();
+    }, 500);
   });
 }
 

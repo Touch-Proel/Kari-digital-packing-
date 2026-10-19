@@ -1,15 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import sharp from 'sharp';
 import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db';
 import { Product } from './types';
 import { broadcastSSE } from './packingRoutes';
-
-// Optimize Sharp for low memory footprint on VPS / Cloud Run
-try {
-  sharp.cache(false);
-  sharp.concurrency(1);
-} catch {}
 
 export interface TelegramItemParsed {
   code: string;
@@ -245,22 +238,12 @@ export async function downloadTelegramPhoto(
     const filename = standardFilename;
     const localSavePath = path.join(uploadDir, filename);
 
-    // ⚡ Fast Sharp Progressive JPEG processing (500x500 HD Cover Crop)
-    const processedBuffer = await sharp(rawBuffer)
-      .rotate()
-      .resize(500, 500, {
-        fit: 'cover',
-        position: 'center',
-        fastShrinkOnLoad: true
-      })
-      .jpeg({ quality: 82, progressive: false })
-      .toBuffer();
-
-    fs.writeFileSync(localSavePath, processedBuffer);
+    // Save Telegram's pre-compressed JPEG directly without native C++ sharp overhead
+    await fs.promises.writeFile(localSavePath, rawBuffer);
 
     if (fs.existsSync(distUploadDir)) {
       try {
-        fs.writeFileSync(path.join(distUploadDir, filename), processedBuffer);
+        await fs.promises.writeFile(path.join(distUploadDir, filename), rawBuffer);
       } catch {}
     }
 

@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import sharp from 'sharp';
 import net from 'net';
 import https from 'https';
 import {
@@ -461,16 +460,10 @@ router.post('/update_product_stock_price', async (req: Request, res: Response) =
       const filename = `${safeCode}_${safeLiveTag}_${Date.now()}.jpg`;
       const filePath = path.join(uploadDir, filename);
 
-      const processedBuffer = await sharp(fileBuffer)
-        .rotate()
-        .resize(500, 500, { fit: 'cover', position: 'center' })
-        .jpeg({ quality: 90, mozjpeg: true })
-        .toBuffer();
-
-      fs.writeFileSync(filePath, processedBuffer);
+      await fs.promises.writeFile(filePath, fileBuffer);
       return `/uploads/${filename}`;
     } catch (err) {
-      console.error('Sharp image processing error in update_product_stock_price:', err);
+      console.error('Image saving error in update_product_stock_price:', err);
       return trimmed;
     }
   };

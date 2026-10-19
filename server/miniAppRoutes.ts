@@ -298,7 +298,18 @@ function getDefaultDatabase(): MiniAppDatabase {
   };
 }
 
-let miniAppDb: MiniAppDatabase = loadMiniAppDb();
+let miniAppSaveTimer: NodeJS.Timeout | null = null;
+let miniAppDb: MiniAppDatabase;
+
+function saveMiniAppDb(dbToSave: MiniAppDatabase = miniAppDb) {
+  if (miniAppSaveTimer) clearTimeout(miniAppSaveTimer);
+  miniAppSaveTimer = setTimeout(() => {
+    miniAppSaveTimer = null;
+    fs.promises.writeFile(MINIAPP_STORE_PATH, JSON.stringify(dbToSave, null, 2), 'utf-8').catch(err => {
+      console.error('[MiniApp DB] Failed to save miniapp_store.json:', err);
+    });
+  }, 200);
+}
 
 function loadMiniAppDb(): MiniAppDatabase {
   try {
@@ -320,16 +331,7 @@ function loadMiniAppDb(): MiniAppDatabase {
   return initial;
 }
 
-let miniAppSaveTimer: NodeJS.Timeout | null = null;
-function saveMiniAppDb(dbToSave: MiniAppDatabase = miniAppDb) {
-  if (miniAppSaveTimer) clearTimeout(miniAppSaveTimer);
-  miniAppSaveTimer = setTimeout(() => {
-    miniAppSaveTimer = null;
-    fs.promises.writeFile(MINIAPP_STORE_PATH, JSON.stringify(dbToSave, null, 2), 'utf-8').catch(err => {
-      console.error('[MiniApp DB] Failed to save miniapp_store.json:', err);
-    });
-  }, 200);
-}
+miniAppDb = loadMiniAppDb();
 
 // ---------------------------------------------------------------------------
 // 1. PUBLIC CATALOG ENDPOINT (Ultra-fast 0ms in-memory response)
@@ -495,8 +497,8 @@ router.post('/orders', async (req: Request, res: Response) => {
     saveMiniAppDb();
 
     // 3. Fire non-blocking Telegram Notification to Shop Owner / Group if token & chatId exist
-    const botToken = settings.telegram_bot_token;
-    const targetChatId = miniAppDb.config.telegramNotifyChatId || settings.telegram_group_id;
+    const botToken = settings.telegram_token;
+    const targetChatId = miniAppDb.config.telegramNotifyChatId || settings.telegram_chat_id;
     if (botToken && targetChatId) {
       const itemsLines = confirmedItems
         .map((it, idx) => `${idx + 1}. <b>[${it.code}]</b> ${it.name}\n   ↳ ${it.color} - ${it.size} x${it.qty} = <b>$${(it.price * it.qty).toFixed(2)}</b>`)
