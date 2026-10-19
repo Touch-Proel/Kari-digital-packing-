@@ -28,6 +28,7 @@ export interface MiniAppProduct {
   originalPrice: number;
   category: 'women' | 'men' | 'unisex';
   imageUrl: string;
+  images?: string[];
   variants: MiniAppVariant[];
   createdAt: string;
 }
@@ -826,10 +827,16 @@ router.post('/admin/send-shop-card', async (req: Request, res: Response) => {
 });
 
 router.post('/admin/products', (req: Request, res: Response) => {
-  const { id, code, name, price, originalPrice, category, imageUrl, variants } = req.body;
+  const { id, code, name, price, originalPrice, category, imageUrl, images, variants } = req.body;
   if (!code || !name) {
     return res.status(400).json({ success: false, error: 'សូមបញ្ចូលកូដ និងឈ្មោះម៉ូតខោអាវ' });
   }
+
+  const normalizedImages: string[] = Array.isArray(images)
+    ? images.map((u: any) => String(u || '').trim()).filter(Boolean)
+    : imageUrl
+    ? [String(imageUrl).trim()]
+    : [];
 
   const normalizedVariants: MiniAppVariant[] = Array.isArray(variants) && variants.length > 0
     ? variants.map((v: any, idx: number) => ({
@@ -842,6 +849,10 @@ router.post('/admin/products', (req: Request, res: Response) => {
 
   const existingIndex = id ? miniAppDb.products.findIndex(p => p.id === id) : -1;
   if (existingIndex >= 0) {
+    const fallbackImg = miniAppDb.products[existingIndex].imageUrl || SVG_A01_WHITE_TEE;
+    const primaryImg = normalizedImages[0] || imageUrl || fallbackImg;
+    const finalImages = normalizedImages.length > 0 ? normalizedImages : [primaryImg];
+
     miniAppDb.products[existingIndex] = {
       ...miniAppDb.products[existingIndex],
       code: String(code).trim().toUpperCase(),
@@ -849,10 +860,14 @@ router.post('/admin/products', (req: Request, res: Response) => {
       price: Number(price) || 0,
       originalPrice: Number(originalPrice) || Number(price) || 0,
       category: ['women', 'men', 'unisex'].includes(category) ? category : 'women',
-      imageUrl: imageUrl || miniAppDb.products[existingIndex].imageUrl || SVG_A01_WHITE_TEE,
+      imageUrl: primaryImg,
+      images: finalImages,
       variants: normalizedVariants
     };
   } else {
+    const primaryImg = normalizedImages[0] || imageUrl || SVG_A02_KOREAN_DRESS;
+    const finalImages = normalizedImages.length > 0 ? normalizedImages : [primaryImg];
+
     const newProd: MiniAppProduct = {
       id: `prod-${Date.now()}`,
       code: String(code).trim().toUpperCase(),
@@ -860,7 +875,8 @@ router.post('/admin/products', (req: Request, res: Response) => {
       price: Number(price) || 0,
       originalPrice: Number(originalPrice) || Number(price) || 0,
       category: ['women', 'men', 'unisex'].includes(category) ? category : 'women',
-      imageUrl: imageUrl || SVG_A02_KOREAN_DRESS,
+      imageUrl: primaryImg,
+      images: finalImages,
       variants: normalizedVariants,
       createdAt: new Date().toISOString()
     };

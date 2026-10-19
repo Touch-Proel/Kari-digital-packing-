@@ -15,8 +15,15 @@ export interface MiniAppProduct {
   originalPrice: number;
   category: 'women' | 'men' | 'unisex';
   imageUrl: string;
+  images?: string[];
   variants: MiniAppVariant[];
   createdAt: string;
+}
+
+function getProductImages(p: MiniAppProduct): string[] {
+  const arr = Array.isArray(p.images) ? p.images.map(u => String(u || '').trim()).filter(Boolean) : [];
+  if (arr.length > 0) return arr;
+  return p.imageUrl ? [p.imageUrl] : [];
 }
 
 export interface MiniAppConfig {
@@ -168,6 +175,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
   const [isMyOrdersOpen, setIsMyOrdersOpen] = useState<boolean>(false);
   const [zoomProduct, setZoomProduct] = useState<MiniAppProduct | null>(null);
+  const [zoomImageIdx, setZoomImageIdx] = useState<number>(0);
+  const [cardImageIdx, setCardImageIdx] = useState<Record<string, number>>({});
   const [completedOrder, setCompletedOrder] = useState<MiniAppOrder | null>(null);
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -211,6 +220,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [formOrigPrice, setFormOrigPrice] = useState<string>('10.00');
   const [formCategory, setFormCategory] = useState<'women' | 'men' | 'unisex'>('women');
   const [formImageUrl, setFormImageUrl] = useState<string>('');
+  const [formImages, setFormImages] = useState<string[]>([]);
   const [formVariants, setFormVariants] = useState<MiniAppVariant[]>([
     { id: 'v-1', color: 'ស', size: 'Size M', stock: 1 }
   ]);
@@ -452,6 +462,21 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
     const compressImageOnClient = (rawFile: File): Promise<string> => {
       return new Promise((resolve, reject) => {
+        // If file is already small (< 1.5MB) and is PNG/WebP/JPEG, read directly without lossy re-encoding for maximum sharpness
+        if (rawFile.size <= 1.5 * 1024 * 1024 && ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(rawFile.type)) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (typeof reader.result === 'string') {
+              resolve(reader.result);
+            } else {
+              reject(new Error('FileReader error'));
+            }
+          };
+          reader.onerror = () => reject(new Error('FileReader error'));
+          reader.readAsDataURL(rawFile);
+          return;
+        }
+
         const objectUrl = URL.createObjectURL(rawFile);
         const img = new Image();
         img.onerror = () => {
@@ -462,9 +487,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           URL.revokeObjectURL(objectUrl);
           try {
             const canvas = document.createElement('canvas');
-            const maxDim = target === 'logo' ? 400 : 750;
-            let w = img.width || 600;
-            let h = img.height || 600;
+            // Use Full HD / Retina resolution (1800px for products, 1000px for logos, 1400px for payment slips)
+            const maxDim = target === 'logo' ? 1000 : target === 'slip' ? 1400 : 1800;
+            let w = img.naturalWidth || img.width || 1200;
+            let h = img.naturalHeight || img.height || 1200;
             if (w > maxDim || h > maxDim) {
               if (w > h) {
                 h = Math.round((h * maxDim) / w);
@@ -478,8 +504,12 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             canvas.height = h;
             const ctx = canvas.getContext('2d');
             if (ctx) {
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
               ctx.drawImage(img, 0, 0, w, h);
-              resolve(canvas.toDataURL('image/jpeg', 0.86));
+              // Preserve lossless PNG for logos/transparent graphics, otherwise use 0.95 Ultra-HD JPEG
+              const outputMime = (target === 'logo' && rawFile.type === 'image/png') ? 'image/png' : 'image/jpeg';
+              resolve(outputMime === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.95));
             } else {
               reject(new Error('Canvas context error'));
             }
@@ -524,6 +554,14 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         }
       }
 
+      if (target === 'product') {
+        setFormImages(prev => {
+          const next = [...prev, finalUploadedUrl];
+          setFormImageUrl(next[0] || finalUploadedUrl);
+          return next;
+        });
+      }
+
       if (target === 'slip') {
         showToast('✅ បានភ្ជាប់រូបស្លីបបង់ប្រាក់រួចរាល់!');
       } else if (target === 'logo') {
@@ -542,6 +580,19 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       showToast('មិនអាចអានរូបភាពបានទេ សូមជ្រើសរើសរូបផ្សេង', 'error');
     } finally {
       setIsUploadingSlip(false);
+      setIsUploadingProductImg(false);
+    }
+  };
+
+  const handleUploadMultipleProductFiles = async (fileList: FileList) => {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+    setIsUploadingProductImg(true);
+    try {
+      for (const file of files) {
+        await handleUploadFile(file, 'product');
+      }
+    } finally {
       setIsUploadingProductImg(false);
     }
   };
@@ -642,13 +693,15 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
   const openEditProductModal = (prod?: MiniAppProduct) => {
     if (prod) {
+      const existingImgs = getProductImages(prod);
       setEditingProduct(prod);
       setFormCode(prod.code);
       setFormName(prod.name);
       setFormPrice(String(prod.price));
       setFormOrigPrice(String(prod.originalPrice));
       setFormCategory(prod.category);
-      setFormImageUrl(prod.imageUrl);
+      setFormImageUrl(existingImgs[0] || prod.imageUrl);
+      setFormImages(existingImgs);
       setFormVariants(prod.variants.length > 0 ? prod.variants : [{ id: 'v-1', color: 'ស', size: 'Size M', stock: 1 }]);
     } else {
       setEditingProduct(null);
@@ -659,6 +712,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       setFormOrigPrice('10.00');
       setFormCategory('women');
       setFormImageUrl('');
+      setFormImages([]);
       setFormVariants([
         { id: `v-${Date.now()}-1`, color: 'ស', size: 'Size M', stock: 1 },
         { id: `v-${Date.now()}-2`, color: 'ខ្មៅ', size: 'Size L', stock: 1 }
@@ -670,6 +724,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const cleanedImages = formImages.filter(Boolean);
+      const primaryImage = cleanedImages[0] || formImageUrl;
       const res = await fetch('/api/miniapp/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -680,7 +736,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           price: parseFloat(formPrice) || 0,
           originalPrice: parseFloat(formOrigPrice) || 0,
           category: formCategory,
-          imageUrl: formImageUrl,
+          imageUrl: primaryImage,
+          images: cleanedImages.length > 0 ? cleanedImages : primaryImage ? [primaryImage] : [],
           variants: formVariants
         })
       });
@@ -1118,6 +1175,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
                     : 0;
 
+                const prodImages = getProductImages(product);
+                const activeImgIdx = Math.min(cardImageIdx[product.id] || 0, Math.max(0, prodImages.length - 1));
+                const currentCardImage = prodImages[activeImgIdx] || product.imageUrl;
+
                 return (
                   <div
                     key={product.id}
@@ -1128,13 +1189,16 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                     }`}
                   >
                     <div>
-                      {/* Product Photo Container (3:4 Aspect Ratio) */}
+                      {/* Product Photo Container (3:4 Aspect Ratio + Multi-Image Switcher) */}
                       <div
-                        onClick={() => setZoomProduct(product)}
+                        onClick={() => {
+                          setZoomProduct(product);
+                          setZoomImageIdx(activeImgIdx);
+                        }}
                         className="relative aspect-[3/4] w-full bg-[#F1F5F9] overflow-hidden cursor-pointer group"
                       >
                         <img
-                          src={product.imageUrl}
+                          src={currentCardImage}
                           alt={product.name}
                           referrerPolicy="no-referrer"
                           className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
@@ -1162,6 +1226,43 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                           <div className="absolute top-2 right-2 bg-[#F59E0B] text-[#0F172A] px-2 py-0.5 rounded-lg text-[10px] font-extrabold shadow-2xs">
                             🔥 សល់ {totalStock}
                           </div>
+                        )}
+
+                        {/* Multi-Photo Left/Right Controls & Counter on Card */}
+                        {prodImages.length > 1 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                setCardImageIdx(prev => ({
+                                  ...prev,
+                                  [product.id]: (activeImgIdx - 1 + prodImages.length) % prodImages.length
+                                }));
+                              }}
+                              className="absolute left-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/45 hover:bg-black/70 text-white text-xs font-bold flex items-center justify-center backdrop-blur-xs cursor-pointer"
+                              aria-label="រូបមុន"
+                            >
+                              ‹
+                            </button>
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                setCardImageIdx(prev => ({
+                                  ...prev,
+                                  [product.id]: (activeImgIdx + 1) % prodImages.length
+                                }));
+                              }}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/45 hover:bg-black/70 text-white text-xs font-bold flex items-center justify-center backdrop-blur-xs cursor-pointer"
+                              aria-label="រូបបន្ទាប់"
+                            >
+                              ›
+                            </button>
+                            <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-xs text-white px-2 py-0.5 rounded-full text-[10px] font-extrabold tabular-nums">
+                              📸 {activeImgIdx + 1}/{prodImages.length}
+                            </div>
+                          </>
                         )}
 
                         {/* Subtle Bottom-Right Zoom Hint */}
@@ -1306,62 +1407,108 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       </div>
 
       {/* =====================================================================
-          MODAL 1: PRODUCT IMAGE ZOOM & QUICK ADD
+          MODAL 1: PRODUCT IMAGE ZOOM & MULTI-PHOTO GALLERY
          ===================================================================== */}
-      {zoomProduct && (
-        <div
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setZoomProduct(null)}
-        >
+      {zoomProduct && (() => {
+        const zoomImages = getProductImages(zoomProduct);
+        const safeZoomIdx = Math.min(zoomImageIdx, Math.max(0, zoomImages.length - 1));
+        const activeZoomImg = zoomImages[safeZoomIdx] || zoomProduct.imageUrl;
+
+        return (
           <div
-            className="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl"
-            onClick={e => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => setZoomProduct(null)}
           >
-            <div className="relative aspect-[3/4] bg-slate-100">
-              <img
-                src={zoomProduct.imageUrl}
-                alt={zoomProduct.name}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-              <button
-                type="button"
-                onClick={() => setZoomProduct(null)}
-                className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/60 text-white font-bold flex items-center justify-center cursor-pointer"
-              >
-                ✕
-              </button>
-              <div className="absolute bottom-3 left-3 bg-black/75 text-white px-3 py-1 rounded-full text-xs font-extrabold">
-                កូដ: {zoomProduct.code} • ${zoomProduct.price.toFixed(2)}
+            <div
+              className="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="relative aspect-[3/4] bg-slate-100">
+                <img
+                  src={activeZoomImg}
+                  alt={zoomProduct.name}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setZoomProduct(null)}
+                  className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/60 text-white font-bold flex items-center justify-center cursor-pointer"
+                >
+                  ✕
+                </button>
+
+                {zoomImages.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setZoomImageIdx((safeZoomIdx - 1 + zoomImages.length) % zoomImages.length)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/55 hover:bg-black/80 text-white text-lg font-bold flex items-center justify-center cursor-pointer"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setZoomImageIdx((safeZoomIdx + 1) % zoomImages.length)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/55 hover:bg-black/80 text-white text-lg font-bold flex items-center justify-center cursor-pointer"
+                    >
+                      ›
+                    </button>
+                  </>
+                )}
+
+                <div className="absolute bottom-3 left-3 bg-black/75 text-white px-3 py-1 rounded-full text-xs font-extrabold">
+                  កូដ: {zoomProduct.code} • ${zoomProduct.price.toFixed(2)}
+                  {zoomImages.length > 1 ? ` • រូប ${safeZoomIdx + 1}/${zoomImages.length}` : ''}
+                </div>
               </div>
-            </div>
-            <div className="p-4">
-              <h3 className="font-extrabold text-base text-slate-900">{zoomProduct.name}</h3>
-              <p className="text-xs text-slate-500 mt-1">ចុចជ្រើសរើសពណ៌ និងទំហំខាងក្រោមដើម្បីដាក់ចូលកន្ត្រក៖</p>
-              <div className="flex flex-wrap gap-2 mt-3">
-                {zoomProduct.variants.map(v => (
-                  <button
-                    key={v.id}
-                    type="button"
-                    disabled={v.stock <= 0}
-                    onClick={() => {
-                      handleAddToCart(zoomProduct, v);
-                      setZoomProduct(null);
-                    }}
-                    className={`px-3 py-2 rounded-xl text-xs font-extrabold border cursor-pointer ${
-                      v.stock <= 0
-                        ? 'bg-slate-100 text-slate-400 border-slate-200 line-through'
-                        : 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] hover:bg-[#DB1D43] hover:text-white'
-                    }`}
-                  >
-                    + {v.color} - {v.size} (សល់ {v.stock})
-                  </button>
-                ))}
+
+              {/* Thumbnail Strip when product has multiple photos */}
+              {zoomImages.length > 1 && (
+                <div className="px-4 pt-3 flex items-center gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  {zoomImages.map((imgUrl, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setZoomImageIdx(idx)}
+                      className={`w-12 h-14 rounded-xl overflow-hidden border-2 shrink-0 cursor-pointer transition-all ${
+                        safeZoomIdx === idx ? 'border-[#DB1D43] scale-105 shadow-xs' : 'border-slate-200 opacity-70'
+                      }`}
+                    >
+                      <img src={imgUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="p-4">
+                <h3 className="font-extrabold text-base text-slate-900">{zoomProduct.name}</h3>
+                <p className="text-xs text-slate-500 mt-1">ចុចជ្រើសរើសពណ៌ និងទំហំខាងក្រោមដើម្បីដាក់ចូលកន្ត្រក៖</p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {zoomProduct.variants.map(v => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      disabled={v.stock <= 0}
+                      onClick={() => {
+                        handleAddToCart(zoomProduct, v);
+                        setZoomProduct(null);
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs font-extrabold border cursor-pointer ${
+                        v.stock <= 0
+                          ? 'bg-slate-100 text-slate-400 border-slate-200 line-through'
+                          : 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] hover:bg-[#DB1D43] hover:text-white'
+                      }`}
+                    >
+                      + {v.color} - {v.size} (សល់ {v.stock})
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* =====================================================================
           MODAL 2: CHECKOUT DRAWER (KHQR SCAN OR COD)
@@ -1935,12 +2082,19 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                             className="bg-white p-3 rounded-2xl border border-slate-200 flex gap-3 items-center justify-between"
                           >
                             <div className="flex items-center gap-3 min-w-0">
-                              <img
-                                src={p.imageUrl}
-                                alt={p.name}
-                                referrerPolicy="no-referrer"
-                                className="w-14 h-16 rounded-xl object-cover bg-slate-100 shrink-0"
-                              />
+                              <div className="relative w-14 h-16 shrink-0">
+                                <img
+                                  src={p.imageUrl}
+                                  alt={p.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-14 h-16 rounded-xl object-cover bg-slate-100"
+                                />
+                                {getProductImages(p).length > 1 && (
+                                  <span className="absolute bottom-1 right-1 bg-black/75 text-white text-[9px] font-extrabold px-1.5 py-0.2 rounded-md">
+                                    📸 {getProductImages(p).length}
+                                  </span>
+                                )}
+                              </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <span className="bg-slate-900 text-white text-[10px] font-extrabold px-2 py-0.5 rounded">
@@ -2728,31 +2882,79 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
               </div>
             </div>
 
-            {/* Upload Product Image */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">រូបភាពម៉ូតខោអាវ</label>
-              <div className="flex items-center gap-3">
-                {formImageUrl && (
-                  <img
-                    src={formImageUrl}
-                    alt="Preview"
-                    referrerPolicy="no-referrer"
-                    className="w-14 h-16 rounded-xl object-cover border border-slate-200"
-                  />
-                )}
-                <label className="flex-1 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-xs font-bold text-center cursor-pointer">
-                  📷 {isUploadingProductImg ? 'កំពុងបង្ហោះរូប...' : 'ជ្រើសរើសរូបភាពពីទូរស័ព្ទ'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) handleUploadFile(file, 'product');
-                    }}
-                  />
+            {/* Upload Multiple Product Images (Gallery) */}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-extrabold text-slate-700">
+                  រូបភាពម៉ូតខោអាវ ({formImages.length} សន្លឹក) — អាចដាក់ច្រើនសន្លឹក៖
                 </label>
+                {formImages.length > 1 && (
+                  <span className="text-[10px] text-slate-500">ចុចលើរូបដើម្បីដាក់ជារូបមេ</span>
+                )}
               </div>
+
+              {formImages.length > 0 && (
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  {formImages.map((imgUrl, idx) => (
+                    <div
+                      key={`${idx}-${imgUrl.slice(-12)}`}
+                      className={`relative w-16 h-20 rounded-xl overflow-hidden border-2 shrink-0 group ${
+                        idx === 0 ? 'border-[#DB1D43] ring-2 ring-rose-100' : 'border-slate-200'
+                      }`}
+                    >
+                      <img
+                        src={imgUrl}
+                        alt={`រូបទី ${idx + 1}`}
+                        referrerPolicy="no-referrer"
+                        onClick={() => {
+                          if (idx === 0) return;
+                          const reordered = [imgUrl, ...formImages.filter((_, i) => i !== idx)];
+                          setFormImages(reordered);
+                          setFormImageUrl(reordered[0]);
+                          showToast('បានប្តូរជារូបមេ (រូបទី ១)!');
+                        }}
+                        className="w-full h-full object-cover cursor-pointer"
+                        title={idx === 0 ? 'រូបមេ (បង្ហាញមុនគេ)' : 'ចុចដើម្បីដាក់ជារូបមេ'}
+                      />
+                      <span
+                        className={`absolute bottom-0.5 left-0.5 right-0.5 text-center text-[9px] font-extrabold py-0.2 rounded ${
+                          idx === 0 ? 'bg-[#DB1D43] text-white' : 'bg-black/60 text-white'
+                        }`}
+                      >
+                        {idx === 0 ? '⭐ រូបមេ' : `រូបទី ${idx + 1}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = formImages.filter((_, i) => i !== idx);
+                          setFormImages(next);
+                          setFormImageUrl(next[0] || '');
+                        }}
+                        className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/70 text-white text-[10px] font-bold flex items-center justify-center cursor-pointer"
+                        title="លុបរូបនេះ"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <label className="block w-full py-2.5 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 border border-dashed border-rose-300 text-[#BE123C] text-xs font-extrabold text-center cursor-pointer transition-colors">
+                📷 {isUploadingProductImg ? 'កំពុងបង្ហោះរូបភាព...' : '+ បន្ថែមរូបភាពម៉ូត (រើសម្ដងច្រើនសន្លឹកក៏បាន)'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleUploadMultipleProductFiles(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </label>
             </div>
 
             {/* Variants List (Color, Size, Stock) */}
