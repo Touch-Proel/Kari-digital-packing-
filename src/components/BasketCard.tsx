@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Invoice, OrderItem, Product } from '../types';
 import { playPureTone, playSuccessFanfare, playWarningBuzzer, playCollisionAlert } from '../utils/audio';
 import { convertKhmerNumeralsToGlobal } from '../utils/khmerNumerals';
-import { extractCodeQtyPairsFromComment, isPureContactOrInquiryComment, extractPhoneNumber } from '../utils/commentParser';
+import { extractCodeQtyPairsFromComment, isPureContactOrInquiryComment, extractPhoneNumber, findBestMatchingCommentForCode } from '../utils/commentParser';
 import { formatLiveShortBadge } from '../utils/liveUtils';
 import { ErrorAlertModal, ErrorModalData } from './Modals/ErrorAlertModal';
 
@@ -148,17 +148,27 @@ function BasketCardComponent({
   const [manualQtyInput, setManualQtyInput] = useState(1);
   const [manualCommentSource, setManualCommentSource] = useState('');
   const [manualNoteInput, setManualNoteInput] = useState('');
+  const catalogList = useMemo(() => {
+    if (!productMap) return [];
+    return Object.values(productMap).map(p => ({ code: p.code, live_id: p.live_id }));
+  }, [productMap]);
 
-  // Check if entered manual code matches any existing live comment by customer
+  // Check if entered manual code matches any existing live comment by customer using smart scoring
   const matchedCustomerComment = useMemo(() => {
     if (!manualCodeInput.trim()) return null;
-    const clean = convertKhmerNumeralsToGlobal(manualCodeInput).trim().toUpperCase();
-    return invoice.comments?.find(c => {
-      const converted = convertKhmerNumeralsToGlobal(c || '');
-      const codeRegex = new RegExp(`(^|\\D)${clean}(\\D|$)`, 'i');
-      return codeRegex.test(converted);
-    }) || null;
-  }, [manualCodeInput, invoice.comments]);
+    return findBestMatchingCommentForCode(invoice.comments, manualCodeInput, catalogList);
+  }, [manualCodeInput, invoice.comments, catalogList]);
+
+  // When a matching customer comment is found, auto-suggest extracted quantity (e.g. "ថែមកូត55យក2" -> qty 2)
+  useEffect(() => {
+    if (manualCodeInput.trim() && matchedCustomerComment) {
+      const pairs = extractCodeQtyPairsFromComment(matchedCustomerComment, catalogList, false);
+      const matchPair = pairs.find(p => p.code.toUpperCase() === manualCodeInput.trim().toUpperCase());
+      if (matchPair && matchPair.qty >= 1) {
+        setManualQtyInput(matchPair.qty);
+      }
+    }
+  }, [matchedCustomerComment, manualCodeInput, catalogList]);
 
   // Contact Inline Editing
   const [editingPhone, setEditingPhone] = useState(false);
@@ -240,11 +250,6 @@ function BasketCardComponent({
     }
     return true;
   };
-
-  const catalogList = useMemo(() => {
-    if (!productMap) return [];
-    return Object.values(productMap).map(p => ({ code: p.code, live_id: p.live_id }));
-  }, [productMap]);
 
   // Parse all quick code/qty pairs from comment
   const parseAllQuickPairs = (text: string): { code: string; qty: number }[] => {
@@ -1634,21 +1639,28 @@ function BasketCardComponent({
                   ? activeProd.price
                   : (item.price || 0));
 
-              const matchingComment = invoice.comments?.find(c => {
-                const converted = convertKhmerNumeralsToGlobal(c || '');
-                const codeRegex = new RegExp(`(^|\\D)${item.product_code}(\\D|$)`, 'i');
-                return codeRegex.test(converted);
-              });
-              // Never fallback to an arbitrary invoice.comments[0] belonging to another code!
-              let rawNoteText = item.item_comment || matchingComment || '';
+              const matchingComment = findBestMatchingCommentForCode(invoice.comments, item.product_code, catalogList);
+
+              // Smart check if existing note was wrongfully attached to another code's comment (e.g. comment belongs to 48 while item is 55)
+              const isCurrentNoteWrong = Boolean(
+                item.item_comment &&
+                !item.item_comment.startsWith('[ចំណាំ]') &&
+                matchingComment &&
+                item.item_comment !== matchingComment &&
+                !new RegExp(`(?:កូដ|កូត|code|ថែមកូដ|ថែមកូត|#)?\\s*${item.product_code}(?!\\d)`, 'i').test(convertKhmerNumeralsToGlobal(item.item_comment))
+              );
+
+              // Never fallback to an arbitrary comment belonging to another code!
+              let rawNoteText = isCurrentNoteWrong ? matchingComment : (item.item_comment || matchingComment || '');
               // If item.item_comment is just a size/tag but matchingComment contains the full original comment, keep the full original!
-              if (matchingComment && (!item.item_comment || item.item_comment.length < matchingComment.length)) {
+              if (matchingComment && (!item.item_comment || item.item_comment.length < matchingComment.length || isCurrentNoteWrong)) {
                 rawNoteText = matchingComment;
               }
               const noteText = convertKhmerNumeralsToGlobal(rawNoteText);
               const isManualNote = Boolean(
                 item.item_comment &&
-                (item.item_comment.startsWith('[ចំណាំ]') || !matchingComment)
+                (item.item_comment.startsWith('[ចំណាំ]') || !matchingComment) &&
+                !isCurrentNoteWrong
               );
 
               // Smart Code Mismatch Detection ONLY for live comments, never for intentional manual notes!
@@ -1698,12 +1710,15 @@ function BasketCardComponent({
                             : (it.price || 0);
                           const isItChecked = checkedState[`${invoice.invoice_id}_${it.product_code}`] ?? ((invoice as any).checked_items || []).includes(it.product_code);
                           
-                          const itMatchingComment = invoice.comments?.find(c => {
-                            const converted = convertKhmerNumeralsToGlobal(c || '');
-                            const codeRegex = new RegExp(`(^|\\D)${it.product_code}(\\D|$)`, 'i');
-                            return codeRegex.test(converted);
-                          });
-                          const itNoteText = it.item_comment || itMatchingComment || '';
+                          const itMatchingComment = findBestMatchingCommentForCode(invoice.comments, it.product_code, catalogList);
+                          const isItNoteWrong = Boolean(
+                            it.item_comment &&
+                            !it.item_comment.startsWith('[ចំណាំ]') &&
+                            itMatchingComment &&
+                            it.item_comment !== itMatchingComment &&
+                            !new RegExp(`(?:កូដ|កូត|code|ថែមកូដ|ថែមកូត|#)?\\s*${it.product_code}(?!\\d)`, 'i').test(convertKhmerNumeralsToGlobal(it.item_comment))
+                          );
+                          const itNoteText = isItNoteWrong ? itMatchingComment : (it.item_comment || itMatchingComment || '');
 
                           return {
                             code: it.product_code,

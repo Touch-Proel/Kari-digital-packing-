@@ -748,3 +748,96 @@ export function isPureContactOrInquiryComment(text: string): boolean {
   return false;
 }
 
+/**
+ * Intelligently find the exact customer comment that corresponds to a given product code.
+ * Prevents false matches where the number is an address milestone (e.g. គីឡូ55, ផ្លូវ4, ផ្ទះ12),
+ * phone number, waist size (ចង្កេះ29), or belongs to another product code.
+ */
+export function findBestMatchingCommentForCode(
+  comments: string[] | undefined,
+  targetCode: string,
+  catalogProducts?: { code: string; live_id?: string }[]
+): string | null {
+  if (!comments || comments.length === 0 || !targetCode) return null;
+
+  const cleanTarget = convertKhmerDigitsToArabic(targetCode).trim().toUpperCase();
+  if (!cleanTarget) return null;
+
+  let bestComment: string | null = null;
+  let bestScore = -9999;
+
+  for (const rawComment of comments) {
+    if (!rawComment || !rawComment.trim()) continue;
+    const comment = rawComment.trim();
+    const s = convertKhmerDigitsToArabic(comment).toUpperCase();
+
+    let score = 0;
+
+    // 1. Highest priority: extractCodeQtyPairsFromComment extracted this exact code!
+    const pairs = extractCodeQtyPairsFromComment(comment, catalogProducts, false);
+    const hasParsedPair = pairs.some(p => p.code.toUpperCase() === cleanTarget);
+    if (hasParsedPair) {
+      score += 1000;
+    }
+
+    // 2. Explicit code keyword (e.g. កូត55, កូដ55, កុត55, code55, ថែមកូត55, ថែមកូដ55, ថែម55, លេខ55, #55)
+    const explicitPrefixRegex = new RegExp(`(?:កូដ|កូត|កុត|code|លេខ|ថែមកូដ|ថែមកូត|ថែម|ដាក់|កាត់|កក់|#)\\s*[:#-]?\\s*${cleanTarget}(?!\\d)`, 'i');
+    if (explicitPrefixRegex.test(s)) {
+      score += 500;
+    }
+
+    // 3. Explicit action / assignment (e.g. 55=2, 55យក2, 55x2, 55:2)
+    const explicitActionRegex = new RegExp(`(?:^|\\D)${cleanTarget}\\s*(?:[:=xX*»]|យក|កាត់|ថែម|ដាក់|កក់)\\s*\\d+`, 'i');
+    if (explicitActionRegex.test(s)) {
+      score += 400;
+    }
+
+    // 4. Check for false positives:
+    // a. Milestone / Location / Address prefix (e.g. គីឡូ55, ផ្លូវ55, ផ្ទះ55, ភូមិ5, គីឡូម៉ែត្រ55)
+    const isLocationAddress = new RegExp(`(?:គីឡូ|គឺឡូ|កីឡូ|គីឡូម៉ែត្រ|គីឡូលេខ|ផ្លូវ|ផ្ទះ|បន្ទប់|ជាន់|ភូមិ|ក្រុម|ច្រក|សង្កាត់|ខណ្ឌ|បុរី)\\s*${cleanTarget}(?!\\d)`, 'i').test(s);
+    if (isLocationAddress && !explicitPrefixRegex.test(s) && !hasParsedPair) {
+      score -= 2000; // heavily penalize location/milestone numbers
+    }
+
+    // b. Waist / Pants Size prefix (e.g. ចង្កេះ29, size29, សាយ29)
+    const isWaistOrSize = new RegExp(`(?:ចង្កេះ|ចង្កះ|ចង្កែះ|size|សាយ|ទំហំ|ស្លឹក)\\s*[:=\\s-]*${cleanTarget}(?!\\d)`, 'i').test(s);
+    if (isWaistOrSize && !explicitPrefixRegex.test(s) && !hasParsedPair) {
+      score -= 2000; // heavily penalize waist size numbers
+    }
+
+    // c. Weight indicator (e.g. 55 គីឡូ, 55kg)
+    const isWeight = new RegExp(`${cleanTarget}\\s*(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គក|kg|kilo)`, 'i').test(s);
+    if (isWeight && !explicitPrefixRegex.test(s) && !hasParsedPair) {
+      score -= 2000;
+    }
+
+    // d. Check if cleanTarget is embedded inside a phone number
+    const { phone } = extractPhoneNumber(comment);
+    if (phone && phone.includes(cleanTarget) && !explicitPrefixRegex.test(s) && !hasParsedPair) {
+      const nonPhoneText = comment.replace(phone, '');
+      const nonPhoneNorm = convertKhmerDigitsToArabic(nonPhoneText).toUpperCase();
+      if (!new RegExp(`(^|\\D)${cleanTarget}(\\D|$)`).test(nonPhoneNorm)) {
+        score -= 2000;
+      }
+    }
+
+    // e. General standalone match (as low confidence fallback)
+    if (new RegExp(`(^|\\D)${cleanTarget}(\\D|$)`).test(s)) {
+      score += 50;
+    }
+
+    // f. If another explicit code exists in this comment and matches better (e.g. comment has "កូត48" while target is 55)
+    if (!hasParsedPair && !explicitPrefixRegex.test(s) && pairs.length > 0 && !pairs.some(p => p.code.toUpperCase() === cleanTarget)) {
+      score -= 500; // this comment belongs to another product code!
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestComment = comment;
+    }
+  }
+
+  // Only return if score is positive (confidence is valid)
+  return bestScore > 0 ? bestComment : null;
+}
+

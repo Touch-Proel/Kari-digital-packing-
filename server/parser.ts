@@ -27,6 +27,7 @@ import {
   extractSizeAndColorNotes,
   normalizeKhmerText,
   extractCodeQtyPairsFromComment,
+  findBestMatchingCommentForCode,
   type ExtractedItemPair
 } from '../src/utils/commentParser.ts';
 
@@ -45,7 +46,8 @@ export {
   extractPhoneNumber,
   extractSizeAndColorNotes,
   normalizeKhmerText,
-  extractCodeQtyPairsFromComment
+  extractCodeQtyPairsFromComment,
+  findBestMatchingCommentForCode
 };
 export type { ExtractedItemPair };
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FacebookPage, FacebookPost } from '../../types';
 import { playSuccessFanfare, playWarningBuzzer } from '../../utils/audio';
-import { safeResponseJson } from '../../utils/safeFetch';
+import { safeFetchJson } from '../../utils/safeFetch';
 
 interface FacebookAuthModalProps {
   isOpen: boolean;
@@ -47,31 +47,27 @@ export function FacebookAuthModal({
   // Fetch status and pages when modal opens
   const fetchFbStatus = async () => {
     try {
-      const res = await fetch('/api/fb/status');
-      if (res.ok) {
-        const data = await safeResponseJson(res);
-        if (data) {
-          setPages(data.pages || []);
-          if (data.activePage) {
-            onPageSelected(data.activePage);
-          }
+      const res = await safeFetchJson<{ pages?: FacebookPage[]; activePage?: FacebookPage }>('/api/fb/status');
+      if (res.ok && res.data) {
+        setPages(res.data.pages || []);
+        if (res.data.activePage) {
+          onPageSelected(res.data.activePage);
         }
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // Safe fallback - avoid unhandled network rejection
     }
   };
 
   const fetchPosts = async () => {
     setLoadingPosts(true);
     try {
-      const res = await fetch(`/api/fb/page_posts${activePage?.id ? `?page_id=${activePage.id}` : ''}`);
-      if (res.ok) {
-        const list = await safeResponseJson(res);
-        setPosts(Array.isArray(list) ? list : []);
+      const res = await safeFetchJson<FacebookPost[]>(`/api/fb/page_posts${activePage?.id ? `?page_id=${activePage.id}` : ''}`);
+      if (res.ok && Array.isArray(res.data)) {
+        setPosts(res.data);
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // Safe fallback
     } finally {
       setLoadingPosts(false);
     }
@@ -86,6 +82,8 @@ export function FacebookAuthModal({
 
   // Listen for OAuth success message from popup window & storage/visibility events on mobile
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
         playSuccessFanfare();
@@ -105,7 +103,7 @@ export function FacebookAuthModal({
     };
 
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && isOpen) {
         fetchFbStatus();
       }
     };
@@ -119,7 +117,7 @@ export function FacebookAuthModal({
       window.removeEventListener('storage', handleStorage);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, []);
+  }, [isOpen, activePage?.id]);
 
   if (!isOpen) return null;
 
@@ -133,9 +131,9 @@ export function FacebookAuthModal({
     try {
       onShowToast('⏳ កំពុងទាញយក OAuth URL...');
       const clientRedirectUri = `${window.location.origin}/auth/callback`;
-      const res = await fetch(`/api/auth/facebook/url?redirect_uri=${encodeURIComponent(clientRedirectUri)}`);
-      if (!res.ok) throw new Error('Failed to get auth URL');
-      const { url } = await res.json();
+      const res = await safeFetchJson<{ url: string }>(`/api/auth/facebook/url?redirect_uri=${encodeURIComponent(clientRedirectUri)}`);
+      if (!res.ok || !res.data?.url) throw new Error(res.error || 'Failed to get auth URL');
+      const { url } = res.data;
 
       const popup = window.open(
         url,
@@ -148,24 +146,24 @@ export function FacebookAuthModal({
       }
     } catch (err: any) {
       playWarningBuzzer();
-      onShowToast(err.message || 'Error opening Facebook login', 'error');
+      onShowToast(err?.message || 'Error opening Facebook login', 'error');
     }
   };
 
   const handleSelectPage = async (pageId: string) => {
     try {
-      const res = await fetch('/api/fb/page/select', {
+      const res = await safeFetchJson<{ success?: boolean; activePage?: FacebookPage }>('/api/fb/page/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ page_id: pageId })
       });
-      const data = await res.json();
-      if (data.success && data.activePage) {
+      const data = res.data;
+      if (res.ok && data?.success && data.activePage) {
         onPageSelected(data.activePage);
         onShowToast(`✅ បានជ្រើសរើសទំព័រ៖ ${data.activePage.name}`);
         fetchPosts();
       }
-    } catch (e) {
+    } catch {
       onShowToast('Error selecting page', 'error');
     }
   };
@@ -173,9 +171,9 @@ export function FacebookAuthModal({
   const handleDeletePage = async (pageId: string, pageName: string) => {
     if (!window.confirm(`តើបងពិតជាចង់ផ្តាច់ទំព័រ «${pageName}» ចេញពីប្រព័ន្ធមែនទេ?`)) return;
     try {
-      const res = await fetch(`/api/fb/page/${pageId}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
+      const res = await safeFetchJson<{ success?: boolean; pages?: FacebookPage[]; activePage?: FacebookPage }>(`/api/fb/page/${pageId}`, { method: 'DELETE' });
+      const data = res.data;
+      if (res.ok && data?.success) {
         setPages(data.pages || []);
         if (data.activePage) {
           onPageSelected(data.activePage);
@@ -191,9 +189,9 @@ export function FacebookAuthModal({
   const handleClearAllPages = async () => {
     if (!window.confirm('តើបងពិតជាចង់ផ្តាច់ Facebook Pages ទាំងអស់ចេញពីប្រព័ន្ធមែនទេ?')) return;
     try {
-      const res = await fetch('/api/fb/pages/clear', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
+      const res = await safeFetchJson<{ success?: boolean }>('/api/fb/pages/clear', { method: 'POST' });
+      const data = res.data;
+      if (res.ok && data?.success) {
         setPages([]);
         onShowToast('🗑️ បានផ្តាច់ Facebook Pages ទាំងអស់រួចរាល់!');
         fetchPosts();
@@ -207,9 +205,9 @@ export function FacebookAuthModal({
     setIsRefreshingPages(true);
     onShowToast('⏳ កំពុងទាញយកបញ្ជី Facebook Pages ទាំងអស់...');
     try {
-      const res = await fetch('/api/fb/refresh_pages', { method: 'POST' });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.pages)) {
+      const res = await safeFetchJson<{ success?: boolean; pages?: FacebookPage[]; activePage?: FacebookPage }>('/api/fb/refresh_pages', { method: 'POST' });
+      const data = res.data;
+      if (res.ok && data?.success && Array.isArray(data.pages)) {
         setPages(data.pages);
         if (data.activePage) {
           onPageSelected(data.activePage);
@@ -234,7 +232,7 @@ export function FacebookAuthModal({
       return;
     }
     try {
-      const res = await fetch('/api/fb/manual_connect', {
+      const res = await safeFetchJson<{ success?: boolean; pages?: FacebookPage[]; activePage?: FacebookPage; imported_count?: number; error?: string }>('/api/fb/manual_connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -242,8 +240,8 @@ export function FacebookAuthModal({
           access_token: manualToken.trim()
         })
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = res.data;
+      if (res.ok && data?.success) {
         if (data.pages && Array.isArray(data.pages)) {
           setPages(data.pages);
         }
@@ -259,9 +257,9 @@ export function FacebookAuthModal({
         fetchFbStatus();
         fetchPosts();
       } else {
-        onShowToast(data.error || 'Invalid token', 'error');
+        onShowToast(data?.error || res.error || 'Invalid token', 'error');
       }
-    } catch (e) {
+    } catch {
       onShowToast('Error connecting token', 'error');
     }
   };
@@ -269,13 +267,13 @@ export function FacebookAuthModal({
   const handleSelectLive = async (liveId: string) => {
     onSelectLiveId(liveId);
     try {
-      await fetch('/api/fb/active_live', {
+      await safeFetchJson('/api/fb/active_live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ live_id: liveId })
       });
-    } catch (e) {
-      console.warn('Set active live warning:', e);
+    } catch {
+      // Safe fallback
     }
     onShowToast(`🎥 បានជ្រើសរើស Live #${liveId} រួចរាល់!`);
     if (onSyncSuccess) {
@@ -299,27 +297,29 @@ export function FacebookAuthModal({
     const displayLiveId = activeLiveId.length > 12 ? activeLiveId.slice(-8) : activeLiveId;
     onShowToast(`🔄 កំពុងទាញយកខំមិនទាំងអស់ (Full Sync) ពី Live #${displayLiveId}...`);
     try {
-      const res = await fetch('/api/fb/sync_comments', {
+      const res = await safeFetchJson<{
+        success?: boolean;
+        total_synced?: number;
+        total_baskets?: number;
+        total_orders?: number;
+        target_live_id?: string;
+        error?: string;
+      }>('/api/fb/sync_comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ post_id: activeLiveId })
       });
-      let data: any = {};
-      try {
-        data = await res.json();
-      } catch {
-        data = { success: false, error: 'ការឆ្លើយតបពីម៉ាស៊ីនបម្រើមិនត្រឹមត្រូវ' };
-      }
-      if (data.success) {
+      const data = res.data;
+      if (res.ok && data?.success) {
         playSuccessFanfare();
         const targetId = data.target_live_id || activeLiveId;
         onSelectLiveId(targetId);
-        onShowToast(`🎉 បានទាញយកខំមិនសរុប ${data.total_synced} និងបង្កើតបាន ${data.total_baskets || 0} កន្ត្រកដោយជោគជ័យ!`);
+        onShowToast(`🎉 បានទាញយកខំមិនសរុប ${data.total_synced || 0} និងបង្កើតបាន ${data.total_baskets || 0} កន្ត្រកដោយជោគជ័យ!`);
         if (onSyncSuccess) {
           onSyncSuccess(targetId, data.total_orders || 0, data.total_baskets || 0);
         }
       } else {
-        onShowToast(data.error || 'មិនអាចទាញយកខំមិនបានឡើយ', 'error');
+        onShowToast(data?.error || res.error || 'មិនអាចទាញយកខំមិនបានឡើយ', 'error');
       }
     } catch (e: any) {
       onShowToast(e?.message || 'Network error while syncing comments', 'error');

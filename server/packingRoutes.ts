@@ -23,7 +23,7 @@ import {
   stampInvoiceWorkflowUpdate
 } from './db.ts';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite.ts';
-import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment } from './parser.ts';
+import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment, findBestMatchingCommentForCode } from './parser.ts';
 import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper.ts';
 import type { Invoice, Product, OrderItem } from './types.ts';
 import { sendFacebookReply, fetchFacebookComments } from './fbAuth.ts';
@@ -2138,10 +2138,17 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
 
     const existingItem = inv.items.find(item => item.product_code.toUpperCase() === cleanCode);
     let finalQty = addQty;
+
+    // Resolve best matching customer comment for this product code
+    const bestMatchingLiveComment = findBestMatchingCommentForCode(inv.comments, cleanCode);
+    const resolvedItemComment = (comment_text && !comment_text.startsWith('[ចំណាំ]') && bestMatchingLiveComment)
+      ? bestMatchingLiveComment
+      : (comment_text || bestMatchingLiveComment || '');
+
     if (existingItem) {
       existingItem.quantity += addQty;
       finalQty = existingItem.quantity;
-      if (comment_text) existingItem.item_comment = comment_text;
+      if (resolvedItemComment) existingItem.item_comment = resolvedItemComment;
       if (prod.image_file && prod.image_file.trim() !== '') {
         existingItem.image_file = prod.image_file;
       }
@@ -2159,7 +2166,7 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
         quantity: addQty,
         price: prod.price,
         is_packed: false,
-        item_comment: comment_text || '',
+        item_comment: resolvedItemComment,
         image_file: prod.image_file || ''
       });
     }
