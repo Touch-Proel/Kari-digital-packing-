@@ -1,17 +1,25 @@
 import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { settings, saveDatabaseToDisk, getConnectedFacebookPages } from './db.ts';
 import { sendTelegramMessage } from './telegramBotService.ts';
 
 const router = Router();
 
 const MINIAPP_STORE_PATH = path.join(process.cwd(), 'server', 'miniapp_store.json');
+const EXTERNAL_BACKUP_DIR = path.join(os.homedir() || process.cwd(), '.karishop_data');
+const EXTERNAL_MINIAPP_BACKUP_PATH = path.join(EXTERNAL_BACKUP_DIR, 'miniapp_store_backup.json');
 const UPLOADS_DIR = path.join(process.cwd(), 'public', 'uploads');
 
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
+try {
+  if (!fs.existsSync(EXTERNAL_BACKUP_DIR)) {
+    fs.mkdirSync(EXTERNAL_BACKUP_DIR, { recursive: true });
+  }
+} catch {}
 
 export interface MiniAppVariant {
   id: string;
@@ -476,17 +484,56 @@ function saveMiniAppDb(dbToSave: MiniAppDatabase = miniAppDb) {
   if (miniAppSaveTimer) clearTimeout(miniAppSaveTimer);
   miniAppSaveTimer = setTimeout(() => {
     miniAppSaveTimer = null;
-    fs.promises.writeFile(MINIAPP_STORE_PATH, JSON.stringify(dbToSave, null, 2), 'utf-8').catch(err => {
+    const payload = JSON.stringify(dbToSave, null, 2);
+    fs.promises.writeFile(MINIAPP_STORE_PATH, payload, 'utf-8').catch(err => {
       console.error('[MiniApp DB] Failed to save miniapp_store.json:', err);
     });
-  }, 200);
+    fs.promises.writeFile(EXTERNAL_MINIAPP_BACKUP_PATH, payload, 'utf-8').catch(() => {});
+  }, 150);
 }
 
 function loadMiniAppDb(): MiniAppDatabase {
   try {
+    let parsed: any = null;
     if (fs.existsSync(MINIAPP_STORE_PATH)) {
-      const raw = fs.readFileSync(MINIAPP_STORE_PATH, 'utf-8');
-      const parsed = JSON.parse(raw);
+      try {
+        parsed = JSON.parse(fs.readFileSync(MINIAPP_STORE_PATH, 'utf-8'));
+      } catch {}
+    }
+    let extParsed: any = null;
+    if (fs.existsSync(EXTERNAL_MINIAPP_BACKUP_PATH)) {
+      try {
+        extParsed = JSON.parse(fs.readFileSync(EXTERNAL_MINIAPP_BACKUP_PATH, 'utf-8'));
+      } catch {}
+    }
+
+    if (!parsed && extParsed) {
+      parsed = extParsed;
+    } else if (parsed && extParsed) {
+      // Merge products and orders from Git-immune backup so git pull never wipes custom products
+      if (Array.isArray(extParsed.products) && extParsed.products.length > 0) {
+        const currentProds: MiniAppProduct[] = Array.isArray(parsed.products) ? parsed.products : [];
+        const byId = new Map<string, MiniAppProduct>();
+        for (const p of currentProds) byId.set(p.id, p);
+        for (const ep of extParsed.products) {
+          if (ep && ep.id && !byId.has(ep.id)) {
+            currentProds.push(ep);
+          } else if (ep && ep.id && byId.has(ep.id)) {
+            // Prefer external backup product if it has custom uploaded images or modified price
+            byId.set(ep.id, ep);
+          }
+        }
+        parsed.products = Array.from(byId.values());
+      }
+      if (Array.isArray(extParsed.orders) && extParsed.orders.length > (parsed.orders?.length || 0)) {
+        parsed.orders = extParsed.orders;
+      }
+      if (extParsed.config) {
+        parsed.config = { ...(parsed.config || {}), ...extParsed.config };
+      }
+    }
+
+    if (parsed) {
       const defaults = getDefaultDatabase();
       const loadedProducts: MiniAppProduct[] = Array.isArray(parsed.products) ? parsed.products : defaults.products;
       let needsSave = false;
@@ -606,18 +653,53 @@ router.get('/orders/lookup', (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. UPLOAD IMAGE (Instant 0ms non-blocking write of client-compressed JPEG/WebP)
+// 2. UPLOAD IMAGE (Supports both single-request and 600KB chunked Ultra-HD uploads)
 // ---------------------------------------------------------------------------
+const pendingUploadChunks = new Map<string, { chunks: string[]; totalChunks: number; createdAt: number }>();
+
 router.post('/upload', async (req: Request, res: Response) => {
   try {
-    const { imageBase64 } = req.body;
-    if (!imageBase64 || typeof imageBase64 !== 'string') {
+    const { imageBase64, uploadId, chunkIndex, totalChunks, chunkData } = req.body || {};
+
+    let fullBase64 = '';
+
+    // Handle chunked upload for large Ultra-HD images (> 650KB) so Nginx 1MB limit never triggers
+    if (uploadId && typeof chunkIndex === 'number' && typeof totalChunks === 'number' && typeof chunkData === 'string') {
+      const now = Date.now();
+      for (const [k, v] of pendingUploadChunks.entries()) {
+        if (now - v.createdAt > 5 * 60 * 1000) pendingUploadChunks.delete(k);
+      }
+
+      let entry = pendingUploadChunks.get(uploadId);
+      if (!entry) {
+        entry = { chunks: new Array(totalChunks).fill(''), totalChunks, createdAt: now };
+        pendingUploadChunks.set(uploadId, entry);
+      }
+      entry.chunks[chunkIndex] = chunkData;
+
+      const isComplete = entry.chunks.every(c => c.length > 0);
+      if (!isComplete) {
+        return res.json({ success: true, partial: true, chunkIndex });
+      }
+
+      fullBase64 = entry.chunks.join('');
+      pendingUploadChunks.delete(uploadId);
+    } else if (imageBase64 && typeof imageBase64 === 'string') {
+      fullBase64 = imageBase64;
+    } else {
       return res.status(400).json({ success: false, error: 'Missing imageBase64' });
     }
 
-    const matches = imageBase64.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
-    const extType = matches ? matches[1].toLowerCase() : 'jpeg';
-    const rawBase64 = matches ? matches[2] : imageBase64;
+    let extType = 'jpeg';
+    let rawBase64 = fullBase64.trim();
+    const base64MarkerIdx = rawBase64.indexOf(';base64,');
+    if (base64MarkerIdx !== -1) {
+      const header = rawBase64.slice(0, base64MarkerIdx).toLowerCase();
+      if (header.includes('png')) extType = 'png';
+      else if (header.includes('webp')) extType = 'webp';
+      rawBase64 = rawBase64.slice(base64MarkerIdx + 8);
+    }
+
     const finalBuffer = Buffer.from(rawBase64, 'base64');
     const finalExt = extType === 'png' ? 'png' : extType === 'webp' ? 'webp' : 'jpg';
 
@@ -1055,65 +1137,106 @@ router.post('/admin/send-shop-card', async (req: Request, res: Response) => {
   }
 });
 
+function persistBase64ImageIfNeeded(rawUrl: string): string {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed.startsWith('data:image/')) {
+    return trimmed;
+  }
+  // Keep lightweight inline SVG illustrations as-is
+  if (trimmed.startsWith('data:image/svg+xml')) {
+    return trimmed;
+  }
+  try {
+    const base64MarkerIdx = trimmed.indexOf(';base64,');
+    if (base64MarkerIdx === -1) return trimmed;
+    const header = trimmed.slice(0, base64MarkerIdx).toLowerCase();
+    const rawBase64 = trimmed.slice(base64MarkerIdx + 8);
+    const finalBuffer = Buffer.from(rawBase64, 'base64');
+    const finalExt = header.includes('png') ? 'png' : header.includes('webp') ? 'webp' : 'jpg';
+    const fileName = `miniapp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${finalExt}`;
+    const filePath = path.join(UPLOADS_DIR, fileName);
+    fs.writeFileSync(filePath, finalBuffer);
+
+    const distUploads = path.join(process.cwd(), 'dist', 'uploads');
+    if (fs.existsSync(distUploads)) {
+      try {
+        fs.writeFileSync(path.join(distUploads, fileName), finalBuffer);
+      } catch {}
+    }
+    return `/uploads/${fileName}`;
+  } catch (err) {
+    console.error('[MiniApp] Failed to persist inline base64 image:', err);
+    return trimmed;
+  }
+}
+
 router.post('/admin/products', (req: Request, res: Response) => {
-  const { id, code, name, price, originalPrice, category, imageUrl, images, variants } = req.body;
-  if (!code || !name) {
-    return res.status(400).json({ success: false, error: 'សូមបញ្ចូលកូដ និងឈ្មោះម៉ូតខោអាវ' });
+  try {
+    const { id, code, name, price, originalPrice, category, imageUrl, images, variants } = req.body;
+    if (!code || !name) {
+      return res.status(400).json({ success: false, error: 'សូមបញ្ចូលកូដ និងឈ្មោះម៉ូតខោអាវ' });
+    }
+
+    const rawImages: string[] = Array.isArray(images)
+      ? images.map((u: any) => String(u || '').trim()).filter(Boolean)
+      : imageUrl
+      ? [String(imageUrl).trim()]
+      : [];
+
+    const normalizedImages: string[] = rawImages.map(u => persistBase64ImageIfNeeded(u)).filter(Boolean);
+    const sanitizedPrimaryUrl = imageUrl ? persistBase64ImageIfNeeded(String(imageUrl)) : '';
+
+    const normalizedVariants: MiniAppVariant[] = Array.isArray(variants) && variants.length > 0
+      ? variants.map((v: any, idx: number) => ({
+          id: v.id || `var-${Date.now()}-${idx}`,
+          color: String(v.color || 'ធម្មតា').trim(),
+          size: (['Size S', 'Size M', 'Size L', 'Size XL', 'Free Size'].includes(v.size) ? v.size : 'Free Size') as MiniAppVariant['size'],
+          stock: Math.max(0, Number(v.stock) || 0)
+        }))
+      : [{ id: `var-${Date.now()}-0`, color: 'ស', size: 'Free Size', stock: 1 }];
+
+    const existingIndex = id ? miniAppDb.products.findIndex(p => p.id === id) : -1;
+    if (existingIndex >= 0) {
+      const fallbackImg = miniAppDb.products[existingIndex].imageUrl || SVG_A01_WHITE_TEE;
+      const primaryImg = normalizedImages[0] || sanitizedPrimaryUrl || fallbackImg;
+      const finalImages = normalizedImages.length > 0 ? normalizedImages : [primaryImg];
+
+      miniAppDb.products[existingIndex] = {
+        ...miniAppDb.products[existingIndex],
+        code: String(code).trim().toUpperCase(),
+        name: String(name).trim(),
+        price: Number(price) || 0,
+        originalPrice: Number(originalPrice) || Number(price) || 0,
+        category: ['women', 'men', 'kids', 'unisex'].includes(category) ? category : 'women',
+        imageUrl: primaryImg,
+        images: finalImages,
+        variants: normalizedVariants
+      };
+    } else {
+      const primaryImg = normalizedImages[0] || sanitizedPrimaryUrl || SVG_A02_KOREAN_DRESS;
+      const finalImages = normalizedImages.length > 0 ? normalizedImages : [primaryImg];
+
+      const newProd: MiniAppProduct = {
+        id: `prod-${Date.now()}`,
+        code: String(code).trim().toUpperCase(),
+        name: String(name).trim(),
+        price: Number(price) || 0,
+        originalPrice: Number(originalPrice) || Number(price) || 0,
+        category: ['women', 'men', 'kids', 'unisex'].includes(category) ? category : 'women',
+        imageUrl: primaryImg,
+        images: finalImages,
+        variants: normalizedVariants,
+        createdAt: new Date().toISOString()
+      };
+      miniAppDb.products.unshift(newProd);
+    }
+
+    saveMiniAppDb();
+    res.json({ success: true, products: miniAppDb.products });
+  } catch (err: any) {
+    console.error('[MiniApp Save Product Error]:', err);
+    res.status(500).json({ success: false, error: err?.message || 'មិនអាចរក្សាទុកម៉ូតខោអាវបានទេ' });
   }
-
-  const normalizedImages: string[] = Array.isArray(images)
-    ? images.map((u: any) => String(u || '').trim()).filter(Boolean)
-    : imageUrl
-    ? [String(imageUrl).trim()]
-    : [];
-
-  const normalizedVariants: MiniAppVariant[] = Array.isArray(variants) && variants.length > 0
-    ? variants.map((v: any, idx: number) => ({
-        id: v.id || `var-${Date.now()}-${idx}`,
-        color: String(v.color || 'ធម្មតា').trim(),
-        size: (['Size S', 'Size M', 'Size L', 'Size XL', 'Free Size'].includes(v.size) ? v.size : 'Free Size') as MiniAppVariant['size'],
-        stock: Math.max(0, Number(v.stock) || 0)
-      }))
-    : [{ id: `var-${Date.now()}-0`, color: 'ស', size: 'Free Size', stock: 1 }];
-
-  const existingIndex = id ? miniAppDb.products.findIndex(p => p.id === id) : -1;
-  if (existingIndex >= 0) {
-    const fallbackImg = miniAppDb.products[existingIndex].imageUrl || SVG_A01_WHITE_TEE;
-    const primaryImg = normalizedImages[0] || imageUrl || fallbackImg;
-    const finalImages = normalizedImages.length > 0 ? normalizedImages : [primaryImg];
-
-    miniAppDb.products[existingIndex] = {
-      ...miniAppDb.products[existingIndex],
-      code: String(code).trim().toUpperCase(),
-      name: String(name).trim(),
-      price: Number(price) || 0,
-      originalPrice: Number(originalPrice) || Number(price) || 0,
-      category: ['women', 'men', 'kids', 'unisex'].includes(category) ? category : 'women',
-      imageUrl: primaryImg,
-      images: finalImages,
-      variants: normalizedVariants
-    };
-  } else {
-    const primaryImg = normalizedImages[0] || imageUrl || SVG_A02_KOREAN_DRESS;
-    const finalImages = normalizedImages.length > 0 ? normalizedImages : [primaryImg];
-
-    const newProd: MiniAppProduct = {
-      id: `prod-${Date.now()}`,
-      code: String(code).trim().toUpperCase(),
-      name: String(name).trim(),
-      price: Number(price) || 0,
-      originalPrice: Number(originalPrice) || Number(price) || 0,
-      category: ['women', 'men', 'kids', 'unisex'].includes(category) ? category : 'women',
-      imageUrl: primaryImg,
-      images: finalImages,
-      variants: normalizedVariants,
-      createdAt: new Date().toISOString()
-    };
-    miniAppDb.products.unshift(newProd);
-  }
-
-  saveMiniAppDb();
-  res.json({ success: true, products: miniAppDb.products });
 });
 
 router.delete('/admin/products/:id', (req: Request, res: Response) => {

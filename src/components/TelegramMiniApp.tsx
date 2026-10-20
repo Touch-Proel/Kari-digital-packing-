@@ -261,6 +261,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     { id: 'v-1', color: 'ស', size: 'Size M', stock: 1 }
   ]);
   const [isUploadingProductImg, setIsUploadingProductImg] = useState<boolean>(false);
+  const [isSavingProduct, setIsSavingProduct] = useState<boolean>(false);
   const [botTokenInput, setBotTokenInput] = useState<string>('');
   const [isSettingUpBot, setIsSettingUpBot] = useState<boolean>(false);
   const [isSendingShopCard, setIsSendingShopCard] = useState<boolean>(false);
@@ -650,73 +651,131 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     );
   };
 
-  const handleUploadFile = async (file: File, target: 'slip' | 'product' | 'logo' | 'khqr') => {
+  const compressImageOnClient = (rawFile: File, target: 'slip' | 'product' | 'logo' | 'khqr'): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      // Keep original file untouched if <= 800KB for maximum crystal-clear sharpness
+      if (rawFile.size <= 800 * 1024 && ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(rawFile.type)) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result);
+          } else {
+            reject(new Error('FileReader error'));
+          }
+        };
+        reader.onerror = () => reject(new Error('FileReader error'));
+        reader.readAsDataURL(rawFile);
+        return;
+      }
+
+      const objectUrl = URL.createObjectURL(rawFile);
+      const img = new Image();
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Image load error'));
+      };
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        try {
+          const canvas = document.createElement('canvas');
+          // Full HD 1800px resolution at 0.92 quality so clothing details & textures stay 100% sharp when zoomed
+          const maxDim = target === 'logo' ? 1000 : target === 'khqr' ? 1400 : target === 'slip' ? 1600 : 1800;
+          let w = img.naturalWidth || img.width || 1600;
+          let h = img.naturalHeight || img.height || 1600;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+            resolve(dataUrl);
+          } else {
+            reject(new Error('Canvas context error'));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.src = objectUrl;
+    });
+  };
+
+  const uploadBase64ToServer = async (base64Data: string): Promise<string> => {
+    if (!base64Data.startsWith('data:image/') || base64Data.startsWith('data:image/svg+xml')) {
+      return base64Data;
+    }
+
+    const CHUNK_SIZE = 550_000; // ~550KB per request, always safely below Nginx's default 1MB limit
+
+    // If image is > 550KB Base64, upload in chunks so Ultra-HD images never hit 413 Payload Too Large
+    if (base64Data.length > CHUNK_SIZE) {
+      const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const totalChunks = Math.ceil(base64Data.length / CHUNK_SIZE);
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkData = base64Data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        let chunkOk = false;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch('/api/miniapp/upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                uploadId,
+                chunkIndex: i,
+                totalChunks,
+                chunkData
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              chunkOk = true;
+              if (data.success && data.url) {
+                return String(data.url);
+              }
+              break;
+            }
+          } catch {}
+        }
+        if (!chunkOk) break;
+      }
+    }
+
+    // Standard single-request upload for images <= 550KB
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch('/api/miniapp/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64Data })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.url) {
+            return String(data.url);
+          }
+        }
+      } catch {}
+    }
+    return base64Data;
+  };
+
+  const handleUploadFile = async (file: File, target: 'slip' | 'product' | 'logo' | 'khqr', silentToast = false) => {
     if (target === 'slip') setIsUploadingSlip(true);
     else setIsUploadingProductImg(true);
 
-    const compressImageOnClient = (rawFile: File): Promise<string> => {
-      return new Promise((resolve, reject) => {
-        // If file is already small (< 1.5MB) and is PNG/WebP/JPEG, read directly without lossy re-encoding for maximum sharpness
-        if (rawFile.size <= 1.5 * 1024 * 1024 && ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(rawFile.type)) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            if (typeof reader.result === 'string') {
-              resolve(reader.result);
-            } else {
-              reject(new Error('FileReader error'));
-            }
-          };
-          reader.onerror = () => reject(new Error('FileReader error'));
-          reader.readAsDataURL(rawFile);
-          return;
-        }
-
-        const objectUrl = URL.createObjectURL(rawFile);
-        const img = new Image();
-        img.onerror = () => {
-          URL.revokeObjectURL(objectUrl);
-          reject(new Error('Image load error'));
-        };
-        img.onload = () => {
-          URL.revokeObjectURL(objectUrl);
-          try {
-            const canvas = document.createElement('canvas');
-            // Use Full HD / Retina resolution (1800px for products, 1000px for logos/khqr, 1400px for payment slips)
-            const maxDim = target === 'logo' || target === 'khqr' ? 1000 : target === 'slip' ? 1400 : 1800;
-            let w = img.naturalWidth || img.width || 1200;
-            let h = img.naturalHeight || img.height || 1200;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) {
-                h = Math.round((h * maxDim) / w);
-                w = maxDim;
-              } else {
-                w = Math.round((w * maxDim) / h);
-                h = maxDim;
-              }
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.imageSmoothingEnabled = true;
-              ctx.imageSmoothingQuality = 'high';
-              ctx.drawImage(img, 0, 0, w, h);
-              // Preserve lossless PNG for logos/QR codes/transparent graphics, otherwise use 0.95 Ultra-HD JPEG
-              const outputMime = ((target === 'logo' || target === 'khqr') && rawFile.type === 'image/png') ? 'image/png' : 'image/jpeg';
-              resolve(outputMime === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.95));
-            } else {
-              reject(new Error('Canvas context error'));
-            }
-          } catch (e) {
-            reject(e);
-          }
-        };
-        img.src = objectUrl;
-      });
-    };
-
     try {
-      const compressedBase64 = await compressImageOnClient(file);
+      const compressedBase64 = await compressImageOnClient(file, target);
 
       // Immediately preview the compressed image so user sees it right away
       if (target === 'slip') {
@@ -725,34 +784,17 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         setConfig(prev => ({ ...prev, storeLogoUrl: compressedBase64 }));
       } else if (target === 'khqr') {
         setConfig(prev => ({ ...prev, khqrImageUrl: compressedBase64 }));
-      } else {
-        setFormImageUrl(compressedBase64);
       }
 
-      const res = await fetch('/api/miniapp/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: compressedBase64 })
-      });
+      const finalUploadedUrl = await uploadBase64ToServer(compressedBase64);
 
-      let finalUploadedUrl = compressedBase64;
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.url) {
-          finalUploadedUrl = data.url;
-          if (target === 'slip') {
-            setPaymentSlipUrl(data.url);
-          } else if (target === 'logo') {
-            setConfig(prev => ({ ...prev, storeLogoUrl: data.url }));
-          } else if (target === 'khqr') {
-            setConfig(prev => ({ ...prev, khqrImageUrl: data.url }));
-          } else {
-            setFormImageUrl(data.url);
-          }
-        }
-      }
-
-      if (target === 'product') {
+      if (target === 'slip') {
+        setPaymentSlipUrl(finalUploadedUrl);
+      } else if (target === 'logo') {
+        setConfig(prev => ({ ...prev, storeLogoUrl: finalUploadedUrl }));
+      } else if (target === 'khqr') {
+        setConfig(prev => ({ ...prev, khqrImageUrl: finalUploadedUrl }));
+      } else if (target === 'product') {
         setFormImages(prev => {
           const next = [...prev, finalUploadedUrl];
           setFormImageUrl(next[0] || finalUploadedUrl);
@@ -778,14 +820,17 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           body: JSON.stringify(updatedCfg)
         }).catch(() => null);
         showToast('✅ បានដាក់រូប KHQR ធនាគាររបស់ហាងរួចរាល់!');
-      } else {
+      } else if (!silentToast) {
         showToast('✅ បានបង្ហោះរូបម៉ូតខោអាវរួចរាល់!');
       }
     } catch {
       showToast('មិនអាចអានរូបភាពបានទេ សូមជ្រើសរើសរូបផ្សេង', 'error');
     } finally {
-      setIsUploadingSlip(false);
-      setIsUploadingProductImg(false);
+      if (target === 'slip') {
+        setIsUploadingSlip(false);
+      } else if (!silentToast) {
+        setIsUploadingProductImg(false);
+      }
     }
   };
 
@@ -794,9 +839,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     if (files.length === 0) return;
     setIsUploadingProductImg(true);
     try {
-      for (const file of files) {
-        await handleUploadFile(file, 'product');
+      for (let i = 0; i < files.length; i++) {
+        await handleUploadFile(files[i], 'product', true);
       }
+      showToast(`✅ បានបង្ហោះរូបភាពចំនួន ${files.length} សន្លឹករួចរាល់!`);
     } finally {
       setIsUploadingProductImg(false);
     }
@@ -928,9 +974,31 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isUploadingProductImg) {
+      showToast('⏳ សូមរង់ចាំការបង្ហោះរូបភាពឱ្យចប់សិន...', 'error');
+      return;
+    }
+    if (isSavingProduct) return;
+
+    setIsSavingProduct(true);
     try {
-      const cleanedImages = formImages.filter(Boolean);
-      const primaryImage = cleanedImages[0] || formImageUrl;
+      // Ensure any inline base64 images are uploaded individually first so the POST body stays tiny (< 5KB)
+      const rawList = formImages.filter(Boolean);
+      const uploadedImages: string[] = [];
+      for (const imgItem of rawList) {
+        if (imgItem.startsWith('data:image/') && !imgItem.startsWith('data:image/svg+xml')) {
+          const serverUrl = await uploadBase64ToServer(imgItem);
+          uploadedImages.push(serverUrl);
+        } else {
+          uploadedImages.push(imgItem);
+        }
+      }
+
+      let primaryImage = uploadedImages[0] || formImageUrl;
+      if (primaryImage && primaryImage.startsWith('data:image/') && !primaryImage.startsWith('data:image/svg+xml')) {
+        primaryImage = await uploadBase64ToServer(primaryImage);
+      }
+
       const res = await fetch('/api/miniapp/admin/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -942,20 +1010,37 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           originalPrice: parseFloat(formOrigPrice) || 0,
           category: formCategory,
           imageUrl: primaryImage,
-          images: cleanedImages.length > 0 ? cleanedImages : primaryImage ? [primaryImage] : [],
+          images: uploadedImages.length > 0 ? uploadedImages : primaryImage ? [primaryImage] : [],
           variants: formVariants
         })
       });
+
+      if (!res.ok) {
+        let errText = 'មិនអាចរក្សាទុកបានទេ';
+        try {
+          const errJson = await res.json();
+          if (errJson?.error) errText = errJson.error;
+        } catch {
+          if (res.status === 413) {
+            errText = 'ទំហំរូបភាពធំពេក សូមលុបរូបចាស់រួចជ្រើសរើសរូបម្តងទៀត';
+          }
+        }
+        showToast(errText, 'error');
+        return;
+      }
+
       const data = await res.json();
       if (data.success) {
         setProducts(data.products);
         setIsProductFormOpen(false);
-        showToast('រក្សាទុកម៉ូតខោអាវដោយជោគជ័យ!');
+        showToast('✅ រក្សាទុកម៉ូតខោអាវដោយជោគជ័យ!');
       } else {
         showToast(data.error || 'មិនអាចរក្សាទុកបានទេ', 'error');
       }
     } catch {
       showToast('កំហុសបណ្តាញពេលរក្សាទុកម៉ូតខោអាវ', 'error');
+    } finally {
+      setIsSavingProduct(false);
     }
   };
 
@@ -4123,9 +4208,18 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
             <button
               type="submit"
-              className="w-full py-3 rounded-2xl bg-[#DB1D43] text-white font-extrabold text-xs cursor-pointer mt-2"
+              disabled={isUploadingProductImg || isSavingProduct}
+              className={`w-full py-3 rounded-2xl text-white font-extrabold text-xs mt-2 transition-opacity ${
+                isUploadingProductImg || isSavingProduct
+                  ? 'bg-slate-400 cursor-not-allowed opacity-80'
+                  : 'bg-[#DB1D43] hover:bg-[#BE123C] cursor-pointer'
+              }`}
             >
-              រក្សាទុកម៉ូតខោអាវ
+              {isUploadingProductImg
+                ? '⏳ កំពុងបង្ហោះរូបភាព សូមរង់ចាំបន្តិច...'
+                : isSavingProduct
+                ? '⏳ កំពុងរក្សាទុកម៉ូតខោអាវ...'
+                : 'រក្សាទុកម៉ូតខោអាវ'}
             </button>
           </form>
         </div>
