@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import {
+  generateBakongKHQRString,
+  generateKHQRDataUrl,
+  decodeQRFromImageFile,
+  parseBakongKHQRString,
+  drawKHQRToCanvas
+} from '../utils/khqr';
 
 export interface MiniAppVariant {
   id: string;
@@ -44,8 +51,12 @@ export interface MiniAppConfig {
   shippingFeeProvince: number;
   freeShippingThreshold: number;
   khqrMerchantName: string;
+  khqrAccountNumber?: string;
+  khqrBakongId?: string;
   khqrAccountInfo: string;
   khqrImageUrl: string;
+  khqrRawString?: string;
+  abaPaymentLink?: string;
   telegramNotifyChatId?: string;
   telegramBotToken?: string;
   adminPin?: string;
@@ -216,7 +227,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [completedOrder, setCompletedOrder] = useState<MiniAppOrder | null>(null);
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Customer Checkout Form
+  // Customer Checkout Form & Multi-Step KHQR Payment Flow
   const [customerName, setCustomerName] = useState<string>(() => localStorage.getItem('tg_cust_name') || '');
   const [telegramUsername, setTelegramUsername] = useState<string>('');
   const [telegramUserId, setTelegramUserId] = useState<string>('');
@@ -227,6 +238,15 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [zone, setZone] = useState<'PP' | 'PROVINCE'>('PP');
   const [deliveryCompany, setDeliveryCompany] = useState<string>('ដឹកក្នុងក្រុងភ្នំពេញ');
   const [paymentMethod, setPaymentMethod] = useState<'KHQR' | 'COD'>('KHQR');
+  const [selectedKhqrType, setSelectedKhqrType] = useState<'KHQR' | 'ABA_KHQR'>('KHQR');
+  const [checkoutStep, setCheckoutStep] = useState<'SUMMARY' | 'KHQR_SCAN'>('SUMMARY');
+  const [isEditingAddress, setIsEditingAddress] = useState<boolean>(() => {
+    const savedPhone = localStorage.getItem('tg_cust_phone') || '';
+    const savedAddr = localStorage.getItem('tg_cust_address') || '';
+    return !savedPhone.trim() || !savedAddr.trim();
+  });
+  const [qrCountdown, setQrCountdown] = useState<number>(300);
+  const [isGeneratingKhqrCard, setIsGeneratingKhqrCard] = useState<boolean>(false);
   const [paymentSlipUrl, setPaymentSlipUrl] = useState<string>('');
   const [isUploadingSlip, setIsUploadingSlip] = useState<boolean>(false);
   const [orderNote, setOrderNote] = useState<string>('');
@@ -775,6 +795,23 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     else setIsUploadingProductImg(true);
 
     try {
+      // If uploading a KHQR screenshot in Admin Settings, automatically decode the real EMVCo QR string using jsQR!
+      let decodedKhqrMeta: Partial<MiniAppConfig> = {};
+      if (target === 'khqr') {
+        try {
+          const { qrString } = await decodeQRFromImageFile(file);
+          if (qrString) {
+            const parsed = parseBakongKHQRString(qrString);
+            decodedKhqrMeta.khqrRawString = qrString;
+            if (parsed.isValidKHQR) {
+              if (parsed.accountNumber) decodedKhqrMeta.khqrAccountNumber = parsed.accountNumber;
+              if (parsed.bakongAccountId) decodedKhqrMeta.khqrBakongId = parsed.bakongAccountId;
+              if (parsed.merchantName) decodedKhqrMeta.khqrMerchantName = parsed.merchantName;
+            }
+          }
+        } catch {}
+      }
+
       const compressedBase64 = await compressImageOnClient(file, target);
 
       // Immediately preview the compressed image so user sees it right away
@@ -783,7 +820,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       } else if (target === 'logo') {
         setConfig(prev => ({ ...prev, storeLogoUrl: compressedBase64 }));
       } else if (target === 'khqr') {
-        setConfig(prev => ({ ...prev, khqrImageUrl: compressedBase64 }));
+        setConfig(prev => ({ ...prev, ...decodedKhqrMeta, khqrImageUrl: compressedBase64 }));
       }
 
       const finalUploadedUrl = await uploadBase64ToServer(compressedBase64);
@@ -793,7 +830,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       } else if (target === 'logo') {
         setConfig(prev => ({ ...prev, storeLogoUrl: finalUploadedUrl }));
       } else if (target === 'khqr') {
-        setConfig(prev => ({ ...prev, khqrImageUrl: finalUploadedUrl }));
+        setConfig(prev => ({ ...prev, ...decodedKhqrMeta, khqrImageUrl: finalUploadedUrl }));
       } else if (target === 'product') {
         setFormImages(prev => {
           const next = [...prev, finalUploadedUrl];
@@ -813,13 +850,17 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         }).catch(() => null);
         showToast('✅ បានប្តូររូបឡូហ្គោហាងរួចរាល់!');
       } else if (target === 'khqr') {
-        const updatedCfg = { ...config, khqrImageUrl: finalUploadedUrl };
+        const updatedCfg = { ...config, ...decodedKhqrMeta, khqrImageUrl: finalUploadedUrl };
         await fetch('/api/miniapp/admin/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updatedCfg)
         }).catch(() => null);
-        showToast('✅ បានដាក់រូប KHQR ធនាគាររបស់ហាងរួចរាល់!');
+        showToast(
+          decodedKhqrMeta.khqrAccountNumber
+            ? `✅ បានអានកូដ KHQR ស្វ័យប្រវត្តិ (គណនី ${decodedKhqrMeta.khqrAccountNumber})!`
+            : '✅ បានដាក់រូប KHQR ធនាគាររបស់ហាងរួចរាល់!'
+        );
       } else if (!silentToast) {
         showToast('✅ បានបង្ហោះរូបម៉ូតខោអាវរួចរាល់!');
       }
@@ -848,17 +889,360 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     }
   };
 
-  const handleSubmitOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Live 5-minute countdown timer when on the KHQR Scan screen
+  useEffect(() => {
+    if (!isCheckoutOpen || checkoutStep !== 'KHQR_SCAN') return;
+    const timer = setInterval(() => {
+      setQrCountdown(prev => (prev > 0 ? prev - 1 : 300));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isCheckoutOpen, checkoutStep]);
+
+  const formatCountdown = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  // Extract clean ABA Account Number (digits only) for display & copy
+  const cleanAbaAccountNumber = useMemo(() => {
+    if (config.khqrAccountNumber && /\d{6,}/.test(config.khqrAccountNumber)) {
+      return config.khqrAccountNumber.replace(/\s+/g, '');
+    }
+    const matchFromInfo = (config.khqrAccountInfo || '').match(/\d[\d\s]{5,}\d/);
+    if (matchFromInfo) {
+      return matchFromInfo[0].replace(/\s+/g, '');
+    }
+    return '000474559';
+  }, [config.khqrAccountNumber, config.khqrAccountInfo]);
+
+  // Real NBC EMVCo Dynamic Bakong KHQR String (Scannable by ABA Mobile, ACLEDA, Wing, Bakong, etc.)
+  const realKhqrPayloadString = useMemo(() => {
+    try {
+      // If merchant uploaded a real KHQR and we decoded its account info, use that for dynamic amount generation
+      const parsedRaw = config.khqrRawString ? parseBakongKHQRString(config.khqrRawString) : null;
+      const effectiveAccount = parsedRaw?.accountNumber || cleanAbaAccountNumber;
+      const effectiveBakongId = parsedRaw?.bakongAccountId || config.khqrBakongId || 'abaakhppxxx@abaa';
+      const effectiveMerchantType = parsedRaw?.merchantType || 'merchant';
+      const effectiveMerchantName = config.khqrMerchantName || parsedRaw?.merchantName || config.storeName || 'Kari Arnett';
+
+      return generateBakongKHQRString({
+        amount: Number(cartTotal.toFixed(2)),
+        currency: 'USD',
+        storeLabel: effectiveMerchantName,
+        config: {
+          bankName: 'ABA Bank',
+          accountNumber: effectiveAccount,
+          accountName: effectiveMerchantName,
+          merchantName: effectiveMerchantName,
+          bakongAccountId: effectiveBakongId,
+          merchantCity: parsedRaw?.merchantCity || 'Phnom Penh',
+          currency: 'USD',
+          qrMode: 'dynamic',
+          merchantType: effectiveMerchantType,
+          acquiringBank: parsedRaw?.acquiringBank || 'abaa',
+          enabled: true
+        }
+      });
+    } catch {
+      return config.khqrRawString || '';
+    }
+  }, [cartTotal, cleanAbaAccountNumber, config.khqrBakongId, config.khqrMerchantName, config.khqrRawString, config.storeName]);
+
+  const [generatedKhqrDataUrl, setGeneratedKhqrDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (!realKhqrPayloadString) return;
+    generateKHQRDataUrl(realKhqrPayloadString, { width: 480, margin: 1 })
+      .then(url => setGeneratedKhqrDataUrl(url))
+      .catch(() => {});
+  }, [realKhqrPayloadString]);
+
+  const hasCustomUploadedKhqrImage = Boolean(
+    config.khqrImageUrl &&
+      !config.khqrImageUrl.includes('api.qrserver.com') &&
+      !config.khqrRawString
+  );
+
+  const getKhqrQrSrc = (): string => {
+    if (hasCustomUploadedKhqrImage) return config.khqrImageUrl;
+    if (generatedKhqrDataUrl) return generatedKhqrDataUrl;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=480x480&margin=4&data=${encodeURIComponent(realKhqrPayloadString)}`;
+  };
+
+  // Direct 1-Click Open ABA Mobile App (plus auto-copy ABA account number for instant paste if needed)
+  const handleOpenAbaDirect = () => {
+    try {
+      navigator.clipboard?.writeText(cleanAbaAccountNumber).catch(() => {});
+    } catch {}
+
+    const customAbaLink = (config.abaPaymentLink || '').trim();
+    if (customAbaLink && (customAbaLink.startsWith('http://') || customAbaLink.startsWith('https://') || customAbaLink.startsWith('abamobilebank://'))) {
+      showToast(`🚀 កំពុងបើកកម្មវិធី ABA Mobile... (គណនី ${cleanAbaAccountNumber})`);
+      try {
+        const tgWebApp = (window as any).Telegram?.WebApp;
+        if (tgWebApp && typeof tgWebApp.openLink === 'function' && customAbaLink.startsWith('http')) {
+          tgWebApp.openLink(customAbaLink);
+          return;
+        }
+      } catch {}
+      window.location.href = customAbaLink;
+      return;
+    }
+
+    // Standard ABA Mobile Deep Link with encoded real EMVCo KHQR payload
+    const abaSchemeUrl = `abamobilebank://ababank.com?type=payway&qrcode=${encodeURIComponent(realKhqrPayloadString)}`;
+    showToast(`🚀 កំពុងបើក ABA Mobile និងចម្លងលេខគណនី ${cleanAbaAccountNumber} ស្វ័យប្រវត្តិ!`);
+
+    try {
+      const a = document.createElement('a');
+      a.href = abaSchemeUrl;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      window.location.href = abaSchemeUrl;
+    }
+  };
+
+  // Renders the complete official Bakong KHQR Card to a high-res PNG Blob for Save / Share
+  const generateKhqrCardBlob = async (): Promise<Blob | null> => {
+    return new Promise(resolve => {
+      try {
+        const canvas = document.createElement('canvas');
+        const W = 720;
+        const H = 1000;
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+
+        // Outer clean background
+        ctx.fillStyle = '#F4F5F7';
+        ctx.fillRect(0, 0, W, H);
+
+        // Card container
+        const cardX = 50;
+        const cardY = 45;
+        const cardW = W - 100;
+        const cardH = H - 90;
+        const radius = 44;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(cardX, cardY, cardW, cardH, radius);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.shadowColor = 'rgba(15,23,42,0.10)';
+        ctx.shadowBlur = 32;
+        ctx.shadowOffsetY = 12;
+        ctx.fill();
+        ctx.restore();
+
+        // Clip inside card for header
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(cardX, cardY, cardW, cardH, radius);
+        ctx.clip();
+
+        // Official KHQR Red top header (#CE3232) with right diagonal notch
+        ctx.fillStyle = '#CE3232';
+        ctx.beginPath();
+        ctx.moveTo(cardX, cardY);
+        ctx.lineTo(cardX + cardW, cardY);
+        ctx.lineTo(cardX + cardW, cardY + 152);
+        ctx.lineTo(cardX + cardW - 105, cardY + 106);
+        ctx.lineTo(cardX, cardY + 106);
+        ctx.closePath();
+        ctx.fill();
+
+        // White KHQR title in header
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '900 42px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('KHQR', W / 2, cardY + 68);
+
+        // Merchant Name & Total Amount
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#0F172A';
+        ctx.font = '800 28px system-ui, -apple-system, sans-serif';
+        ctx.fillText(config.khqrMerchantName || config.storeName, cardX + 52, cardY + 166);
+
+        ctx.font = '900 54px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#0F172A';
+        ctx.fillText(`$${cartTotal.toFixed(2)}`, cardX + 52, cardY + 232);
+
+        // Dashed divider
+        ctx.strokeStyle = '#E2E8F0';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([12, 10]);
+        ctx.beginPath();
+        ctx.moveTo(cardX + 48, cardY + 268);
+        ctx.lineTo(cardX + cardW - 48, cardY + 268);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Inner QR rounded border box
+        const qrBoxX = cardX + 52;
+        const qrBoxY = cardY + 302;
+        const qrBoxSize = cardW - 104;
+        ctx.strokeStyle = '#E2E8F0';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.roundRect(qrBoxX, qrBoxY, qrBoxSize, qrBoxSize, 32);
+        ctx.stroke();
+
+        // Draw genuine EMVCo QR directly onto the canvas
+        if (!hasCustomUploadedKhqrImage && realKhqrPayloadString) {
+          drawKHQRToCanvas(ctx, realKhqrPayloadString, W / 2, qrBoxY + 36, qrBoxSize - 72);
+          const cx = qrBoxX + qrBoxSize / 2;
+          const cy = qrBoxY + qrBoxSize / 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 40, 0, Math.PI * 2);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(cx, cy, 35, 0, Math.PI * 2);
+          ctx.fillStyle = '#CE3232';
+          ctx.fill();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '900 16px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('KHQR', cx, cy);
+          ctx.restore();
+          canvas.toBlob(blob => resolve(blob), 'image/png', 1.0);
+          return;
+        }
+
+        const qrImg = new Image();
+        qrImg.crossOrigin = 'anonymous';
+        qrImg.onload = () => {
+          const pad = 30;
+          ctx.drawImage(qrImg, qrBoxX + pad, qrBoxY + pad, qrBoxSize - pad * 2, qrBoxSize - pad * 2);
+          ctx.restore();
+          canvas.toBlob(blob => resolve(blob), 'image/png', 1.0);
+        };
+        qrImg.onerror = () => {
+          ctx.restore();
+          canvas.toBlob(blob => resolve(blob), 'image/png', 1.0);
+        };
+        qrImg.src = getKhqrQrSrc();
+      } catch {
+        resolve(null);
+      }
+    });
+  };
+
+  const handleSaveKhqrImage = async () => {
+    if (isGeneratingKhqrCard) return;
+    setIsGeneratingKhqrCard(true);
+    try {
+      const blob = await generateKhqrCardBlob();
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `KHQR-${(config.khqrMerchantName || 'Shop').replace(/\s+/g, '_')}-${cartTotal.toFixed(2)}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 3000);
+        showToast('✅ បានរក្សាទុករូប KHQR ចូលទូរស័ព្ទរួចរាល់! អាចបើកស្កេនក្នុង ABA / ធនាគារបានភ្លាម');
+      } else {
+        window.open(getKhqrQrSrc(), '_blank');
+      }
+    } catch {
+      showToast('មិនអាចរក្សាទុករូប QR បានទេ', 'error');
+    } finally {
+      setIsGeneratingKhqrCard(false);
+    }
+  };
+
+  const handleShareKhqrImage = async () => {
+    if (isGeneratingKhqrCard) return;
+    setIsGeneratingKhqrCard(true);
+    try {
+      const blob = await generateKhqrCardBlob();
+      if (blob && navigator.share) {
+        const file = new File([blob], `KHQR-${cartTotal.toFixed(2)}.png`, { type: 'image/png' });
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            title: `KHQR ${config.storeName} ($${cartTotal.toFixed(2)})`,
+            text: `ទូទាត់ប្រាក់ $${cartTotal.toFixed(2)} ទៅកាន់ ${config.khqrMerchantName || config.storeName} (ABA: ${cleanAbaAccountNumber})`,
+            files: [file]
+          });
+          showToast('✅ បានចែករំលែករូប KHQR រួចរាល់!');
+          return;
+        }
+      }
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `KHQR-${cartTotal.toFixed(2)}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 3000);
+        showToast('✅ បានទាញយករូប KHQR សម្រាប់ចែករំលែកទៅកម្មវិធីធនាគារ!');
+      }
+    } catch {
+      // User cancelled share sheet or fallback
+    } finally {
+      setIsGeneratingKhqrCard(false);
+    }
+  };
+
+  const handleChoosePaymentMethod = (chosen: 'KHQR' | 'ABA_KHQR' | 'COD') => {
+    if (cart.length === 0) {
+      showToast('កន្ត្រកទំនិញទទេ!', 'error');
+      return;
+    }
+    if (!phone.trim() || !address.trim()) {
+      setIsEditingAddress(true);
+      showToast('សូមបំពេញលេខទូរស័ព្ទ និងអាសយដ្ឋានដឹកជញ្ជូនជាមុនសិន!', 'error');
+      return;
+    }
+    try {
+      localStorage.setItem('tg_cust_name', customerName);
+      localStorage.setItem('tg_cust_phone', phone);
+      localStorage.setItem('tg_cust_address', address);
+    } catch {}
+    setIsEditingAddress(false);
+
+    if (chosen === 'COD') {
+      setPaymentMethod('COD');
+      submitOrderWithMethod('COD');
+    } else {
+      setPaymentMethod('KHQR');
+      setSelectedKhqrType(chosen);
+      setQrCountdown(300);
+      setCheckoutStep('KHQR_SCAN');
+      // If user clicked ABA QR, immediately trigger ABA Mobile direct launch!
+      if (chosen === 'ABA_KHQR') {
+        setTimeout(() => {
+          handleOpenAbaDirect();
+        }, 120);
+      }
+    }
+  };
+
+  const submitOrderWithMethod = async (methodOverride?: 'KHQR' | 'COD') => {
+    const finalMethod = methodOverride || paymentMethod;
     if (cart.length === 0) {
       showToast('កន្ត្រកទំនិញទទេ!', 'error');
       return;
     }
     if (!phone.trim()) {
+      setIsEditingAddress(true);
       showToast('សូមបញ្ចូលលេខទូរស័ព្ទរបស់អ្នក!', 'error');
       return;
     }
     if (!address.trim()) {
+      setIsEditingAddress(true);
       showToast('សូមបញ្ចូលទីតាំងដឹកជញ្ជូនរបស់អ្នក!', 'error');
       return;
     }
@@ -883,7 +1267,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           address: address.trim(),
           zone,
           deliveryCompany,
-          paymentMethod,
+          paymentMethod: finalMethod,
           paymentSlipUrl,
           items: cart,
           note: orderNote.trim()
@@ -902,6 +1286,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       setCart([]);
       setPaymentSlipUrl('');
       setOrderNote('');
+      setCheckoutStep('SUMMARY');
       setIsCheckoutOpen(false);
       setCompletedOrder(data.order);
 
@@ -917,6 +1302,11 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     } finally {
       setIsSubmittingOrder(false);
     }
+  };
+
+  const handleSubmitOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await submitOrderWithMethod();
   };
 
   // Admin Handlers
@@ -1348,7 +1738,11 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
             <button
               type="button"
-              onClick={() => setIsCheckoutOpen(true)}
+              onClick={() => {
+                setCheckoutStep('SUMMARY');
+                setIsEditingAddress(!phone.trim() || !address.trim());
+                setIsCheckoutOpen(true);
+              }}
               className="relative w-10 h-10 rounded-full bg-[#FFF1F2] hover:bg-rose-100 border border-rose-200/80 flex items-center justify-center text-[#DB1D43] cursor-pointer active:scale-95 transition-transform"
               aria-label="មើលកន្ត្រកទំនិញ"
             >
@@ -1929,7 +2323,11 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           <div className="fixed bottom-3 left-1/2 -translate-x-1/2 w-full max-w-[460px] px-3 z-40">
             <button
               type="button"
-              onClick={() => setIsCheckoutOpen(true)}
+              onClick={() => {
+                setCheckoutStep('SUMMARY');
+                setIsEditingAddress(!phone.trim() || !address.trim());
+                setIsCheckoutOpen(true);
+              }}
               className="w-full bg-[#DB1D43] hover:bg-[#BE123C] text-white rounded-2xl px-4 py-3 shadow-[0_12px_28px_rgba(219,29,67,0.38)] border border-rose-400/30 flex items-center justify-between gap-2 active:scale-[0.99] transition-all cursor-pointer"
             >
               <div className="flex items-center gap-2.5 min-w-0">
@@ -2119,70 +2517,327 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       })()}
 
       {/* =====================================================================
-          MODAL 2: CHECKOUT DRAWER (KHQR SCAN OR COD)
+          MODAL 2: FULL-SCREEN CHECKOUT & OFFICIAL KHQR / ABA KHQR (Unified App Theme)
          ===================================================================== */}
       {isCheckoutOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center"
-          onClick={() => setIsCheckoutOpen(false)}
-        >
-          <div
-            className="bg-white w-full max-w-[480px] max-h-[92vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="px-4 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">🛍️</span>
-                <h2 className="font-extrabold text-base text-slate-900">
-                  កន្ត្រកទំនិញ & ការទូទាត់ ({totalCartItems} មុខ)
+        <div className="fixed inset-0 z-50 bg-[#F8FAFC] flex flex-col items-center justify-start overflow-hidden">
+          <div className="w-full max-w-[480px] h-full flex flex-col bg-[#F8FAFC] overflow-hidden shadow-2xl">
+            {/* 1. TOP HEADER + 3-STEP PROGRESS BAR (Unified Rose-Crimson App Theme) */}
+            <div className="bg-white px-5 pt-4 pb-3.5 border-b border-slate-100 shadow-[0_1px_4px_rgba(15,23,42,0.03)] shrink-0">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (checkoutStep === 'KHQR_SCAN') {
+                      setCheckoutStep('SUMMARY');
+                    } else {
+                      setIsCheckoutOpen(false);
+                    }
+                  }}
+                  className="w-10 h-10 rounded-full bg-[#F8FAFC] hover:bg-[#FFF1F2] border border-[#E2E8F0] hover:border-rose-200 text-[#0F172A] hover:text-[#DB1D43] flex items-center justify-center cursor-pointer active:scale-95 transition-all"
+                  aria-label="ត្រឡប់ក្រោយ"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5m0 0l7-7m-7 7l7 7" />
+                  </svg>
+                </button>
+
+                <h2 className="font-black text-[18px] text-[#0F172A] tracking-tight">
+                  ទូទាត់ប្រាក់
                 </h2>
+
+                <div className="w-10 h-10" />
               </div>
-              <button
-                type="button"
-                onClick={() => setIsCheckoutOpen(false)}
-                className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center cursor-pointer"
-              >
-                ✕
-              </button>
+
+              {/* 3-Step Horizontal Stepper with App Brand Rose-Crimson Circles */}
+              <div className="mt-4 px-3 flex items-start justify-between">
+                {/* Step 1: អាសយដ្ឋាន */}
+                <div className="flex flex-col items-center">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#E11D48] to-[#BE123C] text-white flex items-center justify-center font-black text-sm shadow-xs shadow-rose-500/20">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <span className="mt-1.5 text-[12px] font-extrabold text-[#DB1D43]">
+                    អាសយដ្ឋាន
+                  </span>
+                </div>
+
+                {/* Line 1 -> 2 */}
+                <div className="flex-1 h-[2px] bg-[#DB1D43] mt-[18px] -mx-1" />
+
+                {/* Step 2: ទូទាត់ */}
+                <div className="flex flex-col items-center">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#E11D48] to-[#BE123C] text-white flex items-center justify-center font-black text-[14px] shadow-xs shadow-rose-500/20">
+                    {checkoutStep === 'KHQR_SCAN' ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      '2'
+                    )}
+                  </div>
+                  <span className="mt-1.5 text-[12px] font-extrabold text-[#DB1D43]">
+                    ទូទាត់
+                  </span>
+                </div>
+
+                {/* Line 2 -> 3 */}
+                <div
+                  className={`flex-1 h-[2px] mt-[18px] -mx-1 ${
+                    checkoutStep === 'KHQR_SCAN' ? 'bg-[#DB1D43]' : 'bg-[#E2E8F0]'
+                  }`}
+                />
+
+                {/* Step 3: បានបញ្ជាក់ */}
+                <div className="flex flex-col items-center">
+                  <div
+                    className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-[14px] ${
+                      checkoutStep === 'KHQR_SCAN'
+                        ? 'bg-gradient-to-br from-[#E11D48] to-[#BE123C] text-white shadow-xs shadow-rose-500/20'
+                        : 'bg-[#F1F5F9] text-slate-400'
+                    }`}
+                  >
+                    3
+                  </div>
+                  <span
+                    className={`mt-1.5 text-[12px] font-extrabold ${
+                      checkoutStep === 'KHQR_SCAN' ? 'text-[#DB1D43]' : 'text-slate-400'
+                    }`}
+                  >
+                    បានបញ្ជាក់
+                  </span>
+                </div>
+              </div>
             </div>
 
-            {/* Body */}
-            <div className="p-4 overflow-y-auto space-y-4 flex-1">
-              {cart.length === 0 ? (
-                <div className="text-center py-10">
-                  <div className="text-4xl mb-2">🛒</div>
-                  <div className="font-bold text-slate-800 text-sm">មិនទាន់មានម៉ូតខោអាវក្នុងកន្ត្រកទេ</div>
-                  <p className="text-xs text-slate-500 mt-1">សូមជ្រើសរើសម៉ូតខោអាវដែលអ្នកពេញចិត្តជាមុនសិន</p>
+            {/* ===============================================================
+                BODY: STEP 1 (SUMMARY + PAYMENT METHODS) OR STEP 2 (KHQR SCAN)
+               =============================================================== */}
+            {cart.length === 0 ? (
+              <div className="p-8 text-center my-auto">
+                <div className="text-4xl mb-2">🛒</div>
+                <div className="font-bold text-slate-800 text-sm">មិនទាន់មានម៉ូតខោអាវក្នុងកន្ត្រកទេ</div>
+                <p className="text-xs text-slate-500 mt-1">សូមជ្រើសរើសម៉ូតខោអាវដែលអ្នកពេញចិត្តជាមុនសិន</p>
+              </div>
+            ) : checkoutStep === 'SUMMARY' ? (
+              <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-3.5 pb-8">
+                {/* CARD 1: SHIPPING ADDRESS ("| អាសយដ្ឋានដឹកជញ្ជូន") */}
+                <div className="bg-white rounded-2xl p-4 shadow-2xs border border-[#E2E8F0]">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-1 h-5 rounded-full bg-[#DB1D43]" />
+                      <h3 className="font-black text-[15.5px] text-[#0F172A]">អាសយដ្ឋានដឹកជញ្ជូន</h3>
+                    </div>
+
+                    {!isEditingAddress && phone.trim() && address.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingAddress(true)}
+                        className="px-3 py-1.5 rounded-full bg-[#FFF1F2] hover:bg-rose-100 border border-rose-200 text-[#BE123C] font-extrabold text-[12px] flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                      >
+                        <span className="w-4 h-4 rounded-full bg-[#DB1D43] text-white text-[10px] flex items-center justify-center">
+                          ✎
+                        </span>
+                        <span>កែប្រែអាសយដ្ឋាន</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {!isEditingAddress && phone.trim() && address.trim() ? (
+                    <div className="rounded-2xl bg-[#F8FAFC] border border-[#E2E8F0] p-3.5 space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-[15.5px] text-[#0F172A]">
+                            {customerName.trim() || 'អតិថិជនហាង'}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-[#334155] text-[11px] font-extrabold">
+                            Home
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-[#FFF1F2] border border-rose-200 text-[#DB1D43] text-[11px] font-extrabold">
+                            ★ Default
+                          </span>
+                        </div>
+
+                        <span className="text-[13.5px] font-extrabold text-[#0F172A] bg-white px-2.5 py-1 rounded-lg border border-slate-200/80 flex items-center gap-1.5 tabular-nums">
+                          <svg className="w-3.5 h-3.5 text-[#DB1D43]" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                          </svg>
+                          {phone}
+                        </span>
+                      </div>
+
+                      <div className="flex items-start gap-2 pt-0.5">
+                        <span className="text-sm mt-0.5">📍</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-extrabold text-[14.5px] text-[#0F172A] leading-snug break-words">
+                            {address}
+                          </div>
+                          <div className="text-[12.5px] font-bold text-slate-500 mt-0.5">
+                            {zone === 'PP'
+                              ? `ភ្នំពេញ • ដឹកជញ្ជូនក្នុងក្រុង ($${config.shippingFeePP.toFixed(2)})`
+                              : `ខេត្ត • ${deliveryCompany} ($${config.shippingFeeProvince.toFixed(2)})`}
+                            {orderNote ? ` • ចំណាំ: ${orderNote}` : ''}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 pt-1">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">ឈ្មោះរបស់អ្នក</label>
+                          <input
+                            type="text"
+                            value={customerName}
+                            onChange={e => setCustomerName(e.target.value)}
+                            placeholder="ឈ្មោះភ្ញៀវ..."
+                            className="w-full px-3 py-2 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs font-bold text-[#0F172A] focus:bg-white focus:outline-none focus:border-[#DB1D43]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">លេខទូរស័ព្ទ *</label>
+                          <input
+                            type="tel"
+                            required
+                            value={phone}
+                            onChange={e => setPhone(e.target.value)}
+                            placeholder="010 / 012 / 096..."
+                            className="w-full px-3 py-2 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs font-extrabold text-[#0F172A] focus:bg-white focus:outline-none focus:border-[#DB1D43]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZone('PP');
+                            setDeliveryCompany('ដឹកក្នុងក្រុងភ្នំពេញ');
+                          }}
+                          className={`p-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                            zone === 'PP'
+                              ? 'bg-[#DB1D43] border-[#DB1D43] text-white shadow-xs'
+                              : 'bg-[#F8FAFC] border-[#E2E8F0] text-[#334155] hover:border-slate-300'
+                          }`}
+                        >
+                          <span>🛵 ភ្នំពេញ (${config.shippingFeePP.toFixed(2)})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZone('PROVINCE');
+                            setDeliveryCompany('វីរៈប៊ុនថាំ (VET)');
+                          }}
+                          className={`p-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                            zone === 'PROVINCE'
+                              ? 'bg-[#DB1D43] border-[#DB1D43] text-white shadow-xs'
+                              : 'bg-[#F8FAFC] border-[#E2E8F0] text-[#334155] hover:border-slate-300'
+                          }`}
+                        >
+                          <span>🚚 ខេត្ត (${config.shippingFeeProvince.toFixed(2)})</span>
+                        </button>
+                      </div>
+
+                      {zone === 'PROVINCE' && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {['វីរៈប៊ុនថាំ (VET)', 'J&T Express', 'Capitol'].map(comp => (
+                            <button
+                              key={comp}
+                              type="button"
+                              onClick={() => setDeliveryCompany(comp)}
+                              className={`px-3 py-1 rounded-lg text-[11px] font-extrabold border cursor-pointer transition-all ${
+                                deliveryCompany === comp
+                                  ? 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] ring-1 ring-[#FB7185]/30'
+                                  : 'bg-white text-slate-600 border-[#E2E8F0] hover:border-slate-300'
+                              }`}
+                            >
+                              {deliveryCompany === comp ? `✓ ${comp}` : comp}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          ទីតាំងដឹកជញ្ជូន / អាសយដ្ឋាន *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={address}
+                          onChange={e => setAddress(e.target.value)}
+                          placeholder="ឧ. ផ្ទះលេខ, ផ្លូវ, សង្កាត់/ឃុំ, ខណ្ឌ/ខេត្ត..."
+                          className="w-full px-3 py-2 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs font-bold text-[#0F172A] focus:bg-white focus:outline-none focus:border-[#DB1D43]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                          ចំណាំបន្ថែម (មិនបាច់បំពេញក៏បាន)
+                        </label>
+                        <input
+                          type="text"
+                          value={orderNote}
+                          onChange={e => setOrderNote(e.target.value)}
+                          placeholder="ឧ. សូមតេមុនដឹក ១៥ នាទី..."
+                          className="w-full px-3 py-2 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] text-xs font-medium text-[#0F172A] focus:bg-white focus:outline-none focus:border-[#DB1D43]"
+                        />
+                      </div>
+
+                      {phone.trim() && address.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            try {
+                              localStorage.setItem('tg_cust_name', customerName);
+                              localStorage.setItem('tg_cust_phone', phone);
+                              localStorage.setItem('tg_cust_address', address);
+                            } catch {}
+                            setIsEditingAddress(false);
+                          }}
+                          className="w-full py-2.5 rounded-xl bg-[#DB1D43] hover:bg-[#BE123C] text-white font-extrabold text-xs cursor-pointer shadow-xs transition-colors"
+                        >
+                          ✓ រក្សាទុកអាសយដ្ឋានដឹកជញ្ជូន
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <form id="miniapp-checkout-form" onSubmit={handleSubmitOrder} className="space-y-4">
-                  {/* 1. Cart Items List */}
-                  <div className="space-y-2">
-                    <div className="text-xs font-extrabold text-slate-700">១. មុខទំនិញដែលបានជ្រើសរើស៖</div>
+
+                {/* CARD 2: ORDER SUMMARY ("| បញ្ជីទំនិញកម្ម៉ង់") */}
+                <div className="bg-white rounded-2xl p-4 shadow-2xs border border-[#E2E8F0]">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-1 h-5 rounded-full bg-[#DB1D43]" />
+                      <h3 className="font-black text-[15.5px] text-[#0F172A]">បញ្ជីទំនិញកម្ម៉ង់ (Order Summary)</h3>
+                    </div>
+                    <span className="px-3 py-1 rounded-full bg-[#FFF1F2] border border-rose-200 text-[#BE123C] font-extrabold text-[12px]">
+                      {totalCartItems} មុខ
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-slate-100">
                     {cart.map(item => (
                       <div
                         key={`${item.productId}-${item.variantId}`}
-                        className="flex items-center justify-between gap-2.5 p-2.5 rounded-2xl bg-slate-50 border border-slate-200"
+                        className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3"
                       >
                         <img
                           src={item.imageUrl}
                           alt={item.name}
                           referrerPolicy="no-referrer"
-                          className="w-14 h-16 rounded-xl object-cover bg-white border border-slate-200 shrink-0"
+                          className="w-14 h-14 rounded-2xl object-cover bg-[#F8FAFC] border border-[#E2E8F0] shrink-0"
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="bg-slate-900 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-md">
-                              {item.code}
-                            </span>
-                            <span className="font-bold text-xs text-slate-900 truncate">{item.name}</span>
+                          <div className="font-extrabold text-[14px] text-[#0F172A] truncate">
+                            {item.name}
                           </div>
-                          <div className="text-[11px] font-bold text-[#BE123C] mt-0.5">
-                            {item.color} - {item.size}
+                          <div className="text-[12px] font-bold text-slate-500 mt-0.5">
+                            កូដ <span className="text-[#0F172A] font-extrabold">{item.code}</span> • {item.color} • {item.size}
                           </div>
-                          <div className="text-xs font-extrabold text-slate-900 mt-0.5 tabular-nums">
-                            ${item.price.toFixed(2)} x {item.qty} = ${(item.price * item.qty).toFixed(2)}
+                          <div className="text-[13px] font-black text-[#DB1D43] mt-0.5 tabular-nums">
+                            ${item.price.toFixed(2)} × {item.qty} = ${(item.price * item.qty).toFixed(2)}
                           </div>
                         </div>
 
@@ -2190,15 +2845,15 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                           <button
                             type="button"
                             onClick={() => handleUpdateCartQty(item.productId, item.variantId, -1)}
-                            className="w-7 h-7 rounded-lg bg-white border border-slate-300 font-bold text-slate-700 flex items-center justify-center cursor-pointer"
+                            className="w-7 h-7 rounded-lg bg-[#F8FAFC] hover:bg-[#FFF1F2] hover:text-[#DB1D43] border border-[#E2E8F0] font-black text-slate-700 flex items-center justify-center cursor-pointer transition-colors"
                           >
                             -
                           </button>
-                          <span className="text-xs font-extrabold w-5 text-center tabular-nums">{item.qty}</span>
+                          <span className="text-xs font-extrabold w-5 text-center tabular-nums text-[#0F172A]">{item.qty}</span>
                           <button
                             type="button"
                             onClick={() => handleUpdateCartQty(item.productId, item.variantId, 1)}
-                            className="w-7 h-7 rounded-lg bg-white border border-slate-300 font-bold text-slate-700 flex items-center justify-center cursor-pointer"
+                            className="w-7 h-7 rounded-lg bg-[#F8FAFC] hover:bg-[#FFF1F2] hover:text-[#DB1D43] border border-[#E2E8F0] font-black text-slate-700 flex items-center justify-center cursor-pointer transition-colors"
                           >
                             +
                           </button>
@@ -2207,301 +2862,292 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                     ))}
                   </div>
 
-                  {/* 2. Customer Shipping Info */}
-                  <div className="space-y-2.5 pt-2 border-t border-slate-200">
-                    <div className="text-xs font-extrabold text-slate-700">២. ព័ត៌មានដឹកជញ្ជូន៖</div>
-
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">ឈ្មោះរបស់អ្នក</label>
-                        <input
-                          type="text"
-                          value={customerName}
-                          onChange={e => setCustomerName(e.target.value)}
-                          placeholder="ឈ្មោះភ្ញៀវ..."
-                          className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium focus:outline-none focus:border-[#DB1D43]"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">លេខទូរស័ព្ទ *</label>
-                        <input
-                          type="tel"
-                          required
-                          value={phone}
-                          onChange={e => setPhone(e.target.value)}
-                          placeholder="012 / 096 / 070..."
-                          className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold focus:outline-none focus:border-[#DB1D43]"
-                        />
-                      </div>
+                  {/* Subtotal + Shipping Breakdown */}
+                  <div className="mt-3.5 pt-3 border-t border-dashed border-slate-200 space-y-1.5 text-[13px]">
+                    <div className="flex items-center justify-between text-slate-500 font-bold">
+                      <span>តម្លៃទំនិញសរុប ({totalCartItems} មុខ)</span>
+                      <span className="tabular-nums text-[#0F172A] font-extrabold">${cartSubtotal.toFixed(2)}</span>
                     </div>
-
-                    {/* Zone Selection */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setZone('PP');
-                          setDeliveryCompany('ដឹកក្នុងក្រុងភ្នំពេញ');
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-                          zone === 'PP'
-                            ? 'bg-[#FFF1F2] border-[#DB1D43] text-[#BE123C]'
-                            : 'bg-slate-50 border-slate-200 text-slate-700'
-                        }`}
-                      >
-                        <span>🛵 ភ្នំពេញ (${config.shippingFeePP.toFixed(2)})</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setZone('PROVINCE');
-                          setDeliveryCompany('J&T Express');
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-                          zone === 'PROVINCE'
-                            ? 'bg-[#FFF1F2] border-[#DB1D43] text-[#BE123C]'
-                            : 'bg-slate-50 border-slate-200 text-slate-700'
-                        }`}
-                      >
-                        <span>🚚 ខេត្ត (${config.shippingFeeProvince.toFixed(2)})</span>
-                      </button>
-                    </div>
-
-                    {zone === 'PROVINCE' && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {['J&T Express', 'វីរៈប៊ុនថាំ (VET)', 'Capitol'].map(comp => (
-                          <button
-                            key={comp}
-                            type="button"
-                            onClick={() => setDeliveryCompany(comp)}
-                            className={`px-3 py-1 rounded-lg text-[11px] font-bold border cursor-pointer ${
-                              deliveryCompany === comp
-                                ? 'bg-slate-900 text-white border-slate-900'
-                                : 'bg-white text-slate-600 border-slate-300'
-                            }`}
-                          >
-                            {comp}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        ទីតាំងដឹកជញ្ជូន / អាសយដ្ឋាន *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={address}
-                        onChange={e => setAddress(e.target.value)}
-                        placeholder="ឧ. ផ្ទះលេខ... ផ្លូវ... សង្កាត់/ខេត្ត..."
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium focus:outline-none focus:border-[#DB1D43]"
-                      />
-                    </div>
-
-                    {/* Customer Note / Delivery Instructions */}
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        ចំណាំបន្ថែមសម្រាប់អ្នកដឹក (មិនបាច់បំពេញក៏បាន)
-                      </label>
-                      <input
-                        type="text"
-                        value={orderNote}
-                        onChange={e => setOrderNote(e.target.value)}
-                        placeholder="ឧ. សូមតេមុនដឹក ១៥ នាទី, ផ្ញើពេលរសៀល..."
-                        className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-medium focus:outline-none focus:border-[#DB1D43]"
-                      />
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {['📞 សូមតេមុនដឹក', '🌅 ដឹកពេលព្រឹក', '🌇 ដឹកពេលរសៀល', '🏠 ដាក់មុខផ្ទះ'].map(chip => (
-                          <button
-                            key={chip}
-                            type="button"
-                            onClick={() =>
-                              setOrderNote(prev =>
-                                prev.includes(chip) ? prev : prev ? `${prev}, ${chip}` : chip
-                              )
-                            }
-                            className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-[#BE123C] border border-slate-200 text-[10px] font-bold cursor-pointer"
-                          >
-                            + {chip}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 3. PAYMENT METHOD CHOICE: KHQR OR COD */}
-                  <div className="space-y-2.5 pt-2 border-t border-slate-200">
-                    <div className="text-xs font-extrabold text-slate-700">
-                      ៣. ជ្រើសរើសវិធីបង់ប្រាក់ (ស្កេនបង់លុយ ក៏បាន / COD ក៏បាន)៖
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2.5">
-                      {/* Option A: KHQR Scan */}
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('KHQR')}
-                        className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer ${
-                          paymentMethod === 'KHQR'
-                            ? 'border-[#DB1D43] bg-[#FFF1F2]'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-base">💳</span>
-                          <span
-                            className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                              paymentMethod === 'KHQR' ? 'border-[#DB1D43] bg-[#DB1D43] text-white' : 'border-slate-300'
-                            }`}
-                          >
-                            {paymentMethod === 'KHQR' && <span className="text-[9px]">✓</span>}
-                          </span>
-                        </div>
-                        <div className="font-extrabold text-xs text-slate-900 mt-1">ស្កេនបង់លុយ (KHQR)</div>
-                        <div className="text-[10.5px] text-slate-500 mt-0.5">ABA / ACLEDA / Wing</div>
-                      </button>
-
-                      {/* Option B: Cash on Delivery (COD) */}
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod('COD')}
-                        className={`p-3 rounded-2xl border-2 text-left transition-all cursor-pointer ${
-                          paymentMethod === 'COD'
-                            ? 'border-[#DB1D43] bg-[#FFF1F2]'
-                            : 'border-slate-200 bg-white hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-base">🚚</span>
-                          <span
-                            className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                              paymentMethod === 'COD' ? 'border-[#DB1D43] bg-[#DB1D43] text-white' : 'border-slate-300'
-                            }`}
-                          >
-                            {paymentMethod === 'COD' && <span className="text-[9px]">✓</span>}
-                          </span>
-                        </div>
-                        <div className="font-extrabold text-xs text-slate-900 mt-1">បង់ពេលដឹកដល់ (COD)</div>
-                        <div className="text-[10.5px] text-slate-500 mt-0.5">ទទួលអីវ៉ាន់ទើបបង់លុយ</div>
-                      </button>
-                    </div>
-
-                    {/* KHQR Scan Box when KHQR is chosen */}
-                    {paymentMethod === 'KHQR' && (
-                      <div className="p-3.5 rounded-2xl bg-slate-900 text-white space-y-3">
-                        <div className="flex items-center justify-between border-b border-slate-700 pb-2">
-                          <div>
-                            <div className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">KHQR PAYMENT</div>
-                            <div className="font-extrabold text-xs">{config.khqrMerchantName}</div>
-                            <div className="text-[11px] text-slate-400">{config.khqrAccountInfo}</div>
-                          </div>
-                          <div className="text-right tabular-nums">
-                            <div className="text-[10px] text-slate-400">ទឹកប្រាក់ត្រូវបង់</div>
-                            <div className="text-lg font-black text-emerald-400">${cartTotal.toFixed(2)}</div>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-center justify-center bg-white p-3 rounded-2xl max-w-[210px] mx-auto">
-                          {config.khqrImageUrl ? (
-                            <img
-                              src={config.khqrImageUrl}
-                              alt="Shop KHQR"
-                              referrerPolicy="no-referrer"
-                              className="w-44 h-44 object-contain"
-                            />
-                          ) : (
-                            <img
-                              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-                                `KHQR:${config.khqrMerchantName}|AMOUNT:${cartTotal.toFixed(2)}|USD`
-                              )}`}
-                              alt="KHQR Code"
-                              referrerPolicy="no-referrer"
-                              className="w-40 h-40 object-contain"
-                            />
-                          )}
-                          <span className="text-[10px] font-bold text-slate-600 mt-1.5">
-                            ស្កេនតាម ABA / ACLEDA / ធនាគារគ្រប់ប្រភេទ
-                          </span>
-                        </div>
-
-                        {/* Upload Payment Slip */}
-                        <div className="pt-1">
-                          <label className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer">
-                            <span>📸 {isUploadingSlip ? 'កំពុងបង្ហោះរូបស្លីប...' : paymentSlipUrl ? 'ប្តូររូបស្លីបបង់ប្រាក់' : 'ភ្ជាប់រូបស្លីបបង់ប្រាក់ (Slip)'}</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={e => {
-                                const file = e.target.files?.[0];
-                                if (file) handleUploadFile(file, 'slip');
-                              }}
-                            />
-                          </label>
-                          {paymentSlipUrl && (
-                            <div className="mt-2 flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 p-2 rounded-xl">
-                              <img
-                                src={paymentSlipUrl}
-                                alt="Payment Slip"
-                                referrerPolicy="no-referrer"
-                                className="w-10 h-12 object-cover rounded-lg"
-                              />
-                              <div className="text-xs font-bold text-emerald-300">
-                                ✅ បានភ្ជាប់រូបស្លីបរួចរាល់!
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* COD Info note when COD is chosen */}
-                    {paymentMethod === 'COD' && (
-                      <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium">
-                        🚚 អ្នកបានជ្រើសរើស <b>បង់លុយពេលអីវ៉ាន់ទៅដល់ (COD)</b>។ បុគ្គលិកហាងនឹងទាក់ទងទៅលេខទូរស័ព្ទរបស់អ្នកដើម្បីបញ្ជាក់ការដឹកជញ្ជូន!
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Summary Totals */}
-                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs tabular-nums">
-                    <div className="flex justify-between text-slate-600">
-                      <span>សរុបតម្លៃខោអាវ ({totalCartItems} មុខ):</span>
-                      <span className="font-bold">${cartSubtotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>ថ្លៃដឹកជញ្ជូន ({zone === 'PP' ? 'ភ្នំពេញ' : 'ខេត្ត'}):</span>
-                      <span className="font-bold">
-                        {shippingFee === 0 ? 'ឥតគិតថ្លៃ (FREE)' : `$${shippingFee.toFixed(2)}`}
+                    <div className="flex items-center justify-between text-slate-500 font-bold">
+                      <span>សេវាដឹកជញ្ជូន ({zone === 'PP' ? 'ភ្នំពេញ' : deliveryCompany})</span>
+                      <span className="tabular-nums text-[#0F172A] font-extrabold">
+                        {shippingFee === 0 ? 'ឥតគិតថ្លៃ' : `$${shippingFee.toFixed(2)}`}
                       </span>
                     </div>
-                    <div className="flex justify-between text-sm font-extrabold text-[#0F172A] pt-1.5 border-t border-slate-200">
-                      <span>ទឹកប្រាក់សរុបរួម:</span>
-                      <span className="text-[#DB1D43] text-base">${cartTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                {/* =============================================================
+                    CARD 3: "ជ្រើសរើសវិធីទូទាត់" (Unified Rose-Crimson & Clean Slate Theme)
+                   ============================================================= */}
+                <div className="rounded-2xl bg-white p-4 shadow-2xs border border-[#E2E8F0]">
+                  <div className="flex items-center justify-between gap-2 mb-3.5">
+                    <div className="flex items-start gap-2.5">
+                      <span className="w-1 h-5 rounded-full bg-[#DB1D43] mt-1 shrink-0" />
+                      <div>
+                        <h3 className="font-black text-[16.5px] text-[#0F172A]">
+                          ជ្រើសរើសវិធីទូទាត់
+                        </h3>
+                        <p className="text-[12px] font-bold text-slate-500 mt-0.5">
+                          ទឹកប្រាក់ត្រូវបង់សរុប (រួមទាំងសេវាដឹក)
+                        </p>
+                      </div>
+                    </div>
+                    <span className="bg-[#FFF1F2] border border-rose-200 px-3.5 py-1.5 rounded-full font-black text-[17px] text-[#DB1D43] tabular-nums shrink-0">
+                      ${cartTotal.toFixed(2)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {/* OPTION 1: KHQR */}
+                    <button
+                      type="button"
+                      disabled={isSubmittingOrder}
+                      onClick={() => handleChoosePaymentMethod('KHQR')}
+                      className="w-full p-3.5 rounded-2xl bg-[#F8FAFC] hover:bg-[#FFF1F2]/70 border border-[#E2E8F0] hover:border-rose-300 flex items-center justify-between gap-3 cursor-pointer active:scale-[0.99] transition-all text-left group"
+                    >
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-center shrink-0">
+                          <span className="bg-[#CE3232] text-white font-black text-[10px] tracking-wider px-2 py-1 rounded">
+                            KHQR
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-black text-[15px] text-[#0F172A] group-hover:text-[#DB1D43] transition-colors">
+                            KHQR
+                          </div>
+                          <div className="text-[12px] font-medium text-slate-500 truncate mt-0.5">
+                            ស្គេនទូទាត់តាមធនាគារជាសមាជិក
+                          </div>
+                        </div>
+                      </div>
+                      <svg className="w-5 h-5 text-slate-400 group-hover:text-[#DB1D43] shrink-0 transition-colors" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+
+                    {/* OPTION 2: ABA KHQR */}
+                    <button
+                      type="button"
+                      disabled={isSubmittingOrder}
+                      onClick={() => handleChoosePaymentMethod('ABA_KHQR')}
+                      className="w-full p-3.5 rounded-2xl bg-[#F8FAFC] hover:bg-[#FFF1F2]/70 border border-[#E2E8F0] hover:border-rose-300 flex items-center justify-between gap-3 cursor-pointer active:scale-[0.99] transition-all text-left group"
+                    >
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="w-12 h-12 rounded-2xl overflow-hidden shadow-2xs flex flex-col shrink-0">
+                          <div className="bg-[#1B5271] flex-1 flex items-center justify-center">
+                            <span className="text-white font-black text-[13px] tracking-tight">
+                              ABA<span className="text-[#E1232E]">&apos;</span>
+                            </span>
+                          </div>
+                          <div className="bg-[#CE3232] h-4 flex items-center justify-center">
+                            <span className="text-white font-black text-[8px] tracking-wider">
+                              KHQR
+                            </span>
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-black text-[15px] text-[#0F172A] group-hover:text-[#DB1D43] transition-colors">
+                            ABA KHQR
+                          </div>
+                          <div className="text-[12px] font-medium text-slate-500 truncate mt-0.5">
+                            ចុចបើកកម្មវិធី ABA Mobile ផ្ទាល់ ឬស្គេន QR
+                          </div>
+                        </div>
+                      </div>
+                      <svg className="w-5 h-5 text-slate-400 group-hover:text-[#DB1D43] shrink-0 transition-colors" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+
+                    {/* OPTION 3: COD (បង់ប្រាក់ពេលដឹកដល់) */}
+                    <button
+                      type="button"
+                      disabled={isSubmittingOrder}
+                      onClick={() => handleChoosePaymentMethod('COD')}
+                      className="w-full p-3.5 rounded-2xl bg-[#F8FAFC] hover:bg-[#FFF1F2]/70 border border-[#E2E8F0] hover:border-rose-300 flex items-center justify-between gap-3 cursor-pointer active:scale-[0.99] transition-all text-left group"
+                    >
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-center text-lg shrink-0">
+                          🚚
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-black text-[15px] text-[#0F172A] group-hover:text-[#DB1D43] transition-colors">
+                            {isSubmittingOrder && paymentMethod === 'COD'
+                              ? 'កំពុងបញ្ជូនការកម្ម៉ង់ COD...'
+                              : 'បង់ពេលទទួលទំនិញ (COD)'}
+                          </div>
+                          <div className="text-[12px] font-medium text-slate-500 truncate mt-0.5">
+                            ទូទាត់សាច់ប្រាក់ផ្ទាល់ពេលទំនិញដឹកដល់ដៃ
+                          </div>
+                        </div>
+                      </div>
+                      <svg className="w-5 h-5 text-slate-400 group-hover:text-[#DB1D43] shrink-0 transition-colors" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* =============================================================
+                 STEP 2 VIEW: OFFICIAL KHQR CARD + SAVE / SHARE / ABA (Unified App Theme)
+                 ============================================================= */
+              <div className="flex-1 overflow-y-auto px-5 py-5 flex flex-col items-center">
+                {/* 1. OFFICIAL FULL-SIZE KHQR CARD ( shrink-0 prevents any vertical clipping! ) */}
+                <div className="w-full max-w-[330px] bg-white rounded-[28px] shadow-[0_8px_28px_rgba(15,23,42,0.08)] border border-[#E2E8F0] overflow-hidden shrink-0">
+                  {/* Top Crimson Red KHQR Banner with Diagonal Right Cut */}
+                  <div className="relative h-[60px] bg-[#CE3232] flex items-center justify-center">
+                    <span className="text-white font-black text-[21px] tracking-[0.14em]">
+                      KHQR
+                    </span>
+                    <div
+                      className="absolute bottom-0 left-0 right-11 h-3.5 bg-white"
+                      style={{ clipPath: 'polygon(0 0, 88% 0, 100% 100%, 0% 100%)' }}
+                    />
+                  </div>
+
+                  {/* Merchant Name & Exact Total Amount */}
+                  <div className="px-7 pt-2 pb-4 text-left">
+                    <div className="font-extrabold text-[15px] text-[#0F172A] truncate">
+                      {config.khqrMerchantName || config.storeName}
+                    </div>
+                    <div className="font-black text-[28px] text-[#DB1D43] tracking-tight tabular-nums mt-0.5 leading-tight">
+                      ${cartTotal.toFixed(2)}
                     </div>
                   </div>
-                </form>
-              )}
-            </div>
 
-            {/* Footer Submit Button */}
-            {cart.length > 0 && (
-              <div className="p-3.5 border-t border-slate-200 bg-white">
-                <button
-                  type="submit"
-                  form="miniapp-checkout-form"
-                  disabled={isSubmittingOrder}
-                  className="w-full py-3.5 rounded-2xl bg-[#DB1D43] hover:bg-[#BE123C] text-white font-extrabold text-sm shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  <span>
-                    {isSubmittingOrder
-                      ? 'កំពុងបញ្ជូនការកម្ម៉ង់...'
-                      : paymentMethod === 'KHQR'
-                      ? `✅ បញ្ជាក់ការកម្ម៉ង់តាម KHQR ($${cartTotal.toFixed(2)})`
-                      : `✅ បញ្ជាក់ការកម្ម៉ង់ COD ($${cartTotal.toFixed(2)})`}
+                  {/* Dashed Horizontal Line */}
+                  <div className="mx-6 border-b-[1.5px] border-dashed border-slate-200" />
+
+                  {/* Unclipped Square QR Code Box with Centered Red KHQR Emblem */}
+                  <div className="p-5">
+                    <div className="p-3.5 rounded-[22px] border border-slate-200 bg-white flex items-center justify-center relative aspect-square w-full">
+                      <img
+                        src={getKhqrQrSrc()}
+                        alt="KHQR Code"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-contain block"
+                      />
+
+                      {/* Centered Circular Red KHQR Emblem with White Mini QR Icon */}
+                      {!hasCustomUploadedKhqrImage && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="w-11 h-11 rounded-full bg-[#CE3232] border-[2.5px] border-white shadow-md flex items-center justify-center text-white">
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm13-2h3v2h-3v-2zm-3 0h2v3h-2v-3zm3 3h3v2h-3v-2zm-3 3h2v2h-2v-2zm3 0h3v2h-3v-2z" />
+                            </svg>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. EXPIRATION COUNTDOWN PILL */}
+                <div className="mt-4 px-5 py-2 rounded-full bg-[#FFF1F2] border border-rose-200 text-[#BE123C] font-extrabold text-[13px] flex items-center gap-2 shadow-2xs shrink-0">
+                  <svg className="w-4 h-4 text-[#DB1D43]" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="tabular-nums">
+                    QR ផុតកំណត់ក្នុងរយៈពេល {formatCountdown(qrCountdown)}
                   </span>
-                </button>
+                </div>
+
+                {/* 3. SAVE & SHARE BUTTONS (Matched to App's Slate & Rose-Crimson Palette) */}
+                <div className="mt-4 w-full max-w-[350px] grid grid-cols-2 gap-3 shrink-0">
+                  <button
+                    type="button"
+                    disabled={isGeneratingKhqrCard}
+                    onClick={handleSaveKhqrImage}
+                    className="py-2.5 px-4 rounded-2xl bg-[#0F172A] hover:bg-slate-800 text-white font-extrabold text-[14px] shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+                  >
+                    <span className="w-7 h-7 rounded-full bg-white/15 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+                      </svg>
+                    </span>
+                    <span>{isGeneratingKhqrCard ? 'កំពុងរក្សា...' : 'រក្សាទុក'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isGeneratingKhqrCard}
+                    onClick={handleShareKhqrImage}
+                    className="py-2.5 px-4 rounded-2xl bg-[#DB1D43] hover:bg-[#BE123C] text-white font-extrabold text-[14px] shadow-xs shadow-rose-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+                  >
+                    <span className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M16 6l-4-4m0 0L8 6m4-4v12" />
+                      </svg>
+                    </span>
+                    <span>ចែករំលែក</span>
+                  </button>
+                </div>
+
+                {/* 4. WAITING FOR PAYMENT CONFIRMATION STATUS BAR */}
+                <div className="mt-3.5 w-full max-w-[350px] py-3 px-4 rounded-2xl bg-white border border-[#E2E8F0] flex items-center justify-center gap-2.5 text-[#334155] font-extrabold text-[13px] shadow-2xs shrink-0">
+                  <svg className="w-4 h-4 text-[#DB1D43] animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                  </svg>
+                  <span>កំពុងរង់ចាំការបញ្ជាក់ការទូទាត់...</span>
+                </div>
+
+                {/* 5. OPTIONAL ABA DIRECT OPEN + SLIP UPLOAD & CONFIRM */}
+                <div className="mt-3 w-full max-w-[350px] space-y-2 pb-4 shrink-0">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenAbaDirect}
+                      className="py-2.5 px-3 rounded-xl bg-[#1B5271] hover:bg-[#133E57] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <span>🚀 បើក ABA ផ្ទាល់</span>
+                    </button>
+
+                    <label className="py-2.5 px-3 rounded-xl bg-white hover:bg-[#FFF1F2] border border-[#E2E8F0] hover:border-rose-200 text-[#334155] hover:text-[#BE123C] font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-colors">
+                      <span>
+                        📸 {isUploadingSlip ? 'កំពុងបង្ហោះ...' : paymentSlipUrl ? 'ប្តូររូបស្លីប ✓' : 'ភ្ជាប់ស្លីបបង់ប្រាក់'}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (file) handleUploadFile(file, 'slip');
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {paymentSlipUrl && (
+                    <div className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 p-2 rounded-xl">
+                      <img
+                        src={paymentSlipUrl}
+                        alt="Payment Slip"
+                        referrerPolicy="no-referrer"
+                        className="w-8 h-10 object-cover rounded-lg border border-emerald-300"
+                      />
+                      <div className="text-xs font-extrabold text-emerald-800">
+                        ✅ បានភ្ជាប់រូបស្លីបបង់ប្រាក់រួចរាល់!
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={isSubmittingOrder}
+                    onClick={() => submitOrderWithMethod('KHQR')}
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-[#E11D48] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] text-white font-extrabold text-xs sm:text-sm shadow-md shadow-rose-500/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 active:scale-[0.99] transition-all"
+                  >
+                    <span>
+                      {isSubmittingOrder
+                        ? '⏳ កំពុងបញ្ជូនការកម្ម៉ង់...'
+                        : `✅ បញ្ជាក់ការកម្ម៉ង់ • បានបង់ប្រាក់ ($${cartTotal.toFixed(2)})`}
+                    </span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -3582,21 +4228,51 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">ឈ្មោះគណនី KHQR</label>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">ឈ្មោះគណនី KHQR / ABA</label>
                           <input
                             type="text"
                             value={config.khqrMerchantName}
                             onChange={e => setConfig({ ...config, khqrMerchantName: e.target.value })}
+                            placeholder="ឧ. KARI ARNETT SHOP"
                             className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold"
                           />
                         </div>
-                        <div className="sm:col-span-2">
-                          <label className="block text-[11px] font-bold text-slate-600 mb-1">ព័ត៌មានលេខគណនីធនាគារ</label>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">លេខគណនី ABA (បង្កើត QR ពិត)</label>
+                          <input
+                            type="text"
+                            value={config.khqrAccountNumber || ''}
+                            onChange={e =>
+                              setConfig({
+                                ...config,
+                                khqrAccountNumber: e.target.value.replace(/\s+/g, '')
+                              })
+                            }
+                            placeholder="ឧ. 000474559"
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-extrabold font-mono text-[#003D5B]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">ព័ត៌មានបង្ហាញលើកាត QR</label>
                           <input
                             type="text"
                             value={config.khqrAccountInfo}
                             onChange={e => setConfig({ ...config, khqrAccountInfo: e.target.value })}
+                            placeholder="ឧ. 000 474 559 (ABA USD)"
                             className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-3">
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            🔗 លីងបើក ABA Mobile ផ្ទាល់ (ABA Payment Link - បើមិនដាក់ក៏ប្រព័ន្ធបើក ABA ស្វ័យប្រវត្តិដែរ)
+                          </label>
+                          <input
+                            type="text"
+                            value={config.abaPaymentLink || ''}
+                            onChange={e => setConfig({ ...config, abaPaymentLink: e.target.value })}
+                            placeholder="ឧ. https://link.payway.com.kh/aba?id=... (ទុកទទេក៏បាន ប្រព័ន្ធនឹងបើក ABA Mobile ដោយស្វ័យប្រវត្តិ)"
+                            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono"
                           />
                         </div>
 
@@ -3619,7 +4295,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                                 រូបភាព QR ធនាគារផ្ទាល់របស់ហាង (ABA / ACLEDA KHQR)
                               </div>
                               <div className="text-[10.5px] text-slate-500">
-                                បើដាក់រូប QR ផ្ទាល់ ភ្ញៀវនឹងឃើញរូប QR នេះពេលជ្រើសរើសបង់ប្រាក់តាម KHQR
+                                ពេលបង្ហោះរូប QR ប្រព័ន្ធនឹងអានលេខគណនី ABA ក្នុង QR ដោយស្វ័យប្រវត្តិ ដើម្បីបង្កើតកូដ KHQR ពិតដែលស្កេនចេញតម្លៃទឹកប្រាក់ភ្លាមៗ!
                               </div>
                             </div>
                           </div>

@@ -94,8 +94,12 @@ export interface MiniAppConfig {
   shippingFeeProvince: number;
   freeShippingThreshold: number;
   khqrMerchantName: string;
+  khqrAccountNumber?: string;
+  khqrBakongId?: string;
   khqrAccountInfo: string;
   khqrImageUrl: string;
+  khqrRawString?: string;
+  abaPaymentLink?: string;
   telegramNotifyChatId: string;
   telegramBotToken?: string;
   adminPin: string;
@@ -361,8 +365,11 @@ function getDefaultDatabase(): MiniAppDatabase {
       shippingFeeProvince: 2.0,
       freeShippingThreshold: 30.0,
       khqrMerchantName: 'KARI ARNETT SHOP',
-      khqrAccountInfo: 'ABA / KHQR (ដុល្លារ USD)',
+      khqrAccountNumber: '000474559',
+      khqrBakongId: 'abaakhppxxx@abaa',
+      khqrAccountInfo: '000 474 559 (ABA Bank • USD)',
       khqrImageUrl: '',
+      abaPaymentLink: '',
       telegramNotifyChatId: '',
       adminPin: '1688',
       miniAppUrl: 'https://chatbotkh.com/miniapp',
@@ -567,8 +574,14 @@ function loadMiniAppDb(): MiniAppDatabase {
         }
       }
 
+      const mergedConfig = { ...defaults.config, ...(parsed.config || {}) };
+      if (mergedConfig.khqrImageUrl && mergedConfig.khqrImageUrl.includes('api.qrserver.com')) {
+        mergedConfig.khqrImageUrl = '';
+        needsSave = true;
+      }
+
       const dbObj: MiniAppDatabase = {
-        config: { ...defaults.config, ...(parsed.config || {}) },
+        config: mergedConfig,
         products: loadedProducts,
         orders: Array.isArray(parsed.orders) ? parsed.orders : []
       };
@@ -595,6 +608,10 @@ export function getMiniAppConfig(): MiniAppConfig {
 // 1. PUBLIC CATALOG ENDPOINT (Ultra-fast 0ms in-memory response)
 // ---------------------------------------------------------------------------
 router.get('/catalog', (_req: Request, res: Response) => {
+  const cleanKhqrImg =
+    miniAppDb.config.khqrImageUrl && !miniAppDb.config.khqrImageUrl.includes('api.qrserver.com')
+      ? miniAppDb.config.khqrImageUrl
+      : '';
   res.json({
     success: true,
     config: {
@@ -607,9 +624,13 @@ router.get('/catalog', (_req: Request, res: Response) => {
       shippingFeePP: miniAppDb.config.shippingFeePP,
       shippingFeeProvince: miniAppDb.config.shippingFeeProvince,
       freeShippingThreshold: miniAppDb.config.freeShippingThreshold,
-      khqrMerchantName: miniAppDb.config.khqrMerchantName,
-      khqrAccountInfo: miniAppDb.config.khqrAccountInfo,
-      khqrImageUrl: miniAppDb.config.khqrImageUrl,
+      khqrMerchantName: miniAppDb.config.khqrMerchantName || settings.merchant_name || 'KARI ARNETT SHOP',
+      khqrAccountNumber: miniAppDb.config.khqrAccountNumber || settings.account_number || '000474559',
+      khqrBakongId: miniAppDb.config.khqrBakongId || settings.bakong_id || 'abaakhppxxx@abaa',
+      khqrAccountInfo: miniAppDb.config.khqrAccountInfo || `${miniAppDb.config.khqrAccountNumber || settings.account_number || '000474559'} (ABA Bank)`,
+      khqrImageUrl: cleanKhqrImg,
+      khqrRawString: miniAppDb.config.khqrRawString || (settings as any).khqr_orig_string || '',
+      abaPaymentLink: miniAppDb.config.abaPaymentLink || '',
       botUsername: miniAppDb.config.botUsername || '',
       fbPageId: miniAppDb.config.fbPageId || '',
       fbPageName: miniAppDb.config.fbPageName || '',
@@ -826,7 +847,7 @@ router.post('/orders', async (req: Request, res: Response) => {
       phone: String(phone).trim(),
       address: String(address).trim(),
       zone: normalizedZone,
-      deliveryCompany: String(deliveryCompany || (normalizedZone === 'PP' ? 'ដឹកក្នុងក្រុងភ្នំពេញ' : 'J&T Express')).trim(),
+      deliveryCompany: String(deliveryCompany || (normalizedZone === 'PP' ? 'ដឹកក្នុងក្រុងភ្នំពេញ' : 'វីរៈប៊ុនថាំ (VET)')).trim(),
       paymentMethod: paymentMethod === 'KHQR' ? 'KHQR' : 'COD',
       paymentSlipUrl: paymentSlipUrl ? String(paymentSlipUrl) : undefined,
       items: confirmedItems,
@@ -957,8 +978,12 @@ router.put('/admin/config', (req: Request, res: Response) => {
     shippingFeeProvince: incoming.shippingFeeProvince !== undefined ? Number(incoming.shippingFeeProvince) : miniAppDb.config.shippingFeeProvince,
     freeShippingThreshold: incoming.freeShippingThreshold !== undefined ? Number(incoming.freeShippingThreshold) : miniAppDb.config.freeShippingThreshold,
     khqrMerchantName: incoming.khqrMerchantName ?? miniAppDb.config.khqrMerchantName,
+    khqrAccountNumber: incoming.khqrAccountNumber !== undefined ? String(incoming.khqrAccountNumber).replace(/\s+/g, '') : (miniAppDb.config.khqrAccountNumber || settings.account_number || '000474559'),
+    khqrBakongId: incoming.khqrBakongId !== undefined ? String(incoming.khqrBakongId).trim() : (miniAppDb.config.khqrBakongId || settings.bakong_id || 'abaakhppxxx@abaa'),
     khqrAccountInfo: incoming.khqrAccountInfo ?? miniAppDb.config.khqrAccountInfo,
     khqrImageUrl: incoming.khqrImageUrl ?? miniAppDb.config.khqrImageUrl,
+    khqrRawString: incoming.khqrRawString !== undefined ? String(incoming.khqrRawString) : miniAppDb.config.khqrRawString,
+    abaPaymentLink: incoming.abaPaymentLink !== undefined ? String(incoming.abaPaymentLink).trim() : miniAppDb.config.abaPaymentLink,
     telegramNotifyChatId: incoming.telegramNotifyChatId ?? miniAppDb.config.telegramNotifyChatId,
     telegramBotToken: incoming.telegramBotToken !== undefined ? String(incoming.telegramBotToken).trim() : miniAppDb.config.telegramBotToken,
     adminPin: incoming.adminPin ? String(incoming.adminPin).trim() : miniAppDb.config.adminPin,
