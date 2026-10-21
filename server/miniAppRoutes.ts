@@ -536,7 +536,20 @@ function loadMiniAppDb(): MiniAppDatabase {
         parsed.orders = extParsed.orders;
       }
       if (extParsed.config) {
-        parsed.config = { ...(parsed.config || {}), ...extParsed.config };
+        const baseCfg = parsed.config || {};
+        const extCfg = extParsed.config || {};
+        const mergedCfg: Record<string, any> = { ...baseCfg, ...extCfg };
+        // Never allow an empty string in either file to overwrite a non-empty token/setting in the other
+        for (const key of Object.keys(mergedCfg)) {
+          const bVal = baseCfg[key];
+          const eVal = extCfg[key];
+          if (typeof bVal === 'string' && bVal.trim() && (!eVal || (typeof eVal === 'string' && !eVal.trim()))) {
+            mergedCfg[key] = bVal;
+          } else if (typeof eVal === 'string' && eVal.trim()) {
+            mergedCfg[key] = eVal;
+          }
+        }
+        parsed.config = mergedCfg;
       }
     }
 
@@ -602,6 +615,150 @@ miniAppDb = loadMiniAppDb();
 
 export function getMiniAppConfig(): MiniAppConfig {
   return miniAppDb.config;
+}
+
+// Helper: Resolve effective Facebook Page Access Token & Page ID from MiniApp config or main POS DB
+function getEffectiveFbPageAuth(): { token: string; pageId: string; pageName: string } {
+  let token = String(miniAppDb.config.fbPageAccessToken || '').trim();
+  let pageId = String(miniAppDb.config.fbPageId || '').trim();
+  let pageName = String(miniAppDb.config.fbPageName || '').trim();
+
+  if (!token) {
+    try {
+      const connectedPages = getConnectedFacebookPages() || [];
+      const matchedPage =
+        (pageId ? connectedPages.find(p => String(p.id) === pageId && p.access_token) : undefined) ||
+        connectedPages.find(p => p && p.access_token);
+      if (matchedPage && matchedPage.access_token) {
+        token = String(matchedPage.access_token).trim();
+        pageId = String(matchedPage.id || pageId).trim();
+        pageName = String(matchedPage.name || pageName).trim();
+        // Auto-sync back into miniAppDb so it stays connected
+        miniAppDb.config.fbPageAccessToken = token;
+        if (pageId) miniAppDb.config.fbPageId = pageId;
+        if (pageName) miniAppDb.config.fbPageName = pageName;
+        saveMiniAppDb();
+      }
+    } catch {}
+  }
+
+  if (!token && (settings as any).fb_access_token) {
+    token = String((settings as any).fb_access_token).trim();
+  }
+
+  return { token, pageId, pageName };
+}
+
+// Helper: Remember known Facebook Messenger customers (PSID <-> Name/Phone)
+const fbKnownCustomers = new Map<string, { psid: string; name: string; phone?: string; updatedAt: number }>();
+
+function recordKnownFbCustomer(psid?: string, name?: string, phone?: string) {
+  const cleanPsid = String(psid || '').trim();
+  if (!cleanPsid) return;
+  const cleanName = String(name || '').trim();
+  const cleanPhone = String(phone || '').replace(/\s+/g, '').trim();
+  fbKnownCustomers.set(cleanPsid, {
+    psid: cleanPsid,
+    name: cleanName || fbKnownCustomers.get(cleanPsid)?.name || '',
+    phone: cleanPhone || fbKnownCustomers.get(cleanPsid)?.phone,
+    updatedAt: Date.now()
+  });
+}
+
+// Helper: Resolve a customer's Facebook Messenger PSID even if opened via Persistent Menu or browser without ?psid=
+async function resolveCustomerFbPsid(opts: {
+  explicitPsid?: string;
+  customerName?: string;
+  phone?: string;
+  channel?: string;
+  fbToken?: string;
+  fbPageId?: string;
+}): Promise<string> {
+  const explicit = String(opts.explicitPsid || '').trim();
+  if (explicit) {
+    recordKnownFbCustomer(explicit, opts.customerName, opts.phone);
+    return explicit;
+  }
+
+  const cleanPhone = String(opts.phone || '').replace(/\s+/g, '').trim();
+  const cleanName = String(opts.customerName || '').trim().toLowerCase();
+  const isDefaultPlaceholderName =
+    !cleanName ||
+    cleanName === 'អតិថិជន telegram' ||
+    cleanName === 'អតិថិជន facebook page' ||
+    cleanName === 'អតិថិជន facebook' ||
+    cleanName === 'អតិថិជន';
+
+  // 1. Check previous orders in miniAppDb.orders by phone or customerName
+  for (const ord of miniAppDb.orders) {
+    const ordPsid = String(ord.fbPsid || '').trim();
+    if (!ordPsid) continue;
+    const ordPhone = String(ord.phone || '').replace(/\s+/g, '').trim();
+    const ordName = String(ord.customerName || '').trim().toLowerCase();
+    if (cleanPhone.length >= 6 && ordPhone === cleanPhone) {
+      recordKnownFbCustomer(ordPsid, opts.customerName, opts.phone);
+      return ordPsid;
+    }
+    if (!isDefaultPlaceholderName && ordName && ordName === cleanName) {
+      recordKnownFbCustomer(ordPsid, opts.customerName, opts.phone);
+      return ordPsid;
+    }
+  }
+
+  // 2. Check in-memory fbKnownCustomers directory by phone or name
+  for (const entry of fbKnownCustomers.values()) {
+    if (cleanPhone.length >= 6 && entry.phone && entry.phone === cleanPhone) {
+      return entry.psid;
+    }
+    if (!isDefaultPlaceholderName && entry.name && entry.name.toLowerCase() === cleanName) {
+      return entry.psid;
+    }
+  }
+
+  // 3. Query Facebook Page recent conversations via Graph API if fbToken is available
+  const token = String(opts.fbToken || '').trim();
+  const pageId = String(opts.fbPageId || '').trim();
+  if (token) {
+    try {
+      const convRes = await fetch(
+        `https://graph.facebook.com/v19.0/me/conversations?fields=participants,updated_time&limit=10&access_token=${encodeURIComponent(token)}`
+      );
+      if (convRes.ok) {
+        const convData = await convRes.json();
+        const conversations = Array.isArray(convData?.data) ? convData.data : [];
+        let mostRecentPsid = '';
+
+        for (const conv of conversations) {
+          const participants = conv?.participants?.data || [];
+          const cust = participants.find((p: any) => String(p?.id || '') !== pageId);
+          if (!cust?.id) continue;
+          const cPsid = String(cust.id).trim();
+          const cName = String(cust.name || '').trim();
+          recordKnownFbCustomer(cPsid, cName);
+
+          if (!mostRecentPsid) {
+            mostRecentPsid = cPsid;
+          }
+
+          if (!isDefaultPlaceholderName && cName) {
+            const cLower = cName.toLowerCase();
+            if (cLower === cleanName || cLower.includes(cleanName) || cleanName.includes(cLower)) {
+              recordKnownFbCustomer(cPsid, opts.customerName, opts.phone);
+              return cPsid;
+            }
+          }
+        }
+
+        // If opened from Facebook Messenger (e.g., Persistent Menu where ?source=fb has no psid in URL),
+        // or if the user is testing on their Page with an active recent conversation, use mostRecentPsid
+        if (mostRecentPsid && (opts.channel === 'FACEBOOK' || !isDefaultPlaceholderName)) {
+          return mostRecentPsid;
+        }
+      }
+    } catch {}
+  }
+
+  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -827,8 +984,18 @@ router.post('/orders', async (req: Request, res: Response) => {
     const totalAmount = Number((subtotal + shippingFee).toFixed(2));
 
     const orderNum = 1001 + miniAppDb.orders.length;
+    const { token: fbToken, pageId: fbPageId } = getEffectiveFbPageAuth();
+    const resolvedFbPsid = await resolveCustomerFbPsid({
+      explicitPsid: fbPsid ? String(fbPsid).trim() : '',
+      customerName: customerName ? String(customerName).trim() : '',
+      phone: String(phone).trim(),
+      channel: channel ? String(channel).trim() : '',
+      fbToken,
+      fbPageId
+    });
+
     const resolvedChannel: 'TELEGRAM' | 'FACEBOOK' | 'WEB' =
-      channel === 'FACEBOOK' || fbPsid
+      channel === 'FACEBOOK' || resolvedFbPsid
         ? 'FACEBOOK'
         : telegramUserId || telegramUsername
         ? 'TELEGRAM'
@@ -843,7 +1010,7 @@ router.post('/orders', async (req: Request, res: Response) => {
       telegramUsername: telegramUsername ? String(telegramUsername).trim() : undefined,
       telegramUserId: telegramUserId ? String(telegramUserId).trim() : undefined,
       channel: resolvedChannel,
-      fbPsid: fbPsid ? String(fbPsid).trim() : undefined,
+      fbPsid: resolvedFbPsid || undefined,
       phone: String(phone).trim(),
       address: String(address).trim(),
       zone: normalizedZone,
@@ -861,17 +1028,17 @@ router.post('/orders', async (req: Request, res: Response) => {
     miniAppDb.orders.unshift(newOrder);
     saveMiniAppDb();
 
-    // 3. Fire non-blocking Telegram Notification to Shop Owner / Group if token & chatId exist
-    // Prioritize Mini App's dedicated Bot Token before falling back to Live POS Bot Token
-    const botToken = (miniAppDb.config.telegramBotToken || settings.telegram_token || '').trim();
+    // 3. Fire Telegram Notification to Shop Owner / Group AND Customer's Telegram Chat (if ordered via Telegram)
+    const botToken = (miniAppDb.config.telegramBotToken || settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
     const targetChatId = (miniAppDb.config.telegramNotifyChatId || settings.telegram_chat_id || '').trim();
+    const payLabel = newOrder.paymentMethod === 'KHQR'
+      ? (newOrder.paymentSlipUrl ? '💳 ស្កេនបង់ប្រាក់រួច (KHQR + មានស្លីប)' : '💳 ស្កេនបង់ប្រាក់ (KHQR)')
+      : '🚚 បង់ប្រាក់ពេលអីវ៉ាន់ទៅដល់ (COD)';
+
     if (botToken && targetChatId) {
       const itemsLines = confirmedItems
         .map((it, idx) => `${idx + 1}. <b>[${it.code}]</b> ${it.name}\n   ↳ ${it.color} - ${it.size} x${it.qty} = <b>$${(it.price * it.qty).toFixed(2)}</b>`)
         .join('\n');
-      const payLabel = newOrder.paymentMethod === 'KHQR'
-        ? (newOrder.paymentSlipUrl ? '💳 ស្កេនបង់ប្រាក់រួច (KHQR + មានស្លីប)' : '💳 ស្កេនបង់ប្រាក់ (KHQR)')
-        : '🚚 បង់ប្រាក់ពេលអីវ៉ាន់ទៅដល់ (COD)';
 
       const sourceTitle =
         newOrder.channel === 'FACEBOOK'
@@ -896,9 +1063,30 @@ router.post('/orders', async (req: Request, res: Response) => {
       sendTelegramMessage(botToken, targetChatId, tgMessage).catch(() => {});
     }
 
-    // 4. If customer ordered from Facebook Messenger (has fbPsid) and Page Token is configured,
+    // 3B. If customer ordered inside Telegram Mini App (has telegramUserId), send Order Receipt directly to their Telegram chat!
+    if (botToken && newOrder.telegramUserId && String(newOrder.telegramUserId) !== String(targetChatId)) {
+      const tgReceiptLines = [
+        `🎉 <b>អរគុណសម្រាប់ការកម្ម៉ង់ទិញពី ${miniAppDb.config.storeName}!</b>`,
+        `🧾 លេខវិក្កយបត្រ៖ <b>#${newOrder.id}</b>`,
+        `━━━━━━━━━━━━━━━━`,
+        ...confirmedItems.map(
+          (it, idx) => `${idx + 1}. <b>[${it.code}]</b> ${it.name} (${it.color} - ${it.size}) x${it.qty} = <b>$${(it.price * it.qty).toFixed(2)}</b>`
+        ),
+        `━━━━━━━━━━━━━━━━`,
+        `🚚 ថ្លៃដឹក៖ <b>$${newOrder.shippingFee.toFixed(2)}</b> (${newOrder.deliveryCompany})`,
+        `💵 សរុបរួម៖ <b>$${newOrder.totalAmount.toFixed(2)}</b>`,
+        `💰 ការទូទាត់៖ <b>${payLabel}</b>`,
+        `📞 ទូរស័ព្ទ៖ <b>${newOrder.phone}</b>`,
+        `📍 ទីតាំង៖ <b>${newOrder.address}</b>`,
+        `✅ ក្រុមការងារហាងយើងខ្ញុំបានទទួលការកម្ម៉ង់របស់បងហើយ និងកំពុងរៀបចំវេចខ្ចប់ជូនបង! 🙏✨`
+      ].join('\n');
+
+      sendTelegramMessage(botToken, newOrder.telegramUserId, tgReceiptLines).catch(() => {});
+    }
+
+    // 4. If customer ordered from Facebook Messenger (or resolved fbPsid) and Page Token is available,
     // automatically send an Order Receipt confirmation message back into their Facebook Messenger chat!
-    const fbToken = (miniAppDb.config.fbPageAccessToken || '').trim();
+    let sentToFbChat = false;
     if (fbToken && newOrder.fbPsid) {
       const receiptLines = [
         `🎉 អរគុណសម្រាប់ការកម្ម៉ង់ទិញពី ${miniAppDb.config.storeName}!`,
@@ -915,20 +1103,40 @@ router.post('/orders', async (req: Request, res: Response) => {
         `✅ ក្រុមការងារហាងយើងខ្ញុំបានទទួលការកម្ម៉ង់របស់បងហើយ និងកំពុងរៀបចំវេចខ្ចប់ជូនបង! 🙏✨`
       ].join('\n');
 
-      fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipient: { id: newOrder.fbPsid },
-          messaging_type: 'RESPONSE',
-          message: { text: receiptLines }
-        })
-      }).catch(() => {});
+      try {
+        const fbRes = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipient: { id: newOrder.fbPsid },
+            messaging_type: 'RESPONSE',
+            message: { text: receiptLines }
+          })
+        });
+        if (fbRes.ok) {
+          sentToFbChat = true;
+        } else {
+          // Fallback to UPDATE messaging_type
+          const retryRes = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              recipient: { id: newOrder.fbPsid },
+              messaging_type: 'UPDATE',
+              message: { text: receiptLines }
+            })
+          });
+          if (retryRes.ok) sentToFbChat = true;
+        }
+      } catch (fbErr) {
+        console.error('[MiniApp FB Receipt Error]:', fbErr);
+      }
     }
 
     return res.json({
       success: true,
       order: newOrder,
+      sentToFbChat,
       products: miniAppDb.products
     });
   } catch (err: any) {
@@ -984,15 +1192,33 @@ router.put('/admin/config', (req: Request, res: Response) => {
     khqrImageUrl: incoming.khqrImageUrl ?? miniAppDb.config.khqrImageUrl,
     khqrRawString: incoming.khqrRawString !== undefined ? String(incoming.khqrRawString) : miniAppDb.config.khqrRawString,
     abaPaymentLink: incoming.abaPaymentLink !== undefined ? String(incoming.abaPaymentLink).trim() : miniAppDb.config.abaPaymentLink,
-    telegramNotifyChatId: incoming.telegramNotifyChatId ?? miniAppDb.config.telegramNotifyChatId,
-    telegramBotToken: incoming.telegramBotToken !== undefined ? String(incoming.telegramBotToken).trim() : miniAppDb.config.telegramBotToken,
+    telegramNotifyChatId:
+      incoming.telegramNotifyChatId && String(incoming.telegramNotifyChatId).trim()
+        ? String(incoming.telegramNotifyChatId).trim()
+        : miniAppDb.config.telegramNotifyChatId,
+    telegramBotToken:
+      incoming.telegramBotToken && String(incoming.telegramBotToken).trim()
+        ? String(incoming.telegramBotToken).trim()
+        : miniAppDb.config.telegramBotToken,
     adminPin: incoming.adminPin ? String(incoming.adminPin).trim() : miniAppDb.config.adminPin,
     miniAppUrl: incoming.miniAppUrl ? String(incoming.miniAppUrl).trim() : miniAppDb.config.miniAppUrl,
     menuButtonText: incoming.menuButtonText ? String(incoming.menuButtonText).trim() : miniAppDb.config.menuButtonText,
-    botUsername: incoming.botUsername ?? miniAppDb.config.botUsername,
-    fbPageId: incoming.fbPageId !== undefined ? String(incoming.fbPageId).trim() : miniAppDb.config.fbPageId,
-    fbPageName: incoming.fbPageName !== undefined ? String(incoming.fbPageName).trim() : miniAppDb.config.fbPageName,
-    fbPageAccessToken: incoming.fbPageAccessToken !== undefined ? String(incoming.fbPageAccessToken).trim() : miniAppDb.config.fbPageAccessToken,
+    botUsername:
+      incoming.botUsername && String(incoming.botUsername).trim()
+        ? String(incoming.botUsername).trim()
+        : miniAppDb.config.botUsername,
+    fbPageId:
+      incoming.fbPageId && String(incoming.fbPageId).trim()
+        ? String(incoming.fbPageId).trim()
+        : miniAppDb.config.fbPageId,
+    fbPageName:
+      incoming.fbPageName && String(incoming.fbPageName).trim()
+        ? String(incoming.fbPageName).trim()
+        : miniAppDb.config.fbPageName,
+    fbPageAccessToken:
+      incoming.fbPageAccessToken && String(incoming.fbPageAccessToken).trim()
+        ? String(incoming.fbPageAccessToken).trim()
+        : miniAppDb.config.fbPageAccessToken,
     fbVerifyToken: incoming.fbVerifyToken !== undefined ? String(incoming.fbVerifyToken).trim() : (miniAppDb.config.fbVerifyToken || '1688'),
     fbAutoReplyEnabled: incoming.fbAutoReplyEnabled !== undefined ? Boolean(incoming.fbAutoReplyEnabled) : (miniAppDb.config.fbAutoReplyEnabled ?? true),
     fbButtonText: incoming.fbButtonText ? String(incoming.fbButtonText).trim() : (miniAppDb.config.fbButtonText || '🛍️ ចុចទិញទំនិញ'),
@@ -1363,9 +1589,21 @@ router.patch('/admin/orders/:id', async (req: Request, res: Response) => {
       } catch {}
     }
 
-    // 2. Send to Facebook Messenger customer if fbPsid is present
-    const fbToken = (miniAppDb.config.fbPageAccessToken || '').trim();
-    if (fbToken && order.fbPsid) {
+    // 2. Send to Facebook Messenger customer if fbPsid is present or can be resolved
+    const { token: fbToken, pageId: fbPageId } = getEffectiveFbPageAuth();
+    const targetFbPsid = await resolveCustomerFbPsid({
+      explicitPsid: order.fbPsid,
+      customerName: order.customerName,
+      phone: order.phone,
+      channel: order.channel,
+      fbToken,
+      fbPageId
+    });
+    if (targetFbPsid && !order.fbPsid) {
+      order.fbPsid = targetFbPsid;
+      saveMiniAppDb();
+    }
+    if (fbToken && targetFbPsid) {
       try {
         const fbRes = await fetch(
           `https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(fbToken)}`,
@@ -1373,7 +1611,7 @@ router.patch('/admin/orders/:id', async (req: Request, res: Response) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              recipient: { id: order.fbPsid },
+              recipient: { id: targetFbPsid },
               messaging_type: 'UPDATE',
               message: { text: fullCustomerMsg }
             })
@@ -1387,7 +1625,7 @@ router.patch('/admin/orders/:id', async (req: Request, res: Response) => {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                recipient: { id: order.fbPsid },
+                recipient: { id: targetFbPsid },
                 messaging_type: 'RESPONSE',
                 message: { text: fullCustomerMsg }
               })
@@ -1830,14 +2068,14 @@ router.post('/admin/setup-fb-page', async (req: Request, res: Response) => {
 // Send a test Shop Button Card to the most recent customer in Facebook Page Inbox
 router.post('/admin/send-fb-test-card', async (req: Request, res: Response) => {
   try {
-    const activeToken = String(miniAppDb.config.fbPageAccessToken || '').trim();
-    const pageId = String(miniAppDb.config.fbPageId || '').trim();
+    const { token: activeToken, pageId: fbPageId } = getEffectiveFbPageAuth();
     if (!activeToken) {
       return res.status(400).json({
         success: false,
         error: 'សូមភ្ជាប់ Facebook Page Access Token ជាមុនសិន'
       });
     }
+    const pageId = String(miniAppDb.config.fbPageId || fbPageId || '').trim();
 
     let targetPsid = String(req.body?.psid || '').trim();
     let targetName = '';
@@ -1861,6 +2099,7 @@ router.post('/admin/send-fb-test-card', async (req: Request, res: Response) => {
         if (customer?.id) {
           targetPsid = String(customer.id);
           targetName = String(customer.name || '');
+          recordKnownFbCustomer(targetPsid, targetName);
           break;
         }
       }
@@ -1915,15 +2154,17 @@ router.post('/fb-webhook', async (req: Request, res: Response) => {
     const body = req.body;
     if (body?.object !== 'page' || !Array.isArray(body.entry)) return;
 
-    const activeToken = (miniAppDb.config.fbPageAccessToken || '').trim();
+    const { token: activeToken, pageId: resolvedPageId } = getEffectiveFbPageAuth();
     if (!activeToken || miniAppDb.config.fbAutoReplyEnabled === false) return;
 
     for (const entry of body.entry) {
       const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
       for (const evt of messagingEvents) {
         const senderId = evt?.sender?.id ? String(evt.sender.id) : '';
-        const pageId = String(miniAppDb.config.fbPageId || entry.id || '');
+        const pageId = String(miniAppDb.config.fbPageId || resolvedPageId || entry.id || '');
         if (!senderId || senderId === pageId || evt?.message?.is_echo) continue;
+
+        recordKnownFbCustomer(senderId);
 
         const postbackPayload = evt?.postback?.payload || '';
         const text = typeof evt?.message?.text === 'string' ? evt.message.text.trim() : '';
@@ -1959,8 +2200,7 @@ let isFirstFbPollPass = true;
 async function startFacebookMessengerShopPoller() {
   while (true) {
     try {
-      const activeToken = (miniAppDb.config.fbPageAccessToken || '').trim();
-      const pageId = (miniAppDb.config.fbPageId || '').trim();
+      const { token: activeToken, pageId } = getEffectiveFbPageAuth();
       const autoReply = miniAppDb.config.fbAutoReplyEnabled !== false;
 
       if (!activeToken || !pageId || !autoReply) {
@@ -1979,6 +2219,13 @@ async function startFacebookMessengerShopPoller() {
       const conversations = Array.isArray(data?.data) ? data.data : [];
 
       for (const conv of conversations) {
+        const participants = conv?.participants?.data || [];
+        for (const pt of participants) {
+          if (pt?.id && String(pt.id) !== pageId) {
+            recordKnownFbCustomer(String(pt.id), String(pt.name || ''));
+          }
+        }
+
         const msgs = conv?.messages?.data || [];
         if (msgs.length === 0) continue;
 
@@ -1998,6 +2245,7 @@ async function startFacebookMessengerShopPoller() {
         const fromId = String(latestMsg?.from?.id || '');
         const fromName = String(latestMsg?.from?.name || '');
         if (!fromId || fromId === pageId) continue;
+        recordKnownFbCustomer(fromId, fromName);
 
         // Check message age (only auto-reply to messages received within the last 3 minutes)
         const createdTime = latestMsg?.created_time ? new Date(latestMsg.created_time).getTime() : Date.now();
@@ -2047,9 +2295,15 @@ router.post('/inquire', async (req: Request, res: Response) => {
 
     let sentToCustomerChat = false;
 
-    // 1. If customer is in Facebook Messenger Webview (has fbPsid)
-    const fbToken = (miniAppDb.config.fbPageAccessToken || '').trim();
-    if (fbToken && fbPsid) {
+    // 1. If customer is in Facebook Messenger Webview (has fbPsid or can be resolved)
+    const { token: fbToken, pageId: fbPageId } = getEffectiveFbPageAuth();
+    const resolvedFbPsid = await resolveCustomerFbPsid({
+      explicitPsid: fbPsid ? String(fbPsid).trim() : '',
+      customerName: custLabel,
+      fbToken,
+      fbPageId
+    });
+    if (fbToken && resolvedFbPsid) {
       const fbMsg = [
         `💬 បងកំពុងសាកសួរអំពីម៉ូតកូដ [${cleanCode}] — ${cleanName} ($${Number(price || 0).toFixed(2)})`,
         `✍️ សូមបងវាយសំណួររបស់បងនៅក្នុងឆាតនេះ (ឧ. សួរពីសាច់ក្រណាត់ ឬទំហំគីឡូ) ក្រុមការងារហាងនឹងឆ្លើយតបជូនបងភ្លាមៗ! 🙏✨`
@@ -2061,7 +2315,7 @@ router.post('/inquire', async (req: Request, res: Response) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              recipient: { id: String(fbPsid) },
+              recipient: { id: String(resolvedFbPsid) },
               messaging_type: 'RESPONSE',
               message: { text: fbMsg }
             })
@@ -2087,7 +2341,7 @@ router.post('/inquire', async (req: Request, res: Response) => {
     // 3. Notify Shop Admin Group on Telegram
     const targetChatId = (miniAppDb.config.telegramNotifyChatId || settings.telegram_chat_id || '').trim();
     if (botToken && targetChatId) {
-      const channelBadge = fbPsid ? '📘 Facebook Page' : '✈️ Telegram';
+      const channelBadge = resolvedFbPsid ? '📘 Facebook Page' : '✈️ Telegram';
       const handleStr = telegramUsername ? `(@${telegramUsername})` : '';
       const alertMsg = [
         `💬 <b>ភ្ញៀវចុចសួរពីម៉ូតខោអាវ! (${channelBadge})</b>`,
@@ -2097,7 +2351,7 @@ router.post('/inquire', async (req: Request, res: Response) => {
       sendTelegramMessage(botToken, targetChatId, alertMsg).catch(() => {});
     }
 
-    return res.json({ success: true, sentToCustomerChat });
+    return res.json({ success: true, sentToCustomerChat, resolvedFbPsid: resolvedFbPsid || undefined });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err?.message || 'Error sending inquiry' });
   }

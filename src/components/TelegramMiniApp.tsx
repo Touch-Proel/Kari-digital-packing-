@@ -306,10 +306,12 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       const sourceParam = params.get('source');
       const psidParam = params.get('psid');
       const cnameParam = params.get('cname');
+      const tgUidParam = params.get('tg_uid');
       const ua = navigator.userAgent || '';
-      const isFbUa = /FBAN|FBAV|Messenger/i.test(ua);
+      const isFbUa = /FBAN|FBAV|Messenger|FB_IAB/i.test(ua);
+      const savedFbPsid = localStorage.getItem('fb_cust_psid') || '';
 
-      if (sourceParam === 'fb' || psidParam || isFbUa) {
+      if (sourceParam === 'fb' || psidParam || isFbUa || savedFbPsid) {
         setIsFbMessenger(true);
       }
       if (psidParam) {
@@ -317,12 +319,17 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         try {
           localStorage.setItem('fb_cust_psid', psidParam);
         } catch {}
+      } else if (savedFbPsid) {
+        setFbPsid(savedFbPsid);
       }
       if (cnameParam && !customerName) {
         setCustomerName(cnameParam);
         try {
           localStorage.setItem('tg_cust_name', cnameParam);
         } catch {}
+      }
+      if (tgUidParam) {
+        setTelegramUserId(tgUidParam);
       }
 
       const tg = window.Telegram?.WebApp;
@@ -384,6 +391,13 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         })
       });
       const data = await res.json();
+      if (data.resolvedFbPsid) {
+        setFbPsid(data.resolvedFbPsid);
+        setIsFbMessenger(true);
+        try {
+          localStorage.setItem('fb_cust_psid', data.resolvedFbPsid);
+        } catch {}
+      }
 
       if (data.sentToCustomerChat) {
         showToast(`💬 បានផ្ញើម៉ូតកូដ [${product.code}] ចូលឆាតរបស់បងហើយ! សូមចូលឆាតវាយសំណួរបានភ្លាម`);
@@ -1283,6 +1297,13 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       if (Array.isArray(data.products)) {
         setProducts(data.products);
       }
+      if (data.order?.fbPsid) {
+        setFbPsid(data.order.fbPsid);
+        setIsFbMessenger(true);
+        try {
+          localStorage.setItem('fb_cust_psid', data.order.fbPsid);
+        } catch {}
+      }
       setCart([]);
       setPaymentSlipUrl('');
       setOrderNote('');
@@ -1296,7 +1317,11 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         localStorage.setItem('tg_miniapp_my_orders', JSON.stringify(updatedHistory));
       } catch {}
 
-      showToast('🎉 កម្ម៉ង់ជោគជ័យ! អរគុណសម្រាប់ការគាំទ្រ');
+      showToast(
+        data.sentToFbChat
+          ? '🎉 កម្ម៉ង់ជោគជ័យ! បានផ្ញើវិក្កយបត្រចូលឆាត Messenger របស់បងហើយ!'
+          : '🎉 កម្ម៉ង់ជោគជ័យ! អរគុណសម្រាប់ការគាំទ្រ'
+      );
     } catch {
       showToast('មានបញ្ហាបណ្តាញ សូមព្យាយាមម្តងទៀត', 'error');
     } finally {
