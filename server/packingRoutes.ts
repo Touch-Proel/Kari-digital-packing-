@@ -12,6 +12,9 @@ import {
   settings,
   activeLiveId,
   setActiveLiveId,
+  normalizeLiveId,
+  getLinkedVideosForSession,
+  mergeLiveSessionsIntoPrimary,
   activeInvoiceLocks,
   cleanExpiredLocks,
   bumpDataRevision,
@@ -23,10 +26,10 @@ import {
   stampInvoiceWorkflowUpdate
 } from './db.ts';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite.ts';
-import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment, findBestMatchingCommentForCode } from './parser.ts';
+import { parseAndAllocateComment, clearProcessedCommentsForLive, syncProcessedCommentKeysWithInvoices, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment, findBestMatchingCommentForCode } from './parser.ts';
 import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper.ts';
 import type { Invoice, Product, OrderItem } from './types.ts';
-import { sendFacebookReply, fetchFacebookComments } from './fbAuth.ts';
+import { sendFacebookReply, fetchFacebookComments, clearLiveStreamCache } from './fbAuth.ts';
 import { generateServerKHQRPNG } from './khqrServer.ts';
 import {
   testTelegramBotToken,
@@ -2761,26 +2764,50 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
     return 0;
   };
 
-  const uniqueLiveIds = allLiveIds.map(liveId => {
-    const sessionInvoices = invoices.filter(i => i.live_id === liveId);
-    let sessionDate = '';
-    if (sessionInvoices.length > 0) {
-      const dates = sessionInvoices.map(i => i.created_at).filter(Boolean).sort().reverse();
-      if (dates.length > 0) sessionDate = dates[0];
+  // Collect all secondary video IDs that have already been linked into a primary session
+  const secondaryLinkedSet = new Set<string>();
+  const linkedMap = settings.linked_live_videos || {};
+  for (const [primaryKey, vids] of Object.entries(linkedMap)) {
+    if (Array.isArray(vids)) {
+      for (const v of vids) {
+        const cleanV = normalizeLiveId(v);
+        if (cleanV && cleanV !== normalizeLiveId(primaryKey)) {
+          secondaryLinkedSet.add(cleanV);
+        }
+      }
     }
-    const sample = sessionInvoices[0];
-    const count = sessionInvoices.filter(i => i.status !== 'Cancelled').length;
-    const sessionProducts = products.filter(p => (p.live_id || activeLiveId) === liveId);
-    const unsoldProducts = sessionProducts.filter(p => p.stock_qty > 0);
-    return {
-      live_id: liveId,
-      created_at: sessionDate || sample?.created_at || new Date().toISOString(),
-      basket_count: count,
-      product_count: sessionProducts.length,
-      unsold_product_count: unsoldProducts.length,
-      is_active: liveId === activeLiveId
-    };
-  });
+  }
+
+  const uniqueLiveIds = allLiveIds
+    .map(liveId => {
+      const sessionInvoices = invoices.filter(i => i.live_id === liveId);
+      let sessionDate = '';
+      if (sessionInvoices.length > 0) {
+        const dates = sessionInvoices.map(i => i.created_at).filter(Boolean).sort().reverse();
+        if (dates.length > 0) sessionDate = dates[0];
+      }
+      const sample = sessionInvoices[0];
+      const count = sessionInvoices.filter(i => i.status !== 'Cancelled').length;
+      const sessionProducts = products.filter(p => (p.live_id || activeLiveId) === liveId);
+      const unsoldProducts = sessionProducts.filter(p => p.stock_qty > 0);
+      const linkedVideos = getLinkedVideosForSession(liveId);
+      return {
+        live_id: liveId,
+        created_at: sessionDate || sample?.created_at || new Date().toISOString(),
+        basket_count: count,
+        product_count: sessionProducts.length,
+        unsold_product_count: unsoldProducts.length,
+        is_active: liveId === activeLiveId,
+        linked_videos: linkedVideos
+      };
+    })
+    .filter(item => {
+      // Hide empty secondary sessions that were already merged/linked into another primary session
+      if (item.live_id !== activeLiveId && secondaryLinkedSet.has(normalizeLiveId(item.live_id)) && item.basket_count === 0 && item.product_count === 0) {
+        return false;
+      }
+      return true;
+    });
 
   // Sort:
   // 1. ACTIVE session ALWAYS goes to the very top (when active រត់ទៅ top)
@@ -2899,6 +2926,24 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
     }
   }
 
+  // Clear in-memory processed comment keys and Facebook stream cache for this session and any linked videos
+  const linkedVids = getLinkedVideosForSession(cleanLiveId);
+  clearProcessedCommentsForLive(cleanLiveId);
+  for (const vid of linkedVids) {
+    clearProcessedCommentsForLive(vid);
+    clearLiveStreamCache(vid);
+  }
+  if (settings.linked_live_videos) {
+    delete settings.linked_live_videos[cleanLiveId];
+    const normClean = normalizeLiveId(cleanLiveId);
+    delete settings.linked_live_videos[normClean];
+    for (const [k, arr] of Object.entries(settings.linked_live_videos)) {
+      if (Array.isArray(arr)) {
+        settings.linked_live_videos[k] = arr.filter(v => v !== cleanLiveId && v !== normClean);
+      }
+    }
+  }
+
   // If the deleted session was currently the activeLiveId, switch to another remaining session
   if (activeLiveId === cleanLiveId) {
     const remainingLiveIds = Array.from(new Set([
@@ -2928,6 +2973,39 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
     deleted_baskets_count: deletedInvoicesCount,
     deleted_products_count: deletedProductCount,
     active_live_id: activeLiveId
+  });
+});
+
+// POST /api/merge_live_sessions - Consolidate two Live Sessions (Part 1 + Part 2) into one Unified Session
+router.post('/merge_live_sessions', (req: Request, res: Response) => {
+  const { target_live_id, source_live_id } = req.body;
+  const targetId = normalizeLiveId(String(target_live_id || activeLiveId || ''));
+  const sourceId = normalizeLiveId(String(source_live_id || ''));
+
+  if (!targetId || !sourceId) {
+    return res.status(400).json({ success: false, error: 'សូមជ្រើសរើសវគ្គ Live ដែលត្រូវច្របាច់បញ្ចូលគ្នា!' });
+  }
+  if (targetId === sourceId) {
+    return res.status(400).json({ success: false, error: 'មិនអាចច្របាច់វគ្គ Live តែមួយចូលគ្នាបានទេ!' });
+  }
+
+  const stats = mergeLiveSessionsIntoPrimary(targetId, sourceId);
+  bumpDataRevision();
+  saveDatabaseToDisk();
+
+  const totalBaskets = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled').length;
+  const linkedVideos = getLinkedVideosForSession(targetId);
+
+  return res.json({
+    success: true,
+    target_live_id: targetId,
+    source_live_id: sourceId,
+    merged_same_customer_count: stats.mergedSameCustomerCount,
+    moved_baskets_count: stats.movedBasketsCount,
+    moved_products_count: stats.movedProductsCount,
+    total_baskets: totalBaskets,
+    linked_videos: linkedVideos,
+    message: `🎉 បានច្របាច់ Live #${sourceId.slice(-8)} ចូលក្នុង Live #${targetId.slice(-8)} ជោគជ័យ! (រួមកន្ត្រកភ្ញៀវដូចគ្នា ${stats.mergedSameCustomerCount} កន្ត្រក និងផ្ទេរ ${stats.movedBasketsCount} កន្ត្រក)`
   });
 });
 

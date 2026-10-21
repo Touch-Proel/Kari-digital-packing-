@@ -1,8 +1,9 @@
-import { fetchFacebookComments } from './fbAuth.ts';
-import { parseAndAllocateComment } from './parser.ts';
+import { fetchFacebookComments, clearLiveStreamCache } from './fbAuth.ts';
+import { parseAndAllocateComment, syncProcessedCommentKeysWithInvoices } from './parser.ts';
 import {
   activeLiveId,
   setActiveLiveId,
+  getLinkedVideosForSession,
   invoices,
   bumpDataRevision,
   saveDatabaseToDisk,
@@ -34,6 +35,7 @@ export interface LiveCommentsAutoSyncStatus {
   enabled: boolean;
   intervalSec: number;
   activeLiveId: string;
+  linkedVideoIds?: string[];
   lastSyncAt: string | null;
   totalCommentsSynced: number;
   totalOrdersAllocated: number;
@@ -47,6 +49,7 @@ const liveSyncState: LiveCommentsAutoSyncStatus = {
   enabled: false,
   intervalSec: 3,
   activeLiveId: activeLiveId || '1630588828526235',
+  linkedVideoIds: [],
   lastSyncAt: null,
   totalCommentsSynced: 0,
   totalOrdersAllocated: 0,
@@ -67,11 +70,13 @@ export function recordRecentOrder(order: RecentLiveOrder) {
 }
 
 /**
- * Execute one iteration of pulling Facebook comments and allocating to baskets
+ * Execute one iteration of pulling Facebook comments from primary + all linked Live videos
+ * and allocating to unified baskets in the primary session
  */
 export async function executeLiveCommentsSyncOnce(customLiveId?: string, force = false): Promise<{
   success: boolean;
   target_live_id: string;
+  linked_videos?: string[];
   total_synced: number;
   new_orders: number;
   total_baskets: number;
@@ -79,12 +84,14 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
   is_simulated?: boolean;
 }> {
   if (!force && !liveSyncState.enabled) {
+    const tId = customLiveId || liveSyncState.activeLiveId || activeLiveId;
     return {
       success: true,
-      target_live_id: customLiveId || liveSyncState.activeLiveId || activeLiveId,
+      target_live_id: tId,
+      linked_videos: getLinkedVideosForSession(tId),
       total_synced: 0,
       new_orders: 0,
-      total_baskets: invoices.filter(i => i.live_id === (customLiveId || activeLiveId) && i.status !== 'Cancelled').length
+      total_baskets: invoices.filter(i => i.live_id === tId && i.status !== 'Cancelled').length
     };
   }
 
@@ -92,6 +99,7 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
     return {
       success: true,
       target_live_id: liveSyncState.activeLiveId,
+      linked_videos: getLinkedVideosForSession(liveSyncState.activeLiveId),
       total_synced: 0,
       new_orders: 0,
       total_baskets: invoices.filter(i => i.live_id === liveSyncState.activeLiveId && i.status !== 'Cancelled').length
@@ -116,101 +124,134 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
     setActiveLiveId(targetId);
   }
 
+  const videoIdsToPull = getLinkedVideosForSession(targetId);
+  liveSyncState.linkedVideoIds = videoIdsToPull;
+
   try {
-    const isRealtime = !force;
-    const result = await fetchFacebookComments(
-      targetId,
-      undefined,
-      force ? 15000 : 200,
-      { isRealtimePoll: isRealtime, forceFullFetch: force }
-    );
-    if (result.error && (!result.data || result.data.length === 0)) {
-      liveSyncState.lastError = result.error;
+    const currentBasketsCount = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled').length;
+    const shouldForceFull = force || currentBasketsCount === 0;
+    const isRealtime = !shouldForceFull;
+
+    // Ensure processedCommentKeys matches current active baskets in targetId
+    syncProcessedCommentKeysWithInvoices(targetId);
+    if (shouldForceFull) {
+      for (const vid of videoIdsToPull) {
+        clearLiveStreamCache(vid);
+      }
+    }
+
+    let totalCommentsFetched = 0;
+    let newAllocatedCount = 0;
+    let newProcessedCommentsCount = 0;
+    let anySimulated = false;
+    let firstError: string | null = null;
+    let anySuccess = false;
+
+    for (const videoId of videoIdsToPull) {
+      const result = await fetchFacebookComments(
+        videoId,
+        undefined,
+        shouldForceFull ? 15000 : 200,
+        { isRealtimePoll: isRealtime, forceFullFetch: shouldForceFull }
+      );
+
+      if (result.error && (!result.data || result.data.length === 0)) {
+        if (!firstError) firstError = result.error;
+        continue;
+      }
+
+      anySuccess = true;
+      if (result.isSimulated) anySimulated = true;
+      const comments = result.data || [];
+      totalCommentsFetched += comments.length;
+
+      for (const c of comments) {
+        // Allocate into the primary targetId session so Part 1 + Part 2 share 1 unified basket per customer!
+        const parsed = parseAndAllocateComment(
+          c.from?.id || '',
+          c.from?.name || 'អតិថិជន Facebook',
+          c.message || '',
+          targetId,
+          c.id,
+          c.from?.picture?.data?.url,
+          true // batchMode = true
+        );
+
+        if (parsed.status !== 'IGNORED') {
+          newProcessedCommentsCount++;
+        }
+
+        if (parsed.status === 'SUCCESS') {
+          newAllocatedCount++;
+          liveSyncState.totalOrdersAllocated++;
+
+          // Find basket info in primary targetId
+          const matchingInv = invoices.find(
+            i => i.live_id === targetId &&
+                 i.status !== 'Cancelled' &&
+                 (i.facebook_user_id === (c.from?.id || '') || i.facebook_name === (c.from?.name || ''))
+          );
+
+          recordRecentOrder({
+            id: c.id || `ord_${Date.now()}_${Math.random()}`,
+            timestamp: new Date().toISOString(),
+            customer_name: c.from?.name || 'អតិថិជន Facebook',
+            customer_id: c.from?.id,
+            picture_url: c.from?.picture?.data?.url || matchingInv?.picture_url,
+            comment_text: c.message || '',
+            basket_no: matchingInv?.basket_no || '?',
+            codes: (matchingInv?.items || []).map(it => `${it.product_code}x${it.quantity}`),
+            allocated_items: (matchingInv?.items || []).map(it => ({
+              code: it.product_code,
+              product_name: it.product_name,
+              quantity: it.quantity,
+              price: it.price
+            })),
+            phone_number: matchingInv?.phone_number,
+            address: matchingInv?.address,
+            location_label: matchingInv?.location_label,
+            total_amount: matchingInv?.total_amount || 0
+          });
+        }
+      }
+    }
+
+    if (!anySuccess && firstError) {
+      liveSyncState.lastError = firstError;
       liveSyncState.lastSyncAt = new Date().toISOString();
       return {
         success: false,
         target_live_id: targetId,
+        linked_videos: videoIdsToPull,
         total_synced: 0,
         new_orders: 0,
         total_baskets: 0,
-        error: result.error
+        error: firstError
       };
     }
 
-    const comments = result.data || [];
-    let newAllocatedCount = 0;
-    let newProcessedCommentsCount = 0;
-
     // Fast return if zero new comments in incremental poll
-    if (comments.length === 0 && isRealtime) {
+    if (totalCommentsFetched === 0 && isRealtime) {
       liveSyncState.lastSyncAt = new Date().toISOString();
       liveSyncState.lastError = null;
       return {
         success: true,
         target_live_id: targetId,
+        linked_videos: videoIdsToPull,
         total_synced: liveSyncState.totalCommentsSynced,
         new_orders: 0,
         total_baskets: invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled').length
       };
     }
 
-    for (const c of comments) {
-      const parsed = parseAndAllocateComment(
-        c.from?.id || '',
-        c.from?.name || 'អតិថិជន Facebook',
-        c.message || '',
-        targetId,
-        c.id,
-        c.from?.picture?.data?.url,
-        true // batchMode = true
-      );
-
-      if (parsed.status !== 'IGNORED') {
-        newProcessedCommentsCount++;
-      }
-
-      if (parsed.status === 'SUCCESS') {
-        newAllocatedCount++;
-        liveSyncState.totalOrdersAllocated++;
-
-        // Find basket info
-        const matchingInv = invoices.find(
-          i => i.live_id === targetId &&
-               i.status !== 'Cancelled' &&
-               (i.facebook_user_id === (c.from?.id || '') || i.facebook_name === (c.from?.name || ''))
-        );
-
-        recordRecentOrder({
-          id: c.id || `ord_${Date.now()}_${Math.random()}`,
-          timestamp: new Date().toISOString(),
-          customer_name: c.from?.name || 'អតិថិជន Facebook',
-          customer_id: c.from?.id,
-          picture_url: c.from?.picture?.data?.url || matchingInv?.picture_url,
-          comment_text: c.message || '',
-          basket_no: matchingInv?.basket_no || '?',
-          codes: (matchingInv?.items || []).map(it => `${it.product_code}x${it.quantity}`),
-          allocated_items: (matchingInv?.items || []).map(it => ({
-            code: it.product_code,
-            product_name: it.product_name,
-            quantity: it.quantity,
-            price: it.price
-          })),
-          phone_number: matchingInv?.phone_number,
-          address: matchingInv?.address,
-          location_label: matchingInv?.location_label,
-          total_amount: matchingInv?.total_amount || 0
-        });
-      }
-    }
-
     liveSyncState.lastSyncAt = new Date().toISOString();
-    liveSyncState.totalCommentsSynced += comments.length;
+    liveSyncState.totalCommentsSynced += totalCommentsFetched;
     liveSyncState.lastNewOrdersCount = newAllocatedCount;
     liveSyncState.lastError = null;
 
     if (newProcessedCommentsCount > 0) {
       bumpDataRevision();
-      console.log(`🎉 [Live Real-Time Sync]: Processed ${newProcessedCommentsCount} comments (${newAllocatedCount} new orders) from Live #${targetId}!`);
+      console.log(`🎉 [Live Real-Time Sync]: Processed ${newProcessedCommentsCount} comments (${newAllocatedCount} new orders) across ${videoIdsToPull.length} linked video(s) into Live #${targetId}!`);
     }
 
     const activeBaskets = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled');
@@ -218,10 +259,11 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
     return {
       success: true,
       target_live_id: targetId,
-      total_synced: comments.length,
+      linked_videos: videoIdsToPull,
+      total_synced: totalCommentsFetched,
       new_orders: newAllocatedCount,
       total_baskets: activeBaskets.length,
-      is_simulated: result.isSimulated || false
+      is_simulated: anySimulated
     };
   } catch (err: any) {
     liveSyncState.lastError = err.message || 'Error pulling live comments';
@@ -229,6 +271,7 @@ export async function executeLiveCommentsSyncOnce(customLiveId?: string, force =
     return {
       success: false,
       target_live_id: targetId,
+      linked_videos: videoIdsToPull,
       total_synced: 0,
       new_orders: 0,
       total_baskets: 0,
@@ -249,6 +292,7 @@ export function startLiveCommentsAutoSync(intervalSec = 3, liveId?: string) {
     liveSyncState.activeLiveId = liveId;
     setActiveLiveId(liveId);
   }
+  liveSyncState.linkedVideoIds = getLinkedVideosForSession(liveSyncState.activeLiveId);
   liveSyncState.enabled = true;
 
   if (liveSyncTimer) {
@@ -266,7 +310,7 @@ export function startLiveCommentsAutoSync(intervalSec = 3, liveId?: string) {
     }
   }, liveSyncState.intervalSec * 1000);
 
-  console.log(`🔴 [Live Comments Auto-Sync STARTED]: Polling Live #${liveSyncState.activeLiveId} every ${liveSyncState.intervalSec}s`);
+  console.log(`🔴 [Live Comments Auto-Sync STARTED]: Polling Live #${liveSyncState.activeLiveId} (${liveSyncState.linkedVideoIds.length} video(s)) every ${liveSyncState.intervalSec}s`);
   return getLiveCommentsAutoSyncStatus();
 }
 
@@ -287,8 +331,11 @@ export function stopLiveCommentsAutoSync() {
  * Get current live auto sync status
  */
 export function getLiveCommentsAutoSyncStatus(): LiveCommentsAutoSyncStatus {
+  const currentId = liveSyncState.activeLiveId || activeLiveId;
   return {
     ...liveSyncState,
-    activeLiveId: liveSyncState.activeLiveId || activeLiveId
+    activeLiveId: currentId,
+    linkedVideoIds: getLinkedVideosForSession(currentId)
   };
 }
+
