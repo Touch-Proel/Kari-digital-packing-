@@ -39,6 +39,7 @@ export function FacebookAuthModal({
   const [isRefreshingPages, setIsRefreshingPages] = useState(false);
   const [linkedVideos, setLinkedVideos] = useState<string[]>([]);
   const [linkingVideoId, setLinkingVideoId] = useState<string | null>(null);
+  const [pendingLinkConfirmId, setPendingLinkConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -295,6 +296,7 @@ export function FacebookAuthModal({
 
   const handleLinkLiveVideo = async (videoId: string) => {
     if (!videoId) return;
+    setPendingLinkConfirmId(null);
     setLinkingVideoId(videoId);
     const shortVid = videoId.includes('_') ? videoId.split('_').pop() || videoId : videoId;
     const shortPrimary = activeLiveId.includes('_') ? activeLiveId.split('_').pop() || activeLiveId : activeLiveId;
@@ -781,28 +783,50 @@ export function FacebookAuthModal({
                           </span>
                         </div>
 
-                        {/* Action Buttons: Link to Current Live (Part 2) OR Switch */}
-                        <div className="flex items-center gap-1.5 ml-auto" onClick={e => e.stopPropagation()}>
+                        {/* Action Buttons: Primary = Switch to this Live (Isolated Stock) | Secondary = Link Part 2 */}
+                        <div className="flex items-center gap-1.5 ml-auto flex-wrap" onClick={e => e.stopPropagation()}>
                           {!isSelected && !isLinkedSecondary && (
                             <>
                               <button
                                 type="button"
-                                disabled={isLinkingThis}
-                                onClick={() => handleLinkLiveVideo(p.id)}
-                                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-2.5 py-1 rounded-lg text-[10.5px] font-black border border-purple-400/50 shadow-sm transition-all active:scale-95 flex items-center gap-1 disabled:opacity-60"
-                                title="ភ្ជាប់វីដេអូនេះចូលជាមួយ Live កំពុងប្រើ ដើម្បីទាញខំមិន និងរួមកន្ត្រកភ្ញៀវតែមួយ (Part 1 + Part 2)"
-                              >
-                                <span>🔗</span>
-                                <span>{isLinkingThis ? 'កំពុងភ្ជាប់...' : 'ភ្ជាប់តឡាយ (រួមកន្ត្រក)'}</span>
-                              </button>
-                              <button
-                                type="button"
                                 onClick={() => handleSelectLive(p.id)}
-                                className="bg-slate-800 hover:bg-slate-700 text-cyan-300 px-2 py-1 rounded-lg text-[10.5px] font-bold border border-slate-700 transition-all active:scale-95"
-                                title="ប្តូរទៅកាន់វគ្គ Live នេះដាច់ដោយឡែក"
+                                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-2.5 py-1 rounded-lg text-[10.5px] font-black border border-cyan-400/50 shadow-sm transition-all active:scale-95 flex items-center gap-1"
+                                title="ជ្រើសរើសវគ្គ Live នេះជាគោល (ស្តុក រូបភាព កូដ និងតម្លៃដាច់ដោយឡែក ១០០% មិនឆ្លងពី Live ចាស់)"
                               >
-                                ប្តូរទៅឡាយនេះ
+                                <span>🎥</span>
+                                <span>ជ្រើសរើសឡាយនេះ (ស្តុកដាច់ដោយឡែក)</span>
                               </button>
+                              {pendingLinkConfirmId === p.id ? (
+                                <div className="flex items-center gap-1 bg-purple-950/90 border border-purple-400/80 px-2 py-0.5 rounded-lg">
+                                  <span className="text-[10px] text-purple-200 font-bold">ភ្ជាប់ចូល #{(activeLiveId.split('_').pop() || activeLiveId).slice(-6)}?</span>
+                                  <button
+                                    type="button"
+                                    disabled={isLinkingThis}
+                                    onClick={() => handleLinkLiveVideo(p.id)}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white px-2 py-0.5 rounded text-[10px] font-black"
+                                  >
+                                    យល់ព្រម
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPendingLinkConfirmId(null)}
+                                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                  >
+                                    បោះបង់
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={isLinkingThis}
+                                  onClick={() => setPendingLinkConfirmId(p.id)}
+                                  className="bg-slate-900/90 hover:bg-purple-950/80 text-purple-300 hover:text-purple-200 px-2 py-1 rounded-lg text-[10px] font-bold border border-purple-500/40 transition-all active:scale-95 flex items-center gap-1 disabled:opacity-60"
+                                  title="ប្រើសម្រាប់តែករណីដាច់ឡាយ ហើយតឡាយទី ២ ក្នុងថ្ងៃតែមួយ (Part 2) ប៉ុណ្ណោះ (មិនទាញស្តុកចាស់ឆ្លងឡើយ)"
+                                >
+                                  <span>🔗</span>
+                                  <span>{isLinkingThis ? 'កំពុងភ្ជាប់...' : 'តឡាយ Part 2'}</span>
+                                </button>
+                              )}
                             </>
                           )}
                           {isLinkedSecondary && (

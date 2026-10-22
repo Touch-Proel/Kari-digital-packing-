@@ -48,6 +48,7 @@ import {
 import { parseAndAllocateComment, syncProcessedCommentKeysWithInvoices } from './server/parser.ts';
 import { startLiveCommentsAutoSync, executeLiveCommentsSyncOnce } from './server/liveSync.ts';
 import { initTelegramBotService } from './server/telegramBotService.ts';
+import { resetTelegramStateForNewLiveSession } from './server/telegramSync.ts';
 
 dotenv.config();
 
@@ -459,6 +460,7 @@ app.post('/api/fb/active_live', (req: Request, res: Response) => {
   if (live_id) {
     const cleanId = normalizeLiveId(String(live_id));
     setActiveLiveId(cleanId);
+    resetTelegramStateForNewLiveSession(cleanId);
     startLiveCommentsAutoSync(3, cleanId);
     bumpDataRevision();
     return res.json({
@@ -473,7 +475,7 @@ app.post('/api/fb/active_live', (req: Request, res: Response) => {
 // 5.6 Link a secondary Live Video (Part 2 / Reconnected Live) into the Primary Active Live Session
 app.post('/api/fb/link_live_video', async (req: Request, res: Response) => {
   try {
-    const { primary_live_id, video_id } = req.body;
+    const { primary_live_id, video_id, include_products } = req.body;
     const primaryId = normalizeLiveId(String(primary_live_id || activeLiveId || ''));
     const cleanVideoId = normalizeLiveId(String(video_id || ''));
 
@@ -484,8 +486,10 @@ app.post('/api/fb/link_live_video', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'វីដេអូនេះគឺជា Live គោលកំពុងប្រើស្រាប់ហើយ!' });
     }
 
-    // 1. Merge any existing baskets/comments/stock if cleanVideoId was previously opened separately
-    const mergeStats = mergeLiveSessionsIntoPrimary(primaryId, cleanVideoId);
+    // 1. Merge any existing baskets/comments if cleanVideoId was previously opened separately (strictly NEVER move stock products across sessions unless explicitly requested!)
+    const mergeStats = mergeLiveSessionsIntoPrimary(primaryId, cleanVideoId, {
+      includeProducts: include_products === true
+    });
 
     // 2. Link cleanVideoId to primaryId
     const linkedVideos = addLinkedVideoToSession(primaryId, cleanVideoId);

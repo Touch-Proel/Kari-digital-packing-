@@ -354,7 +354,7 @@ export async function persistToSqlite(data: {
       }
       for (const p of data.products) {
         const prodId = p.id || ++currentMaxId;
-        stmtProd.run([prodId, p.code, p.name, p.stock_qty, p.price, p.cost_price || 0, p.image_file || '', p.live_id || data.activeLiveId || '']);
+        stmtProd.run([prodId, p.code, p.name, p.stock_qty, p.price, p.cost_price || 0, p.image_file || '', p.live_id || 'LEGACY_ISOLATED']);
       }
       stmtProd.free();
 
@@ -661,7 +661,7 @@ export async function loadFromSqlite(): Promise<{
         price: Number(r[4]),
         cost_price: Number(r[5] || 0),
         image_file: String(r[6] || ''),
-        live_id: String(r[7] || '').trim() || (result.activeLiveId || '1626350178950100')
+        live_id: String(r[7] || '').trim() || 'LEGACY_ISOLATED'
       }));
     }
 

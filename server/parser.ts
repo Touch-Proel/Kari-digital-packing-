@@ -7,6 +7,7 @@ import {
   bumpDataRevision,
   saveDatabaseToDisk,
   activeLiveId,
+  normalizeLiveId,
   settings
 } from './db.ts';
 import { sendFacebookReply } from './fbAuth.ts';
@@ -124,8 +125,8 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   const { phone, cleanText } = extractPhoneNumber(text);
   if (!phone && isQuestionComment(text)) return [];
 
-  const targetLive = liveId || activeLiveId;
-  const targetProducts = products.filter(p => (p.live_id || activeLiveId) === targetLive);
+  const targetLive = normalizeLiveId(liveId || activeLiveId);
+  const targetProducts = products.filter(p => normalizeLiveId(p.live_id || '') === targetLive);
 
   return extractCodeQtyPairsFromComment(cleanText || text, targetProducts, settings.parser_strict_catalog);
 }
@@ -731,8 +732,9 @@ export function parseAndAllocateComment(
       continue;
     }
 
+    const normTargetLive = normalizeLiveId(liveId);
     let prod = products.find(p => {
-      if ((p.live_id || activeLiveId) !== liveId) return false;
+      if (normalizeLiveId(p.live_id || '') !== normTargetLive) return false;
       const pCode = p.code.toUpperCase().trim();
       if (pCode === cleanPairCode) return true;
       if (pCode.replace(/^0+/, '') === cleanPairCode.replace(/^0+/, '') && cleanPairCode.replace(/^0+/, '') !== '') {

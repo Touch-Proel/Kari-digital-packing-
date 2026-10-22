@@ -346,7 +346,19 @@ export function normalizeLiveId(id: string): string {
 
 export function setActiveLiveId(id: string) {
   const cleanId = normalizeLiveId(id);
+  if (!cleanId) return;
   activeLiveId = cleanId;
+  // Safety: If cleanId was accidentally listed as a secondary linked video inside an older session,
+  // detach it from that older session so selecting a Live post as Primary is 100% isolated.
+  if (settings.linked_live_videos && typeof settings.linked_live_videos === 'object') {
+    for (const [primaryKey, vids] of Object.entries(settings.linked_live_videos)) {
+      if (normalizeLiveId(primaryKey) !== cleanId && Array.isArray(vids)) {
+        settings.linked_live_videos[primaryKey] = vids
+          .map(normalizeLiveId)
+          .filter(v => v && v !== cleanId);
+      }
+    }
+  }
   saveDatabaseToDisk();
 }
 
@@ -405,7 +417,11 @@ export function removeLinkedVideoFromSession(sessionId: string, videoId: string)
   return getLinkedVideosForSession(primaryId);
 }
 
-export function mergeLiveSessionsIntoPrimary(primaryLiveId: string, sourceLiveId: string): {
+export function mergeLiveSessionsIntoPrimary(
+  primaryLiveId: string,
+  sourceLiveId: string,
+  options?: { includeProducts?: boolean }
+): {
   mergedSameCustomerCount: number;
   movedBasketsCount: number;
   movedProductsCount: number;
@@ -420,22 +436,24 @@ export function mergeLiveSessionsIntoPrimary(primaryLiveId: string, sourceLiveId
   let movedBasketsCount = 0;
   let movedProductsCount = 0;
 
-  // 1. Move or merge products from sourceId into targetId
-  const sourceProducts = products.filter(p => normalizeLiveId(p.live_id || '') === sourceId);
-  for (const sp of sourceProducts) {
-    const cleanCode = (sp.code || '').toUpperCase().trim();
-    const existingInTarget = products.find(
-      p => normalizeLiveId(p.live_id || activeLiveId) === targetId && (p.code || '').toUpperCase().trim() === cleanCode
-    );
-    if (!existingInTarget) {
-      sp.live_id = targetId;
-      movedProductsCount++;
+  // 1. Move or merge products from sourceId into targetId ONLY when explicitly requested (default false to prevent stock contamination across Live sessions)
+  if (options?.includeProducts === true) {
+    const sourceProducts = products.filter(p => normalizeLiveId(p.live_id || '') === sourceId);
+    for (const sp of sourceProducts) {
+      const cleanCode = (sp.code || '').toUpperCase().trim();
+      const existingInTarget = products.find(
+        p => normalizeLiveId(p.live_id || '') === targetId && (p.code || '').toUpperCase().trim() === cleanCode
+      );
+      if (!existingInTarget) {
+        sp.live_id = targetId;
+        movedProductsCount++;
+      }
     }
-  }
-  // Remove leftover duplicate products in sourceId
-  for (let i = products.length - 1; i >= 0; i--) {
-    if (normalizeLiveId(products[i].live_id || '') === sourceId) {
-      products.splice(i, 1);
+    // Remove leftover duplicate products in sourceId
+    for (let i = products.length - 1; i >= 0; i--) {
+      if (normalizeLiveId(products[i].live_id || '') === sourceId) {
+        products.splice(i, 1);
+      }
     }
   }
 
@@ -959,19 +977,20 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string, persist = 
   let updatedInvoicesCount = 0;
 
   for (const inv of invoices) {
-    const invLive = inv.live_id || activeLiveId;
-    if (targetLiveId && invLive !== targetLiveId) continue;
+    const invLive = normalizeLiveId(inv.live_id || activeLiveId);
+    if (targetLiveId && invLive !== normalizeLiveId(targetLiveId)) continue;
 
     // Only cascade to active, non-dispatched invoices (never alter historic dispatched packages)
     if (inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED') {
       let invChanged = false;
       for (const item of inv.items) {
-        // Look up product in this live session first, then fallback to global product catalog
+        // STRICT SESSION ISOLATION: Look up product ONLY in this exact live session (never pull price/photo/code from other live sessions!)
         const cleanCode = (item.product_code || '').trim().toUpperCase();
         if (!cleanCode) continue;
 
-        const prod = products.find(p => (p.live_id || activeLiveId) === invLive && (p.code || '').trim().toUpperCase() === cleanCode)
-          || products.find(p => (p.code || '').trim().toUpperCase() === cleanCode);
+        const prod = products.find(
+          p => normalizeLiveId(p.live_id || '') === invLive && (p.code || '').trim().toUpperCase() === cleanCode
+        );
 
         if (prod) {
           // Auto-sync price if stock price is positive and differs
@@ -1177,15 +1196,16 @@ export function loadDatabaseFromDisk(): Promise<void> {
           }
         }
 
-        // Merge any missing products from JSON store
+        // Merge any missing products from JSON store (strictly preserving their original live_id)
         if (Array.isArray(store.products) && store.products.length > 0) {
-          const existingProdKeys = new Set(products.map(p => `${p.live_id || activeLiveId}_${(p.code || '').toUpperCase().trim()}`));
+          const existingProdKeys = new Set(products.map(p => `${normalizeLiveId(p.live_id || 'LEGACY_ISOLATED')}_${(p.code || '').toUpperCase().trim()}`));
           let maxProdId = products.reduce((m, p) => Math.max(m, p.id || 0), 0);
           for (const sp of store.products) {
-            if (!sp || !sp.code) continue;
-            const key = `${sp.live_id || activeLiveId}_${sp.code.toUpperCase().trim()}`;
+            if (!sp || !sp.code || !sp.live_id) continue;
+            const normLive = normalizeLiveId(sp.live_id);
+            const key = `${normLive}_${sp.code.toUpperCase().trim()}`;
             if (!existingProdKeys.has(key)) {
-              products.push({ ...sp, id: sp.id || ++maxProdId });
+              products.push({ ...sp, live_id: normLive, id: sp.id || ++maxProdId });
               existingProdKeys.add(key);
             }
           }
@@ -1290,12 +1310,14 @@ export function loadDatabaseFromDisk(): Promise<void> {
         if (fs.existsSync(LIVE_PRODUCTS_PATH)) {
           const liveProds = JSON.parse(fs.readFileSync(LIVE_PRODUCTS_PATH, 'utf8'));
           if (Array.isArray(liveProds)) {
-            const existingProdKeys = new Set(products.map(p => `${p.live_id}_${p.code}`));
+            const existingProdKeys = new Set(products.map(p => `${normalizeLiveId(p.live_id || 'LEGACY_ISOLATED')}_${p.code}`));
             let maxId = products.reduce((m, p) => Math.max(m, p.id || 0), 0);
             for (const lp of liveProds) {
-              const key = `${lp.live_id || activeLiveId}_${lp.code}`;
+              if (!lp || !lp.code || !lp.live_id) continue;
+              const normLive = normalizeLiveId(lp.live_id);
+              const key = `${normLive}_${lp.code}`;
               if (!existingProdKeys.has(key)) {
-                products.push({ ...lp, id: ++maxId });
+                products.push({ ...lp, live_id: normLive, id: ++maxId });
                 existingProdKeys.add(key);
               }
             }
@@ -1550,13 +1572,13 @@ export function loadDatabaseFromDisk(): Promise<void> {
       activeLiveId = activeLiveId.split('_').pop() || activeLiveId;
     }
 
-    // Sanitize products, ensure live_id is normalized & assigned, and format names
+    // Sanitize products, ensure live_id is normalized & isolated (never assign orphan products to activeLiveId), and format names
     products.forEach(p => {
       if (p.live_id && p.live_id.includes('_') && !p.live_id.startsWith('LIVE_')) {
         p.live_id = p.live_id.split('_').pop() || p.live_id;
       }
       if (!p.live_id) {
-        p.live_id = activeLiveId;
+        p.live_id = 'LEGACY_ISOLATED';
       }
       if (p.name && p.name.startsWith('ទំនិញកូដ')) {
         p.name = p.name.replace(/^ទំនិញកូដ\s*/, 'កូដ ');
@@ -1804,12 +1826,12 @@ export function loadDatabaseFromDisk(): Promise<void> {
 
         for (const rawC of inv.comments || []) {
           if (/[-_]/.test(rawC)) {
-            const pairs = extractCodeQtyPairsFromComment(rawC, products, false);
+            const invSessionProds = products.filter(pr => normalizeLiveId(pr.live_id || '') === normalizeLiveId(inv.live_id || activeLiveId));
+            const pairs = extractCodeQtyPairsFromComment(rawC, invSessionProds, false);
             for (const p of pairs) {
               const alreadyHas = inv.items.some(it => (it.product_code || '').toUpperCase().trim() === p.code.toUpperCase());
               if (!alreadyHas) {
-                const stockProd = products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase() && (pr.live_id || activeLiveId) === (inv.live_id || activeLiveId)) ||
-                                  products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase());
+                const stockProd = invSessionProds.find(pr => pr.code.toUpperCase() === p.code.toUpperCase());
                 const note = extractSizeAndColorNotes(rawC);
                 inv.items.push({
                   id: Date.now() + Math.floor(Math.random() * 10000),

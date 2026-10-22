@@ -593,10 +593,23 @@ function loadMiniAppDb(): MiniAppDatabase {
         needsSave = true;
       }
 
+      const rawOrders: MiniAppOrder[] = Array.isArray(parsed.orders) ? parsed.orders : [];
+      const seenOrderIds = new Set<string>();
+      const dedupedOrders: MiniAppOrder[] = [];
+      for (const ord of rawOrders) {
+        if (!ord || !ord.id) continue;
+        if (seenOrderIds.has(ord.id)) {
+          needsSave = true;
+          continue;
+        }
+        seenOrderIds.add(ord.id);
+        dedupedOrders.push(ord);
+      }
+
       const dbObj: MiniAppDatabase = {
         config: mergedConfig,
         products: loadedProducts,
-        orders: Array.isArray(parsed.orders) ? parsed.orders : []
+        orders: dedupedOrders
       };
       if (needsSave) {
         saveMiniAppDb(dbObj);
@@ -803,23 +816,31 @@ router.get('/catalog', (_req: Request, res: Response) => {
 // 1B. CUSTOMER LIVE ORDER STATUS LOOKUP (By Order IDs or Phone Number)
 // ---------------------------------------------------------------------------
 router.get('/orders/lookup', (req: Request, res: Response) => {
-  const idsParam = String(req.query.ids || '').trim();
-  const phoneParam = String(req.query.phone || '').replace(/\s+/g, '').trim();
+  const qParam = String(req.query.q || '').trim();
+  const idsParam = String(req.query.ids || qParam || '').trim();
+  const phoneParam = String(req.query.phone || qParam || '').replace(/\s+/g, '').trim();
 
   const idSet = new Set(
     idsParam
       .split(',')
-      .map(s => s.trim().toUpperCase())
+      .map(s => s.trim().replace(/^#/, '').toUpperCase())
       .filter(Boolean)
   );
 
+  const seenIds = new Set<string>();
   const matched = miniAppDb.orders.filter(o => {
-    if (idSet.has(o.id.toUpperCase())) return true;
-    if (phoneParam.length >= 6) {
+    if (!o?.id || seenIds.has(o.id)) return false;
+    let isMatch = false;
+    if (idSet.has(o.id.toUpperCase())) isMatch = true;
+    else if (phoneParam.length >= 6) {
       const cleanOrderPhone = String(o.phone || '').replace(/\s+/g, '');
-      if (cleanOrderPhone.includes(phoneParam) || phoneParam.includes(cleanOrderPhone)) {
-        return true;
+      if (cleanOrderPhone && (cleanOrderPhone.includes(phoneParam) || phoneParam.includes(cleanOrderPhone))) {
+        isMatch = true;
       }
+    }
+    if (isMatch) {
+      seenIds.add(o.id);
+      return true;
     }
     return false;
   });
@@ -983,7 +1004,12 @@ router.post('/orders', async (req: Request, res: Response) => {
       : baseShipping;
     const totalAmount = Number((subtotal + shippingFee).toFixed(2));
 
-    const orderNum = 1001 + miniAppDb.orders.length;
+    const maxExistingNum = miniAppDb.orders.reduce((maxN, o) => {
+      const numMatch = String(o?.id || '').match(/(\d+)$/);
+      const n = numMatch ? parseInt(numMatch[1], 10) : 0;
+      return n > maxN ? n : maxN;
+    }, 1000);
+    let orderNum = Math.max(1001 + miniAppDb.orders.length, maxExistingNum + 1);
     const { token: fbToken, pageId: fbPageId } = getEffectiveFbPageAuth();
     const resolvedFbPsid = await resolveCustomerFbPsid({
       explicitPsid: fbPsid ? String(fbPsid).trim() : '',
@@ -1001,6 +1027,9 @@ router.post('/orders', async (req: Request, res: Response) => {
         ? 'TELEGRAM'
         : 'WEB';
     const orderPrefix = resolvedChannel === 'FACEBOOK' ? 'FB' : 'TG';
+    while (miniAppDb.orders.some(o => o.id === `${orderPrefix}-${orderNum}`)) {
+      orderNum++;
+    }
     const newOrder: MiniAppOrder = {
       id: `${orderPrefix}-${orderNum}`,
       createdAt: new Date().toISOString(),
@@ -1025,7 +1054,7 @@ router.post('/orders', async (req: Request, res: Response) => {
       note: note ? String(note).trim() : undefined
     };
 
-    miniAppDb.orders.unshift(newOrder);
+    miniAppDb.orders = [newOrder, ...miniAppDb.orders.filter(o => o.id !== newOrder.id)];
     saveMiniAppDb();
 
     // 3. Fire Telegram Notification to Shop Owner / Group AND Customer's Telegram Chat (if ordered via Telegram)
