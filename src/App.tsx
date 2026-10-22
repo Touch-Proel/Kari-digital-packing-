@@ -58,7 +58,6 @@ export default function App() {
     product_count?: number;
     unsold_product_count?: number;
     is_active?: boolean;
-    linked_videos?: string[];
   }[]>([]);
   const [selectedLiveId, setSelectedLiveId] = useState<string>(() => {
     return localStorage.getItem('selectedLiveId') || '1626350178950100';

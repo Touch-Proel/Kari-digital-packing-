@@ -20,20 +20,13 @@ import {
   refreshFacebookAccounts,
   fetchPageVideosAndPosts,
   fetchFacebookComments,
-  fetchAllManagedFacebookPages,
-  clearLiveStreamCache
+  fetchAllManagedFacebookPages
 } from './server/fbAuth.ts';
 import {
   activeFacebookPage,
   setActiveFacebookPage,
   activeLiveId,
   setActiveLiveId,
-  normalizeLiveId,
-  getLinkedVideosForSession,
-  addLinkedVideoToSession,
-  removeLinkedVideoFromSession,
-  mergeLiveSessionsIntoPrimary,
-  settings,
   bumpDataRevision,
   invoices,
   addOrUpdateConnectedPage,
@@ -45,10 +38,9 @@ import {
   setFacebookUserAccessToken,
   saveDatabaseToDisk
 } from './server/db.ts';
-import { parseAndAllocateComment, syncProcessedCommentKeysWithInvoices } from './server/parser.ts';
-import { startLiveCommentsAutoSync, executeLiveCommentsSyncOnce } from './server/liveSync.ts';
+import { parseAndAllocateComment } from './server/parser.ts';
+import { startLiveCommentsAutoSync } from './server/liveSync.ts';
 import { initTelegramBotService } from './server/telegramBotService.ts';
-import { resetTelegramStateForNewLiveSession } from './server/telegramSync.ts';
 
 dotenv.config();
 
@@ -309,16 +301,13 @@ app.get(['/data-deletion', '/user-data-deletion'], (_req: Request, res: Response
 });
 
 // 3. Facebook Connection Status
-app.get('/api/fb/status', (req: Request, res: Response) => {
-  const queryLive = req.query.live_id ? normalizeLiveId(String(req.query.live_id)) : activeLiveId;
+app.get('/api/fb/status', (_req: Request, res: Response) => {
   res.json({
     connected: !!activeFacebookPage,
     activePage: activeFacebookPage,
     pages: getAvailablePages(),
     hasUserToken: !!getFacebookUserAccessToken(),
-    activeLiveId,
-    linkedVideos: getLinkedVideosForSession(queryLive),
-    allLinkedVideos: settings.linked_live_videos || {}
+    activeLiveId
   });
 });
 
@@ -458,111 +447,13 @@ app.post(['/api/fb/pages/clear', '/api/fb/clear_all'], (_req: Request, res: Resp
 app.post('/api/fb/active_live', (req: Request, res: Response) => {
   const { live_id } = req.body;
   if (live_id) {
-    const cleanId = normalizeLiveId(String(live_id));
+    const cleanId = String(live_id).trim();
     setActiveLiveId(cleanId);
-    resetTelegramStateForNewLiveSession(cleanId);
     startLiveCommentsAutoSync(3, cleanId);
     bumpDataRevision();
-    return res.json({
-      success: true,
-      activeLiveId: cleanId,
-      linkedVideos: getLinkedVideosForSession(cleanId)
-    });
+    return res.json({ success: true, activeLiveId: cleanId });
   }
   res.status(400).json({ success: false, error: 'live_id is required' });
-});
-
-// 5.6 Link a secondary Live Video (Part 2 / Reconnected Live) into the Primary Active Live Session
-app.post('/api/fb/link_live_video', async (req: Request, res: Response) => {
-  try {
-    const { primary_live_id, video_id, include_products } = req.body;
-    const primaryId = normalizeLiveId(String(primary_live_id || activeLiveId || ''));
-    const cleanVideoId = normalizeLiveId(String(video_id || ''));
-
-    if (!primaryId || !cleanVideoId) {
-      return res.status(400).json({ success: false, error: 'សូមបញ្ជាក់លេខសម្គាល់ Live Video!' });
-    }
-    if (primaryId === cleanVideoId) {
-      return res.status(400).json({ success: false, error: 'វីដេអូនេះគឺជា Live គោលកំពុងប្រើស្រាប់ហើយ!' });
-    }
-
-    // 1. Merge any existing baskets/comments if cleanVideoId was previously opened separately (strictly NEVER move stock products across sessions unless explicitly requested!)
-    const mergeStats = mergeLiveSessionsIntoPrimary(primaryId, cleanVideoId, {
-      includeProducts: include_products === true
-    });
-
-    // 2. Link cleanVideoId to primaryId
-    const linkedVideos = addLinkedVideoToSession(primaryId, cleanVideoId);
-
-    // 3. Re-sync processedCommentKeys with actual active invoices in primaryId so no customer is skipped
-    syncProcessedCommentKeysWithInvoices(primaryId);
-
-    // 4. Immediately pull comments from all linked videos (Part 1 + Part 2) and allocate into primaryId
-    let totalCommentsCount = 0;
-    let newOrdersCount = 0;
-
-    for (const vid of linkedVideos) {
-      clearLiveStreamCache(vid);
-      const fbRes = await fetchFacebookComments(vid, undefined, 15000, { forceFullFetch: true });
-      const comments = fbRes.data || [];
-      totalCommentsCount += comments.length;
-
-      for (const c of comments) {
-        const parsed = parseAndAllocateComment(
-          c.from?.id || '',
-          c.from?.name || 'អតិថិជន Facebook',
-          c.message || '',
-          primaryId,
-          c.id,
-          c.from?.picture?.data?.url,
-          true
-        );
-        if (parsed.status === 'SUCCESS') {
-          newOrdersCount++;
-        }
-      }
-    }
-
-    // Ensure auto-sync continues polling all linked videos
-    startLiveCommentsAutoSync(3, primaryId);
-    bumpDataRevision();
-    saveDatabaseToDisk();
-
-    const totalBaskets = invoices.filter(i => i.live_id === primaryId && i.status !== 'Cancelled' && i.items.length > 0).length;
-
-    return res.json({
-      success: true,
-      primary_live_id: primaryId,
-      linked_video_id: cleanVideoId,
-      linked_videos: linkedVideos,
-      merged_same_customer_count: mergeStats.mergedSameCustomerCount,
-      moved_baskets_count: mergeStats.movedBasketsCount,
-      synced_comments_count: totalCommentsCount,
-      new_orders_count: newOrdersCount,
-      total_baskets: totalBaskets,
-      message: `🔗 បានភ្ជាប់ Live #${cleanVideoId.slice(-8)} ចូលជាមួយ Live #${primaryId.slice(-8)} ជោគជ័យ! (ទាញបាន ${totalCommentsCount} ខំមិនសរុប, បង្កើតកន្ត្រកសរុប ${totalBaskets} កន្ត្រក)`
-    });
-  } catch (err: any) {
-    console.error('[Link Live Video Error]:', err);
-    return res.status(500).json({ success: false, error: err.message || 'មិនអាចភ្ជាប់វីដេអូ Live បានទេ' });
-  }
-});
-
-// 5.7 Unlink a secondary Live Video from a Primary Live Session
-app.post('/api/fb/unlink_live_video', (req: Request, res: Response) => {
-  const { primary_live_id, video_id } = req.body;
-  const primaryId = normalizeLiveId(String(primary_live_id || activeLiveId || ''));
-  const cleanVideoId = normalizeLiveId(String(video_id || ''));
-  if (!primaryId || !cleanVideoId) {
-    return res.status(400).json({ success: false, error: 'Missing primary_live_id or video_id' });
-  }
-  const linkedVideos = removeLinkedVideoFromSession(primaryId, cleanVideoId);
-  return res.json({
-    success: true,
-    primary_live_id: primaryId,
-    linked_videos: linkedVideos,
-    message: `បានផ្តាច់ Live #${cleanVideoId.slice(-8)} ចេញពីការទាញរួមគ្នា!`
-  });
 });
 
 // 6. Get Facebook Page Posts & Live Streams
@@ -717,70 +608,50 @@ app.get('/api/fb/inbox_link/:userId', async (req: Request, res: Response) => {
   });
 });
 
-// 7. Sync Live Comments from Facebook Graph API (including all linked Part 1 + Part 2 videos) and Auto-Allocate into Unified Baskets
+// 7. Sync Live Comments from Facebook Graph API and Auto-Allocate into Baskets
 app.all('/api/fb/sync_comments', async (req: Request, res: Response) => {
   try {
     const post_id = req.body?.post_id || req.query?.post_id as string;
-    const targetId = normalizeLiveId(post_id || activeLiveId);
+    const targetId = post_id || activeLiveId;
 
     if (targetId && targetId !== activeLiveId) {
       setActiveLiveId(targetId);
     }
 
-    const videoIdsToPull = getLinkedVideosForSession(targetId);
-    syncProcessedCommentKeysWithInvoices(targetId);
-
-    const processedResults: any[] = [];
-    let totalCommentsCount = 0;
-    let anySimulated = false;
-    let firstError: string | null = null;
-    let anySuccess = false;
-
-    for (const vid of videoIdsToPull) {
-      clearLiveStreamCache(vid);
-      const result = await fetchFacebookComments(vid, undefined, 15000, { forceFullFetch: true });
-      if (result.error && (!result.data || result.data.length === 0)) {
-        if (!firstError) firstError = result.error;
-        continue;
-      }
-      anySuccess = true;
-      if (result.isSimulated) anySimulated = true;
-      const comments = result.data || [];
-      totalCommentsCount += comments.length;
-
-      for (const c of comments) {
-        const parsed = parseAndAllocateComment(
-          c.from?.id || '',
-          c.from?.name || 'អតិថិជន Facebook',
-          c.message || '',
-          targetId,
-          c.id,
-          c.from?.picture?.data?.url
-        );
-        processedResults.push({ comment: c, parsed, source_video_id: vid });
-      }
-    }
-
-    if (!anySuccess && firstError) {
+    const result = await fetchFacebookComments(targetId);
+    if (result.error && (!result.data || result.data.length === 0)) {
       return res.status(400).json({
         success: false,
-        error: firstError
+        error: result.error
       });
+    }
+    const comments = result.data || [];
+    const processedResults: any[] = [];
+
+    for (const c of comments) {
+      const parsed = parseAndAllocateComment(
+        c.from?.id || '',
+        c.from?.name || 'អតិថិជន Facebook',
+        c.message || '',
+        targetId,
+        c.id,
+        c.from?.picture?.data?.url
+      );
+      processedResults.push({ comment: c, parsed });
     }
 
     bumpDataRevision();
 
-    const createdBaskets = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled' && i.items.length > 0);
+    const createdBaskets = invoices.filter(i => i.live_id === targetId && i.items.length > 0);
     const totalAllocated = processedResults.filter(r => r.parsed?.status === 'SUCCESS').length;
 
     res.json({
       success: true,
       target_live_id: targetId,
-      linked_videos: videoIdsToPull,
-      total_synced: totalCommentsCount,
+      total_synced: comments.length,
       total_orders: totalAllocated,
       total_baskets: createdBaskets.length,
-      is_simulated: anySimulated,
+      is_simulated: result.isSimulated || false,
       results: processedResults
     });
   } catch (err: any) {

@@ -524,14 +524,10 @@ export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: str
       for (const lv of liveData.data) {
         // Facebook Live status: LIVE_NOW or LIVE means actively broadcasting right now. All others (VOD, UNPUBLISHED) are ended.
         const isLiveNow = lv.status === 'LIVE_NOW' || lv.status === 'LIVE';
-        const canonicalVideoId = String(lv.video?.id || lv.id);
-        if (lv.id && lv.video?.id) {
-          liveVideoIdCache.set(String(lv.id), String(lv.video.id));
-        }
         const rawDesc = lv.title || lv.description || lv.video?.description || '';
         const displayTitle = rawDesc.trim()
           ? (isLiveNow ? `🔴 [LIVE NOW] ${rawDesc}` : `📼 [Live Stream] ${rawDesc}`)
-          : (isLiveNow ? `🔴 វីដេអូកំពុងផ្សាយផ្ទាល់ (Live Now)` : `📼 វីដេអូផ្សាយផ្ទាល់ #${canonicalVideoId.slice(-6)}`);
+          : (isLiveNow ? `🔴 វីដេអូកំពុងផ្សាយផ្ទាល់ (Live Now)` : `📼 វីដេអូផ្សាយផ្ទាល់ #${lv.id.slice(-6)}`);
 
         const commentCount =
           (typeof lv.comments?.summary?.total_count === 'number' ? lv.comments.summary.total_count : 0) ||
@@ -541,21 +537,19 @@ export async function fetchPageVideosAndPosts(pageId?: string, accessToken?: str
           (typeof lv.reactions?.summary?.total_count === 'number' ? lv.reactions.summary.total_count : 0) ||
           (typeof lv.video?.reactions?.summary?.total_count === 'number' ? lv.video.reactions.summary.total_count : 0);
 
-        if (!posts.some(existing => existing.id === canonicalVideoId || existing.id === lv.id)) {
-          posts.push({
-            id: canonicalVideoId,
-            message: displayTitle,
-            created_time: lv.creation_time || new Date().toISOString(),
-            is_live: isLiveNow,
-            live_status: isLiveNow ? 'LIVE' : 'VOD',
-            permalink_url: lv.video?.permalink_url || `https://www.facebook.com/watch/?v=${canonicalVideoId}`,
-            thumbnail_url: lv.video?.picture || '',
-            comments_count: commentCount,
-            reactions_count: reactionCount,
-            views_count: typeof lv.video?.views === 'number' ? lv.video.views : undefined,
-            status_type: 'added_video'
-          });
-        }
+        posts.push({
+          id: lv.id,
+          message: displayTitle,
+          created_time: lv.creation_time || new Date().toISOString(),
+          is_live: isLiveNow,
+          live_status: isLiveNow ? 'LIVE' : 'VOD',
+          permalink_url: lv.video?.permalink_url || `https://www.facebook.com/watch/?v=${lv.id}`,
+          thumbnail_url: lv.video?.picture || '',
+          comments_count: commentCount,
+          reactions_count: reactionCount,
+          views_count: typeof lv.video?.views === 'number' ? lv.video.views : undefined,
+          status_type: 'added_video'
+        });
       }
     }
   } catch (err) {
@@ -700,16 +694,6 @@ interface LiveStreamState {
 }
 const liveStreamCache = new Map<string, LiveStreamState>();
 const liveVideoIdCache = new Map<string, string>();
-
-export function clearLiveStreamCache(videoId?: string) {
-  if (!videoId) {
-    liveStreamCache.clear();
-    return;
-  }
-  const cleanId = videoId.includes('_') ? videoId.split('_').pop() || videoId : videoId;
-  liveStreamCache.delete(cleanId);
-  liveStreamCache.delete(videoId);
-}
 
 export interface FetchCommentsOptions {
   isRealtimePoll?: boolean;

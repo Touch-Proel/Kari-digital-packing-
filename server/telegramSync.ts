@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { products, invoices, activeLiveId, normalizeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
+import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
 import type { Product } from './types.ts';
 import { broadcastSSE } from './packingRoutes.ts';
 
@@ -11,7 +11,6 @@ export interface TelegramItemParsed {
   stock_qty: number;
   cost_price?: number;
   image_url?: string;
-  live_id?: string;
   chat_id?: number | string;
   chat_title?: string;
   sender_name?: string;
@@ -31,7 +30,6 @@ export interface TelegramBotInfo {
 
 export interface BufferedMediaItem {
   file_id: string;
-  live_id?: string;
   chat_id?: number | string;
   chat_title?: string;
   sender_name?: string;
@@ -147,17 +145,14 @@ export function extractBestPhotoFileId(msg: any): string | undefined {
   return undefined;
 }
 
-// 3. Helper to find existing product image on disk (strictly scoped to targetLive)
+// 3. Helper to find existing product image on disk
 export function findImageOnDiskForCode(code: string, liveId?: string): string | null {
   try {
     if (!code) return null;
     const clean = code.trim().toLowerCase();
-    const targetLive = normalizeLiveId(liveId || activeLiveId);
-    if (!targetLive) return null;
-
-    const existingProd = products.find(
-      p => normalizeLiveId(p.live_id || '') === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== ''
-    );
+    const targetLive = liveId || activeLiveId;
+    
+    const existingProd = products.find(p => p.live_id === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
     if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
       const relPath = existingProd.image_file.replace(/^\//, '');
       if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
@@ -168,27 +163,23 @@ export function findImageOnDiskForCode(code: string, liveId?: string): string | 
   return null;
 }
 
-// 4. Download and save Telegram photo with Live Session isolation in filename
+// 4. Download and save Telegram photo with HD 500x500 Sharp Progressive Optimization
 export async function downloadTelegramPhoto(
   token: string,
   fileId: string,
   codeHint: string,
   dateHint?: string | number,
-  forceFresh: boolean = false,
-  liveId?: string
+  forceFresh: boolean = false
 ): Promise<string | undefined> {
   const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_\u1780-\u17B3-]/g, '') : 'item';
-  const targetLive = normalizeLiveId(liveId || activeLiveId || 'live');
-  const safeLiveTag = targetLive.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8) || 'live';
   const cleanFileKey = fileId.replace(/[^a-zA-Z0-9]/g, '').slice(-16) || 'img';
-  const standardFilename = `tg_${safeLiveTag}_${safeCode}_${cleanFileKey}.jpg`;
-  const cacheKey = `${safeLiveTag}_${fileId}`;
+  const standardFilename = `tg_${safeCode}_${cleanFileKey}.jpg`;
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
   if (!forceFresh) {
-    if (downloadedPhotoCache.has(cacheKey)) {
-      const cached = downloadedPhotoCache.get(cacheKey);
+    if (downloadedPhotoCache.has(fileId)) {
+      const cached = downloadedPhotoCache.get(fileId);
       if (cached) {
         const p1 = path.join(process.cwd(), 'public', cached.replace(/^\//, ''));
         const p2 = path.join(process.cwd(), 'dist', cached.replace(/^\//, ''));
@@ -205,7 +196,7 @@ export async function downloadTelegramPhoto(
         const stat = fs.statSync(existingPath);
         if (stat.size > 1000) {
           const cachedUrl = `/uploads/${standardFilename}`;
-          downloadedPhotoCache.set(cacheKey, cachedUrl);
+          downloadedPhotoCache.set(fileId, cachedUrl);
           return cachedUrl;
         }
       } catch {}
@@ -214,7 +205,7 @@ export async function downloadTelegramPhoto(
         const stat = fs.statSync(existingDistPath);
         if (stat.size > 1000) {
           const cachedUrl = `/uploads/${standardFilename}`;
-          downloadedPhotoCache.set(cacheKey, cachedUrl);
+          downloadedPhotoCache.set(fileId, cachedUrl);
           return cachedUrl;
         }
       } catch {}
@@ -257,7 +248,7 @@ export async function downloadTelegramPhoto(
     }
 
     const resultUrl = `/uploads/${filename}`;
-    downloadedPhotoCache.set(cacheKey, resultUrl);
+    downloadedPhotoCache.set(fileId, resultUrl);
     return resultUrl;
   } catch (err) {
     console.error(`[Telegram Photo Download Error for ${safeCode}]:`, err);
@@ -413,31 +404,11 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
 
 // In-memory cache of scanned items to prevent losing data after Telegram offset acknowledgement
 export let cachedTelegramItems: TelegramItemParsed[] = [];
-let cachedTelegramLiveId: string = '';
 
 export function clearScannedTelegramCache() {
   cachedTelegramItems = [];
   lastScannedUpdateId = undefined;
   downloadedPhotoCache.clear();
-}
-
-/**
- * Reset Telegram in-memory cache and auto-sync target whenever switching or creating a new Live Session.
- * Prevents 100+ items from a previous Live session from leaking into the new Live session!
- */
-export function resetTelegramStateForNewLiveSession(newLiveId: string) {
-  const cleanNew = normalizeLiveId(newLiveId);
-  if (!cleanNew) return;
-  if (cachedTelegramLiveId !== cleanNew) {
-    cachedTelegramItems = cachedTelegramItems.filter(it => normalizeLiveId(it.live_id || '') === cleanNew);
-    for (let i = recentTelegramMediaBuffer.length - 1; i >= 0; i--) {
-      if (recentTelegramMediaBuffer[i].live_id && normalizeLiveId(recentTelegramMediaBuffer[i].live_id || '') !== cleanNew) {
-        recentTelegramMediaBuffer.splice(i, 1);
-      }
-    }
-    cachedTelegramLiveId = cleanNew;
-  }
-  tgAutoSyncState.targetLiveId = cleanNew;
 }
 
 // ----------------------------------------------------------------------
@@ -449,7 +420,6 @@ export async function fetchTelegramStockUpdates(options: {
   markRead?: boolean;
   clearCache?: boolean;
   limit?: number;
-  targetLiveId?: string;
 }): Promise<{
   success: boolean;
   bot?: TelegramBotInfo;
@@ -460,14 +430,6 @@ export async function fetchTelegramStockUpdates(options: {
   error?: string;
 }> {
   const token = (options.token || settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
-  const targetLive = normalizeLiveId(options.targetLiveId || activeLiveId);
-  if (targetLive && cachedTelegramLiveId && cachedTelegramLiveId !== targetLive) {
-    resetTelegramStateForNewLiveSession(targetLive);
-  } else if (targetLive) {
-    cachedTelegramLiveId = targetLive;
-  }
-  const sessionCachedItems = cachedTelegramItems.filter(it => !it.live_id || normalizeLiveId(it.live_id) === targetLive);
-
   if (!token) {
     return {
       success: false,
@@ -488,9 +450,9 @@ export async function fetchTelegramStockUpdates(options: {
   if (!botRes.success || !botRes.bot) {
     return {
       success: false,
-      items: sessionCachedItems,
+      items: cachedTelegramItems,
       messagesScanned: 0,
-      totalFound: sessionCachedItems.length,
+      totalFound: cachedTelegramItems.length,
       error: botRes.error || 'Bot Token មិនត្រឹមត្រូវ'
     };
   }
@@ -603,11 +565,10 @@ export async function fetchTelegramStockUpdates(options: {
 
       messagesList.push(norm);
 
-      // Also register photo into media buffer (scoped to targetLive)
+      // Also register photo into media buffer
       if (photoFileId) {
         addMediaToBuffer({
           file_id: photoFileId,
-          live_id: targetLive,
           chat_id: msg.chat?.id,
           chat_title: chatTitle,
           sender_name: senderName,
@@ -683,7 +644,6 @@ export async function fetchTelegramStockUpdates(options: {
               name: lineItem.name || `កូដ ${lineItem.code}`,
               price: lineItem.price,
               stock_qty: defaultQty,
-              live_id: targetLive,
               chat_id: m.chat_id,
               chat_title: m.chat_title,
               sender_name: m.sender_name,
@@ -730,12 +690,10 @@ export async function fetchTelegramStockUpdates(options: {
         }
       }
 
-      // Tier 4: Sliding Window Media Buffer Fallback (strictly within same Live session)
+      // Tier 4: Sliding Window Media Buffer Fallback
       if (!assignedPhotoFileId) {
         const bufferedMatch = recentTelegramMediaBuffer.find(
-          b => (!b.live_id || normalizeLiveId(b.live_id) === targetLive) &&
-               (!m.chat_id || b.chat_id === m.chat_id) &&
-               Math.abs(m.date - b.date_sec) < 3600
+          b => (!m.chat_id || b.chat_id === m.chat_id) && Math.abs(m.date - b.date_sec) < 3600
         );
         if (bufferedMatch?.file_id) {
           assignedPhotoFileId = bufferedMatch.file_id;
@@ -744,14 +702,13 @@ export async function fetchTelegramStockUpdates(options: {
 
       // Record items
       for (const item of parsedLines) {
-        const existingDiskImage = findImageOnDiskForCode(item.code, targetLive);
+        const existingDiskImage = findImageOnDiskForCode(item.code);
 
         newlyParsedMap.set(item.code, {
           code: item.code,
           name: item.name || `កូដ ${item.code}`,
           price: item.price,
           stock_qty: defaultQty,
-          live_id: targetLive,
           chat_id: m.chat_id,
           chat_title: m.chat_title,
           sender_name: m.sender_name,
@@ -768,7 +725,7 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 6. Download fresh photos (scoped to targetLive)
+    // 6. Download fresh photos
     const downloadEntries = Array.from(photoToDownloadMap.entries());
     const concurrency = 2;
     for (let i = 0; i < downloadEntries.length; i += concurrency) {
@@ -776,7 +733,7 @@ export async function fetchTelegramStockUpdates(options: {
       await Promise.all(
         chunk.map(async ([code, { fileId, messageDate, isFresh }]) => {
           try {
-            const url = await downloadTelegramPhoto(token, fileId, code, messageDate, isFresh || !!options.clearCache, targetLive);
+            const url = await downloadTelegramPhoto(token, fileId, code, messageDate, isFresh || !!options.clearCache);
             const item = newlyParsedMap.get(code);
             if (item && url) {
               item.image_url = url;
@@ -791,12 +748,10 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 7. Merge ONLY with cached items belonging to this exact targetLive
+    // 7. Merge with cached items
     const combinedMap = new Map<string, TelegramItemParsed>();
     for (const it of cachedTelegramItems) {
-      if (!it.live_id || normalizeLiveId(it.live_id) === targetLive) {
-        combinedMap.set(it.code, { ...it, live_id: targetLive });
-      }
+      combinedMap.set(it.code, it);
     }
     for (const [code, it] of newlyParsedMap.entries()) {
       const existing = combinedMap.get(code);
@@ -804,11 +759,10 @@ export async function fetchTelegramStockUpdates(options: {
         combinedMap.set(code, {
           ...existing,
           ...it,
-          live_id: targetLive,
           image_url: it.image_url || existing.image_url
         });
       } else {
-        combinedMap.set(code, { ...it, live_id: targetLive });
+        combinedMap.set(code, it);
       }
     }
 
@@ -862,11 +816,11 @@ export function bulkImportStockItems(
     return { success: false, imported: 0, updated: 0, total: products.length };
   }
 
-  const targetLive = normalizeLiveId(options?.targetLiveId || activeLiveId);
+  const targetLive = options?.targetLiveId || activeLiveId;
 
   if (mode === 'replace') {
     for (let i = products.length - 1; i >= 0; i--) {
-      if (normalizeLiveId(products[i].live_id || '') === targetLive) {
+      if ((products[i].live_id || activeLiveId) === targetLive) {
         products.splice(i, 1);
       }
     }
@@ -880,7 +834,7 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
-    const existing = products.find(p => normalizeLiveId(p.live_id || '') === targetLive && p.code.toUpperCase() === cleanCode);
+    const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
     if (existing) {
       existing.live_id = targetLive;
       if (it.price !== undefined && it.price !== null) {
@@ -987,13 +941,11 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
   tgAutoSyncState.running = true;
 
   try {
-    const currentTargetLive = normalizeLiveId(tgAutoSyncState.targetLiveId || activeLiveId);
     const res = await fetchTelegramStockUpdates({
       token: activeToken,
       defaultQty: 200,
       markRead: false,
-      clearCache: false,
-      targetLiveId: currentTargetLive
+      clearCache: false
     });
 
     if (!res.success) {
@@ -1002,13 +954,12 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
       return { success: false, imported: 0, scanned: 0, error: tgAutoSyncState.lastError };
     }
 
-    const sessionItems = res.items.filter(it => !it.live_id || normalizeLiveId(it.live_id) === currentTargetLive);
-    tgAutoSyncState.lastScannedCount = sessionItems.length;
+    tgAutoSyncState.lastScannedCount = res.items.length;
     tgAutoSyncState.lastSyncAt = new Date().toISOString();
     tgAutoSyncState.lastError = null;
 
-    if (sessionItems.length > 0) {
-      const itemsToImport = sessionItems.map(it => ({
+    if (res.items.length > 0) {
+      const itemsToImport = res.items.map(it => ({
         code: it.code,
         name: it.name,
         price: it.price,
@@ -1019,11 +970,11 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
 
       const importRes = bulkImportStockItems(itemsToImport, 'merge', {
         keepExistingStockQty: true,
-        targetLiveId: currentTargetLive
+        targetLiveId: tgAutoSyncState.targetLiveId || activeLiveId
       });
 
       tgAutoSyncState.lastImportedCount = importRes.imported + importRes.updated;
-      tgAutoSyncState.totalProductsCount = products.filter(p => normalizeLiveId(p.live_id || '') === currentTargetLive).length;
+      tgAutoSyncState.totalProductsCount = products.length;
 
       tgAutoSyncState.running = false;
       return {

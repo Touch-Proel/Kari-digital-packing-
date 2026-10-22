@@ -7,7 +7,6 @@ import {
   bumpDataRevision,
   saveDatabaseToDisk,
   activeLiveId,
-  normalizeLiveId,
   settings
 } from './db.ts';
 import { sendFacebookReply } from './fbAuth.ts';
@@ -125,8 +124,8 @@ export function extractCodeQtyPairs(text: string, liveId?: string): ExtractedIte
   const { phone, cleanText } = extractPhoneNumber(text);
   if (!phone && isQuestionComment(text)) return [];
 
-  const targetLive = normalizeLiveId(liveId || activeLiveId);
-  const targetProducts = products.filter(p => normalizeLiveId(p.live_id || '') === targetLive);
+  const targetLive = liveId || activeLiveId;
+  const targetProducts = products.filter(p => (p.live_id || activeLiveId) === targetLive);
 
   return extractCodeQtyPairsFromComment(cleanText || text, targetProducts, settings.parser_strict_catalog);
 }
@@ -159,21 +158,18 @@ function ensureCommentIndexReady() {
   if (isCommentKeysPreloaded) return;
   isCommentKeysPreloaded = true;
 
-  // Pre-index comments strictly from active invoices per live_id
+  // Pre-index existing raw comments
+  for (const rc of rawComments) {
+    if (rc.comment_id) processedCommentKeys.add(rc.comment_id);
+    if (rc.live_id && rc.facebook_name && rc.comment_text) {
+      processedCommentKeys.add(`${rc.live_id}_${(rc.facebook_user_id || rc.facebook_name).toLowerCase()}_${rc.comment_text.trim()}`);
+    }
+  }
+
+  // Pre-index comments in invoices
   for (const inv of invoices) {
-    if (inv.status !== 'Cancelled' && inv.live_id) {
-      if (inv.comment_ids) {
-        for (const cid of inv.comment_ids) {
-          processedCommentKeys.add(`${inv.live_id}_cid_${cid}`);
-        }
-      }
-      if (inv.comments) {
-        for (const cText of inv.comments) {
-          if (cText) {
-            processedCommentKeys.add(`${inv.live_id}_${(inv.facebook_user_id || inv.facebook_name || '').toLowerCase()}_${cText.trim()}`);
-          }
-        }
-      }
+    if (inv.comment_ids) {
+      for (const cid of inv.comment_ids) processedCommentKeys.add(cid);
     }
     if (inv.invoice_id > maxInvoiceIdTracker) maxInvoiceIdTracker = inv.invoice_id;
     for (const it of inv.items || []) {
@@ -183,84 +179,6 @@ function ensureCommentIndexReady() {
 
   for (const p of products) {
     if ((p.id || 0) > maxProductIdTracker) maxProductIdTracker = p.id || 0;
-  }
-}
-
-export function clearProcessedCommentsForLive(liveId?: string) {
-  if (!liveId) {
-    processedCommentKeys.clear();
-    return;
-  }
-  const prefix = `${liveId}_`;
-  for (const key of Array.from(processedCommentKeys)) {
-    if (key.startsWith(prefix)) {
-      processedCommentKeys.delete(key);
-    }
-  }
-}
-
-export function syncProcessedCommentKeysWithInvoices(targetLiveId?: string) {
-  ensureCommentIndexReady();
-  if (!targetLiveId) return;
-
-  clearProcessedCommentsForLive(targetLiveId);
-
-  const activeInvs = invoices.filter(i => i.live_id === targetLiveId && i.status !== 'Cancelled');
-  const activeInvIds = new Set(activeInvs.map(i => i.invoice_id));
-
-  // Clean up orphaned rawComments for targetLiveId whose invoice no longer exists
-  for (let i = rawComments.length - 1; i >= 0; i--) {
-    const rc = rawComments[i];
-    if (rc.live_id === targetLiveId && (!rc.invoice_id || !activeInvIds.has(rc.invoice_id))) {
-      rawComments.splice(i, 1);
-    }
-  }
-
-  for (const inv of activeInvs) {
-    const isUnpicked = !inv.packing_stage || inv.packing_stage === 'UNPICKED';
-    const itemComments = new Set<string>();
-    const itemCodes = new Set<string>();
-    for (const it of inv.items || []) {
-      if (it.product_code) itemCodes.add(it.product_code.toUpperCase().trim());
-      if (it.item_comment) {
-        itemComments.add(it.item_comment.trim());
-        for (const part of it.item_comment.split(' | ')) {
-          if (part.trim()) itemComments.add(part.trim());
-        }
-      }
-    }
-    const unmatchedSet = new Set((inv.unmatched_comments || []).map(u => u.trim()));
-
-    // Clean any unallocated order comments from inv.comments & inv.comment_ids if basket is UNPICKED so they can be properly allocated
-    if (isUnpicked && Array.isArray(inv.comments)) {
-      const keptComments: string[] = [];
-      for (const cText of inv.comments) {
-        const cleanC = (cText || '').trim();
-        if (!cleanC) continue;
-        const cPairs = extractCodeQtyPairs(cleanC, targetLiveId);
-        const hasUnallocatedOrder =
-          cPairs.length > 0 &&
-          !itemComments.has(cleanC) &&
-          !unmatchedSet.has(cleanC) &&
-          !cPairs.every(p => itemCodes.has(p.code.toUpperCase().trim()));
-
-        if (!hasUnallocatedOrder) {
-          keptComments.push(cleanC);
-          processedCommentKeys.add(`${targetLiveId}_${(inv.facebook_user_id || inv.facebook_name || '').toLowerCase()}_${cleanC}`);
-        }
-      }
-      inv.comments = keptComments;
-    }
-
-    if (Array.isArray(inv.comment_ids)) {
-      // Only lock comment_ids if all comments in this basket were already allocated or basket is past UNPICKED
-      const hasAllItemsAllocated = !isUnpicked || (inv.items && inv.items.length > 0);
-      if (hasAllItemsAllocated) {
-        for (const cid of inv.comment_ids) {
-          processedCommentKeys.add(`${targetLiveId}_cid_${cid}`);
-        }
-      }
-    }
   }
 }
 
@@ -335,55 +253,50 @@ export function parseAndAllocateComment(
     return false;
   });
 
-  const { zone, label, detectedLocation, hasExplicitLocation } = detectDeliveryZone(rawText);
-  const cleanAddrFromComment = extractCleanAddressFromComment(rawText);
-  const bestLocation = cleanAddrFromComment || (hasExplicitLocation ? detectedLocation : undefined);
-
-  const isQuestion = !phone && isQuestionComment(rawText);
-  const pairs = extractCodeQtyPairs(cleanText, liveId);
-  const hasOrderIntent = pairs.length > 0 && (Boolean(phone) || Boolean(hasExplicitLocation) || !isQuestion);
-
-  const scopedCidKey = commentId ? `${liveId}_cid_${commentId}` : `${liveId}_cid_${savedCommentId}`;
-
-  const isCommentInExistingItems = Boolean(
-    existingInv && (
-      (existingInv.items && existingInv.items.some(it => it.item_comment && (it.item_comment === rawText || it.item_comment.split(' | ').includes(rawText)))) ||
-      (existingInv.unmatched_comments && existingInv.unmatched_comments.includes(rawText)) ||
-      (existingInv.packing_stage && existingInv.packing_stage !== 'UNPICKED')
-    )
-  );
-
-  // O(1) Instant Hash Check for duplicate comments scoped strictly to liveId + active invoice state
-  const isDuplicate = hasOrderIntent
-    ? Boolean(
-        existingInv &&
-        isCommentInExistingItems &&
-        (processedCommentKeys.has(scopedCidKey) ||
-         processedCommentKeys.has(signatureKey) ||
-         Boolean(commentId && existingInv.comment_ids?.includes(commentId)))
-      )
-    : Boolean(
-        (processedCommentKeys.has(scopedCidKey) || processedCommentKeys.has(signatureKey)) &&
-        (!existingInv || existingInv.comments?.includes(rawText))
-      );
+  // O(1) Instant Hash Check for duplicate comments
+  const isDuplicate =
+    (commentId && processedCommentKeys.has(commentId)) ||
+    processedCommentKeys.has(savedCommentId) ||
+    processedCommentKeys.has(signatureKey);
 
   if (isDuplicate) {
+    // If the customer already has an active invoice in this live, ensure this comment is in their comment history!
+    if (existingInv && rawText) {
+      if (!existingInv.comments) existingInv.comments = [];
+      if (!existingInv.comments.includes(rawText)) {
+        existingInv.comments.push(rawText);
+        if (commentId && !existingInv.comment_ids?.includes(commentId)) {
+          if (!existingInv.comment_ids) existingInv.comment_ids = [];
+          existingInv.comment_ids.push(commentId);
+        }
+        recalculateInvoice(existingInv);
+        if (!batchMode) bumpDataRevision();
+      }
+    }
     return {
       status: 'IGNORED',
       message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`
     };
   }
 
-  processedCommentKeys.add(scopedCidKey);
+  processedCommentKeys.add(savedCommentId);
+  if (commentId) processedCommentKeys.add(commentId);
   processedCommentKeys.add(signatureKey);
 
   const isAlreadyInBasket = existingInv && (
-    hasOrderIntent
-      ? isCommentInExistingItems && Boolean((commentId && existingInv.comment_ids?.includes(commentId)) || existingInv.comments?.includes(rawText))
-      : Boolean(existingInv.comments && existingInv.comments.includes(rawText) && !phone && !hasExplicitLocation)
+    (existingInv.comments && existingInv.comments.includes(rawText)) ||
+    (existingInv.unmatched_comments && existingInv.unmatched_comments.includes(rawText)) ||
+    (existingInv.items && existingInv.items.some(it => it.item_comment === rawText))
   );
 
   if (isAlreadyInBasket) {
+    // Ensure comment is in comments list even if previously only in items or unmatched
+    if (existingInv && rawText && (!existingInv.comments || !existingInv.comments.includes(rawText))) {
+      if (!existingInv.comments) existingInv.comments = [];
+      existingInv.comments.push(rawText);
+      recalculateInvoice(existingInv);
+      if (!batchMode) bumpDataRevision();
+    }
     return {
       status: 'IGNORED',
       message: `⏩ ខមិននេះបានបញ្ចូលរួចរាល់ហើយ ៖ «${cleanFbName}» "${rawText.slice(0, 20)}"`
@@ -400,6 +313,10 @@ export function parseAndAllocateComment(
     picture_url: userPicUrl
   };
   rawComments.push(newCommentEntry);
+
+  const { zone, label, detectedLocation, hasExplicitLocation } = detectDeliveryZone(rawText);
+  const cleanAddrFromComment = extractCleanAddressFromComment(rawText);
+  const bestLocation = cleanAddrFromComment || (hasExplicitLocation ? detectedLocation : undefined);
 
   // SAFE CUSTOMER DB LOOKUP:
   // 1. First priority: match by unique facebook_user_id
@@ -452,6 +369,9 @@ export function parseAndAllocateComment(
     cust.last_interaction_at = new Date().toISOString();
   }
 
+  const isQuestion = !phone && isQuestionComment(rawText);
+  const pairs = extractCodeQtyPairs(cleanText, liveId);
+
   // Match open/unpacked invoice for this customer in this live session
   let inv = invoices.find(i => {
     if (i.live_id !== liveId) return false;
@@ -483,6 +403,8 @@ export function parseAndAllocateComment(
 
     return false;
   });
+
+  const hasOrderIntent = pairs.length > 0 && (Boolean(phone) || Boolean(hasExplicitLocation) || !isQuestion);
 
   if (!hasOrderIntent || pairs.length === 0) {
     if (inv) {
@@ -592,12 +514,12 @@ export function parseAndAllocateComment(
       resolvedLabel = custZoneRes.label;
     }
 
-    // Collect any prior non-order comments (e.g. phone/address/chat) this customer made in this live session BEFORE basket was created
+    // Collect any prior comments this customer made in this live session BEFORE basket was created
     const priorComments = rawComments
-      .filter(rc => rc.live_id === liveId && !rc.invoice_id && (
+      .filter(rc => rc.live_id === liveId && (
         (hasValidFbUserId && rc.facebook_user_id === fbUserId) ||
         (!hasValidFbUserId && rc.facebook_name.toLowerCase() === cleanFbName.toLowerCase())
-      ) && extractCodeQtyPairs(rc.comment_text, liveId).length === 0)
+      ))
       .map(rc => rc.comment_text)
       .filter(Boolean);
 
@@ -732,9 +654,8 @@ export function parseAndAllocateComment(
       continue;
     }
 
-    const normTargetLive = normalizeLiveId(liveId);
     let prod = products.find(p => {
-      if (normalizeLiveId(p.live_id || '') !== normTargetLive) return false;
+      if ((p.live_id || activeLiveId) !== liveId) return false;
       const pCode = p.code.toUpperCase().trim();
       if (pCode === cleanPairCode) return true;
       if (pCode.replace(/^0+/, '') === cleanPairCode.replace(/^0+/, '') && cleanPairCode.replace(/^0+/, '') !== '') {

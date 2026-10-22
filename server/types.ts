@@ -150,7 +150,6 @@ export interface AppSettings {
   auto_private_reply_template?: string;
   scan_ping_messenger_enabled?: boolean;
   scan_ping_messenger_template?: string;
-  linked_live_videos?: Record<string, string[]>;
 }
 
 export interface FacebookPage {

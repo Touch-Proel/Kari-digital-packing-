@@ -204,25 +204,11 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
     }
   });
 
-  // Customer Order History stored locally on customer phone (deduplicated by order ID)
+  // Customer Order History stored locally on customer phone
   const [myOrders, setMyOrders] = useState<MiniAppOrder[]>(() => {
     try {
       const saved = localStorage.getItem('tg_miniapp_my_orders');
-      const parsed: MiniAppOrder[] = saved ? JSON.parse(saved) : [];
-      if (!Array.isArray(parsed)) return [];
-      const seen = new Set<string>();
-      const deduped: MiniAppOrder[] = [];
-      for (const ord of parsed) {
-        if (!ord || !ord.id || seen.has(ord.id)) continue;
-        seen.add(ord.id);
-        deduped.push(ord);
-      }
-      if (deduped.length !== parsed.length) {
-        try {
-          localStorage.setItem('tg_miniapp_my_orders', JSON.stringify(deduped));
-        } catch {}
-      }
-      return deduped;
+      return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
@@ -508,17 +494,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       if (data.success) {
         setConfig(prev => ({ ...prev, ...data.config }));
         setProducts(data.products || []);
-        const rawOrders: MiniAppOrder[] = Array.isArray(data.orders) ? data.orders : [];
-        const seenIds = new Set<string>();
-        const uniqueAdminOrders = rawOrders.filter(o => {
-          if (!o?.id || seenIds.has(o.id)) return false;
-          seenIds.add(o.id);
-          return true;
-        });
-        setAdminOrders(uniqueAdminOrders);
-        if (uniqueAdminOrders.length > 0) {
+        setAdminOrders(data.orders || []);
+        if (Array.isArray(data.orders)) {
           const initialTrack: Record<string, string> = {};
-          for (const o of uniqueAdminOrders) {
+          for (const o of data.orders) {
             if (o.trackingInfo) initialTrack[o.id] = o.trackingInfo;
           }
           setTrackingInputs(prev => ({ ...initialTrack, ...prev }));
@@ -1332,10 +1311,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       setIsCheckoutOpen(false);
       setCompletedOrder(data.order);
 
-      const updatedHistory = [
-        data.order,
-        ...myOrders.filter(o => o && o.id !== data.order?.id)
-      ].slice(0, 20);
+      const updatedHistory = [data.order, ...myOrders].slice(0, 20);
       setMyOrders(updatedHistory);
       try {
         localStorage.setItem('tg_miniapp_my_orders', JSON.stringify(updatedHistory));
@@ -3352,8 +3328,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                   </p>
                 </div>
               ) : (
-                myOrders.map((ord, ordIdx) => (
-                <div key={`${ord.id}-${ord.createdAt || ordIdx}`} className="p-3 rounded-2xl border border-slate-200 bg-slate-50 space-y-1.5 text-xs">
+                myOrders.map(ord => (
+                <div key={ord.id} className="p-3 rounded-2xl border border-slate-200 bg-slate-50 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between font-extrabold">
                     <span className="text-[#DB1D43]">#{ord.id}</span>
                     <div className="flex items-center gap-1.5">
@@ -3647,9 +3623,9 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                               if (adminOrderFilter === 'COD') return o.paymentMethod === 'COD';
                               return true;
                             })
-                            .map((ord, ordIdx) => (
+                            .map(ord => (
                               <div
-                                key={`${ord.id}-${ord.createdAt || ordIdx}`}
+                                key={ord.id}
                                 className="bg-white p-3.5 rounded-2xl border border-slate-200 space-y-2 text-xs"
                               >
                                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
