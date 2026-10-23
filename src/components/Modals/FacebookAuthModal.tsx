@@ -37,6 +37,9 @@ export function FacebookAuthModal({
   const [showManualForm, setShowManualForm] = useState(() => isHttpInsecure);
   const [callbackUrl, setCallbackUrl] = useState('');
   const [isRefreshingPages, setIsRefreshingPages] = useState(false);
+  const [linkedVideos, setLinkedVideos] = useState<string[]>([]);
+  const [linkingVideoId, setLinkingVideoId] = useState<string | null>(null);
+  const [pendingLinkConfirmId, setPendingLinkConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -47,9 +50,14 @@ export function FacebookAuthModal({
   // Fetch status and pages when modal opens
   const fetchFbStatus = async () => {
     try {
-      const res = await safeFetchJson<{ pages?: FacebookPage[]; activePage?: FacebookPage }>('/api/fb/status');
+      const res = await safeFetchJson<{ pages?: FacebookPage[]; activePage?: FacebookPage; linkedVideos?: string[] }>(
+        `/api/fb/status?live_id=${encodeURIComponent(activeLiveId || '')}`
+      );
       if (res.ok && res.data) {
         setPages(res.data.pages || []);
+        if (Array.isArray(res.data.linkedVideos)) {
+          setLinkedVideos(res.data.linkedVideos);
+        }
         if (res.data.activePage) {
           onPageSelected(res.data.activePage);
         }
@@ -78,7 +86,7 @@ export function FacebookAuthModal({
       fetchFbStatus();
       fetchPosts();
     }
-  }, [isOpen, activePage?.id]);
+  }, [isOpen, activePage?.id, activeLiveId]);
 
   // Listen for OAuth success message from popup window & storage/visibility events on mobile
   useEffect(() => {
@@ -267,28 +275,107 @@ export function FacebookAuthModal({
   const handleSelectLive = async (liveId: string) => {
     onSelectLiveId(liveId);
     try {
-      await safeFetchJson('/api/fb/active_live', {
+      const res = await safeFetchJson<{ linkedVideos?: string[] }>('/api/fb/active_live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ live_id: liveId })
       });
+      if (res.ok && Array.isArray(res.data?.linkedVideos)) {
+        setLinkedVideos(res.data.linkedVideos);
+      } else {
+        setLinkedVideos([liveId]);
+      }
     } catch {
       // Safe fallback
     }
-    onShowToast(`🎥 បានជ្រើសរើស Live #${liveId} រួចរាល់!`);
+    onShowToast(`🎥 បានប្តូរទៅ Live #${liveId.slice(-8)} រួចរាល់!`);
     if (onSyncSuccess) {
       onSyncSuccess(liveId, 0, 0);
     }
   };
 
-  const handleApplyCustomId = () => {
+  const handleLinkLiveVideo = async (videoId: string) => {
+    if (!videoId) return;
+    setPendingLinkConfirmId(null);
+    setLinkingVideoId(videoId);
+    const shortVid = videoId.includes('_') ? videoId.split('_').pop() || videoId : videoId;
+    const shortPrimary = activeLiveId.includes('_') ? activeLiveId.split('_').pop() || activeLiveId : activeLiveId;
+    onShowToast(`🔗 កំពុងភ្ជាប់ Live #${shortVid.slice(-8)} ចូលក្នុង Live គោល #${shortPrimary.slice(-8)} និងបញ្ចូលកន្ត្រករួមគ្នា...`);
+    try {
+      const res = await safeFetchJson<{
+        success?: boolean;
+        linked_videos?: string[];
+        new_orders_count?: number;
+        total_baskets?: number;
+        message?: string;
+        error?: string;
+      }>('/api/fb/link_live_video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          primary_live_id: activeLiveId,
+          video_id: videoId
+        })
+      });
+      const data = res.data;
+      if (res.ok && data?.success) {
+        playSuccessFanfare();
+        if (Array.isArray(data.linked_videos)) {
+          setLinkedVideos(data.linked_videos);
+        }
+        onShowToast(data.message || `🔗 បានភ្ជាប់ Live #${shortVid.slice(-8)} ចូលកន្ត្រករួមគ្នាជោគជ័យ!`, 'success');
+        if (onSyncSuccess) {
+          onSyncSuccess(activeLiveId, data.new_orders_count || 0, data.total_baskets || 0);
+        }
+      } else {
+        playWarningBuzzer();
+        onShowToast(data?.error || res.error || 'មិនអាចភ្ជាប់ Live បានទេ', 'error');
+      }
+    } catch (e: any) {
+      playWarningBuzzer();
+      onShowToast(e?.message || 'កំហុសបណ្តាញពេលភ្ជាប់ Live', 'error');
+    } finally {
+      setLinkingVideoId(null);
+    }
+  };
+
+  const handleUnlinkLiveVideo = async (videoId: string) => {
+    try {
+      const res = await safeFetchJson<{
+        success?: boolean;
+        linked_videos?: string[];
+        message?: string;
+      }>('/api/fb/unlink_live_video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          primary_live_id: activeLiveId,
+          video_id: videoId
+        })
+      });
+      if (res.ok && res.data?.success) {
+        if (Array.isArray(res.data.linked_videos)) {
+          setLinkedVideos(res.data.linked_videos);
+        }
+        onShowToast(res.data.message || 'បានផ្តាច់វីដេអូ Live ចេញពីការទាញរួមគ្នា!', 'success');
+      }
+    } catch {
+      onShowToast('មិនអាចផ្តាច់វីដេអូ Live បានទេ', 'error');
+    }
+  };
+
+  const handleApplyCustomId = (asLinkedPart2 = false) => {
     if (!customPostId.trim()) return;
     let clean = customPostId.trim();
     const match = clean.match(/(?:videos\/|watch\/\?v=|reel\/|posts\/)?(\d{10,})/);
     if (match && match[1]) {
       clean = match[1];
     }
-    handleSelectLive(clean);
+    if (asLinkedPart2) {
+      handleLinkLiveVideo(clean);
+    } else {
+      handleSelectLive(clean);
+    }
     setCustomPostId('');
   };
 
@@ -531,6 +618,53 @@ export function FacebookAuthModal({
               </button>
             </div>
 
+            {/* Multi-Live Active Banner (when 2+ videos are linked into 1 session) */}
+            {linkedVideos.length > 1 && (
+              <div className="bg-gradient-to-r from-purple-950/80 via-indigo-950/90 to-cyan-950/80 border border-purple-400/60 rounded-2xl p-3 flex flex-col gap-2 shadow-[0_0_20px_rgba(168,85,247,0.25)]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11.5px] font-black text-purple-200 flex items-center gap-1.5">
+                    <span>🔗</span>
+                    <span>កំពុងភ្ជាប់ទាញខំមិនរួមគ្នា ({linkedVideos.length} ឡាយ ➔ កន្ត្រកតែមួយ)</span>
+                  </span>
+                  <span className="text-[10px] font-bold bg-purple-500/30 text-purple-200 px-2 py-0.5 rounded-full border border-purple-400/40">
+                    Part 1 + Part 2
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {linkedVideos.map((vid, idx) => {
+                    const shortV = vid.includes('_') ? vid.split('_').pop() || vid : vid;
+                    const isMain = idx === 0 || vid === activeLiveId || activeLiveId.endsWith(vid);
+                    return (
+                      <div
+                        key={vid}
+                        className={`px-2.5 py-1 rounded-xl text-[10.5px] font-mono font-bold flex items-center gap-1.5 border ${
+                          isMain
+                            ? 'bg-emerald-950/90 border-emerald-400/60 text-emerald-300'
+                            : 'bg-purple-950/90 border-purple-400/60 text-purple-200'
+                        }`}
+                      >
+                        <span>{isMain ? '🎯 គោល:' : `🔗 តឡាយទី ${idx + 1}:`}</span>
+                        <span>#{shortV.slice(-8)}</span>
+                        {!isMain && (
+                          <button
+                            type="button"
+                            onClick={() => handleUnlinkLiveVideo(vid)}
+                            className="ml-0.5 text-rose-300 hover:text-white bg-rose-950/80 hover:bg-rose-600 px-1.5 py-0.2 rounded text-[9.5px] font-sans font-black transition-colors"
+                            title="ផ្តាច់វីដេអូនេះចេញ"
+                          >
+                            ✕ ផ្តាច់
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="text-[10px] text-slate-300 leading-relaxed">
+                  ✨ ភ្ញៀវដដែលខំមិនកុម្ម៉ង់ក្នុងឡាយណាមួយក៏ដោយ ប្រព័ន្ធនឹងបូកទំនិញចូលក្នុង <strong>កន្ត្រកតែមួយ (គិតថ្លៃដឹកតែ ១ ដង)</strong> និងកាត់ស្តុករួមគ្នាដោយស្វ័យប្រវត្តិ!
+                </div>
+              </div>
+            )}
+
             {/* List of fetched 10 live streams */}
             {loadingPosts ? (
               <div className="py-10 text-center text-xs text-cyan-300 flex flex-col items-center justify-center gap-2.5">
@@ -548,13 +682,15 @@ export function FacebookAuthModal({
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-2.5 max-h-[280px] overflow-y-auto pr-1 custom-scroll">
+              <div className="flex flex-col gap-2.5 max-h-[300px] overflow-y-auto pr-1 custom-scroll">
                 {posts.map((p, pIdx) => {
+                  const displayId = p.id.length > 20 ? p.id.split('_').pop() || p.id : p.id;
                   const isSelected = p.id === activeLiveId || (p.id && activeLiveId && (p.id.endsWith(activeLiveId) || activeLiveId.endsWith(p.id)));
+                  const isLinkedSecondary = !isSelected && linkedVideos.some(v => v && (p.id === v || p.id.endsWith(v) || v.endsWith(displayId)));
+                  const isLinkingThis = linkingVideoId === p.id;
                   const isLive = p.is_live;
                   const commentsCount = typeof p.comments_count === 'number' ? p.comments_count : 0;
                   const reactionsCount = typeof p.reactions_count === 'number' ? p.reactions_count : 0;
-                  const displayId = p.id.length > 20 ? p.id.split('_').pop() || p.id : p.id;
 
                   return (
                     <div
@@ -563,11 +699,13 @@ export function FacebookAuthModal({
                       className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all flex flex-col gap-2 relative ${
                         isSelected
                           ? 'bg-gradient-to-r from-[#0B254E] via-[#0E3166] to-[#0B254E] border-cyan-400 shadow-[0_0_18px_rgba(6,182,212,0.4)] ring-1 ring-cyan-400/50'
+                          : isLinkedSecondary
+                          ? 'bg-gradient-to-r from-purple-950/60 via-[#151338] to-indigo-950/60 border-purple-400/80 shadow-[0_0_15px_rgba(168,85,247,0.3)]'
                           : 'bg-[#060E20]/90 border-slate-800 hover:border-slate-700 hover:bg-[#0A1630]'
                       }`}
                     >
                       {/* Top Meta Line: Badge + ID + Actions */}
-                      <div className="flex justify-between items-center gap-1.5">
+                      <div className="flex justify-between items-center gap-1.5 flex-wrap">
                         <div className="flex items-center gap-2 flex-wrap">
                           {isLive ? (
                             <span className="bg-gradient-to-r from-rose-600 to-red-500 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-md shadow-rose-600/30 animate-pulse">
@@ -586,7 +724,12 @@ export function FacebookAuthModal({
                         <div className="flex items-center gap-1.5">
                           {isSelected && (
                             <span className="text-emerald-300 font-extrabold text-[10px] bg-emerald-950/90 border border-emerald-400/60 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
-                              <span>✓</span> ជ្រើសរើស
+                              <span>✓</span> ឡាយគោល (កំពុងប្រើ)
+                            </span>
+                          )}
+                          {isLinkedSecondary && (
+                            <span className="text-purple-200 font-extrabold text-[10px] bg-purple-950/90 border border-purple-400/70 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                              <span>🔗</span> បានភ្ជាប់តឡាយ (រួមកន្ត្រក)
                             </span>
                           )}
                           {p.permalink_url && (
@@ -609,8 +752,8 @@ export function FacebookAuthModal({
                         {p.message}
                       </div>
 
-                      {/* Bottom Stat Highlights: Total Comments, Reactions, Time */}
-                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5 flex-wrap">
+                      {/* Bottom Stat Highlights & Multi-Live Link Action Buttons */}
+                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/5 flex-wrap">
                         
                         {/* Highlights Pill Badges */}
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -635,18 +778,66 @@ export function FacebookAuthModal({
                             </div>
                           )}
 
-                          {/* Views Badge */}
-                          {typeof p.views_count === 'number' && p.views_count > 0 && (
-                            <div className="bg-slate-900/90 border border-slate-800 text-slate-300 px-2 py-0.5 rounded-lg text-[10.5px] font-mono flex items-center gap-1">
-                              <span>👁️</span>
-                              <span>{p.views_count.toLocaleString()}</span>
-                            </div>
-                          )}
+                          <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">
+                            📅 {formatPostTime(p.created_time)}
+                          </span>
                         </div>
 
-                        {/* Date Time */}
-                        <div className="text-[10px] text-slate-400 font-medium whitespace-nowrap ml-auto">
-                          📅 {formatPostTime(p.created_time)}
+                        {/* Action Buttons: Primary = Switch to this Live (Isolated Stock) | Secondary = Link Part 2 */}
+                        <div className="flex items-center gap-1.5 ml-auto flex-wrap" onClick={e => e.stopPropagation()}>
+                          {!isSelected && !isLinkedSecondary && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectLive(p.id)}
+                                className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white px-2.5 py-1 rounded-lg text-[10.5px] font-black border border-cyan-400/50 shadow-sm transition-all active:scale-95 flex items-center gap-1"
+                                title="ជ្រើសរើសវគ្គ Live នេះជាគោល (ស្តុក រូបភាព កូដ និងតម្លៃដាច់ដោយឡែក ១០០% មិនឆ្លងពី Live ចាស់)"
+                              >
+                                <span>🎥</span>
+                                <span>ជ្រើសរើសឡាយនេះ (ស្តុកដាច់ដោយឡែក)</span>
+                              </button>
+                              {pendingLinkConfirmId === p.id ? (
+                                <div className="flex items-center gap-1 bg-purple-950/90 border border-purple-400/80 px-2 py-0.5 rounded-lg">
+                                  <span className="text-[10px] text-purple-200 font-bold">ភ្ជាប់ចូល #{(activeLiveId.split('_').pop() || activeLiveId).slice(-6)}?</span>
+                                  <button
+                                    type="button"
+                                    disabled={isLinkingThis}
+                                    onClick={() => handleLinkLiveVideo(p.id)}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white px-2 py-0.5 rounded text-[10px] font-black"
+                                  >
+                                    យល់ព្រម
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPendingLinkConfirmId(null)}
+                                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                  >
+                                    បោះបង់
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={isLinkingThis}
+                                  onClick={() => setPendingLinkConfirmId(p.id)}
+                                  className="bg-slate-900/90 hover:bg-purple-950/80 text-purple-300 hover:text-purple-200 px-2 py-1 rounded-lg text-[10px] font-bold border border-purple-500/40 transition-all active:scale-95 flex items-center gap-1 disabled:opacity-60"
+                                  title="ប្រើសម្រាប់តែករណីដាច់ឡាយ ហើយតឡាយទី ២ ក្នុងថ្ងៃតែមួយ (Part 2) ប៉ុណ្ណោះ (មិនទាញស្តុកចាស់ឆ្លងឡើយ)"
+                                >
+                                  <span>🔗</span>
+                                  <span>{isLinkingThis ? 'កំពុងភ្ជាប់...' : 'តឡាយ Part 2'}</span>
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {isLinkedSecondary && (
+                            <button
+                              type="button"
+                              onClick={() => handleUnlinkLiveVideo(displayId)}
+                              className="bg-rose-950/80 hover:bg-rose-800 text-rose-300 hover:text-white px-2.5 py-1 rounded-lg text-[10.5px] font-bold border border-rose-500/40 transition-all active:scale-95"
+                            >
+                              ✕ ផ្តាច់ពីការតឡាយ
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -664,16 +855,21 @@ export function FacebookAuthModal({
                 <div className="flex items-center gap-1 self-start sm:self-auto bg-cyan-950/90 border border-cyan-500/40 px-2.5 py-0.5 rounded-lg text-[11px] font-mono text-cyan-300 font-bold max-w-full">
                   <span className="text-slate-400 font-sans text-[10px]">Live សកម្ម:</span>
                   <span className="truncate max-w-[150px]">#{activeLiveId.includes('_') ? activeLiveId.split('_').pop() : activeLiveId}</span>
+                  {linkedVideos.length > 1 && (
+                    <span className="text-purple-300 font-sans text-[10px] ml-1">
+                      (+{linkedVideos.length - 1} តឡាយ)
+                    </span>
+                  )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <div className="relative flex-1">
                   <input
                     type="text"
                     value={customPostId}
                     onChange={e => setCustomPostId(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleApplyCustomId()}
+                    onKeyDown={e => e.key === 'Enter' && handleApplyCustomId(false)}
                     placeholder="បិទភ្ជាប់ (Paste) ID ឬ Link វីដេអូ Facebook..."
                     className="w-full bg-[#030914] border border-slate-700/90 focus:border-cyan-400 rounded-xl pl-3 pr-8 py-2 text-xs text-cyan-200 font-mono outline-none placeholder:text-slate-500 transition-all shadow-inner"
                   />
@@ -688,13 +884,26 @@ export function FacebookAuthModal({
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleApplyCustomId}
-                  className="bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs active:scale-95 shadow-lg shadow-cyan-500/20 cursor-pointer transition-all whitespace-nowrap flex-shrink-0"
-                >
-                  កំណត់ Live
-                </button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleApplyCustomId(true)}
+                    disabled={!customPostId.trim() || Boolean(linkingVideoId)}
+                    className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white font-black px-3 py-2 rounded-xl text-xs active:scale-95 shadow-lg shadow-purple-500/20 cursor-pointer transition-all whitespace-nowrap flex items-center gap-1 border border-purple-400/40"
+                    title="ភ្ជាប់វីដេអូនេះចូលក្នុង Live បច្ចុប្បន្ន (Part 1 + Part 2) ប្រើកន្ត្រករួមគ្នា"
+                  >
+                    <span>🔗</span>
+                    <span>ភ្ជាប់តឡាយ (Part 2)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyCustomId(false)}
+                    disabled={!customPostId.trim()}
+                    className="bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 disabled:opacity-50 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs active:scale-95 shadow-lg shadow-cyan-500/20 cursor-pointer transition-all whitespace-nowrap"
+                  >
+                    កំណត់ជា Live ថ្មី
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -713,8 +922,9 @@ export function FacebookAuthModal({
                 <>
                   <span className="text-base">⚡</span>
                   <span>
-                    ទាញយក Comment ទាំងអស់ពី Live #{activeLiveId.includes('_') ? activeLiveId.split('_').pop() : activeLiveId}
-                    {selectedPost?.comments_count ? ` (💬 ${selectedPost.comments_count.toLocaleString()})` : ''}
+                    {linkedVideos.length > 1
+                      ? `ទាញយក Comment ទាំងអស់ពី ${linkedVideos.length} ឡាយរួមគ្នា (Part 1 + Part 2)`
+                      : `ទាញយក Comment ទាំងអស់ពី Live #${activeLiveId.includes('_') ? activeLiveId.split('_').pop() : activeLiveId}${selectedPost?.comments_count ? ` (💬 ${selectedPost.comments_count.toLocaleString()})` : ''}`}
                   </span>
                 </>
               )}

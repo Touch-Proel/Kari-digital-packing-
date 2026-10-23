@@ -9,6 +9,7 @@ interface LiveSessionItem {
   product_count?: number;
   unsold_product_count?: number;
   is_active?: boolean;
+  linked_videos?: string[];
 }
 
 interface ManageLiveSessionsModalProps {
@@ -38,6 +39,8 @@ export function ManageLiveSessionsModal({
 }: ManageLiveSessionsModalProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [mergingId, setMergingId] = useState<string | null>(null);
+  const [confirmMergeId, setConfirmMergeId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   if (!isOpen) return null;
@@ -122,6 +125,37 @@ export function ManageLiveSessionsModal({
       onShowToast(`កំហុសបណ្តាញ៖ ${err.message}`, 'error');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleMergeSessionIntoActive = async (sourceLiveId: string) => {
+    if (!activeLiveId || sourceLiveId === activeLiveId) return;
+    setMergingId(sourceLiveId);
+    try {
+      const res = await fetch('/api/merge_live_sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_live_id: activeLiveId,
+          source_live_id: sourceLiveId
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        playSuccessFanfare();
+        onShowToast(data.message || 'បានច្របាច់វគ្គ Live ចូលគ្នាជោគជ័យ!', 'success');
+        setConfirmMergeId(null);
+        onRefreshLiveSessions();
+        onSelectLiveId(activeLiveId);
+      } else {
+        playWarningBuzzer();
+        onShowToast(data.error || 'មិនអាចច្របាច់វគ្គ Live បានទេ', 'error');
+      }
+    } catch (err: any) {
+      playWarningBuzzer();
+      onShowToast(`កំហុសបណ្តាញ៖ ${err.message}`, 'error');
+    } finally {
+      setMergingId(null);
     }
   };
 
@@ -256,8 +290,11 @@ export function ManageLiveSessionsModal({
               const isSelected = activeLiveId === session.live_id;
               const isConfirmingThis = confirmDeleteId === session.live_id;
               const isDeletingThis = deletingId === session.live_id;
+              const isConfirmingMerge = confirmMergeId === session.live_id;
+              const isMergingThis = mergingId === session.live_id;
               const title = getLiveDisplayTitle(session.live_id);
               const { date, time } = formatSessionDate(session.created_at);
+              const linkedCount = Array.isArray(session.linked_videos) ? session.linked_videos.length : 1;
 
               return (
                 <div
@@ -281,6 +318,12 @@ export function ManageLiveSessionsModal({
                           កំពុងដំណើរការ (ACTIVE)
                         </span>
                       )}
+                      {linkedCount > 1 && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-purple-500/25 text-purple-200 border border-purple-400/60 flex items-center gap-1">
+                          <span>🔗</span>
+                          <span>រួម {linkedCount} ឡាយ (Part 1+{linkedCount - 1})</span>
+                        </span>
+                      )}
                     </div>
 
                     {/* Delete button (top right, Admin Only) */}
@@ -288,6 +331,7 @@ export function ManageLiveSessionsModal({
                       <button
                         onClick={() => {
                           playPureTone(350, 0.06);
+                          setConfirmMergeId(null);
                           setConfirmDeleteId(session.live_id);
                         }}
                         className="w-8 h-8 rounded-xl bg-rose-950/40 hover:bg-rose-900/80 border border-rose-800/50 hover:border-rose-500 text-rose-300 hover:text-white text-sm font-bold transition-all active:scale-90 flex items-center justify-center flex-shrink-0 cursor-pointer shadow-sm"
@@ -331,8 +375,8 @@ export function ManageLiveSessionsModal({
                     </div>
                   </div>
 
-                  {/* Bottom Row: Date & Action Button */}
-                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+                  {/* Bottom Row: Date & Action Buttons */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60 flex-wrap">
                     <div className="flex items-center gap-1 text-[11px] sm:text-xs text-slate-400">
                       <span>📅</span>
                       <span className="font-medium">{date}</span>
@@ -344,29 +388,80 @@ export function ManageLiveSessionsModal({
                       )}
                     </div>
 
-                    {/* Switch / Active Button */}
-                    <div>
+                    {/* Switch / Merge / Active Buttons */}
+                    <div className="flex items-center gap-1.5 ml-auto">
                       {isSelected ? (
                         <div className="px-3 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 text-xs font-black flex items-center gap-1 shadow-sm">
                           <span>✓</span>
                           <span>កំពុងជ្រើសរើស</span>
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            playPureTone(520, 0.06);
-                            onSelectLiveId(session.live_id);
-                            onClose();
-                          }}
-                          className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-slate-800 to-slate-700 hover:from-cyan-600 hover:to-blue-600 border border-slate-600/80 hover:border-cyan-400 text-slate-100 hover:text-white text-xs font-black transition-all active:scale-95 flex items-center gap-1.5 shadow cursor-pointer"
-                        >
-                          <span>⚡</span>
-                          <span>ប្តូរទៅ Live នេះ</span>
-                        </button>
+                        <>
+                          {activeLiveId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                playPureTone(580, 0.06);
+                                setConfirmDeleteId(null);
+                                setConfirmMergeId(session.live_id);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 border border-purple-400/50 text-white text-xs font-black transition-all active:scale-95 flex items-center gap-1 shadow cursor-pointer"
+                              title="ច្របាច់កន្ត្រក និងភ្ជាប់វគ្គនេះចូលទៅក្នុង Live កំពុងដំណើរការ (Part 1 + Part 2)"
+                            >
+                              <span>🔗</span>
+                              <span>ច្របាច់ចូល Live បច្ចុប្បន្ន</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              playPureTone(520, 0.06);
+                              onSelectLiveId(session.live_id);
+                              onClose();
+                            }}
+                            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-slate-800 to-slate-700 hover:from-cyan-600 hover:to-blue-600 border border-slate-600/80 hover:border-cyan-400 text-slate-100 hover:text-white text-xs font-black transition-all active:scale-95 flex items-center gap-1.5 shadow cursor-pointer"
+                          >
+                            <span>⚡</span>
+                            <span>ប្តូរទៅ Live នេះ</span>
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
+
+                  {/* Inline Merge Confirmation Banner */}
+                  {isConfirmingMerge && (
+                    <div className="p-3 rounded-xl bg-purple-950/90 border border-purple-400 text-purple-100 text-xs flex flex-col gap-2 animate-in fade-in duration-150">
+                      <div className="flex items-start gap-2">
+                        <span className="text-lg leading-none">🔗</span>
+                        <div className="flex-1">
+                          <p className="font-bold text-white">
+                            ច្របាច់ {title} ចូលទៅក្នុង {getLiveDisplayTitle(activeLiveId)} មែនទេ?
+                          </p>
+                          <p className="text-purple-200/90 text-[11px] mt-1 leading-relaxed">
+                            • ភ្ញៀវដដែលដែលកម្មង់ក្នុងឡាយទាំង ២ នឹងត្រូវបូកបញ្ចូលក្នុង <strong>កន្ត្រកតែមួយ (គិតថ្លៃដឹកតែ ១ ដង)</strong><br />
+                            • កន្ត្រកផ្សេងៗទៀត ({session.basket_count || 0} កន្ត្រក) និងការទាញខំមិនបន្ត នឹងត្រូវបញ្ចូលរួមគ្នាក្នុងវគ្គតែមួយ!
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 justify-end pt-1.5 border-t border-purple-800/60">
+                        <button
+                          onClick={() => setConfirmMergeId(null)}
+                          disabled={isMergingThis}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs font-bold hover:bg-slate-700 transition-all cursor-pointer"
+                        >
+                          បោះបង់
+                        </button>
+                        <button
+                          onClick={() => handleMergeSessionIntoActive(session.live_id)}
+                          disabled={isMergingThis}
+                          className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-black shadow transition-all flex items-center gap-1 cursor-pointer"
+                        >
+                          {isMergingThis ? 'កំពុងច្របាច់បញ្ចូលគ្នា...' : '🔗 យល់ព្រម ច្របាច់ចូលគ្នា'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Inline Delete Confirmation Banner */}
                   {isConfirmingThis && (

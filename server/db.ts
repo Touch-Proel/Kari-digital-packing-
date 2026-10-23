@@ -339,10 +339,234 @@ export interface AutoScannedMessengerSlip {
 
 export const messengerSlips: AutoScannedMessengerSlip[] = [];
 
+export function normalizeLiveId(id: string): string {
+  const trimmed = String(id || '').trim();
+  return trimmed && trimmed.includes('_') && !trimmed.startsWith('LIVE_') ? trimmed.split('_').pop() || trimmed : trimmed;
+}
+
 export function setActiveLiveId(id: string) {
-  const cleanId = id && id.includes('_') && !id.startsWith('LIVE_') ? id.split('_').pop() || id : id;
+  const cleanId = normalizeLiveId(id);
+  if (!cleanId) return;
   activeLiveId = cleanId;
+  // Safety: If cleanId was accidentally listed as a secondary linked video inside an older session,
+  // detach it from that older session so selecting a Live post as Primary is 100% isolated.
+  if (settings.linked_live_videos && typeof settings.linked_live_videos === 'object') {
+    for (const [primaryKey, vids] of Object.entries(settings.linked_live_videos)) {
+      if (normalizeLiveId(primaryKey) !== cleanId && Array.isArray(vids)) {
+        settings.linked_live_videos[primaryKey] = vids
+          .map(normalizeLiveId)
+          .filter(v => v && v !== cleanId);
+      }
+    }
+  }
   saveDatabaseToDisk();
+}
+
+export function getLinkedVideosForSession(sessionId?: string): string[] {
+  const primaryId = normalizeLiveId(sessionId || activeLiveId);
+  if (!primaryId) return [];
+  const map = settings.linked_live_videos || {};
+  const extras = Array.isArray(map[primaryId]) ? map[primaryId].map(normalizeLiveId).filter(Boolean) : [];
+  return Array.from(new Set([primaryId, ...extras]));
+}
+
+export function addLinkedVideoToSession(sessionId: string, videoId: string): string[] {
+  const primaryId = normalizeLiveId(sessionId || activeLiveId);
+  const cleanVid = normalizeLiveId(videoId);
+  if (!primaryId || !cleanVid) return getLinkedVideosForSession(primaryId);
+
+  if (!settings.linked_live_videos) {
+    settings.linked_live_videos = {};
+  }
+  const existing = Array.isArray(settings.linked_live_videos[primaryId])
+    ? settings.linked_live_videos[primaryId].map(normalizeLiveId).filter(Boolean)
+    : [];
+
+  if (cleanVid !== primaryId && !existing.includes(cleanVid)) {
+    existing.push(cleanVid);
+  }
+  settings.linked_live_videos[primaryId] = existing;
+
+  // Also if cleanVid itself had any linked videos, absorb them into primaryId
+  if (cleanVid !== primaryId && Array.isArray(settings.linked_live_videos[cleanVid])) {
+    for (const subVid of settings.linked_live_videos[cleanVid]) {
+      const cSub = normalizeLiveId(subVid);
+      if (cSub && cSub !== primaryId && !settings.linked_live_videos[primaryId].includes(cSub)) {
+        settings.linked_live_videos[primaryId].push(cSub);
+      }
+    }
+    delete settings.linked_live_videos[cleanVid];
+  }
+
+  bumpDataRevision();
+  saveDatabaseToDisk();
+  return getLinkedVideosForSession(primaryId);
+}
+
+export function removeLinkedVideoFromSession(sessionId: string, videoId: string): string[] {
+  const primaryId = normalizeLiveId(sessionId || activeLiveId);
+  const cleanVid = normalizeLiveId(videoId);
+  if (!primaryId || !cleanVid || !settings.linked_live_videos?.[primaryId]) {
+    return getLinkedVideosForSession(primaryId);
+  }
+  settings.linked_live_videos[primaryId] = settings.linked_live_videos[primaryId]
+    .map(normalizeLiveId)
+    .filter(v => v && v !== cleanVid);
+  bumpDataRevision();
+  saveDatabaseToDisk();
+  return getLinkedVideosForSession(primaryId);
+}
+
+export function mergeLiveSessionsIntoPrimary(
+  primaryLiveId: string,
+  sourceLiveId: string,
+  options?: { includeProducts?: boolean }
+): {
+  mergedSameCustomerCount: number;
+  movedBasketsCount: number;
+  movedProductsCount: number;
+} {
+  const targetId = normalizeLiveId(primaryLiveId);
+  const sourceId = normalizeLiveId(sourceLiveId);
+  if (!targetId || !sourceId || targetId === sourceId) {
+    return { mergedSameCustomerCount: 0, movedBasketsCount: 0, movedProductsCount: 0 };
+  }
+
+  let mergedSameCustomerCount = 0;
+  let movedBasketsCount = 0;
+  let movedProductsCount = 0;
+
+  // 1. Move or merge products from sourceId into targetId ONLY when explicitly requested (default false to prevent stock contamination across Live sessions)
+  if (options?.includeProducts === true) {
+    const sourceProducts = products.filter(p => normalizeLiveId(p.live_id || '') === sourceId);
+    for (const sp of sourceProducts) {
+      const cleanCode = (sp.code || '').toUpperCase().trim();
+      const existingInTarget = products.find(
+        p => normalizeLiveId(p.live_id || '') === targetId && (p.code || '').toUpperCase().trim() === cleanCode
+      );
+      if (!existingInTarget) {
+        sp.live_id = targetId;
+        movedProductsCount++;
+      }
+    }
+    // Remove leftover duplicate products in sourceId
+    for (let i = products.length - 1; i >= 0; i--) {
+      if (normalizeLiveId(products[i].live_id || '') === sourceId) {
+        products.splice(i, 1);
+      }
+    }
+  }
+
+  // 2. Move rawComments from sourceId to targetId
+  for (const rc of rawComments) {
+    if (normalizeLiveId(rc.live_id || '') === sourceId) {
+      rc.live_id = targetId;
+    }
+  }
+
+  // 3. Merge or move invoices from sourceId into targetId
+  const sourceInvoices = invoices.filter(inv => normalizeLiveId(inv.live_id || '') === sourceId && inv.status !== 'Cancelled');
+  for (const srcInv of sourceInvoices) {
+    const srcUid = srcInv.facebook_user_id && !['FB_USER_ID_STREAM', 'FB_MANUAL_USER', 'MANUAL_USER_ID'].includes(srcInv.facebook_user_id)
+      ? srcInv.facebook_user_id
+      : '';
+    const srcName = (srcInv.facebook_name || '').trim().toLowerCase();
+    const srcPhone = (srcInv.phone_number || '').replace(/\D/g, '');
+
+    // Look for an active (non-Cancelled, non-Dispatched) basket for the same customer in targetId
+    const targetInv = invoices.find(inv => {
+      if (normalizeLiveId(inv.live_id || '') !== targetId) return false;
+      if (inv.invoice_id === srcInv.invoice_id) return false;
+      if (inv.status === 'Cancelled' || inv.status === 'Dispatched' || inv.packing_stage === 'DISPATCHED') return false;
+
+      if (srcUid && inv.facebook_user_id === srcUid) return true;
+      if (srcName && (inv.facebook_name || '').trim().toLowerCase() === srcName) return true;
+      if (srcPhone.length >= 8 && (inv.phone_number || '').replace(/\D/g, '') === srcPhone) return true;
+      return false;
+    });
+
+    if (targetInv && srcInv.status !== 'Dispatched' && srcInv.packing_stage !== 'DISPATCHED') {
+      // Same customer! Consolidate items into targetInv (1 single basket, 1 shipping fee!)
+      for (const sItem of srcInv.items || []) {
+        const existingItem = targetInv.items.find(
+          t => t.product_code.toUpperCase().trim() === sItem.product_code.toUpperCase().trim() && t.price === sItem.price
+        );
+        if (existingItem) {
+          existingItem.quantity += sItem.quantity;
+          if (sItem.item_comment && !existingItem.item_comment?.includes(sItem.item_comment)) {
+            existingItem.item_comment = `${existingItem.item_comment ? existingItem.item_comment + ' | ' : ''}${sItem.item_comment}`;
+          }
+        } else {
+          targetInv.items.push({
+            ...sItem,
+            id: Date.now() + Math.floor(Math.random() * 100000),
+            invoice_id: targetInv.invoice_id,
+            note: sItem.note ? `${sItem.note} (តឡាយ #${sourceId.slice(-6)})` : `(តឡាយ #${sourceId.slice(-6)})`
+          });
+        }
+      }
+
+      if ((!targetInv.phone_number || targetInv.phone_number === 'គ្មានលេខ' || targetInv.phone_number.includes('មិនទាន់')) &&
+          srcInv.phone_number && srcInv.phone_number !== 'គ្មានលេខ') {
+        targetInv.phone_number = srcInv.phone_number;
+      }
+      if ((!targetInv.address || targetInv.address.includes('មិនទាន់')) &&
+          srcInv.address && !srcInv.address.includes('មិនទាន់')) {
+        targetInv.address = srcInv.address;
+      }
+      if (srcInv.location_zone && srcInv.location_zone !== 'UNKNOWN' && targetInv.location_zone === 'UNKNOWN') {
+        targetInv.location_zone = srcInv.location_zone;
+        targetInv.location_label = srcInv.location_label;
+      }
+
+      if (Array.isArray(srcInv.comments)) {
+        targetInv.comments = Array.from(new Set([...(targetInv.comments || []), ...srcInv.comments]));
+      }
+      if (Array.isArray(srcInv.comment_ids)) {
+        targetInv.comment_ids = Array.from(new Set([...(targetInv.comment_ids || []), ...srcInv.comment_ids]));
+      }
+      if (Array.isArray(srcInv.unmatched_comments)) {
+        targetInv.unmatched_comments = Array.from(new Set([...(targetInv.unmatched_comments || []), ...srcInv.unmatched_comments]));
+      }
+
+      recalculateInvoice(targetInv);
+      targetInv.updated_at = new Date().toISOString();
+
+      // Remove merged source invoice so there's no duplicate or cancelled ghost
+      const idx = invoices.findIndex(i => i.invoice_id === srcInv.invoice_id);
+      if (idx !== -1) {
+        invoices.splice(idx, 1);
+      }
+      mergedSameCustomerCount++;
+    } else {
+      // Different customer — move their basket into targetId!
+      const usedBasketNos = new Set(
+        invoices
+          .filter(i => normalizeLiveId(i.live_id || '') === targetId && i.invoice_id !== srcInv.invoice_id)
+          .map(i => Number(i.basket_no) || 0)
+      );
+      let bNo = Number(srcInv.basket_no) || 1;
+      if (usedBasketNos.has(bNo)) {
+        const maxBNo = usedBasketNos.size > 0 ? Math.max(...Array.from(usedBasketNos)) : 0;
+        bNo = maxBNo + 1;
+      }
+      srcInv.live_id = targetId;
+      srcInv.basket_no = bNo;
+      srcInv.updated_at = new Date().toISOString();
+      movedBasketsCount++;
+    }
+  }
+
+  // Remove any remaining cancelled invoices in sourceId
+  for (let i = invoices.length - 1; i >= 0; i--) {
+    if (normalizeLiveId(invoices[i].live_id || '') === sourceId) {
+      invoices.splice(i, 1);
+    }
+  }
+
+  // Link sourceId to targetId for future real-time comment syncs
+  addLinkedVideoToSession(targetId, sourceId);
+  return { mergedSameCustomerCount, movedBasketsCount, movedProductsCount };
 }
 
 // Active locks on invoices
@@ -386,7 +610,8 @@ export const settings: AppSettings = {
   auto_private_reply_enabled: false,
   auto_private_reply_template: 'ជម្រាបសួរ [Name]! អរគុណសម្រាប់ការកុម្ម៉ង់ទំនិញក្នុង Live។ ប្រព័ន្ធបានកត់ត្រាការកក់របស់បងរួចរាល់ហើយ។ សូមបងផ្ញើលេខទូរស័ព្ទ និងទីតាំង ដើម្បីខាងប្អូនរៀបចំវេចខ្ចប់ជូនបង។ អរគុណ!',
   scan_ping_messenger_enabled: true,
-  scan_ping_messenger_template: '📦 [សួស្តីបង [Name]] បុគ្គលិកផ្នែករៀបចំ និងវេចខ្ចប់កំពុងផ្ទៀងផ្ទាត់កន្ត្រក #[Basket] ជូនបង! បុគ្គលិកអាចនឹងផ្ញើរូបភាព ឬបញ្ជាក់ទំនិញក្នុងឆាតនេះ។ សូមបងរង់ចាំបន្តិចណា៎! 🙏✨'
+  scan_ping_messenger_template: '📦 [សួស្តីបង [Name]] បុគ្គលិកផ្នែករៀបចំ និងវេចខ្ចប់កំពុងផ្ទៀងផ្ទាត់កន្ត្រក #[Basket] ជូនបង! បុគ្គលិកអាចនឹងផ្ញើរូបភាព ឬបញ្ជាក់ទំនិញក្នុងឆាតនេះ។ សូមបងរង់ចាំបន្តិចណា៎! 🙏✨',
+  linked_live_videos: {}
 };
 
 // Initial Products Catalog
@@ -752,19 +977,20 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string, persist = 
   let updatedInvoicesCount = 0;
 
   for (const inv of invoices) {
-    const invLive = inv.live_id || activeLiveId;
-    if (targetLiveId && invLive !== targetLiveId) continue;
+    const invLive = normalizeLiveId(inv.live_id || activeLiveId);
+    if (targetLiveId && invLive !== normalizeLiveId(targetLiveId)) continue;
 
     // Only cascade to active, non-dispatched invoices (never alter historic dispatched packages)
     if (inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED') {
       let invChanged = false;
       for (const item of inv.items) {
-        // Look up product in this live session first, then fallback to global product catalog
+        // STRICT SESSION ISOLATION: Look up product ONLY in this exact live session (never pull price/photo/code from other live sessions!)
         const cleanCode = (item.product_code || '').trim().toUpperCase();
         if (!cleanCode) continue;
 
-        const prod = products.find(p => (p.live_id || activeLiveId) === invLive && (p.code || '').trim().toUpperCase() === cleanCode)
-          || products.find(p => (p.code || '').trim().toUpperCase() === cleanCode);
+        const prod = products.find(
+          p => normalizeLiveId(p.live_id || '') === invLive && (p.code || '').trim().toUpperCase() === cleanCode
+        );
 
         if (prod) {
           // Auto-sync price if stock price is positive and differs
@@ -970,15 +1196,16 @@ export function loadDatabaseFromDisk(): Promise<void> {
           }
         }
 
-        // Merge any missing products from JSON store
+        // Merge any missing products from JSON store (strictly preserving their original live_id)
         if (Array.isArray(store.products) && store.products.length > 0) {
-          const existingProdKeys = new Set(products.map(p => `${p.live_id || activeLiveId}_${(p.code || '').toUpperCase().trim()}`));
+          const existingProdKeys = new Set(products.map(p => `${normalizeLiveId(p.live_id || 'LEGACY_ISOLATED')}_${(p.code || '').toUpperCase().trim()}`));
           let maxProdId = products.reduce((m, p) => Math.max(m, p.id || 0), 0);
           for (const sp of store.products) {
-            if (!sp || !sp.code) continue;
-            const key = `${sp.live_id || activeLiveId}_${sp.code.toUpperCase().trim()}`;
+            if (!sp || !sp.code || !sp.live_id) continue;
+            const normLive = normalizeLiveId(sp.live_id);
+            const key = `${normLive}_${sp.code.toUpperCase().trim()}`;
             if (!existingProdKeys.has(key)) {
-              products.push({ ...sp, id: sp.id || ++maxProdId });
+              products.push({ ...sp, live_id: normLive, id: sp.id || ++maxProdId });
               existingProdKeys.add(key);
             }
           }
@@ -993,6 +1220,17 @@ export function loadDatabaseFromDisk(): Promise<void> {
             if (!seenLogInvs.has(key)) {
               packerLogs.push({ ...sl, log_id: sl.log_id || ++maxLogId });
               seenLogInvs.add(key);
+            }
+          }
+        }
+
+        // Merge linked_live_videos from JSON store settings
+        if (store.settings?.linked_live_videos && typeof store.settings.linked_live_videos === 'object') {
+          if (!settings.linked_live_videos) settings.linked_live_videos = {};
+          for (const [k, v] of Object.entries(store.settings.linked_live_videos)) {
+            if (Array.isArray(v)) {
+              const existingList = settings.linked_live_videos[k] || [];
+              settings.linked_live_videos[k] = Array.from(new Set([...existingList, ...(v as string[])]));
             }
           }
         }
@@ -1072,12 +1310,14 @@ export function loadDatabaseFromDisk(): Promise<void> {
         if (fs.existsSync(LIVE_PRODUCTS_PATH)) {
           const liveProds = JSON.parse(fs.readFileSync(LIVE_PRODUCTS_PATH, 'utf8'));
           if (Array.isArray(liveProds)) {
-            const existingProdKeys = new Set(products.map(p => `${p.live_id}_${p.code}`));
+            const existingProdKeys = new Set(products.map(p => `${normalizeLiveId(p.live_id || 'LEGACY_ISOLATED')}_${p.code}`));
             let maxId = products.reduce((m, p) => Math.max(m, p.id || 0), 0);
             for (const lp of liveProds) {
-              const key = `${lp.live_id || activeLiveId}_${lp.code}`;
+              if (!lp || !lp.code || !lp.live_id) continue;
+              const normLive = normalizeLiveId(lp.live_id);
+              const key = `${normLive}_${lp.code}`;
               if (!existingProdKeys.has(key)) {
-                products.push({ ...lp, id: ++maxId });
+                products.push({ ...lp, live_id: normLive, id: ++maxId });
                 existingProdKeys.add(key);
               }
             }
@@ -1332,13 +1572,13 @@ export function loadDatabaseFromDisk(): Promise<void> {
       activeLiveId = activeLiveId.split('_').pop() || activeLiveId;
     }
 
-    // Sanitize products, ensure live_id is normalized & assigned, and format names
+    // Sanitize products, ensure live_id is normalized & isolated (never assign orphan products to activeLiveId), and format names
     products.forEach(p => {
       if (p.live_id && p.live_id.includes('_') && !p.live_id.startsWith('LIVE_')) {
         p.live_id = p.live_id.split('_').pop() || p.live_id;
       }
       if (!p.live_id) {
-        p.live_id = activeLiveId;
+        p.live_id = 'LEGACY_ISOLATED';
       }
       if (p.name && p.name.startsWith('ទំនិញកូដ')) {
         p.name = p.name.replace(/^ទំនិញកូដ\s*/, 'កូដ ');
@@ -1586,12 +1826,12 @@ export function loadDatabaseFromDisk(): Promise<void> {
 
         for (const rawC of inv.comments || []) {
           if (/[-_]/.test(rawC)) {
-            const pairs = extractCodeQtyPairsFromComment(rawC, products, false);
+            const invSessionProds = products.filter(pr => normalizeLiveId(pr.live_id || '') === normalizeLiveId(inv.live_id || activeLiveId));
+            const pairs = extractCodeQtyPairsFromComment(rawC, invSessionProds, false);
             for (const p of pairs) {
               const alreadyHas = inv.items.some(it => (it.product_code || '').toUpperCase().trim() === p.code.toUpperCase());
               if (!alreadyHas) {
-                const stockProd = products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase() && (pr.live_id || activeLiveId) === (inv.live_id || activeLiveId)) ||
-                                  products.find(pr => pr.code.toUpperCase() === p.code.toUpperCase());
+                const stockProd = invSessionProds.find(pr => pr.code.toUpperCase() === p.code.toUpperCase());
                 const note = extractSizeAndColorNotes(rawC);
                 inv.items.push({
                   id: Date.now() + Math.floor(Math.random() * 10000),
