@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   generateBakongKHQRString,
   generateKHQRDataUrl,
@@ -226,6 +226,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [zoomTouchStartX, setZoomTouchStartX] = useState<number | null>(null);
   const [showShareOptions, setShowShareOptions] = useState<boolean>(false);
   const [showReturnPolicyDetail, setShowReturnPolicyDetail] = useState<boolean>(false);
+  const pdpScrollRef = useRef<HTMLDivElement | null>(null);
   const [cardImageIdx, setCardImageIdx] = useState<Record<string, number>>({});
   const [completedOrder, setCompletedOrder] = useState<MiniAppOrder | null>(null);
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -2514,11 +2515,33 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
           .reduce((s, c) => s + c.qty, 0);
         const shareUrl = getProductShareUrl(zoomProduct);
 
+        // Smart Related & Recommended Products (Prioritize In-Stock + Same Category + Matching Selected Size)
+        const targetSize = activeZoomVariant?.size;
+        const relatedProducts = products
+          .filter(p => p.id !== zoomProduct.id)
+          .map(p => {
+            const pStock = p.variants.reduce((acc, v) => acc + v.stock, 0);
+            const sameCategory =
+              p.category === zoomProduct.category || p.category === 'unisex' || zoomProduct.category === 'unisex';
+            const hasMatchingSizeInStock = targetSize
+              ? p.variants.some(v => v.size === targetSize && v.stock > 0)
+              : false;
+            const hasDiscount = p.originalPrice > p.price;
+            const score =
+              (pStock > 0 ? 100 : 0) +
+              (sameCategory ? 30 : 0) +
+              (hasMatchingSizeInStock ? 20 : 0) +
+              (hasDiscount ? 5 : 0);
+            return { product: p, pStock, sameCategory, hasMatchingSizeInStock, score };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 6);
+
         return (
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center">
             <div className="w-full max-w-[480px] h-full bg-[#F8FAFC] flex flex-col justify-between overflow-hidden shadow-2xl relative">
-              {/* SCROLLABLE MAIN CONTENT (Hero Gallery + Product Details) */}
-              <div className="flex-1 overflow-y-auto overscroll-contain pb-6">
+              {/* SCROLLABLE MAIN CONTENT (Hero Gallery + Product Details + Related Products) */}
+              <div ref={pdpScrollRef} className="flex-1 overflow-y-auto overscroll-contain pb-6">
                 {/* 1. HERO FULL-BLEED ULTRA-HD IMAGE GALLERY + FLOATING TOP ACTION BAR */}
                 <div
                   className="relative aspect-[4/4.5] w-full bg-[#0F172A] overflow-hidden select-none"
@@ -2861,8 +2884,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                               : 'bg-[#F8FAFC] hover:bg-slate-100 text-[#0F172A] border-slate-200'
                           }`}
                         >
-                          <div className="min-w-0">
-                            <div className="text-xs font-extrabold truncate">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[11.5px] font-extrabold leading-snug break-words">
                               {isSelected ? '✓ ' : ''}
                               {v.color} • {v.size.replace(/^Size\s+/i, '')}
                             </div>
@@ -2873,7 +2896,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                             )}
                           </div>
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-black shrink-0 tabular-nums ${
+                            className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-black shrink-0 tabular-nums ${
                               isOut
                                 ? 'bg-slate-100 text-slate-400'
                                 : isSelected
@@ -2965,6 +2988,155 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                     <span className="text-[#DB1D43] font-black text-xs shrink-0">ឆាតភ្លាម ›</span>
                   </button>
                 </div>
+
+                {/* 6. RELATED & RECOMMENDED PRODUCTS SECTION (ម៉ូតស្រដៀងគ្នា & ណែនាំសម្រាប់បង) */}
+                {relatedProducts.length > 0 && (
+                  <div className="mt-4 mx-3 space-y-2.5">
+                    {/* Section Header + Smart Free Shipping Upsell Hint */}
+                    <div className="flex items-center justify-between gap-2 px-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-6 h-6 rounded-lg bg-[#FFF1F2] text-[#DB1D43] flex items-center justify-center text-xs font-black">
+                          ✨
+                        </span>
+                        <div>
+                          <h3 className="text-[13px] font-black text-[#0F172A] leading-tight">
+                            ម៉ូតស្រដៀងគ្នា & ណែនាំសម្រាប់បង
+                          </h3>
+                          <p className="text-[10px] text-slate-500 font-medium">
+                            ជ្រើសរើសម៉ូតស្អាតៗបន្ថែម ដើម្បីចំណេញថ្លៃដឹកជញ្ជូន
+                          </p>
+                        </div>
+                      </div>
+
+                      {config.freeShippingThreshold > 0 && cartSubtotal < config.freeShippingThreshold && (
+                        <span className="bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-1 rounded-lg text-[10px] font-extrabold shrink-0 tabular-nums">
+                          🚚 ខ្វះ ${(config.freeShippingThreshold - cartSubtotal).toFixed(2)} Free ដឹក
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 2-Column Boutique Related Products Grid */}
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {relatedProducts.map(({ product: relProd, pStock, hasMatchingSizeInStock }) => {
+                        const relImages = getProductImages(relProd);
+                        const relThumb = relImages[0] || relProd.imageUrl;
+                        const relFirstVar =
+                          (targetSize && relProd.variants.find(v => v.size === targetSize && v.stock > 0)) ||
+                          relProd.variants.find(v => v.stock > 0) ||
+                          relProd.variants[0];
+                        const relDiscPct =
+                          relProd.originalPrice > relProd.price && relProd.originalPrice > 0
+                            ? Math.round(((relProd.originalPrice - relProd.price) / relProd.originalPrice) * 100)
+                            : 0;
+                        const relQtyInCart = cart
+                          .filter(c => c.productId === relProd.id)
+                          .reduce((s, c) => s + c.qty, 0);
+
+                        return (
+                          <div
+                            key={relProd.id}
+                            className={`bg-white rounded-2xl border overflow-hidden flex flex-col justify-between transition-all ${
+                              pStock <= 0
+                                ? 'border-slate-200/70 opacity-75'
+                                : 'border-slate-200/90 shadow-2xs hover:border-rose-200'
+                            }`}
+                          >
+                            <div
+                              onClick={() => {
+                                setZoomProduct(relProd);
+                                setZoomImageIdx(0);
+                                setShowShareOptions(false);
+                                pdpScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="cursor-pointer group"
+                            >
+                              <div className="relative aspect-[3/4] w-full bg-slate-100 overflow-hidden">
+                                <img
+                                  src={relThumb}
+                                  alt={relProd.name}
+                                  loading="eager"
+                                  decoding="async"
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 [image-rendering:-webkit-optimize-contrast]"
+                                />
+                                {/* Code Badge */}
+                                <div className="absolute top-2 left-2 bg-[#0F172A]/85 backdrop-blur-xs text-white px-2 py-0.5 rounded-md text-[10px] font-extrabold">
+                                  កូដ {relProd.code}
+                                </div>
+                                {/* Stock or Discount Badge */}
+                                {pStock <= 0 ? (
+                                  <div className="absolute top-2 right-2 bg-slate-900/85 text-white px-2 py-0.5 rounded-md text-[9.5px] font-extrabold">
+                                    អស់ស្តុក
+                                  </div>
+                                ) : relDiscPct > 0 ? (
+                                  <div className="absolute top-2 right-2 bg-[#DB1D43] text-white px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold">
+                                    -{relDiscPct}%
+                                  </div>
+                                ) : (
+                                  <div className="absolute top-2 right-2 bg-[#F59E0B] text-[#0F172A] px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold">
+                                    សល់ {pStock}
+                                  </div>
+                                )}
+
+                                {/* Matching Size Hint Badge */}
+                                {hasMatchingSizeInStock && targetSize && (
+                                  <div className="absolute bottom-2 left-2 bg-emerald-950/80 backdrop-blur-xs text-emerald-200 px-2 py-0.5 rounded-md text-[9.5px] font-extrabold border border-emerald-400/30">
+                                    ✓ មាន {targetSize.replace(/^Size\s+/i, '')}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="p-2.5 pb-1.5">
+                                <div className="font-bold text-xs text-[#0F172A] truncate">
+                                  {relProd.name}
+                                </div>
+                                <div className="flex items-baseline justify-between gap-1 mt-1 tabular-nums">
+                                  <div className="flex items-baseline gap-1.5">
+                                    <span className="font-black text-[15px] text-[#DB1D43]">
+                                      ${relProd.price.toFixed(2)}
+                                    </span>
+                                    {relProd.originalPrice > relProd.price && (
+                                      <span className="text-[10.5px] text-slate-400 line-through">
+                                        ${relProd.originalPrice.toFixed(2)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[9.5px] font-bold text-slate-500">
+                                    សល់ {pStock}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Quick 1-Tap Add to Cart on Related Card */}
+                            <div className="px-2.5 pb-2.5 pt-1">
+                              <button
+                                type="button"
+                                disabled={pStock <= 0}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  handleAddToCart(relProd, relFirstVar);
+                                }}
+                                className={`w-full py-1.5 px-2.5 rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                                  pStock <= 0
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                    : 'bg-[#FFF1F2] hover:bg-[#DB1D43] text-[#BE123C] hover:text-white border border-rose-200/80 active:scale-95'
+                                }`}
+                              >
+                                <span>+ ដាក់ចូលកន្ត្រក</span>
+                                {relQtyInCart > 0 && (
+                                  <span className="bg-[#DB1D43] text-white min-w-[16px] h-[16px] px-1 rounded-full text-[9.5px] font-black flex items-center justify-center tabular-nums">
+                                    {relQtyInCart}
+                                  </span>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* =================================================================
