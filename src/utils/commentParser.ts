@@ -714,13 +714,27 @@ export function extractCodeQtyPairsFromComment(
 }
 
 /**
- * Checks if a comment is purely contact info (phone/address) or customer chat inquiry,
+ * Checks if a comment is purely contact info (phone/address), weight/size/color note, or customer chat inquiry,
  * with NO product order intent.
  */
 export function isPureContactOrInquiryComment(text: string): boolean {
   if (!text) return true;
-  const s = text.trim();
+  const s = convertKhmerDigitsToArabic(text.trim());
   if (!s) return true;
+
+  // 0. Pure body weight / waist / chest / size / color note (e.g. "គីឡូ67", "គីឡូ73", "65គីឡូ", "សាយ L", "ពណ៌ខ្មៅ")
+  const cleanNoteCandidate = s
+    .replace(/^(?:បង|ចែ|អូន|ម៉ាក់|អូនយក|បងយក|ដាក់|យក|សុំ)\s*/i, '')
+    .replace(/[។៕៖!?.,_]+/g, ' ')
+    .trim();
+  if (
+    /^(?:ទម្ងន់\s*)?(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ|kg|kilo|gk)\s*[:=\s\-_/]?\s*\d{2,3}\s*(?:គីឡូ|គក|kg|kilo)?$/i.test(cleanNoteCandidate) ||
+    /^(?:ទម្ងន់\s*)?\d{2,3}\s*(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ|kg|kilo|gk)$/i.test(cleanNoteCandidate) ||
+    /^(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ទំហំ|ដើមទ្រូង|ទ្រូង|កម្ពស់|កំពស់)\s*[:=\s\-_/]?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE|\d{2,3})(?:\s*(?:cm|m|ម៉ែត្រ|kg|គីឡូ))?$/i.test(cleanNoteCandidate) ||
+    /^(?:ពណ៌|ពណ៍|ពណ៏)\s*[\u1780-\u17D3a-zA-Z]+$/i.test(cleanNoteCandidate)
+  ) {
+    return true;
+  }
 
   // 1. Phone numbers: if comment is purely a Cambodian phone number (e.g. 012345678, លេខ016285098, 099 942032)
   const phoneOnly = s
@@ -738,9 +752,9 @@ export function isPureContactOrInquiryComment(text: string): boolean {
 
   // 3. Pure location comments without order intent (e.g. "ផ្សារព្រែកឯង", "ចោមចៅ", "បែកចាន", "ទួលគោក", "សៀមរាប", "តាកែវ")
   const hasOrderPattern = 
-    /(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})|(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*(?:\.|\s+)?\s*(?:យក|កាត់|ថែម|ដាក់|កក់)|(?:(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5})|(?<![A-Za-z0-9])(?:[A-Za-z]\d{1,3}|\d{2,4})(?![A-Za-z0-9])/i.test(s);
+    /(?:(?<=[^\w\u1780-\u17D3]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})|(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*(?:\.|\s+)?\s*(?:យក|កាត់|ថែម|ដាក់|កក់)|(?:(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5})|(?<![A-Za-z0-9])(?:[A-Za-z]\d{1,3}|\d{2,4})(?![A-Za-z0-9])/i.test(s);
   if (!hasOrderPattern) {
-    if (/(?:ផ្សារ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ភ្នំពេញ|ចោមចៅ|ទឹកថ្លា|បែកចាន|ទួលគោក|ដង្កោ|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|តាកែវ|កំពត|ព្រៃវែង|ស្វាយរៀង|វីរៈប៊ុនថាំ|j&t|flash|បសេដ្ឋ|បរសេដ្ឋ|ទន្លាប់|ឈូកវ៉ា)/i.test(s)) {
+    if (/(?:ផ្សារ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ភ្នំពេញ|ចោមចៅ|ទឹកថ្លា|បែកចាន|ទួលគោក|ដង្កោ|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|តាកែវ|កំពត|ព្រៃវែង|ស្វាយរៀង|បន្ទាយមានជ័យ|ឧត្តរមានជ័យ|វីរៈប៊ុនថាំ|j&t|flash|បសេដ្ឋ|បរសេដ្ឋ|ទន្លាប់|ឈូកវ៉ា)/i.test(s)) {
       return true;
     }
   }

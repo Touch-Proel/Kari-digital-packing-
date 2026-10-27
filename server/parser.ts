@@ -500,14 +500,32 @@ export function parseAndAllocateComment(
         if (cust) cust.phone_number = phone;
       }
 
-      // If comment contains location or clean address text
-      if (cleanAddrFromComment && !isQuestionOrLiveChatter(cleanAddrFromComment)) {
+      // If comment is a pure weight / size / color follow-up (e.g. "គីឡូ67", "គីឡូ73", "សាយ L"),
+      // attach it to the customer's latest item note and NEVER treat it as an address or unmatched code!
+      const isPureSpecNote = isPureWeightSizeOrColorComment(rawText);
+      if (isPureSpecNote && inv.items && inv.items.length > 0) {
+        const specNote = extractSizeAndColorNotes(rawText);
+        const latestItem = inv.items[inv.items.length - 1];
+        if (specNote && latestItem) {
+          if (!latestItem.note) {
+            latestItem.note = specNote;
+          } else if (!latestItem.note.includes(specNote)) {
+            latestItem.note = `${latestItem.note} | ${specNote}`;
+          }
+          if (latestItem.item_comment && !latestItem.item_comment.includes(rawText)) {
+            latestItem.item_comment = `${latestItem.item_comment} | ${rawText}`;
+          }
+        }
+      }
+
+      // If comment contains location or clean address text (and is NOT a pure weight/size/color note)
+      if (!isPureSpecNote && cleanAddrFromComment && !isQuestionOrLiveChatter(cleanAddrFromComment) && !isPureWeightSizeOrColorComment(cleanAddrFromComment)) {
         const addrZone = detectDeliveryZone(cleanAddrFromComment);
         inv.location_zone = addrZone.zone;
         inv.location_label = addrZone.label;
         inv.address = cleanAddrFromComment;
         if (cust) cust.address = cleanAddrFromComment;
-      } else if (hasExplicitLocation && !isQuestion && bestLocation && !isQuestionOrLiveChatter(bestLocation)) {
+      } else if (!isPureSpecNote && hasExplicitLocation && !isQuestion && bestLocation && !isQuestionOrLiveChatter(bestLocation) && !isPureWeightSizeOrColorComment(bestLocation)) {
         inv.location_zone = zone;
         inv.location_label = label;
         if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || bestLocation.length > inv.address.length) {
@@ -516,18 +534,17 @@ export function parseAndAllocateComment(
         if (cust) cust.address = inv.address;
       }
 
-      // If comment is purely contact info (phone/address) or general inquiry, do NOT flag as unmatched product code warning!
-      // BUT if the comment contains potential product codes or action verbs (e.g. 36.យកក្រហម, យក, កាត់, etc.), ALWAYS flag as unmatched warning!
-      const hasCodeOrOrderClues = Boolean(
+      // If comment is purely contact info (phone/address), weight/size/color note, or general inquiry, do NOT flag as unmatched product code warning!
+      const hasCodeOrOrderClues = !isPureSpecNote && Boolean(
         rawText.match(/(?:យក|កាត់|ថែម|ដាក់|កក់|បូក|កូដ|code|\b\d{2,4}\b)/i) ||
         cleanText.match(/(?:យក|កាត់|ថែម|ដាក់|កក់|បូក|កូដ|code|\b\d{2,4}\b)/i)
       );
-      const isPureContactOrChat = !hasCodeOrOrderClues && (isQuestion || isPureContactOrInquiryComment(rawText));
+      const isPureContactOrChat = isPureSpecNote || (!hasCodeOrOrderClues && (isQuestion || isPureContactOrInquiryComment(rawText)));
       if (!isPureContactOrChat) {
         if (!inv.unmatched_comments) inv.unmatched_comments = [];
         if (!inv.unmatched_comments.includes(rawText)) inv.unmatched_comments.push(rawText);
       } else {
-        // If it was in unmatched_comments previously and was truly pure contact, clean it up
+        // If it was in unmatched_comments previously and was truly pure contact or weight/size note, clean it up
         if (inv.unmatched_comments) {
           inv.unmatched_comments = inv.unmatched_comments.filter(c => c !== rawText);
         }

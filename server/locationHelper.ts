@@ -74,13 +74,13 @@ export const PP_SANGKATS_AND_AREAS = [
   'បឹងសាឡាង', 'ផ្សារដើមគរ', 'ផ្សារដើមគ', 'ដើមគរ', 'ដើមគ',
   'ផ្សារមាន់អាំង', 'ផ្សារសាមគ្គី', 'ផ្សារតូច', 'សន្ធរម៉ុក', 'សាលាឥន្ទ្រទេវី', 'អង់តែនទួលគោក',
 
-  // ឫស្សីកែវ
-  'គីឡូម៉ែត្រលេខ៦', 'គីឡូម៉ែត្រលេខ ៦', 'គីឡូម៉ែត្រ៦', 'គីឡូម៉ែត្រ6', 'គីឡូ៦', 'គីឡូ 6', 'គីឡូ6', 'គីឡូលេខ៦', 'គីឡូលេខ6',
-  'គីឡូ៧', 'គីឡូ 7', 'គីឡូ7', 'គីឡូលេខ៧', 'គីឡូលេខ7',
-  'គីឡូ៨', 'គីឡូ 8', 'គីឡូ8', 'គីឡូលេខ៨', 'គីឡូលេខ8',
-  'គីឡូ៩', 'គីឡូ 9', 'គីឡូ9', 'គីឡូលេខ៩', 'គីឡូលេខ9',
-  'គីឡូ១០', 'គីឡូ 10', 'គីឡូ10', 'គីឡូលេខ១០', 'គីឡូលេខ10',
-  'ផ្សារគីឡូលេខ៤', 'ផ្សារគីឡូ៤', 'ផ្សារគីឡូ4', 'គីឡូ៤', 'គីឡូ4', 'គីឡូ5', 'គីឡូ៥',
+  // ឫស្សីកែវ (ប្រើពាក្យពេញលេញ ដើម្បីកុំឱ្យច្រឡំជាមួយទម្ងន់ភ្ញៀវ ដូចជា គីឡូ50, គីឡូ67, គីឡូ73)
+  'គីឡូម៉ែត្រលេខ៦', 'គីឡូម៉ែត្រលេខ ៦', 'គីឡូម៉ែត្រលេខ6', 'គីឡូម៉ែត្រលេខ 6', 'គីឡូម៉ែត្រ៦', 'គីឡូម៉ែត្រ6', 'គីឡូលេខ៦', 'គីឡូលេខ 6', 'គីឡូលេខ6', 'ផ្សារគីឡូលេខ៦', 'ផ្សារគីឡូលេខ6', 'ផ្សារគីឡូ៦', 'ផ្សារគីឡូ6',
+  'គីឡូម៉ែត្រលេខ៧', 'គីឡូម៉ែត្រលេខ ៧', 'គីឡូម៉ែត្រលេខ7', 'គីឡូម៉ែត្រលេខ 7', 'គីឡូម៉ែត្រ៧', 'គីឡូម៉ែត្រ7', 'គីឡូលេខ៧', 'គីឡូលេខ 7', 'គីឡូលេខ7', 'ផ្សារគីឡូលេខ៧', 'ផ្សារគីឡូលេខ7', 'ផ្សារគីឡូ៧', 'ផ្សារគីឡូ7',
+  'គីឡូម៉ែត្រលេខ៨', 'គីឡូម៉ែត្រលេខ ៨', 'គីឡូម៉ែត្រលេខ8', 'គីឡូម៉ែត្រលេខ 8', 'គីឡូម៉ែត្រ៨', 'គីឡូម៉ែត្រ8', 'គីឡូលេខ៨', 'គីឡូលេខ 8', 'គីឡូលេខ8',
+  'គីឡូម៉ែត្រលេខ៩', 'គីឡូម៉ែត្រលេខ ៩', 'គីឡូម៉ែត្រលេខ9', 'គីឡូម៉ែត្រលេខ 9', 'គីឡូម៉ែត្រ៩', 'គីឡូម៉ែត្រ9', 'គីឡូលេខ៩', 'គីឡូលេខ 9', 'គីឡូលេខ9',
+  'គីឡូម៉ែត្រលេខ១០', 'គីឡូម៉ែត្រលេខ10', 'គីឡូលេខ១០', 'គីឡូលេខ10',
+  'ផ្សារគីឡូលេខ៤', 'ផ្សារគីឡូលេខ4', 'ផ្សារគីឡូ៤', 'ផ្សារគីឡូ4', 'គីឡូលេខ៤', 'គីឡូលេខ4', 'គីឡូលេខ៥', 'គីឡូលេខ5',
   'ទួលសង្កែទី១', 'ទួលសង្កែទី 1', 'ទួលសង្កែ១', 'ទួលសង្កែ1',
   'ទួលសង្កែទី២', 'ទួលសង្កែទី 2', 'ទួលសង្កែ២', 'ទួលសង្កែ2',
   'ទួលសង្កែ', 'tuol sangke', 'ផ្សារទួលសង្កែ',
@@ -94,7 +94,7 @@ export const PP_SANGKATS_AND_AREAS = [
   'ឈូកវ៉ាទី២', 'ឈូកវ៉ាទី 2', 'ឈូកវ៉ាទី2', 'ឈូកវ៉ា២', 'ឈូកវ៉ា2',
   'ឈូកវ៉ាទី៣', 'ឈូកវ៉ាទី 3', 'ឈូកវ៉ាទី3', 'ឈូកវ៉ា៣', 'ឈូកវ៉ា3',
   'ឈូកវ៉ា', 'ឈូករ៉ាពី', 'ឈូករា៉ពី',
-  'ផ្សារដីហុយ', 'សឡា', 'ផ្សារសឡា', 'ផ្សារបឹងបៃតង', 'បឹងបៃតង',
+  'ផ្សារដីហុយ', 'ផ្សារសឡា', 'ស្តុបសឡា', 'ផ្លូវសឡា', 'ផ្សារបឹងបៃតង', 'បឹងបៃតង',
 
   // មានជ័យ
   'ចាក់អង្រែលើ', 'ចាក់អង្រែក្រោម', 'ចាក់អង្រែ', 'ផ្សារចាក់អង្រែ',
@@ -115,7 +115,7 @@ export const PP_SANGKATS_AND_AREAS = [
   'កាកាបទី១', 'កាកាបទី 1', 'កាកាបទី1', 'កាកាប១', 'កាកាប1',
   'កាកាបទី២', 'កាកាបទី 2', 'កាកាបទី2', 'កាកាប២', 'កាកាប2', 'កាកាប',
   'ត្រពាំងក្រសាំង', 'សំរោងក្រោម', 'វត្តជន្លង់ម្លូ', 'ជន្លង់ម្លូ',
-  'កន្ទោក', 'ភ្លើងឆេះរទេះ', 'បឹងធំ', 'ស្នោរ', 'ឱឡោក', 'ប្រទះឡាង', 'ផ្សារកំបូល', 'កំបូល',
+  'កន្ទោក', 'ភ្លើងឆេះរទេះ', 'បឹងធំ', 'សង្កាត់ស្នោរ', 'បឹងស្នោ', 'ឱឡោក', 'ប្រទះឡាង', 'ផ្សារកំបូល', 'កំបូល',
   'ផ្សារត្រពាំងថ្លឹង', 'ត្រពាំងថ្លឹង', 'ត្រពាំងពោធិ៍', 'ត្រពាំងរំចេក',
   'ផ្សារកាណាឌីយ៉ា', 'កាណាឌីយ៉ា', 'canadia',
   'វេងស្រេង', 'វ៉េងស្រេង', 'veng sreng', 'vengsreng',
@@ -140,7 +140,7 @@ export const PP_SANGKATS_AND_AREAS = [
   // ដង្កោ
   'ដង្កោ', 'dangkao', 'dangkor',
   'ព្រៃស', 'ព្រៃ ស', 'ស្តុបព្រៃស', 'សង្កាត់ព្រៃស',
-  'ជើងឯក', 'ជេីងឯក', 'ពងទឹក', 'ក្រាំងពង្រ', 'សាក់សំពៅ', 'ទៀន', 'គងនយ', 'ស្ពានថ្ម', 'រលួស',
+  'ជើងឯក', 'ជេីងឯក', 'ពងទឹក', 'ក្រាំងពង្រ', 'សាក់សំពៅ', 'សង្កាត់ទៀន', 'ស្ពានទៀន', 'គងនយ', 'ស្ពានថ្ម', 'រលួស',
   'សង្កាត់ព្រៃវែង', 'ដង្កោ ព្រៃវែង',
   'ចំការដូង', 'ផ្សារចំការដូង', 'វត្តសំបួរ', 'សំបួរ', 'ទួលពង្រ', 'ផ្សារទួលពង្រ'
 ];
@@ -199,9 +199,9 @@ export const PP_LANDMARKS_AND_ROADS = [
   // ផ្លូវធំៗ
   'ផ្លូវ 2004', 'ផ្លូវ2004', 'ផ្លូវ 271', 'ផ្លូវ271', 'ផ្លូវ 371', 'ផ្លូវ371',
   'ផ្លូវ 598', 'ផ្លូវ598', 'ផ្លូវ 1986', 'ផ្លូវ1986', 'ផ្លូវ 1003', 'ផ្លូវ1003', 'ផ្លូវ 1928', 'ផ្លូវ1928',
-  'ផ្លូវ 60ម៉ែត្រ', 'ផ្លូវ60ម៉ែត្រ', 'ផ្លូវ 60m', 'ផ្លូវ60m', '60ម៉ែត្រ', '60m',
-  'ផ្លូវ 50ម៉ែត្រ', 'ផ្លូវ50ម៉ែត្រ', 'ផ្លូវ 50m', 'ផ្លូវ50m', '50ម៉ែត្រ', '50m',
-  'ផ្លូវ 30ម៉ែត្រ', 'ផ្លូវ30ម៉ែត្រ', 'ផ្លូវ 30m', 'ផ្លូវ30m', '30ម៉ែត្រ', '30m',
+  'ផ្លូវ 60ម៉ែត្រ', 'ផ្លូវ60ម៉ែត្រ', 'ផ្លូវ 60m', 'ផ្លូវ60m', '60ម៉ែត្រ',
+  'ផ្លូវ 50ម៉ែត្រ', 'ផ្លូវ50ម៉ែត្រ', 'ផ្លូវ 50m', 'ផ្លូវ50m', '50ម៉ែត្រ',
+  'ផ្លូវ 30ម៉ែត្រ', 'ផ្លូវ30ម៉ែត្រ', 'ផ្លូវ 30m', 'ផ្លូវ30m', '30ម៉ែត្រ',
   'ផ្លូវ 217', 'ផ្លូវ217', 'ផ្លូវ 564', 'ផ្លូវ564',
   'ផ្លូវ 105', 'ផ្លូវ105', 'ផ្លូវ 310', 'ផ្លូវ310', 'ផ្លូវ 182', 'ផ្លូវ182', 'ផ្លូវ 2002', 'ផ្លូវ2002',
   'ជាសុផារ៉ា', 'សហព័ន្ធរុស្ស៊ី', 'កម្ពុជាក្រោម', 'មុនីវង្ស', 'monivong', 'នរោត្តម', 'norodom',
@@ -336,49 +336,110 @@ const canonicalNameMap: Record<string, string> = {
 };
 
 /**
+ * Checks if a comment is purely a body weight, size, waist, chest, height, or color specification
+ * (e.g. "គីឡូ67", "គីឡូ73", "គីឡូ 50", "65គីឡូ", "65kg", "សាយ L", "ចង្កេះ 32", "ពណ៌ខ្មៅ")
+ */
+export function isPureWeightSizeOrColorComment(text: string): boolean {
+  if (!text) return false;
+  const s = cleanText(text)
+    .replace(/^(?:បង|ចែ|អូន|ម៉ាក់|អូនយក|បងយក|ដាក់|យក|សុំ)\s*/i, '')
+    .replace(/[។៕៖!?.,_]+/g, ' ')
+    .trim();
+  if (!s) return false;
+
+  // 1. Pure body weight: e.g. "គីឡូ67", "គីឡូ 73", "67គីឡូ", "67kg", "គឺឡូ 55", "ទម្ងន់ 60 គីឡូ"
+  if (/^(?:ទម្ងន់\s*)?(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ|kg|kilo|gk)\s*[:=\s\-_/]?\s*\d{2,3}\s*(?:គីឡូ|គក|kg|kilo)?$/i.test(s)) {
+    return true;
+  }
+  if (/^(?:ទម្ងន់\s*)?\d{2,3}\s*(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ|kg|kilo|gk)$/i.test(s)) {
+    return true;
+  }
+
+  // 2. Pure waist/chest/height/size: e.g. "ចង្កេះ 32", "សាយ L", "size XL", "ទ្រូង 38", "កម្ពស់ 160"
+  if (/^(?:សាយ|size|ចង្កេះ|ចង្កះ|ចង្កែះ|ទំហំ|ដើមទ្រូង|ទ្រូង|កម្ពស់|កំពស់)\s*[:=\s\-_/]?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE|\d{2,3})(?:\s*(?:cm|m|ម៉ែត្រ|kg|គីឡូ))?$/i.test(s)) {
+    return true;
+  }
+  if (/^(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|FS|FREESIZE)$/i.test(s)) {
+    return true;
+  }
+
+  // 3. Pure color: e.g. "ពណ៌ខ្មៅ", "ពណ៍ស"
+  if (/^(?:ពណ៌|ពណ៍|ពណ៏)\s*[\u1780-\u17D3a-zA-Z]+$/i.test(s)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Strips body weight, waist, chest, height, and clothing size tokens so they are never mistaken for locations
+ */
+function stripMeasurementsAndWeights(input: string): string {
+  if (!input) return '';
+  return input
+    // Weight with keyword before number: e.g. គីឡូ67, គីឡូ 73, គីឡូ50, គឺឡូ 65, kg 55 (2-3 digits 25..199)
+    .replace(/(?:ទម្ងន់\s*)?(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ|kg|kilo|gk)\s*[:=\s\-_/]?\s*(?:[2-9]\d|1\d{2})(?!\d)/gi, ' ')
+    // Weight with number before keyword: e.g. 67គីឡូ, 50 គីឡូ, 67kg, 50kilo
+    .replace(/(?<!\d)\d{1,3}\s*(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គីឡុ|គីឡួ|គីឡូក្រាម|គឺឡូក្រាម|គក|គឺទូ|kg|kilo|gk)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)/gi, ' ')
+    // Short Khmer weight shorthand e.g. 73គ65 or គ65
+    .replace(/(?<![A-Za-z0-9])គ\s*[3-9]\d(?!\d)/gi, ' ')
+    // Height / chest / waist measurements
+    .replace(/(?:ដើមទ្រូង|ទ្រូង|ចង្កេះ|ចង្កះ|ចង្កែះ|ត្រគាក|កម្ពស់|កំពស់|ទំហំ|សាយ|size)\s*[:=\s\-_/]?\s*(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE|\d{1,3})(?:\s*(?:cm|m|ម៉ែត្រ|ហ៊ុន|inch))?/gi, ' ')
+    .replace(/(?<!\d)(?:1\.\d{1,2}|1[4-9]\d)\s*(?:cm|m|ម៉ែត្រ)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)/gi, ' ');
+}
+
+/**
  * Deep sanitization for address extraction:
- * Strips phone numbers, product codes with quantities and sizes (e.g. 24=1L, 20=, 23=1, 15=1, 8M, 24=3 SML),
- * clothing types, color notes, measurements (160m, 50kg), asterisks, and customer questions.
+ * Strips phone numbers, product codes with quantities and sizes (e.g. 24=1L, 20=, 23=1, កូដ74=5=អាវ, កូត14_1),
+ * clothing types, color notes, measurements (160m, គីឡូ50, គីឡូ67, គីឡូ73), asterisks, and customer questions.
  */
 export function cleanAddressInput(raw: string): string {
   if (!raw) return '';
+  if (isPureWeightSizeOrColorComment(raw)) return '';
+
   let s = cleanText(raw);
 
   // 1. Phone numbers:
   // Cambodian phone numbers: 0 + 8 or 9 digits (01x, 06x, 07x, 08x, 09x, 03x) with optional spaces/dashes
   s = s.replace(/(?:(?:\+?855[\s.\-()]*|0)[1-9](?:[\s.\-()]*\d){7,8}(?!\d))|(?:លេខ\s*0\d{8,9})|(?:\b0\d{8,9}\b)/gi, ' ');
 
-  // 2. Product codes with assignments, quantities, or symbols:
-  // e.g. 20=, 20=1, 23=1, 24=1L, 15=1, 8M, 14x1, 20x1, 24=3 SML, 20=************, 20=1/L, 21=1/kg50, កូត10=1, 36.យក, etc.
-  s = s.replace(/(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)/gi, ' ');
+  // 2. Strip body weights & measurements early (e.g. "90=2គីឡូ50", "គីឡូ67", "គីឡូ73", "73kg")
+  s = stripMeasurementsAndWeights(s);
+
+  // 3. Product codes with explicit "កូដ/កូត/code" prefix + optional quantity/clothing suffix:
+  // e.g. "កូដ74=5=អាវ", "_កូត14_1", "យកកូដ 53 2 ឈុតបង", "កូដ51"
+  s = s.replace(/(?:បង|ចែ|អូន|admin)?\s*(?:យក|ថែម|ដាក់|កក់|បូក|សុំ|កាត់)?\s*(?:កូដ|កូត|កុត|គូដ|គូត|code|ម៉ូត)\s*\[?\s*[A-Za-z0-9]{1,5}\s*\]?(?:\s*[:=/\-_*xX»\s]\s*\d{1,3})?(?:\s*[:=/\-_*xX»\s]?\s*(?:អាវ|ខោ|ឈុត|ឆុត|រ៉ូប|សំពត់|គូ|កំប៉ុង|កញ្ចប់))?(?:\s*(?:បង|ចែ|អូន))?/gi, ' ');
+
+  // Normalize underscores and Khmer full stops (។) into spaces so "_បន្ទាយមានជ័យ_ទីតាំងស្រុកមង្គលបូរី_" splits cleanly
+  s = s.replace(/[_។៕]+/g, ' ');
+
+  // 4. Product codes with assignments, quantities, or symbols:
+  // e.g. 20=, 20=1, 23=1, 24=1L, 15=1, 8M, 14x1, 20x1, 24=3 SML, 20=************, 20=1/L, 21=1/kg50, 36.យក, etc.
+  s = s.replace(/(?:(?<=[^\w\u1780-\u17D3]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*(?:\s*[:=/\-_*xX»]+\s*(?:អាវ|ខោ|ឈុត|ឆុត|រ៉ូប|សំពត់))?)/gi, ' ');
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*(?:\.|\s+)?\s*(?:ថែម|កាត់|កក់|ដាក់|យក|យម)/gi, ' ');
   s = s.replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*\.(?!\d)/gi, ' ');
-  s = s.replace(/(?:បង|ចែ|អូន|admin)?\s*(?:យក|ថែម|ដាក់|កក់|បូក|សុំ|កាត់)?\s*(?:កូដ|កូត|code|ម៉ូត)\s*\[?\s*[A-Za-z0-9]*\s*\]?(?:\s*[:=/\-_*xX»]\s*[A-Za-z0-9]*)?/gi, ' ');
-  s = s.replace(/\b(?:កូដ|កូត|code|ម៉ូត)\b/gi, ' ');
+  s = s.replace(/(?:^|[^\u1780-\u17D3a-zA-Z0-9])(?:កូដ|កូត|កុត|គូដ|គូត|code|ម៉ូត)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)/gi, ' ');
 
-  // 3. Sizes & measurements (e.g. XXS..6XL, S, M, L, FS, 75kg, 160m)
-  s = s.replace(/\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, ' ');
-  s = s.replace(/\b\d{1,3}\s*(?:kg|kilo|គីឡូ|គឺឡូ|កីឡូ|cm|m|ម៉ែត្រ)\b/gi, ' ');
+  // 5. Sizes (e.g. XXS..6XL, S, M, L, FS)
+  s = s.replace(/(?:^|[^\u1780-\u17D3a-zA-Z0-9])(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)/gi, ' ');
 
-  // 4. Action phrases (e.g. យក 22, ថែម 33, បងយក, កាត់) - Safeguard 'សង្កាត់'!
-  s = s.replace(/(?:(?<=^|\s)(?:បង|ចែ|អូន)?\s*(?:យក|ថែម|ដាក់|កក់|បូក|សុំ)|(?<!សង្)កាត់)(?=\s|$|[0-9])/gi, ' ');
+  // 6. Action phrases (e.g. យក 22, ថែម 33, បងយក, កាត់) - Safeguard 'សង្កាត់'!
+  s = s.replace(/(?:(?<=^|\s)(?:បង|ចែ|អូន)?\s*(?:យក|ថែម|ដាក់|កក់|បូក|សុំ)(?:\s*\d{1,4})?|(?<!សង្)កាត់)(?=\s|$|[0-9])/gi, ' ');
   s = s.replace(/^(?:បង|ចែ|អូន|admin)\s+/gi, ' ');
+  s = s.replace(/\s+(?:បង|ចែ|អូន|ណា៎|ណាបង|ផងបង|ផងចែ)$/gi, ' ');
 
-  // 5. Khmer quantity phrases
-  s = s.replace(/(?:មួយ|ពី|ពីរ|បី|បួន|ប្រាំ|1|2|3|4|5)\s*(?:អាវ|ខោ|ឈុត|ឆុត|រ៉ូប|សំពត់|កំប៉ុង|កញ្ចប់|គូ)/gi, ' ');
-  s = s.replace(/\b(?:មួយ|ពីរ|បី|បួន|ប្រាំ)\s*(?:មុខ|កំរង|ឈុត|អាវ|ខោ)\b/gi, ' ');
+  // 7. Khmer quantity phrases & clothing types (using Khmer-aware Unicode boundaries instead of ASCII \b)
+  s = s.replace(/(?:មួយ|ពី|ពីរ|បី|បួន|ប្រាំ|1|2|3|4|5)\s*(?:អាវ|ខោ|ឈុត|ឆុត|រ៉ូប|សំពត់|កំប៉ុង|កញ្ចប់|គូ|មុខ|កំរង)/gi, ' ');
+  s = s.replace(/(?:^|[^\u1780-\u17D3a-zA-Z0-9])(?:ខោជើងប៉ាត|ខោជើងវែង|ខោជើងខ្លី|ខោ|អាវ|សំពត់|ឈុត|ឆុត|រ៉ូប|កាបូប|ស្បែកជើង)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)/gi, ' ');
 
-  // 6. Colors (Unicode aware, matching Khmer script properly without relying on ASCII \b)
-  s = s.replace(/(?:ពណ៍|ពណ៌|ពណ៏|ពណ)\s*[\u1780-\u17D2a-zA-Z0-9]+/gi, ' ');
-  s = s.replace(/(?:^|[^\u1780-\u17D2])(?:ពណ៌|ពណ៍|ពណ៏|ពណ)?\s*(?:សរ?|ខ្មៅ|ក្រហម|ខៀវ|លឿង|ផ្កាឈូក|ស្វាយ|បៃតង|ត្នោត|ប្រផេះ|ទឹកដោះគោ|សូកូឡា|កាហ្វេ|ឈាមជ្រូក|ផ្ទៃមេឃ|ត្រួយចេក|បែកផ្សែង|ការ៉ុត|ទឹកក្រូច|កាពិ)(?=[^\u1780-\u17D2]|$)/gi, ' ');
+  // 8. Colors (Unicode aware, matching Khmer script properly)
+  s = s.replace(/(?:ពណ៍|ពណ៌|ពណ៏|ពណ)\s*[\u1780-\u17D3a-zA-Z0-9]+/gi, ' ');
+  s = s.replace(/(?:^|[^\u1780-\u17D3])(?:ពណ៌|ពណ៍|ពណ៏|ពណ)?\s*(?:សរ?|ខ្មៅ|ក្រហម|ខៀវ|លឿង|ផ្កាឈូក|ស្វាយ|បៃតង|ត្នោត|ប្រផេះ|ទឹកដោះគោ|សូកូឡា|សុកុឡា|សុកូឡា|កាហ្វេ|ឈាមជ្រូក|ផ្ទៃមេឃ|ត្រួយចេក|បែកផ្សែង|ការ៉ុត|ទឹកក្រូច|កាពិ)(?=[^\u1780-\u17D3]|$)/gi, ' ');
 
-  // 7. Clothing types
-  s = s.replace(/\b(?:ខោជើងប៉ាត|ខោជើងវែង|ខោជើងខ្លី|ខោ|អាវ|សំពត់|ឈុត|ឆុត|រ៉ូប|កាបូប|ស្បែកជើង)\b/gi, ' ');
-
-  // 8. Questions & chat phrases
+  // 9. Questions & chat phrases
   s = s.replace(/(?:ពាក់បានអត់|ពាក់បានទេ|ពាក់បាន|ស្លៀកបាន|មានអត់|អស់នៅ|អស់ហើយ|លក់ម៉េច|ប៉ុន្មាន|សុំមើល|លើកអាវ|លើកខោ|សាច់ស្អាត|សួស្តី|ជម្រាបសួរ|អរគុណ|admin|ok|yes|no)/gi, ' ');
 
-  // 9. Clean symbols, asterisks, brackets (leave slashes / dashes for addresses like 12/A or 12-A)
+  // 10. Clean symbols, asterisks, brackets
   s = s.replace(/[\*#@!~^%_+=:;\\|()\[\]\.]+/g, ' ')
        .replace(/^[,\s.:;=()\-]+|[,\s.:;=()\-]+$/g, '')
        .replace(/\s{2,}/g, ' ')
@@ -388,16 +449,18 @@ export function cleanAddressInput(raw: string): string {
 }
 
 /**
- * Strips any leftover stray product code traces from a candidate location
+ * Strips any leftover stray product code or garment traces from a candidate location
  */
 function postCleanLocation(loc: string): string {
   if (!loc) return '';
-  let s = loc
-    .replace(/(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)/gi, ' ')
+  let s = stripMeasurementsAndWeights(loc)
+    .replace(/[_។៕]+/g, ' ')
+    .replace(/(?:(?<=[^\w\u1780-\u17D3]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)/gi, ' ')
     .replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*(?:\.|\s+)?\s*(?:ថែម|កាត់|កក់|ដាក់|យក|យម)/gi, ' ')
     .replace(/(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*\.(?!\d)/gi, ' ')
-    .replace(/\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)\b/gi, ' ')
-    .replace(/(?:^|[^\u1780-\u17D2])(?:ពណ៌|ពណ៍|ពណ៏|ពណ)?\s*(?:សរ?|ខ្មៅ|ក្រហម|ខៀវ|លឿង|ផ្កាឈូក|ស្វាយ|បៃតង|ត្នោត|ប្រផេះ|ទឹកដោះគោ|សូកូឡា|កាហ្វេ|ឈាមជ្រូក|ផ្ទៃមេឃ|ត្រួយចេក|បែកផ្សែង|ការ៉ុត|ទឹកក្រូច|កាពិ)(?=[^\u1780-\u17D2]|$)/gi, ' ')
+    .replace(/(?:^|[^\u1780-\u17D3a-zA-Z0-9])(?:កូដ|កូត|កុត|គូដ|គូត|code|ម៉ូត|ខោជើងប៉ាត|ខោជើងវែង|ខោជើងខ្លី|ខោ|អាវ|សំពត់|ឈុត|ឆុត|រ៉ូប|កាបូប|ស្បែកជើង)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)/gi, ' ')
+    .replace(/(?:^|[^\u1780-\u17D3a-zA-Z0-9])(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS|FREESIZE)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)/gi, ' ')
+    .replace(/(?:^|[^\u1780-\u17D3])(?:ពណ៌|ពណ៍|ពណ៏|ពណ)?\s*(?:សរ?|ខ្មៅ|ក្រហម|ខៀវ|លឿង|ផ្កាឈូក|ស្វាយ|បៃតង|ត្នោត|ប្រផេះ|ទឹកដោះគោ|សូកូឡា|សុកុឡា|សុកូឡា|កាហ្វេ|ឈាមជ្រូក|ផ្ទៃមេឃ|ត្រួយចេក|បែកផ្សែង|ការ៉ុត|ទឹកក្រូច|កាពិ)(?=[^\u1780-\u17D3]|$)/gi, ' ')
     .replace(/[\*#@!~^%_+=:;\\|\[\]\.]+/g, ' ')
     .replace(/^[,\s.:;=\-]+|[,\s.:;=\-]+$/g, '')
     .replace(/\s{2,}/g, ' ')
@@ -424,19 +487,19 @@ function extractFullAddressSentence(text: string, matchedKeyword: string): strin
 
   const canonical = canonicalNameMap[matchedKeyword] || matchedKeyword;
 
-  // Clean the text from any product codes, phone numbers, colors, sizes, or chat phrases
+  // Clean the text from any product codes, phone numbers, colors, sizes, weights, or chat phrases
   const sanitized = cleanAddressInput(norm);
   if (!sanitized) return canonical;
 
   const cleanMatched = cleanText(matchedKeyword);
 
   // If text after cleaning is already concise and contains matchedKeyword, check if it's a clean address phrase
-  if (sanitized.includes(cleanMatched) || sanitized.includes(matchedKeyword)) {
+  if (sanitized.toLowerCase().includes(cleanMatched.toLowerCase()) || sanitized.toLowerCase().includes(matchedKeyword.toLowerCase())) {
     // 1. If sanitized string is a concise address sentence (under 16 words and no order symbols)
     const words = sanitized.split(/\s+/).filter(Boolean);
     if (words.length <= 16 && !/(?:=|\bkilo\b|\bkg\b|\bcode\b|កូដ|កូត)/i.test(sanitized)) {
       const cleaned = postCleanLocation(sanitized);
-      if ((cleaned.includes(cleanMatched) || cleaned.includes(matchedKeyword)) && cleaned.length >= cleanMatched.length) {
+      if ((cleaned.toLowerCase().includes(cleanMatched.toLowerCase()) || cleaned.toLowerCase().includes(matchedKeyword.toLowerCase())) && cleaned.length >= cleanMatched.length) {
         return cleaned;
       }
     }
@@ -444,9 +507,9 @@ function extractFullAddressSentence(text: string, matchedKeyword: string): strin
     // 2. Otherwise extract full contiguous address block around the keyword
     const targetPatternWord = (sanitized.includes(cleanMatched) ? cleanMatched : matchedKeyword).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const segmentPattern = new RegExp(
-      '(?:(?:ផ្ទះ|ផ្លូវ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ឃុំ|ផ្សារ|ម្តុំ|ជិត|ក្បែរ|ទល់មុខ|ក្រោយ|ខាង|បន្ទប់|អគារ|ជាន់ទី)[^\n\r,;|]*?)?' +
+      '(?:(?:នៅ|ទីតាំង|ផ្ទះ|ផ្លូវ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ឃុំ|ផ្សារ|ម្តុំ|ម្ដុំ|ជិត|ក្បែរ|ទល់មុខ|ក្រោយ|ខាង|បន្ទប់|អគារ|ជាន់ទី)[^\n\r,;|]*?)?' +
       targetPatternWord +
-      '(?:[^\n\r,;|]*?(?:ភ្នំពេញ|ខេត្ត|ក្រុង|ស្រុក|ខណ្ឌ|សង្កាត់|ផ្លូវ|ផ្ទះ|បុរី|បន្ទប់|[A-Za-z0-9]+))?',
+      '(?:[^\n\r,;|]*?(?:ភ្នំពេញ|ខេត្ត|ក្រុង|ស្រុក|ខណ្ឌ|សង្កាត់|ផ្លូវ|ផ្ទះ|បុរី|បន្ទប់|[A-Za-z0-9\u1780-\u17D3]+))?',
       'i'
     );
     const m = sanitized.match(segmentPattern);
@@ -462,30 +525,74 @@ function extractFullAddressSentence(text: string, matchedKeyword: string): strin
 }
 
 /**
+ * Helper to check if a keyword matches inside targetLower without false prefix/substring collisions
+ */
+function matchesLocationKeyword(targetLower: string, kwLower: string): boolean {
+  if (!targetLower || !kwLower) return false;
+  if (!targetLower.includes(kwLower)) return false;
+
+  // 1. Prevent 'មានជ័យ' or 'mean chey' from matching inside 'បន្ទាយមានជ័យ' or 'ឧត្តរមានជ័យ'
+  if (kwLower === 'មានជ័យ' || kwLower === 'mean chey' || kwLower === 'meanchey') {
+    const withoutProvinces = targetLower
+      .replace(/បន្ទាយ\s*មានជ័យ|ឧត្តរ\s*មានជ័យ|ឧត្ដរ\s*មានជ័យ|banteay\s*mean\s*chey|oddar\s*mean\s*chey/gi, ' ');
+    if (!withoutProvinces.includes(kwLower)) {
+      return false;
+    }
+  }
+
+  // 2. If keyword ends with a digit (e.g. 'គីឡូលេខ6', 'ចោមចៅ1'), ensure it is NOT followed by another digit (e.g. '67')
+  if (/\d$/.test(kwLower)) {
+    const escaped = kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`${escaped}(?!\\d)`, 'i');
+    if (!re.test(targetLower)) {
+      return false;
+    }
+  }
+
+  // 3. If keyword is pure ASCII (e.g. 'bkk', 'itc', 'ifl', 'rupp', 'aeon', 'sorya'), require word boundaries
+  if (/^[a-z0-9\s]+$/i.test(kwLower)) {
+    const escaped = kwLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
+    return re.test(targetLower);
+  }
+
+  return true;
+}
+
+/**
  * ⚡ HIGH-PRECISION LOCATION & DELIVERY ZONE DETECTOR
  *
  * App Focus (Based on user request):
  * 1. 100% precision capture of all Phnom Penh (PP) locations (14 Khans, 105 Sangkats, Boreys, Roads, Landmarks).
- * 2. If it's outside Phnom Penh or a customer mentions a province / courier, neatly filter it into PROVINCE ('🏞️ តាមខេត្ត').
- * 3. Provincial micro-districts removed to keep the regex razor-sharp for Phnom Penh detection.
+ * 2. Never mistake customer body weight ("គីឡូ67", "គីឡូ73", "គីឡូ50") for Russey Keo Kilometer 6/7/8/9 in Phnom Penh.
+ * 3. Never mistake Provincial names/districts ("បន្ទាយមានជ័យ", "ឧត្តរមានជ័យ", "ស្រុកមង្គលបូរី", "ស្រុកថ្មពួក") for Phnom Penh's "មានជ័យ" or "បុរី".
+ * 4. If it's outside Phnom Penh or a customer mentions a province / courier, neatly filter it into PROVINCE ('🏞️ តាមខេត្ត').
  */
 export function detectDeliveryZone(text: string): DeliveryZoneResult {
-  if (!text || !text.trim()) {
+  if (!text || !text.trim() || isPureWeightSizeOrColorComment(text)) {
     return { zone: 'PROVINCE', label: '🏞️ តាមខេត្ត', hasExplicitLocation: false, detectedLocation: '🏞️ តាមខេត្ត' };
   }
 
-  const normalized = cleanText(text);
+  // Strip weights/measurements ("គីឡូ67", "គីឡូ50"), phone numbers, and underscores first
+  const rawCleaned = stripMeasurementsAndWeights(cleanText(text)).replace(/_/g, ' ').trim();
+  const sanitizedForCheck = cleanAddressInput(rawCleaned);
+  if (!sanitizedForCheck) {
+    return { zone: 'PROVINCE', label: '🏞️ តាមខេត្ត', hasExplicitLocation: false, detectedLocation: '🏞️ តាមខេត្ត' };
+  }
+
+  const normalized = sanitizedForCheck;
   const lower = normalized.toLowerCase();
 
   // -------------------------------------------------------------------------
   // STEP 1: CONTEXTUAL DISAMBIGUATION FOR PHNOM PENH
   // -------------------------------------------------------------------------
   const isSamraongPP = /សំរោងក្រោម|សំរោង\s*ព្រែកព្នៅ|ព្រែកព្នៅ\s*សំរោង|សង្កាត់សំរោង|សំរោងអណ្តែត|សំរោងអណ្ដែត/i.test(normalized);
-  const isPreyVengPP = /ខណ្ឌដង្កោ[\s\S]*ព្រៃវែង|ដង្កោ[\s\S]*ព្រៃវែង|សង្កាត់ព្រៃវែង\s*(?:ខណ្ឌ)?ដង្កោ/i.test(normalized);
+  const isPreyVengPP = /ខណ្ឌដង្កោ[\s\S]*ព្រៃវែង|ដង្កោ[\s\S]*ព្រៃវែង|សង្កាត់ព្រៃវែង\s*(?:ខណ្ឌ)?ដង្កោ|សង្កាត់ព្រៃវែង/i.test(normalized);
   const isPhsarKandalPP = /ផ្សារកណ្តាល|ផ្សារកណ្ដាល|សង្កាត់ផ្សារកណ្តាល/i.test(normalized);
+  const isRusseyKeoKmPP = /(?:នៅ|ជិត|ម្តុំ|ម្ដុំ|ផ្សារ|ឫស្សីកែវ|ឬស្សីកែវ|សង្កាត់)\s*គីឡូ(?:ម៉ែត្រ)?(?:លេខ)?\s*[46789](?!\d)/i.test(normalized);
 
-  if (isSamraongPP || isPreyVengPP || isPhsarKandalPP) {
-    const kw = isSamraongPP ? 'សំរោង' : isPreyVengPP ? 'សង្កាត់ព្រៃវែង' : 'ផ្សារកណ្តាល';
+  if (isSamraongPP || isPreyVengPP || isPhsarKandalPP || isRusseyKeoKmPP) {
+    const kw = isSamraongPP ? 'សំរោង' : isPreyVengPP ? 'សង្កាត់ព្រៃវែង' : isPhsarKandalPP ? 'ផ្សារកណ្តាល' : 'គីឡូលេខ៦';
     const fullAddr = extractFullAddressSentence(normalized, kw);
     return {
       zone: 'PP',
@@ -497,13 +604,87 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
   }
 
   // -------------------------------------------------------------------------
-  // STEP 2: CHECK FOR EXPLICIT PHNOM PENH GEOGRAPHY (100% HIGH PRECISION)
+  // STEP 2: CHECK EXPLICIT PROVINCES & PROVINCIAL DISTRICTS FIRST
+  // Prevents "បន្ទាយមានជ័យ", "ឧត្តរមានជ័យ", "ស្រុកមង្គលបូរី", "ស្រុកថ្មពួក", "ផ្លូវជាតិលេខ5 បាត់ដំបង"
+  // from colliding with Phnom Penh's "មានជ័យ", "បុរី", or "ផ្លូវជាតិ".
+  // -------------------------------------------------------------------------
+  const hasExplicitPPWord = /ភ្នំពេញ|phnom\s*penh|រាជធានី|ខណ្ឌ/i.test(normalized);
+  const hasGreaterPPArea = GREATER_PP_AREAS.some(area => lower.includes(cleanText(area).toLowerCase()));
+
+  if (!hasExplicitPPWord && !hasGreaterPPArea) {
+    // A. Check 24 Clean Province Names
+    for (const prov of PROVINCES_MAP) {
+      // Skip 'កណ្តាល' if it's part of a Greater PP area or Phsar Kandal
+      if (prov.name === 'កណ្តាល' && isPhsarKandalPP) continue;
+      if (prov.name === 'ព្រៃវែង' && isPreyVengPP) continue;
+
+      if (lower.includes(prov.name.toLowerCase())) {
+        const fullAddr = extractFullAddressSentence(normalized, prov.name);
+        return {
+          zone: 'PROVINCE',
+          label: '🏞️ តាមខេត្ត',
+          detectedLocation: postCleanLocation(fullAddr || prov.name),
+          matchedKeyword: prov.name,
+          hasExplicitLocation: true
+        };
+      }
+
+      for (const alias of prov.aliases) {
+        if (alias === 'សំរោង' && isSamraongPP) continue;
+        if (alias.length <= 3) {
+          const re = new RegExp(`(?:^|[^a-z0-9])${alias}(?:[^a-z0-9]|$)`, 'i');
+          if (re.test(lower)) {
+            const fullAddr = extractFullAddressSentence(normalized, alias);
+            return {
+              zone: 'PROVINCE',
+              label: '🏞️ តាមខេត្ត',
+              detectedLocation: postCleanLocation(fullAddr || prov.name),
+              matchedKeyword: alias,
+              hasExplicitLocation: true
+            };
+          }
+        } else if (lower.includes(alias.toLowerCase())) {
+          const fullAddr = extractFullAddressSentence(normalized, alias);
+          return {
+            zone: 'PROVINCE',
+            label: '🏞️ តាមខេត្ត',
+            detectedLocation: postCleanLocation(fullAddr || prov.name),
+            matchedKeyword: alias,
+            hasExplicitLocation: true
+          };
+        }
+      }
+    }
+
+    // B. Check explicit Provincial administrative markers: ខេត្ត..., ស្រុក...
+    // (Phnom Penh only has ខណ្ឌ and សង្កាត់, never ខេត្ត or ស្រុក!)
+    const provAdminPatterns = [
+      /ខេត្ត\s*[\u1780-\u17D3a-zA-Z0-9\s]+/i,
+      /ស្រុក\s*[\u1780-\u17D3a-zA-Z0-9\s]+/i
+    ];
+    for (const pat of provAdminPatterns) {
+      const m = normalized.match(pat);
+      if (m && m[0] && m[0].trim().length >= 4) {
+        const fullAddr = extractFullAddressSentence(normalized, m[0].trim());
+        return {
+          zone: 'PROVINCE',
+          label: '🏞️ តាមខេត្ត',
+          detectedLocation: postCleanLocation(fullAddr || m[0].trim()),
+          matchedKeyword: m[0].trim(),
+          hasExplicitLocation: true
+        };
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 3: CHECK FOR EXPLICIT PHNOM PENH GEOGRAPHY (100% HIGH PRECISION)
   // -------------------------------------------------------------------------
   // Scan ALL Phnom Penh specific locations, Sangkats, Khans, Boreys, and Roads
   for (const loc of ALL_PP_KEYWORDS) {
     const locLower = loc.toLowerCase();
     const locClean = cleanText(locLower);
-    if (lower.includes(locLower) || lower.includes(locClean)) {
+    if (matchesLocationKeyword(lower, locLower) || matchesLocationKeyword(lower, locClean)) {
       const canonical = canonicalNameMap[loc] || loc;
       const fullAddr = extractFullAddressSentence(normalized, loc);
       return {
@@ -541,17 +722,19 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
   }
 
   // Structured address patterns in Phnom Penh: ផ្ទះ, ផ្លូវ, សង្កាត់, ខណ្ឌ, បុរី
+  // Note: Exclude 'មង្គលបូរី' / 'មង្គលបុរី' / 'បុរីជលសារ' which are provincial districts
+  const normalizedWithoutProvBorey = normalized.replace(/មង្គល\s*បូរី|មង្គល\s*បុរី|បុរី\s*ជលសារ/gi, ' ');
   const ppStructuredPatterns = [
     /(?:ផ្ទះ\s*(?:លេខ|№)?\s*\d+[a-z]?[\s\S]*?(?:ផ្លូវ|សង្កាត់|ខណ្ឌ|ភ្នំពេញ))/i,
     /(?:ផ្លូវ\s*(?:លេខ)?\s*\d+[a-z]?[\s\S]*?(?:ផ្ទះ|សង្កាត់|ខណ្ឌ|ភ្នំពេញ))/i,
-    /បុរី\s*[\u1780-\u17FFa-zA-Z0-9_\s]+/i,
-    /សង្កាត់\s*[\u1780-\u17FFa-zA-Z0-9_\s]+/i,
-    /ខណ្ឌ\s*[\u1780-\u17FFa-zA-Z0-9_\s]+/i,
+    /បុរី\s*[\u1780-\u17D3a-zA-Z0-9\s]+/i,
+    /សង្កាត់\s*[\u1780-\u17D3a-zA-Z0-9\s]+/i,
+    /ខណ្ឌ\s*[\u1780-\u17D3a-zA-Z0-9\s]+/i,
     /ផ្លូវ\s*(?:លេខ)?\s*\d{1,4}[A-Za-z]?\b/i
   ];
 
   for (const pat of ppStructuredPatterns) {
-    const m = normalized.match(pat);
+    const m = normalizedWithoutProvBorey.match(pat);
     if (m && m[0] && m[0].trim().length >= 4) {
       const fullAddr = extractFullAddressSentence(normalized, m[0].trim());
       return {
@@ -565,7 +748,7 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
   }
 
   // -------------------------------------------------------------------------
-  // STEP 3: ALL OTHER CASES ARE CLEANLY CATEGORIZED AS PROVINCE ('🏞️ តាមខេត្ត')
+  // STEP 4: ALL OTHER CASES ARE CLEANLY CATEGORIZED AS PROVINCE ('🏞️ តាមខេត្ត')
   // -------------------------------------------------------------------------
 
   // A. Check for Provincial Couriers / Express
@@ -573,10 +756,11 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
     if (courier === 'vet' || courier === 'ce') {
       const re = new RegExp(`(?:^|\\s|ផ្ញើ|ក្រុមហ៊ុន)${courier}(?:\\s|$|express)`, 'i');
       if (re.test(lower)) {
+        const fullAddr = extractFullAddressSentence(normalized, courier);
         return {
           zone: 'PROVINCE',
           label: '🏞️ តាមខេត្ត',
-          detectedLocation: courier,
+          detectedLocation: postCleanLocation(fullAddr || courier),
           matchedKeyword: courier,
           hasExplicitLocation: true
         };
@@ -585,68 +769,31 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
     }
 
     if (lower.includes(courier.toLowerCase())) {
+      const fullAddr = extractFullAddressSentence(normalized, courier);
       return {
         zone: 'PROVINCE',
         label: '🏞️ តាមខេត្ត',
-        detectedLocation: courier,
+        detectedLocation: postCleanLocation(fullAddr || courier),
         matchedKeyword: courier,
         hasExplicitLocation: true
       };
     }
   }
 
-  // B. Check 24 Clean Province Names
-  for (const prov of PROVINCES_MAP) {
-    if (lower.includes(prov.name.toLowerCase())) {
-      return {
-        zone: 'PROVINCE',
-        label: '🏞️ តាមខេត្ត',
-        detectedLocation: prov.name,
-        matchedKeyword: prov.name,
-        hasExplicitLocation: true
-      };
-    }
-
-    // Check province aliases (e.g. 'sr', 'btb', 'kampong som')
-    for (const alias of prov.aliases) {
-      if (alias.length <= 3) {
-        const re = new RegExp(`(?:^|[^a-z0-9])${alias}(?:[^a-z0-9]|$)`, 'i');
-        if (re.test(lower)) {
-          return {
-            zone: 'PROVINCE',
-            label: '🏞️ តាមខេត្ត',
-            detectedLocation: prov.name,
-            matchedKeyword: alias,
-            hasExplicitLocation: true
-          };
-        }
-      } else if (lower.includes(alias.toLowerCase())) {
-        return {
-          zone: 'PROVINCE',
-          label: '🏞️ តាមខេត្ត',
-          detectedLocation: prov.name,
-          matchedKeyword: alias,
-          hasExplicitLocation: true
-        };
-      }
-    }
-  }
-
-  // C. Provincial patterns (ឃុំ, ស្រុក, ភូមិ, ខេត្ត)
+  // B. Remaining Provincial patterns (ឃុំ, ភូមិ)
   const provStructuredPatterns = [
-    /ខេត្ត\s*[\u1780-\u17FFa-zA-Z0-9_\s]+/i,
-    /ស្រុក\s*[\u1780-\u17FFa-zA-Z0-9_\s]+/i,
-    /ឃុំ\s*[\u1780-\u17FFa-zA-Z0-9_\s]+/i,
-    /ភូមិ\s*[\u1780-\u17FFa-zA-Z0-9_\s]+/i
+    /ឃុំ\s*[\u1780-\u17D3a-zA-Z0-9\s]+/i,
+    /ភូមិ\s*[\u1780-\u17D3a-zA-Z0-9\s]+/i
   ];
 
   for (const pat of provStructuredPatterns) {
     const m = normalized.match(pat);
     if (m && m[0] && m[0].trim().length >= 4) {
+      const fullAddr = extractFullAddressSentence(normalized, m[0].trim());
       return {
         zone: 'PROVINCE',
         label: '🏞️ តាមខេត្ត',
-        detectedLocation: m[0].trim(),
+        detectedLocation: postCleanLocation(fullAddr || m[0].trim()),
         matchedKeyword: m[0].trim(),
         hasExplicitLocation: true
       };
@@ -654,7 +801,7 @@ export function detectDeliveryZone(text: string): DeliveryZoneResult {
   }
 
   // -------------------------------------------------------------------------
-  // STEP 4: DEFAULT FALLBACK (No explicit location found -> ALWAYS PROVINCE)
+  // STEP 5: DEFAULT FALLBACK (No explicit location found -> ALWAYS PROVINCE)
   // "ក្រៅពីភ្នំពេញដាក់ filter ខេត្តទៅ"
   // -------------------------------------------------------------------------
   return {
@@ -681,7 +828,7 @@ export function isQuestionOrLiveChatter(text: string): boolean {
   // 2. Question marks or typical question endings
   if (s.includes('?') || /(?:អត់|ទេ|នៅ\?|លក់ម៉េច|ប៉ុន្មាន|ផង|ណា៎|ណាបង|ណា\?|តើអី|អីបង|អីចែ|អត់បង|អត់ចែ)$/i.test(s)) {
     // If it also does not contain an explicit address keyword like ផ្ទះ, ផ្លូវ, ផ្សារ, បុរី, សង្កាត់, ខណ្ឌ, ក្រុង, ស្រុក, ខេត្ត
-    if (!/(?:ផ្ទះ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ខេត្ត)\s*[\u1780-\u17D2a-zA-Z0-9]+/i.test(s)) {
+    if (!/(?:ផ្ទះ|ផ្លូវ|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ខេត្ត)\s*[\u1780-\u17D3a-zA-Z0-9]+/i.test(s)) {
       return true;
     }
   }
@@ -695,28 +842,33 @@ export function isQuestionOrLiveChatter(text: string): boolean {
 }
 
 /**
- * Extracts clean address text from comment by removing product codes, phone numbers, and action words
+ * Extracts clean address text from comment by removing product codes, phone numbers, weights, and action words
  */
 export function extractCleanAddressFromComment(rawComment: string): string | null {
   if (!rawComment || !rawComment.trim()) return null;
 
-  // Strict guard: if comment is a question or garment chatter or live request, RETURN NULL IMMEDIATELY!
-  if (isQuestionOrLiveChatter(rawComment)) {
+  // Strict guard: if comment is a question, garment chatter, or pure weight/size/color note, RETURN NULL IMMEDIATELY!
+  if (isQuestionOrLiveChatter(rawComment) || isPureWeightSizeOrColorComment(rawComment)) {
     return null;
   }
 
   const s = cleanAddressInput(rawComment);
   if (!s || s.length < 2) return null;
 
-  // Check if cleaned string is a question or chatter
-  if (isQuestionOrLiveChatter(s)) {
+  // Check if cleaned string is a question, chatter, or weight/size note
+  if (isQuestionOrLiveChatter(s) || isPureWeightSizeOrColorComment(s)) {
     return null;
   }
 
   const res = detectDeliveryZone(s);
   if (res.hasExplicitLocation && res.detectedLocation) {
     const cleanLoc = postCleanLocation(res.detectedLocation);
-    if (cleanLoc.length >= 2 && !isQuestionOrLiveChatter(cleanLoc) && !/(?:=|\bkilo\b|\bkg\b)/i.test(cleanLoc)) {
+    if (
+      cleanLoc.length >= 2 &&
+      !isQuestionOrLiveChatter(cleanLoc) &&
+      !isPureWeightSizeOrColorComment(cleanLoc) &&
+      !/(?:=|\bkilo\b|\bkg\b)/i.test(cleanLoc)
+    ) {
       return canonicalNameMap[cleanLoc] || cleanLoc;
     }
   }
@@ -725,13 +877,18 @@ export function extractCleanAddressFromComment(rawComment: string): string | nul
 }
 
 /**
- * Checks if a comment is purely contact info (phone/address) or customer chat inquiry,
- * with NO product order intent.
+ * Checks if a comment is purely contact info (phone/address), weight/size/color specification,
+ * or customer chat inquiry, with NO product order intent.
  */
 export function isPureContactOrInquiryComment(text: string): boolean {
   if (!text) return true;
   const s = text.trim();
   if (!s) return true;
+
+  // 0. Pure weight / size / waist / chest / color note (e.g. "គីឡូ67", "គីឡូ73", "សាយ L", "ពណ៌ខ្មៅ")
+  if (isPureWeightSizeOrColorComment(s)) {
+    return true;
+  }
 
   // 1. Phone numbers: if comment is purely a Cambodian phone number (e.g. 012345678, លេខ016285098, 099 942032)
   const phoneOnly = s
@@ -749,9 +906,9 @@ export function isPureContactOrInquiryComment(text: string): boolean {
 
   // 3. Pure location comments without order intent (e.g. "ផ្សារព្រៃឯង", "ចោមចៅ", "បែកចាន", "ទួលគោក", "សៀមរាប", "តាកែវ")
   const hasOrderPattern = 
-    /(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})|(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*(?:\.|\s+)?\s*(?:យក|កាត់|ថែម|ដាក់|កក់)|(?:(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5})|(?<![A-Za-z0-9])(?:[A-Za-z]\d{1,3}|\d{2,4})(?![A-Za-z0-9])/i.test(s);
+    /(?:(?<=[^\w\u1780-\u17D3]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:(?:យក|កាត់|ថែម|ដាក់|កក់)\s*(?:កូដ|code)?[A-Za-z0-9]{1,5})|(?<!\d)([A-Za-z]\d{1,3}|\d{2,4})\s*(?:\.|\s+)?\s*(?:យក|កាត់|ថែម|ដាក់|កក់)|(?:(?:កូដ|កូត|code)\s*[A-Za-z0-9]{1,5})|(?<![A-Za-z0-9])(?:[A-Za-z]\d{1,3}|\d{2,4})(?![A-Za-z0-9])/i.test(s);
   if (!hasOrderPattern) {
-    if (/(?:ផ្សារ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ភ្នំពេញ|ចោមចៅ|ទឹកថ្លា|បែកចាន|ទួលគោក|ដង្កោ|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|តាកែវ|កំពត|ព្រៃវែង|ស្វាយរៀង|វីរៈប៊ុនថាំ|j&t|flash|តាខ្មៅ|ឈូកវ៉ា)/i.test(s)) {
+    if (/(?:ផ្សារ|បុរី|សង្កាត់|ខណ្ឌ|ក្រុង|ស្រុក|ភូមិ|ភ្នំពេញ|ចោមចៅ|ទឹកថ្លា|បែកចាន|ទួលគោក|ដង្កោ|សៀមរាប|បាត់ដំបង|កំពង់ចាម|កំពង់ស្ពឺ|តាកែវ|កំពត|ព្រៃវែង|ស្វាយរៀង|បន្ទាយមានជ័យ|ឧត្តរមានជ័យ|វីរៈប៊ុនថាំ|j&t|flash|តាខ្មៅ|ឈូកវ៉ា)/i.test(s)) {
       return true;
     }
   }
