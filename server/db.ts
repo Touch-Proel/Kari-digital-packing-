@@ -1861,73 +1861,49 @@ export function loadDatabaseFromDisk(): Promise<void> {
         }
       }
 
-      // Sanitize existing address: strip accidental product codes, phone numbers, sizes, colors, body weights (គីឡូ67, គីឡូ73, គីឡូ50), or chat questions
+      // Sanitize existing address: strip accidental product codes, phone numbers, sizes, colors, or chat questions
       if (inv.address) {
-        if (
-          isQuestionOrLiveChatter(inv.address) ||
-          isPureWeightSizeOrColorComment(inv.address) ||
-          /^(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គក|kg|kilo)\s*\d{2,3}$/i.test(inv.address.trim()) ||
-          /(?:ខោជើងប៉ាត|160m|ពាក់បានអត់|ពាក់បានទេ|លក់ម៉េច|ប៉ុន្មាន|បងមាន|ចែមាន|មានសំពត់|សំពត់ក្មេង|លើកសំពត់|លើកឈុត|មានពណ៌|តើអី|បងលើក|ចែលើក)/i.test(inv.address)
-        ) {
+        if (isQuestionOrLiveChatter(inv.address) || /(?:ខោជើងប៉ាត|160m|ពាក់បានអត់|ពាក់បានទេ|លក់ម៉េច|ប៉ុន្មាន|បងមាន|ចែមាន|មានសំពត់|សំពត់ក្មេង|លើកសំពត់|លើកឈុត|មានពណ៌|តើអី|បងលើក|ចែលើក)/i.test(inv.address)) {
           inv.address = '';
-        } else if (
-          /(?:(?<=[^\w\u1780-\u17D3]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS)\b)|(?:ពណ៌|ពណ៍)\s*[\u1780-\u17D3]+|(?:\b0\d{8,9}\b)|(?:\*+)|(?:គីឡូ|គឺឡូ|កីឡូ)\s*\d{2,3}|(?:^|[^\u1780-\u17D3a-zA-Z0-9])(?:អាវ|ខោ|ឈុត|ឆុត|រ៉ូប|សំពត់)(?=[^\u1780-\u17D3a-zA-Z0-9]|$)|_/i.test(inv.address)
-        ) {
-          const cleaned = extractCleanAddressFromComment(inv.address) || cleanAddressInput(inv.address);
-          inv.address = (cleaned && !isPureWeightSizeOrColorComment(cleaned)) ? cleaned : '';
+        } else if (/(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS)\b)|(?:ពណ៌|ពណ៍)\s*[\u1780-\u17D2]+|(?:\b0\d{8,9}\b)|(?:\*+)/i.test(inv.address)) {
+          const cleaned = extractCleanAddressFromComment(inv.address);
+          inv.address = cleaned || '';
         } else if (inv.address === 'ចេាមចៅ') {
           inv.address = 'ចោមចៅ';
         }
       }
 
-      // Always check comments for the most complete, clean address
-      let bestCommentAddr = '';
-      for (const c of inv.comments || []) {
-        const clean = extractCleanAddressFromComment(c);
-        if (clean && !isQuestionOrLiveChatter(clean) && !isPureWeightSizeOrColorComment(clean)) {
-          if (clean.length > bestCommentAddr.length) {
-            bestCommentAddr = clean;
+      // If address is empty or missing, search ALL comments for clean address
+      if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || inv.address === 'ភ្នំពេញ' || inv.address === '🏞️ តាមខេត្ត' || isQuestionOrLiveChatter(inv.address)) {
+        let foundCleanAddr = '';
+        for (const c of inv.comments || []) {
+          const clean = extractCleanAddressFromComment(c);
+          if (clean && !isQuestionOrLiveChatter(clean)) {
+            foundCleanAddr = clean;
+            break;
           }
         }
-      }
-      if (
-        bestCommentAddr &&
-        (!inv.address ||
-          inv.address.includes('មិនទាន់មាន') ||
-          inv.address === '🏙️ ភ្នំពេញ' ||
-          inv.address === 'ភ្នំពេញ' ||
-          inv.address === '🏞️ តាមខេត្ត' ||
-          isQuestionOrLiveChatter(inv.address) ||
-          isPureWeightSizeOrColorComment(inv.address) ||
-          bestCommentAddr.length > inv.address.length)
-      ) {
-        inv.address = bestCommentAddr;
+        if (foundCleanAddr) {
+          inv.address = foundCleanAddr;
+        }
       }
 
-      // Core Routing Rule: Accurate Phnom Penh vs Province detection
-      const allCommentsCleaned = (inv.comments || [])
-        .filter(c => !isPureWeightSizeOrColorComment(c))
-        .join(' ');
-      const zoneCheckTarget =
-        (inv.address && !inv.address.includes('មិនទាន់មាន') && !isQuestionOrLiveChatter(inv.address) && !isPureWeightSizeOrColorComment(inv.address))
-          ? `${inv.address} ${allCommentsCleaned}`
-          : allCommentsCleaned;
+      // Core Routing Rule: Accurate Phnom Penh detection, all remaining baskets are Province!
+      const zoneCheckTarget = (inv.address && !inv.address.includes('មិនទាន់មាន') && !isQuestionOrLiveChatter(inv.address)) ? inv.address : (inv.comments || []).join(' ');
       const zoneRes = detectDeliveryZone(zoneCheckTarget);
 
       if (zoneRes.zone === 'PP') {
         inv.location_zone = 'PP';
         inv.location_label = '🏙️ ភ្នំពេញ';
-        if (zoneRes.detectedLocation && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត' || isQuestionOrLiveChatter(inv.address) || isPureWeightSizeOrColorComment(inv.address))) {
+        if (zoneRes.detectedLocation && (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏞️ តាមខេត្ត' || isQuestionOrLiveChatter(inv.address))) {
           inv.address = zoneRes.detectedLocation;
         }
       } else {
         inv.location_zone = 'PROVINCE';
         inv.location_label = '🏞️ តាមខេត្ត';
-        if (zoneRes.hasExplicitLocation && zoneRes.detectedLocation && !isQuestionOrLiveChatter(zoneRes.detectedLocation) && !isPureWeightSizeOrColorComment(zoneRes.detectedLocation)) {
-          if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || zoneRes.detectedLocation.length > inv.address.length) {
-            inv.address = zoneRes.detectedLocation;
-          }
-        } else if (!inv.address || inv.address.includes('មិនទាន់មាន') || inv.address === '🏙️ ភ្នំពេញ' || isQuestionOrLiveChatter(inv.address) || isPureWeightSizeOrColorComment(inv.address)) {
+        if (zoneRes.hasExplicitLocation && zoneRes.detectedLocation && !isQuestionOrLiveChatter(zoneRes.detectedLocation)) {
+          inv.address = zoneRes.detectedLocation;
+        } else if (!inv.address || inv.address.includes('មិនទាន់មាន') || isQuestionOrLiveChatter(inv.address)) {
           inv.address = '⚠️ មិនទាន់មានអាសយដ្ឋាន';
         }
       }
@@ -1940,26 +1916,9 @@ export function loadDatabaseFromDisk(): Promise<void> {
         if (openP > closeP) inv.address += ')';
       }
 
-      // Attach any pure weight/size/color follow-up comments (e.g. "គីឡូ67", "គីឡូ73") to the latest item's note
-      if (inv.items && inv.items.length > 0) {
-        const latestItem = inv.items[inv.items.length - 1];
-        for (const c of inv.comments || []) {
-          if (isPureWeightSizeOrColorComment(c)) {
-            const specNote = extractSizeAndColorNotes(c);
-            if (specNote && latestItem) {
-              if (!latestItem.note) {
-                latestItem.note = specNote;
-              } else if (!latestItem.note.includes(specNote)) {
-                latestItem.note = `${latestItem.note} | ${specNote}`;
-              }
-            }
-          }
-        }
-      }
-
-      // Filter out pure phone numbers, pure addresses, pure weight/size/color notes, and chat inquiries from unmatched_comments
+      // Filter out pure phone numbers, pure addresses, and chat inquiries from unmatched_comments
       if (inv.unmatched_comments && Array.isArray(inv.unmatched_comments)) {
-        inv.unmatched_comments = inv.unmatched_comments.filter(c => !isPureContactOrInquiryComment(c) && !isPureWeightSizeOrColorComment(c));
+        inv.unmatched_comments = inv.unmatched_comments.filter(c => !isPureContactOrInquiryComment(c));
       }
 
       if (inv.items && Array.isArray(inv.items)) {
@@ -2113,39 +2072,12 @@ export function loadDatabaseFromDisk(): Promise<void> {
       recalculateInvoice(inv);
     }
 
-    // Sanitize saved customer addresses & delivery zones so weights (e.g. គីឡូ67, គីឡូ73, គីឡូ50) or misclassified province zones never persist
-    for (const cust of customers) {
-      if (cust.address) {
-        if (
-          isQuestionOrLiveChatter(cust.address) ||
-          isPureWeightSizeOrColorComment(cust.address) ||
-          /^(?:គីឡូ|គឺឡូ|កីឡូ|គីឡ|គឺឡ|គក|kg|kilo)\s*\d{2,3}$/i.test(cust.address.trim())
-        ) {
-          cust.address = undefined;
-          if (!cust.is_zone_locked) {
-            cust.location_zone = 'PROVINCE';
-            cust.location_label = '🏞️ តាមខេត្ត';
-          }
-        } else {
-          const cleanedCustAddr = extractCleanAddressFromComment(cust.address) || cleanAddressInput(cust.address);
-          if (cleanedCustAddr && !isPureWeightSizeOrColorComment(cleanedCustAddr)) {
-            cust.address = cleanedCustAddr;
-            if (!cust.is_zone_locked) {
-              const cz = detectDeliveryZone(cleanedCustAddr);
-              cust.location_zone = cz.zone;
-              cust.location_label = cz.label;
-            }
-          }
-        }
-      }
-    }
-
     // Remove any leftover 0-item empty baskets from previous question comments
     cleanupEmptyZeroItemInvoices(false);
 
     // Automatically sync all active (non-dispatched) basket prices & photos strictly within their own live sessions
     syncAllActiveInvoicesWithStock(undefined, false);
-    bumpDataRevision(true);
+    bumpDataRevision(false);
   } catch (err) {
     isDatabaseLoaded = true;
     console.error('Failed to load database on startup:', err);
