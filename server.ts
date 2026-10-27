@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 import packingRoutes from './server/packingRoutes.ts';
 import fastCheckRoutes from './server/fastCheckRoutes.ts';
 import chatbotRoutes from './server/chatbotRoutes.ts';
-import miniAppRoutes, { getMiniAppShareMetadata } from './server/miniAppRoutes.ts';
+import miniAppRoutes from './server/miniAppRoutes.ts';
 import { initChatbotStore } from './server/chatbotEngine.ts';
 import {
   getFacebookOAuthUrl,
@@ -758,82 +758,8 @@ async function startServer() {
     (process.env.NODE_ENV === 'production' || isRunningCompiledServer || !isAiStudioPreview) &&
     fs.existsSync(distIndexPath);
 
-  // Serve uploaded product & slip images with long-term immutable caching for instant HD loading
-  app.use(
-    '/uploads',
-    express.static(path.join(publicPath, 'uploads'), {
-      maxAge: '365d',
-      immutable: true,
-      setHeaders: (res) => {
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      }
-    })
-  );
-
   // Serve public root assets (icons, manifest, uploads) directly
   app.use(express.static(publicPath, { maxAge: '7d' }));
-
-  const injectDynamicShareMeta = (htmlContent: string, req: Request): string => {
-    try {
-      const isMiniApp =
-        req.path.startsWith('/miniapp') ||
-        req.path.startsWith('/tg-shop') ||
-        req.query.miniapp === '1' ||
-        Boolean(req.query.code);
-      if (!isMiniApp) return htmlContent;
-
-      const codeParam = typeof req.query.code === 'string' ? req.query.code : undefined;
-      const meta = getMiniAppShareMetadata(codeParam);
-      if (!meta) return htmlContent;
-
-      const escapeHtml = (str: string) =>
-        str
-          .replace(/&/g, '&amp;')
-          .replace(/"/g, '&quot;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;');
-
-      const safeTitle = escapeHtml(meta.title);
-      const safeDesc = escapeHtml(meta.description);
-      const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
-      const host = req.get('host') || '';
-      const baseOrigin = host ? `${proto}://${host}` : '';
-      const fullImgUrl = meta.imageUrl
-        ? meta.imageUrl.startsWith('http')
-          ? meta.imageUrl
-          : `${baseOrigin}${meta.imageUrl.startsWith('/') ? '' : '/'}${meta.imageUrl}`
-        : '';
-
-      let updated = htmlContent
-        .replace(/<title>[\s\S]*?<\/title>/i, `<title>${safeTitle}</title>`)
-        .replace(
-          /<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/i,
-          `<meta property="og:title" content="${safeTitle}" />`
-        )
-        .replace(
-          /<meta\s+property="og:description"\s+content="[^"]*"\s*\/?>/i,
-          `<meta property="og:description" content="${safeDesc}" />`
-        );
-
-      if (fullImgUrl) {
-        const safeImg = escapeHtml(fullImgUrl);
-        if (/property="og:image"/i.test(updated)) {
-          updated = updated.replace(
-            /<meta\s+property="og:image"\s+content="[^"]*"\s*\/?>/i,
-            `<meta property="og:image" content="${safeImg}" />`
-          );
-        } else {
-          updated = updated.replace(
-            /<\/head>/i,
-            `  <meta property="og:image" content="${safeImg}" />\n    <meta name="twitter:card" content="summary_large_image" />\n    <meta name="twitter:image" content="${safeImg}" />\n  </head>`
-          );
-        }
-      }
-      return updated;
-    } catch {
-      return htmlContent;
-    }
-  };
 
   if (!isProduction) {
     const vite = await createViteServer({
@@ -849,7 +775,6 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static(distPath, {
-      index: false,
       setHeaders: (res, filePath) => {
         if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.webmanifest')) {
           res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -860,24 +785,25 @@ async function startServer() {
         }
       }
     }));
-    app.get('*', (req: Request, res: Response, next) => {
-      const targetHtmlPath = fs.existsSync(distIndexPath)
-        ? distIndexPath
-        : path.join(process.cwd(), 'index.html');
-      if (fs.existsSync(targetHtmlPath)) {
+    app.get('*', (_req: Request, res: Response, next) => {
+      if (fs.existsSync(distIndexPath)) {
         res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
-        try {
-          const rawHtml = fs.readFileSync(targetHtmlPath, 'utf-8');
-          const finalHtml = injectDynamicShareMeta(rawHtml, req);
-          res.setHeader('Content-Type', 'text/html; charset=utf-8');
-          res.send(finalHtml);
-        } catch (err) {
-          next(err);
-        }
+        res.sendFile(distIndexPath, (err) => {
+          if (err && !res.headersSent) {
+            next(err);
+          }
+        });
       } else {
-        res.status(404).send('Frontend index.html not found');
+        const rootIndex = path.join(process.cwd(), 'index.html');
+        if (fs.existsSync(rootIndex)) {
+          res.sendFile(rootIndex, (err) => {
+            if (err && !res.headersSent) next(err);
+          });
+        } else {
+          res.status(404).send('Frontend index.html not found');
+        }
       }
     });
   }

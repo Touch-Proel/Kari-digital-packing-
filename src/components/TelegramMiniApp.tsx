@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   generateBakongKHQRString,
   generateKHQRDataUrl,
@@ -223,10 +223,6 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
   const [isInquiring, setIsInquiring] = useState<boolean>(false);
   const [zoomProduct, setZoomProduct] = useState<MiniAppProduct | null>(null);
   const [zoomImageIdx, setZoomImageIdx] = useState<number>(0);
-  const [zoomTouchStartX, setZoomTouchStartX] = useState<number | null>(null);
-  const [showShareOptions, setShowShareOptions] = useState<boolean>(false);
-  const [showReturnPolicyDetail, setShowReturnPolicyDetail] = useState<boolean>(false);
-  const pdpScrollRef = useRef<HTMLDivElement | null>(null);
   const [cardImageIdx, setCardImageIdx] = useState<Record<string, number>>({});
   const [completedOrder, setCompletedOrder] = useState<MiniAppOrder | null>(null);
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -375,93 +371,6 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         return [...prev, productId];
       }
     });
-  };
-
-  // Eagerly preload product images in the browser cache so opening any product is 0ms instant & crystal-clear
-  useEffect(() => {
-    if (!products || products.length === 0) return;
-    const timer = setTimeout(() => {
-      products.slice(0, 24).forEach(p => {
-        const imgs = getProductImages(p);
-        imgs.forEach(url => {
-          if (url && !url.startsWith('data:image/svg')) {
-            const img = new Image();
-            img.decoding = 'async';
-            img.src = url;
-          }
-        });
-      });
-    }, 80);
-    return () => clearTimeout(timer);
-  }, [products]);
-
-  // Immediately preload all gallery angles when a product is opened in the PDP
-  useEffect(() => {
-    if (!zoomProduct) {
-      setShowShareOptions(false);
-      setShowReturnPolicyDetail(false);
-      return;
-    }
-    const imgs = getProductImages(zoomProduct);
-    imgs.forEach(url => {
-      if (url) {
-        const img = new Image();
-        img.decoding = 'sync';
-        img.src = url;
-      }
-    });
-  }, [zoomProduct]);
-
-  const getProductShareUrl = (product: MiniAppProduct): string => {
-    const base = (config.miniAppUrl || '').trim();
-    if (base && base.startsWith('http')) {
-      try {
-        const u = new URL(base);
-        u.searchParams.set('code', product.code);
-        return u.toString();
-      } catch {}
-    }
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    return `${origin}/miniapp?code=${encodeURIComponent(product.code)}`;
-  };
-
-  const handleCopyProductLink = async (product: MiniAppProduct) => {
-    const shareUrl = getProductShareUrl(product);
-    const origStr =
-      product.originalPrice > product.price ? ` (តម្លៃដើម $${product.originalPrice.toFixed(2)})` : '';
-    const shareText = `✨ [${product.code}] ${product.name}\n💰 តម្លៃពិសេស៖ $${product.price.toFixed(2)}${origStr}\n👇 ចុចមើលរូបច្បាស់ៗ និងកម្ម៉ង់ទិញនៅទីនេះ៖\n${shareUrl}`;
-    try {
-      await navigator.clipboard.writeText(shareText);
-      showToast(`🔗 បានចម្លងលីងម៉ូតកូដ [${product.code}] រួចរាល់! អាច Paste ផ្ញើឱ្យមិត្តភក្តិបានភ្លាម`);
-    } catch {
-      showToast(`🔗 លីងម៉ូត៖ ${shareUrl}`);
-    }
-  };
-
-  const handleShareProduct = async (product: MiniAppProduct) => {
-    const shareUrl = getProductShareUrl(product);
-    const origStr =
-      product.originalPrice > product.price ? ` (តម្លៃដើម $${product.originalPrice.toFixed(2)})` : '';
-    const shareTitle = `[កូដ ${product.code}] ${product.name} — $${product.price.toFixed(2)}`;
-    const shareText = `✨ [${product.code}] ${product.name} — តម្លៃពិសេស $${product.price.toFixed(2)}${origStr} នៅ ${config.storeName}`;
-
-    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-      try {
-        await navigator.share({
-          title: shareTitle,
-          text: shareText,
-          url: shareUrl
-        });
-        showToast(`✅ បានចែករំលែកលីងម៉ូតកូដ [${product.code}] រួចរាល់!`);
-        return;
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return;
-      }
-    }
-
-    // Fallback or WebView mode: toggle quick share bar & copy link automatically
-    setShowShareOptions(prev => !prev);
-    await handleCopyProductLink(product);
   };
 
   const handleAskAboutProduct = async (product: MiniAppProduct) => {
@@ -778,8 +687,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
 
   const compressImageOnClient = (rawFile: File, target: 'slip' | 'product' | 'logo' | 'khqr'): Promise<string> => {
     return new Promise((resolve, reject) => {
-      // Keep original file 100% untouched if <= 1.5MB for maximum crystal-clear studio sharpness
-      if (rawFile.size <= 1536 * 1024 && ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(rawFile.type)) {
+      // Keep original file untouched if <= 800KB for maximum crystal-clear sharpness
+      if (rawFile.size <= 800 * 1024 && ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(rawFile.type)) {
         const reader = new FileReader();
         reader.onload = () => {
           if (typeof reader.result === 'string') {
@@ -803,10 +712,10 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
         URL.revokeObjectURL(objectUrl);
         try {
           const canvas = document.createElement('canvas');
-          // Ultra-HD 2000px resolution at 0.95 quality so clothing fabric & details stay razor-sharp when zoomed
-          const maxDim = target === 'logo' ? 1000 : target === 'khqr' ? 1500 : target === 'slip' ? 1600 : 2000;
-          let w = img.naturalWidth || img.width || 1800;
-          let h = img.naturalHeight || img.height || 1800;
+          // Full HD 1800px resolution at 0.92 quality so clothing details & textures stay 100% sharp when zoomed
+          const maxDim = target === 'logo' ? 1000 : target === 'khqr' ? 1400 : target === 'slip' ? 1600 : 1800;
+          let w = img.naturalWidth || img.width || 1600;
+          let h = img.naturalHeight || img.height || 1600;
           if (w > maxDim || h > maxDim) {
             if (w > h) {
               h = Math.round((h * maxDim) / w);
@@ -823,7 +732,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(img, 0, 0, w, h);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
             resolve(dataUrl);
           } else {
             reject(new Error('Canvas context error'));
@@ -2195,10 +2104,8 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                         <img
                           src={currentCardImage}
                           alt={product.name}
-                          loading="eager"
-                          decoding="async"
                           referrerPolicy="no-referrer"
-                          className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 [image-rendering:-webkit-optimize-contrast] ${
+                          className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${
                             totalStock <= 0 ? 'grayscale-[25%]' : ''
                           }`}
                         />
@@ -2262,7 +2169,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                           </>
                         )}
 
-                        {/* Bottom-Right Wishlist Heart & Share Link Buttons */}
+                        {/* Bottom-Right Wishlist Heart & Zoom Hint */}
                         <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
                           <button
                             type="button"
@@ -2273,7 +2180,7 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                             className={`w-7 h-7 rounded-full backdrop-blur-xs flex items-center justify-center transition-transform active:scale-90 cursor-pointer shadow-2xs ${
                               wishlistIds.includes(product.id)
                                 ? 'bg-[#DB1D43] text-white'
-                                : 'bg-white/90 text-slate-700 hover:text-[#DB1D43]'
+                                : 'bg-white/85 text-slate-700 hover:text-[#DB1D43]'
                             }`}
                             aria-label="រក្សាទុកក្នុងបញ្ជីពេញចិត្ត"
                             title="រក្សាទុកក្នុងបញ្ជីពេញចិត្ត"
@@ -2293,24 +2200,11 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
                             </svg>
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={e => {
-                              e.stopPropagation();
-                              handleShareProduct(product);
-                            }}
-                            className="w-7 h-7 rounded-full bg-white/90 hover:bg-white text-slate-700 hover:text-[#DB1D43] backdrop-blur-xs flex items-center justify-center transition-transform active:scale-90 cursor-pointer shadow-2xs"
-                            aria-label="ចែករំលែកលីងម៉ូតនេះ"
-                            title="ចែករំលែកលីងម៉ូតនេះ"
-                          >
+                          <div className="w-6 h-6 rounded-full bg-black/45 backdrop-blur-xs text-white flex items-center justify-center pointer-events-none">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
-                              />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
                             </svg>
-                          </button>
+                          </div>
                         </div>
                       </div>
 
@@ -2492,736 +2386,153 @@ export function TelegramMiniApp({ onBackToPos }: { onBackToPos?: () => void }) {
       </div>
 
       {/* =====================================================================
-          MODAL 1: FULL-SCREEN LUXURY PRODUCT DETAIL VIEW (PDP)
-          (Surpassing NH Mall reference: Floating Top Bar, Ultra-HD Swipe Gallery,
-           Share Link & Wishlist, Variant Picker, Return Guarantee, & Instant Buy Bar)
+          MODAL 1: PRODUCT IMAGE ZOOM & MULTI-PHOTO GALLERY
          ===================================================================== */}
       {zoomProduct && (() => {
         const zoomImages = getProductImages(zoomProduct);
         const safeZoomIdx = Math.min(zoomImageIdx, Math.max(0, zoomImages.length - 1));
         const activeZoomImg = zoomImages[safeZoomIdx] || zoomProduct.imageUrl;
-        const totalZoomStock = zoomProduct.variants.reduce((acc, v) => acc + v.stock, 0);
-        const firstAvailVar = zoomProduct.variants.find(v => v.stock > 0) || zoomProduct.variants[0];
-        const selectedZoomVarId = selectedVariants[zoomProduct.id] || firstAvailVar?.id;
-        const activeZoomVariant =
-          zoomProduct.variants.find(v => v.id === selectedZoomVarId) || firstAvailVar;
-        const zoomDiscountPct =
-          zoomProduct.originalPrice > zoomProduct.price && zoomProduct.originalPrice > 0
-            ? Math.round(((zoomProduct.originalPrice - zoomProduct.price) / zoomProduct.originalPrice) * 100)
-            : 0;
-        const isFav = wishlistIds.includes(zoomProduct.id);
-        const qtyOfProductInCart = cart
-          .filter(c => c.productId === zoomProduct.id)
-          .reduce((s, c) => s + c.qty, 0);
-        const shareUrl = getProductShareUrl(zoomProduct);
-
-        // Smart Related & Recommended Products (Prioritize In-Stock + Same Category + Matching Selected Size)
-        const targetSize = activeZoomVariant?.size;
-        const relatedProducts = products
-          .filter(p => p.id !== zoomProduct.id)
-          .map(p => {
-            const pStock = p.variants.reduce((acc, v) => acc + v.stock, 0);
-            const sameCategory =
-              p.category === zoomProduct.category || p.category === 'unisex' || zoomProduct.category === 'unisex';
-            const hasMatchingSizeInStock = targetSize
-              ? p.variants.some(v => v.size === targetSize && v.stock > 0)
-              : false;
-            const hasDiscount = p.originalPrice > p.price;
-            const score =
-              (pStock > 0 ? 100 : 0) +
-              (sameCategory ? 30 : 0) +
-              (hasMatchingSizeInStock ? 20 : 0) +
-              (hasDiscount ? 5 : 0);
-            return { product: p, pStock, sameCategory, hasMatchingSizeInStock, score };
-          })
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 6);
 
         return (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center">
-            <div className="w-full max-w-[480px] h-full bg-[#F8FAFC] flex flex-col justify-between overflow-hidden shadow-2xl relative">
-              {/* SCROLLABLE MAIN CONTENT (Hero Gallery + Product Details + Related Products) */}
-              <div ref={pdpScrollRef} className="flex-1 overflow-y-auto overscroll-contain pb-6">
-                {/* 1. HERO FULL-BLEED ULTRA-HD IMAGE GALLERY + FLOATING TOP ACTION BAR */}
-                <div
-                  className="relative aspect-[4/4.5] w-full bg-[#0F172A] overflow-hidden select-none"
-                  onTouchStart={e => {
-                    if (e.touches && e.touches[0]) {
-                      setZoomTouchStartX(e.touches[0].clientX);
-                    }
-                  }}
-                  onTouchEnd={e => {
-                    if (zoomTouchStartX === null || zoomImages.length <= 1) return;
-                    const endX = e.changedTouches?.[0]?.clientX ?? zoomTouchStartX;
-                    const diff = zoomTouchStartX - endX;
-                    if (Math.abs(diff) > 40) {
-                      if (diff > 0) {
-                        setZoomImageIdx((safeZoomIdx + 1) % zoomImages.length);
-                      } else {
-                        setZoomImageIdx((safeZoomIdx - 1 + zoomImages.length) % zoomImages.length);
-                      }
-                    }
-                    setZoomTouchStartX(null);
-                  }}
+          <div
+            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => setZoomProduct(null)}
+          >
+            <div
+              className="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="relative aspect-[3/4] bg-slate-100">
+                <img
+                  src={activeZoomImg}
+                  alt={zoomProduct.name}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setZoomProduct(null)}
+                  className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/60 text-white font-bold flex items-center justify-center cursor-pointer"
                 >
-                  {/* Top Subtle Gradient Scrim for Floating Navigation Icons */}
-                  <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/45 via-black/15 to-transparent pointer-events-none z-10" />
+                  ✕
+                </button>
 
-                  {/* FLOATING TOP OVERLAY BAR: Back (Left) • Search & Cart with Badge (Right) */}
-                  <div className="absolute top-3.5 inset-x-3.5 flex items-center justify-between z-20">
+                {zoomImages.length > 1 && (
+                  <>
                     <button
                       type="button"
-                      onClick={() => setZoomProduct(null)}
-                      className="w-10 h-10 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-white border border-white/20 flex items-center justify-center shadow-lg active:scale-92 transition-all cursor-pointer"
-                      aria-label="ត្រឡប់ក្រោយ"
+                      onClick={() => setZoomImageIdx((safeZoomIdx - 1 + zoomImages.length) % zoomImages.length)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/55 hover:bg-black/80 text-white text-lg font-bold flex items-center justify-center cursor-pointer"
                     >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                      </svg>
+                      ‹
                     </button>
-
-                    <div className="flex items-center gap-2">
-                      {/* Quick Search Button */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setZoomProduct(null);
-                          setTimeout(() => {
-                            const searchEl = document.querySelector<HTMLInputElement>('input[placeholder*="ស្វែងរក"]');
-                            searchEl?.focus();
-                          }, 100);
-                        }}
-                        className="w-10 h-10 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-white border border-white/20 flex items-center justify-center shadow-lg active:scale-92 transition-all cursor-pointer"
-                        aria-label="ស្វែងរកម៉ូត"
-                      >
-                        <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth={2.3} viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                      </button>
-
-                      {/* Shopping Cart Button with Live Red Badge */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setZoomProduct(null);
-                          setCheckoutStep('SUMMARY');
-                          setIsEditingAddress(!phone.trim() || !address.trim());
-                          setIsCheckoutOpen(true);
-                        }}
-                        className="relative w-10 h-10 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-md text-white border border-white/20 flex items-center justify-center shadow-lg active:scale-92 transition-all cursor-pointer"
-                        aria-label="មើលកន្ត្រកទំនិញ"
-                      >
-                        <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                        {totalCartItems > 0 && (
-                          <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[#DB1D43] text-white font-black text-[10.5px] flex items-center justify-center shadow-md tabular-nums ring-2 ring-white">
-                            {totalCartItems}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Ultra-Sharp Product Image */}
-                  <img
-                    src={activeZoomImg}
-                    alt={zoomProduct.name}
-                    loading="eager"
-                    decoding="sync"
-                    fetchPriority="high"
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover transition-all duration-200 [image-rendering:-webkit-optimize-contrast]"
-                  />
-
-                  {/* Left/Right Navigation Arrows when multiple photos exist */}
-                  {zoomImages.length > 1 && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setZoomImageIdx((safeZoomIdx - 1 + zoomImages.length) % zoomImages.length)}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/40 hover:bg-black/65 backdrop-blur-xs text-white border border-white/15 text-xl font-bold flex items-center justify-center cursor-pointer active:scale-90 transition-transform z-10"
-                        aria-label="រូបមុន"
-                      >
-                        ‹
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setZoomImageIdx((safeZoomIdx + 1) % zoomImages.length)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/40 hover:bg-black/65 backdrop-blur-xs text-white border border-white/15 text-xl font-bold flex items-center justify-center cursor-pointer active:scale-90 transition-transform z-10"
-                        aria-label="រូបបន្ទាប់"
-                      >
-                        ›
-                      </button>
-                    </>
-                  )}
-
-                  {/* Bottom Scrim + Pill Pagination Dots (Center) + Photo Counter Pill (Right) */}
-                  <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/50 via-black/15 to-transparent pointer-events-none" />
-
-                  {zoomImages.length > 1 && (
-                    <div className="absolute bottom-3.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/25 backdrop-blur-xs z-10">
-                      {zoomImages.map((_, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => setZoomImageIdx(idx)}
-                          className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                            safeZoomIdx === idx ? 'w-5 bg-white shadow-xs' : 'w-1.5 bg-white/55 hover:bg-white/80'
-                          }`}
-                          aria-label={`រូបទី ${idx + 1}`}
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="absolute bottom-3 right-3.5 bg-black/65 backdrop-blur-md text-white px-3 py-1 rounded-full text-xs font-extrabold tabular-nums border border-white/15 shadow-sm z-10">
-                    {safeZoomIdx + 1}/{Math.max(1, zoomImages.length)}
-                  </div>
-                </div>
-
-                {/* Thumbnail Strip when product has multiple photos */}
-                {zoomImages.length > 1 && (
-                  <div className="bg-white px-4 pt-3 pb-1 flex items-center gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                    {zoomImages.map((imgUrl, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setZoomImageIdx(idx)}
-                        className={`w-13 h-15 rounded-xl overflow-hidden border-2 shrink-0 cursor-pointer transition-all ${
-                          safeZoomIdx === idx
-                            ? 'border-[#DB1D43] ring-2 ring-rose-500/20 scale-105 shadow-xs'
-                            : 'border-slate-200/80 opacity-65 hover:opacity-100'
-                        }`}
-                      >
-                        <img
-                          src={imgUrl}
-                          alt=""
-                          loading="eager"
-                          decoding="async"
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
-                      </button>
-                    ))}
-                  </div>
+                    <button
+                      type="button"
+                      onClick={() => setZoomImageIdx((safeZoomIdx + 1) % zoomImages.length)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/55 hover:bg-black/80 text-white text-lg font-bold flex items-center justify-center cursor-pointer"
+                    >
+                      ›
+                    </button>
+                  </>
                 )}
 
-                {/* 2. PRODUCT TITLE, PRICE, SOLD/STOCK BADGE & WISHLIST / SHARE LINK BUTTONS */}
-                <div className="bg-white px-4 pt-3.5 pb-4 border-b border-slate-100 shadow-2xs">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <span className="bg-[#0F172A] text-white text-[10.5px] font-black px-2.5 py-0.5 rounded-md tracking-tight">
-                          កូដ {zoomProduct.code}
-                        </span>
-                        {zoomDiscountPct > 0 && (
-                          <span className="bg-[#FFF1F2] text-[#DB1D43] border border-rose-200 text-[10.5px] font-extrabold px-2 py-0.5 rounded-md">
-                            បញ្ចុះ -{zoomDiscountPct}%
-                          </span>
-                        )}
-                      </div>
-                      <h2 className="font-black text-[18px] leading-snug text-[#0F172A] break-words">
-                        {zoomProduct.name}
-                      </h2>
-                    </div>
-
-                    {/* Right Circular Action Buttons: Heart (Wishlist) + Share Link (Matching & Elevating Reference) */}
-                    <div className="flex items-center gap-2 shrink-0 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => toggleWishlist(zoomProduct.id, zoomProduct.code)}
-                        className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-2xs ${
-                          isFav
-                            ? 'bg-[#FFF1F2] text-[#DB1D43] border-rose-300'
-                            : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200/90'
-                        }`}
-                        aria-label="រក្សាទុកក្នុងបញ្ជីពេញចិត្ត"
-                        title="រក្សាទុកក្នុងបញ្ជីពេញចិត្ត"
-                      >
-                        <svg
-                          className="w-5 h-5"
-                          fill={isFav ? 'currentColor' : 'none'}
-                          stroke="currentColor"
-                          strokeWidth={2}
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-                          />
-                        </svg>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleShareProduct(zoomProduct)}
-                        className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-2xs ${
-                          showShareOptions
-                            ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                            : 'bg-slate-50 hover:bg-rose-50 text-slate-700 hover:text-[#DB1D43] border-slate-200/90'
-                        }`}
-                        aria-label="ចែករំលែកលីងម៉ូតនេះ"
-                        title="ចែករំលែកលីងម៉ូតនេះ"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Expandable Quick Share Link Bar (Appears when Share button is tapped or in WebViews) */}
-                  {showShareOptions && (
-                    <div className="mt-3 p-2.5 rounded-2xl bg-slate-50 border border-slate-200/90 space-y-2 animate-fadeIn">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
-                          <span>🔗</span>
-                          <span>លីងចែករំលែកម៉ូតកូដ {zoomProduct.code} ទៅកាន់មិត្តភក្តិ៖</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowShareOptions(false)}
-                          className="text-[10.5px] font-bold text-slate-400 hover:text-slate-700 cursor-pointer"
-                        >
-                          បិទ ✕
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          readOnly
-                          value={shareUrl}
-                          onClick={e => (e.target as HTMLInputElement).select()}
-                          className="flex-1 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11px] font-mono text-slate-600 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleCopyProductLink(zoomProduct)}
-                          className="px-3 py-1.5 rounded-xl bg-[#DB1D43] hover:bg-[#BE123C] text-white text-[11px] font-extrabold shrink-0 cursor-pointer active:scale-95 transition-transform"
-                        >
-                          📋 ចម្លងលីង
-                        </button>
-                        <a
-                          href={`https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(
-                            `✨ [${zoomProduct.code}] ${zoomProduct.name} — $${zoomProduct.price.toFixed(2)}`
-                          )}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-1.5 rounded-xl bg-[#0088CC] hover:bg-[#0077B5] text-white text-[11px] font-extrabold shrink-0 flex items-center gap-1"
-                        >
-                          <span>✈️</span>
-                          <span>Telegram</span>
-                        </a>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Price & Social Proof / Stock Pill Row */}
-                  <div className="mt-2.5 flex items-baseline justify-between gap-2 flex-wrap">
-                    <div className="flex items-baseline gap-2 tabular-nums">
-                      <span className="text-[26px] font-black text-[#DB1D43] tracking-tight">
-                        ${zoomProduct.price.toFixed(2)}
-                      </span>
-                      {zoomProduct.originalPrice > zoomProduct.price && (
-                        <span className="text-sm text-slate-400 line-through font-semibold">
-                          ${zoomProduct.originalPrice.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-[11px] font-extrabold tabular-nums">
-                        🔥 លក់ដាច់ខ្លាំង • សល់ {totalZoomStock} ឈុត
-                      </span>
-                    </div>
-                  </div>
+                <div className="absolute bottom-3 left-3 bg-black/75 text-white px-3 py-1 rounded-full text-xs font-extrabold">
+                  កូដ: {zoomProduct.code} • ${zoomProduct.price.toFixed(2)}
+                  {zoomImages.length > 1 ? ` • រូប ${safeZoomIdx + 1}/${zoomImages.length}` : ''}
                 </div>
+              </div>
 
-                {/* 3. INTERACTIVE COLOR & SIZE VARIANT SELECTOR CARD */}
-                <div className="mt-2.5 mx-3 bg-white rounded-2xl border border-slate-200/80 p-3.5 shadow-2xs space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-extrabold text-[#0F172A] flex items-center gap-1.5">
-                      <span>🎨</span>
-                      <span>ជ្រើសរើសពណ៌ និងទំហំ (Size)៖</span>
-                    </div>
+              {/* Thumbnail Strip when product has multiple photos */}
+              {zoomImages.length > 1 && (
+                <div className="px-4 pt-3 flex items-center gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  {zoomImages.map((imgUrl, idx) => (
                     <button
+                      key={idx}
                       type="button"
-                      onClick={() => setIsSizeGuideOpen(true)}
-                      className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-[#BE123C] border border-rose-200/80 text-[10.5px] font-extrabold flex items-center gap-1 cursor-pointer"
+                      onClick={() => setZoomImageIdx(idx)}
+                      className={`w-12 h-14 rounded-xl overflow-hidden border-2 shrink-0 cursor-pointer transition-all ${
+                        safeZoomIdx === idx ? 'border-[#DB1D43] scale-105 shadow-xs' : 'border-slate-200 opacity-70'
+                      }`}
                     >
-                      <span>📏</span>
-                      <span>តារាងគីឡូ</span>
+                      <img src={imgUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                     </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    {zoomProduct.variants.map(v => {
-                      const isSelected = activeZoomVariant?.id === v.id && v.stock > 0;
-                      const isOut = v.stock <= 0;
-                      const weightHint = getWeightHintForSize(v.size);
-                      return (
-                        <button
-                          key={v.id}
-                          type="button"
-                          disabled={isOut}
-                          onClick={() =>
-                            setSelectedVariants(prev => ({
-                              ...prev,
-                              [zoomProduct.id]: v.id
-                            }))
-                          }
-                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                            isOut
-                              ? 'bg-slate-50 text-slate-300 border-slate-200/70 line-through cursor-not-allowed'
-                              : isSelected
-                              ? 'bg-[#FFF1F2] text-[#BE123C] border-[#DB1D43] ring-2 ring-[#DB1D43]/20 shadow-2xs'
-                              : 'bg-[#F8FAFC] hover:bg-slate-100 text-[#0F172A] border-slate-200'
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[11.5px] font-extrabold leading-snug break-words">
-                              {isSelected ? '✓ ' : ''}
-                              {v.color} • {v.size.replace(/^Size\s+/i, '')}
-                            </div>
-                            {weightHint && (
-                              <div className="text-[10px] opacity-80 font-bold mt-0.5 truncate">
-                                ⚖️ {weightHint}
-                              </div>
-                            )}
-                          </div>
-                          <span
-                            className={`px-1.5 py-0.5 rounded-md text-[9.5px] font-black shrink-0 tabular-nums ${
-                              isOut
-                                ? 'bg-slate-100 text-slate-400'
-                                : isSelected
-                                ? 'bg-[#DB1D43] text-white'
-                                : 'bg-slate-200/80 text-slate-700'
-                            }`}
-                          >
-                            {isOut ? 'អស់' : `សល់ ${v.stock}`}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  ))}
                 </div>
+              )}
 
-                {/* 4. RETURN POLICY & QUALITY GUARANTEE CARD (Matching & Surpassing Reference Screenshot) */}
-                <div className="mt-2.5 mx-3 bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-2xs">
+              <div className="p-4 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-extrabold text-base text-slate-900">{zoomProduct.name}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      ចុចជ្រើសរើសពណ៌ និងទំហំខាងក្រោមដើម្បីដាក់ចូលកន្ត្រក៖
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setShowReturnPolicyDetail(prev => !prev)}
-                    className="w-full px-3.5 py-3 flex items-center justify-between gap-3 text-left hover:bg-slate-50/80 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setZoomProduct(null);
+                      setIsSizeGuideOpen(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-rose-50 text-[#BE123C] border border-rose-200 text-[10.5px] font-extrabold shrink-0 cursor-pointer"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-xl bg-rose-50 text-[#DB1D43] flex items-center justify-center shrink-0">
-                        <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-                          />
-                        </svg>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-extrabold text-[#0F172A]">
-                          គោលការណ៍ត្រឡប់ទំនិញ & ធានាគុណភាព ១០០%
-                        </div>
-                        <div className="text-[10.5px] text-slate-500 truncate mt-0.5">
-                          ដូរទំហំជូនដោយឥតគិតថ្លៃ • ធានាសាច់ក្រណាត់ស្អាតដូចរូប
-                        </div>
-                      </div>
-                    </div>
-                    <svg
-                      className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${
-                        showReturnPolicyDetail ? 'rotate-90' : ''
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2.2}
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
+                    📏 តារាងគីឡូ
                   </button>
-
-                  {showReturnPolicyDetail && (
-                    <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-100 text-[11px] text-slate-600 space-y-1.5 bg-slate-50/50">
-                      <div className="flex items-start gap-2">
-                        <span className="text-emerald-600 font-black">✓</span>
-                        <span>អាចប្តូរទំហំ (Size) ឬប្តូរម៉ូតបានក្នុងរយៈពេល ៣ ថ្ងៃបន្ទាប់ពីទទួលអីវ៉ាន់។</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="text-emerald-600 font-black">✓</span>
-                        <span>ធានាសាច់ក្រណាត់ស្អាត ថ្នេរដេរមាំ និងពណ៌ដូចរូបភាពពិត ១០០%។</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="text-emerald-600 font-black">✓</span>
-                        <span>ដឹកជញ្ជូនរហ័សទាន់ចិត្តគ្រប់ ២៥ ខេត្ត-ក្រុង (ស្កេន KHQR ក៏បាន / បង់ពេលដឹកដល់ COD ក៏បាន)។</span>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
-                {/* 5. DIRECT CHAT WITH SHOP OWNER CARD */}
-                <div className="mt-2.5 mx-3">
+                <div className="flex flex-wrap gap-2">
+                  {zoomProduct.variants.map(v => {
+                    const weightHint = getWeightHintForSize(v.size);
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        disabled={v.stock <= 0}
+                        onClick={() => {
+                          handleAddToCart(zoomProduct, v);
+                          setZoomProduct(null);
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-extrabold border cursor-pointer text-left ${
+                          v.stock <= 0
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 line-through'
+                            : 'bg-[#FFF1F2] text-[#BE123C] border-[#FB7185] hover:bg-[#DB1D43] hover:text-white'
+                        }`}
+                      >
+                        <div>+ {v.color} - {v.size} (សល់ {v.stock})</div>
+                        {weightHint && (
+                          <div className="text-[10px] opacity-85 font-bold">⚖️ {weightHint}</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Direct Chat Inquiry & Wishlist Actions */}
+                <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
                   <button
                     type="button"
                     disabled={isInquiring}
                     onClick={() => handleAskAboutProduct(zoomProduct)}
-                    className="w-full py-2.5 px-3.5 rounded-2xl bg-white hover:bg-slate-50 text-[#0F172A] border border-slate-200/90 font-extrabold text-xs flex items-center justify-between gap-2 cursor-pointer active:scale-[0.99] transition-all shadow-2xs"
+                    className="flex-1 py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 transition-transform"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="w-7 h-7 rounded-xl bg-slate-100 flex items-center justify-center text-sm">💬</span>
-                      <span>
-                        {isInquiring
-                          ? 'កំពុងភ្ជាប់ចូលឆាត...'
-                          : `មានចម្ងល់ពីសាច់ក្រណាត់ ឬទំហំ? ឆាតសួរម្ចាស់ហាងពីកូដ ${zoomProduct.code}`}
-                      </span>
-                    </div>
-                    <span className="text-[#DB1D43] font-black text-xs shrink-0">ឆាតភ្លាម ›</span>
-                  </button>
-                </div>
-
-                {/* 6. RELATED & RECOMMENDED PRODUCTS SECTION (ម៉ូតស្រដៀងគ្នា & ណែនាំសម្រាប់បង) */}
-                {relatedProducts.length > 0 && (
-                  <div className="mt-4 mx-3 space-y-2.5">
-                    {/* Section Header + Smart Free Shipping Upsell Hint */}
-                    <div className="flex items-center justify-between gap-2 px-0.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-6 h-6 rounded-lg bg-[#FFF1F2] text-[#DB1D43] flex items-center justify-center text-xs font-black">
-                          ✨
-                        </span>
-                        <div>
-                          <h3 className="text-[13px] font-black text-[#0F172A] leading-tight">
-                            ម៉ូតស្រដៀងគ្នា & ណែនាំសម្រាប់បង
-                          </h3>
-                          <p className="text-[10px] text-slate-500 font-medium">
-                            ជ្រើសរើសម៉ូតស្អាតៗបន្ថែម ដើម្បីចំណេញថ្លៃដឹកជញ្ជូន
-                          </p>
-                        </div>
-                      </div>
-
-                      {config.freeShippingThreshold > 0 && cartSubtotal < config.freeShippingThreshold && (
-                        <span className="bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-1 rounded-lg text-[10px] font-extrabold shrink-0 tabular-nums">
-                          🚚 ខ្វះ ${(config.freeShippingThreshold - cartSubtotal).toFixed(2)} Free ដឹក
-                        </span>
-                      )}
-                    </div>
-
-                    {/* 2-Column Boutique Related Products Grid */}
-                    <div className="grid grid-cols-2 gap-2.5">
-                      {relatedProducts.map(({ product: relProd, pStock, hasMatchingSizeInStock }) => {
-                        const relImages = getProductImages(relProd);
-                        const relThumb = relImages[0] || relProd.imageUrl;
-                        const relFirstVar =
-                          (targetSize && relProd.variants.find(v => v.size === targetSize && v.stock > 0)) ||
-                          relProd.variants.find(v => v.stock > 0) ||
-                          relProd.variants[0];
-                        const relDiscPct =
-                          relProd.originalPrice > relProd.price && relProd.originalPrice > 0
-                            ? Math.round(((relProd.originalPrice - relProd.price) / relProd.originalPrice) * 100)
-                            : 0;
-                        const relQtyInCart = cart
-                          .filter(c => c.productId === relProd.id)
-                          .reduce((s, c) => s + c.qty, 0);
-
-                        return (
-                          <div
-                            key={relProd.id}
-                            className={`bg-white rounded-2xl border overflow-hidden flex flex-col justify-between transition-all ${
-                              pStock <= 0
-                                ? 'border-slate-200/70 opacity-75'
-                                : 'border-slate-200/90 shadow-2xs hover:border-rose-200'
-                            }`}
-                          >
-                            <div
-                              onClick={() => {
-                                setZoomProduct(relProd);
-                                setZoomImageIdx(0);
-                                setShowShareOptions(false);
-                                pdpScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-                              }}
-                              className="cursor-pointer group"
-                            >
-                              <div className="relative aspect-[3/4] w-full bg-slate-100 overflow-hidden">
-                                <img
-                                  src={relThumb}
-                                  alt={relProd.name}
-                                  loading="eager"
-                                  decoding="async"
-                                  referrerPolicy="no-referrer"
-                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 [image-rendering:-webkit-optimize-contrast]"
-                                />
-                                {/* Code Badge */}
-                                <div className="absolute top-2 left-2 bg-[#0F172A]/85 backdrop-blur-xs text-white px-2 py-0.5 rounded-md text-[10px] font-extrabold">
-                                  កូដ {relProd.code}
-                                </div>
-                                {/* Stock or Discount Badge */}
-                                {pStock <= 0 ? (
-                                  <div className="absolute top-2 right-2 bg-slate-900/85 text-white px-2 py-0.5 rounded-md text-[9.5px] font-extrabold">
-                                    អស់ស្តុក
-                                  </div>
-                                ) : relDiscPct > 0 ? (
-                                  <div className="absolute top-2 right-2 bg-[#DB1D43] text-white px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold">
-                                    -{relDiscPct}%
-                                  </div>
-                                ) : (
-                                  <div className="absolute top-2 right-2 bg-[#F59E0B] text-[#0F172A] px-1.5 py-0.5 rounded-md text-[9.5px] font-extrabold">
-                                    សល់ {pStock}
-                                  </div>
-                                )}
-
-                                {/* Matching Size Hint Badge */}
-                                {hasMatchingSizeInStock && targetSize && (
-                                  <div className="absolute bottom-2 left-2 bg-emerald-950/80 backdrop-blur-xs text-emerald-200 px-2 py-0.5 rounded-md text-[9.5px] font-extrabold border border-emerald-400/30">
-                                    ✓ មាន {targetSize.replace(/^Size\s+/i, '')}
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="p-2.5 pb-1.5">
-                                <div className="font-bold text-xs text-[#0F172A] truncate">
-                                  {relProd.name}
-                                </div>
-                                <div className="flex items-baseline justify-between gap-1 mt-1 tabular-nums">
-                                  <div className="flex items-baseline gap-1.5">
-                                    <span className="font-black text-[15px] text-[#DB1D43]">
-                                      ${relProd.price.toFixed(2)}
-                                    </span>
-                                    {relProd.originalPrice > relProd.price && (
-                                      <span className="text-[10.5px] text-slate-400 line-through">
-                                        ${relProd.originalPrice.toFixed(2)}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <span className="text-[9.5px] font-bold text-slate-500">
-                                    សល់ {pStock}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Quick 1-Tap Add to Cart on Related Card */}
-                            <div className="px-2.5 pb-2.5 pt-1">
-                              <button
-                                type="button"
-                                disabled={pStock <= 0}
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  handleAddToCart(relProd, relFirstVar);
-                                }}
-                                className={`w-full py-1.5 px-2.5 rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                                  pStock <= 0
-                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                    : 'bg-[#FFF1F2] hover:bg-[#DB1D43] text-[#BE123C] hover:text-white border border-rose-200/80 active:scale-95'
-                                }`}
-                              >
-                                <span>+ ដាក់ចូលកន្ត្រក</span>
-                                {relQtyInCart > 0 && (
-                                  <span className="bg-[#DB1D43] text-white min-w-[16px] h-[16px] px-1 rounded-full text-[9.5px] font-black flex items-center justify-center tabular-nums">
-                                    {relQtyInCart}
-                                  </span>
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* =================================================================
-                  6. STICKY BOTTOM PURCHASE DOCK (Matching & Surpassing Reference)
-                  Top Row: Price Badge ($6.50) + Green Stock Pill (✓ មាន X ក្នុងស្តុក)
-                  Bottom Row: [🛒 ដាក់ក្នុងរទេះទំនិញ] + [⚡ ទិញឥឡូវ]
-                 ================================================================= */}
-              <div className="bg-white border-t border-slate-200/90 px-3.5 pt-2.5 pb-3.5 shadow-[0_-10px_28px_rgba(15,23,42,0.08)] z-20 space-y-2.5">
-                {/* Top Status Row inside Sticky Dock */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="bg-slate-100 text-[#0F172A] font-black text-sm px-3 py-1 rounded-xl tabular-nums">
-                      ${zoomProduct.price.toFixed(2)}
+                    <span>💬</span>
+                    <span>
+                      {isInquiring
+                        ? 'កំពុងបើកឆាត...'
+                        : `ឆាតសួរម្ចាស់ហាងពីកូដ ${zoomProduct.code}`}
                     </span>
-                    {activeZoomVariant && activeZoomVariant.stock > 0 && (
-                      <span className="text-[11px] font-bold text-slate-500 truncate max-w-[140px]">
-                        ({activeZoomVariant.color} • {activeZoomVariant.size.replace(/^Size\s+/i, '')})
-                      </span>
-                    )}
-                  </div>
-
-                  {totalZoomStock > 0 ? (
-                    <div className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 px-3 py-1 rounded-xl text-xs font-extrabold flex items-center gap-1.5 tabular-nums">
-                      <svg className="w-3.5 h-3.5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.8} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>មាន {activeZoomVariant ? activeZoomVariant.stock : totalZoomStock} ក្នុងស្តុក</span>
-                    </div>
-                  ) : (
-                    <div className="bg-rose-50 text-rose-700 border border-rose-200 px-3 py-1 rounded-xl text-xs font-extrabold">
-                      អស់ស្តុកបណ្ដោះអាសន្ន
-                    </div>
-                  )}
-                </div>
-
-                {/* Bottom Dual Action Buttons: Add to Cart + Buy Now */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* Left: Add to Cart (ដាក់ក្នុងរទេះទំនិញ) */}
-                  <button
-                    type="button"
-                    disabled={totalZoomStock <= 0}
-                    onClick={() => handleAddToCart(zoomProduct, activeZoomVariant)}
-                    className={`py-3 px-3 rounded-2xl font-extrabold text-[13px] flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                      totalZoomStock <= 0
-                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                        : 'bg-[#0F172A] hover:bg-slate-800 text-white shadow-sm active:scale-[0.98]'
-                    }`}
-                  >
-                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                    </svg>
-                    <span>ដាក់ក្នុងរទេះទំនិញ</span>
-                    {qtyOfProductInCart > 0 && (
-                      <span className="bg-[#DB1D43] text-white min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-black flex items-center justify-center tabular-nums">
-                        {qtyOfProductInCart}
-                      </span>
-                    )}
                   </button>
 
-                  {/* Right: Instant Buy Now (ទិញឥឡូវ) */}
                   <button
                     type="button"
-                    disabled={totalZoomStock <= 0}
-                    onClick={() => {
-                      const alreadyInCart = cart.some(
-                        c => c.productId === zoomProduct.id && c.variantId === activeZoomVariant?.id
-                      );
-                      if (!alreadyInCart) {
-                        handleAddToCart(zoomProduct, activeZoomVariant);
-                      }
-                      setZoomProduct(null);
-                      setCheckoutStep('SUMMARY');
-                      setIsEditingAddress(!phone.trim() || !address.trim());
-                      setIsCheckoutOpen(true);
-                    }}
-                    className={`py-3 px-3 rounded-2xl font-extrabold text-[13px] flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      totalZoomStock <= 0
-                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-[#E11D48] to-[#BE123C] hover:from-[#BE123C] hover:to-[#9F1239] text-white shadow-[0_8px_20px_rgba(219,29,67,0.35)] active:scale-[0.98]'
+                    onClick={() => toggleWishlist(zoomProduct.id, zoomProduct.code)}
+                    className={`py-2.5 px-3 rounded-xl font-extrabold text-xs border flex items-center justify-center gap-1 cursor-pointer ${
+                      wishlistIds.includes(zoomProduct.id)
+                        ? 'bg-[#FFF1F2] text-[#DB1D43] border-rose-300'
+                        : 'bg-slate-50 text-slate-700 border-slate-200'
                     }`}
                   >
-                    <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                    </svg>
-                    <span>ទិញឥឡូវ</span>
+                    <span>{wishlistIds.includes(zoomProduct.id) ? '❤️ រក្សាទុកហើយ' : '🤍 រក្សាទុក'}</span>
                   </button>
                 </div>
               </div>

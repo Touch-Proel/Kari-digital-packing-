@@ -7,11 +7,6 @@ export interface Product {
   cost_price: number;
   image_file?: string;
   live_id?: string;
-  previous_image_file?: string;
-  previous_price?: number;
-  previous_name?: string;
-  created_at?: string;
-  updated_at?: string;
 }
 
 export interface OrderItem {

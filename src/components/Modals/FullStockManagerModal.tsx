@@ -61,8 +61,6 @@ export function FullStockManagerModal({
   const [wipingStock, setWipingStock] = useState(false);
   const [uploadingCode, setUploadingCode] = useState<string | null>(null);
   const [syncingBaskets, setSyncingBaskets] = useState(false);
-  const [showRecoverConfirm, setShowRecoverConfirm] = useState(false);
-  const [recoveringSession, setRecoveringSession] = useState(false);
 
   const outCount = useMemo(() => products.filter(p => (p.stock_qty ?? 0) <= 0).length, [products]);
   const lowCount = useMemo(() => products.filter(p => (p.stock_qty ?? 0) > 0 && (p.stock_qty ?? 0) <= 5).length, [products]);
@@ -128,35 +126,6 @@ export function FullStockManagerModal({
       onShowToast('⚠️ បញ្ហាតភ្ជាប់បណ្តាញ WiFi!', 'error');
     } finally {
       setSyncingBaskets(false);
-    }
-  };
-
-  // Recover Yesterday's Original Photos/Prices & Split Today's Telegram Stock to New Live Session
-  const handleRecoverPreviousSession = async (switchToNewLive: boolean = false) => {
-    setRecoveringSession(true);
-    try {
-      const res = await fetch('/api/stock/recover_previous_session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          live_id: activeLiveId,
-          switch_to_new_live: switchToNewLive
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        playSuccessFanfare();
-        onShowToast(data.message || '✅ បានស្តាររូបភាពដើម និងបំបែកស្តុកថ្ងៃនេះទៅ Live ថ្មីជោគជ័យ!');
-        setShowRecoverConfirm(false);
-        onStockUpdated();
-      } else {
-        playWarningBuzzer();
-        onShowToast(data.message || data.error || 'មិនមានទិន្នន័យត្រូវបំបែកទេ', 'error');
-      }
-    } catch {
-      onShowToast('⚠️ បញ្ហាតភ្ជាប់បណ្តាញ WiFi!', 'error');
-    } finally {
-      setRecoveringSession(false);
     }
   };
 
@@ -505,17 +474,6 @@ export function FullStockManagerModal({
               <span className="hidden sm:inline">Paste</span>
             </button>
 
-            {/* Recover Cross-Day Overwritten Stock & Split Today's Stock */}
-            <button
-              type="button"
-              onClick={() => setShowRecoverConfirm(prev => !prev)}
-              className="bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-500/70 px-3 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-sm flex-shrink-0"
-              title="ស្តាររូបភាពដើមរបស់ Live ចាស់ និងបំបែកស្តុកដែលបាញ់ចូល Telegram ថ្ងៃនេះទៅ Live ថ្មី"
-            >
-              <span>🛡️</span>
-              <span>ស្តាររូបដើម & បំបែកស្តុកថ្ងៃនេះ</span>
-            </button>
-
             {/* Clear All Stock for this Live */}
             {products.length > 0 && (
               <button
@@ -529,45 +487,6 @@ export function FullStockManagerModal({
               </button>
             )}
           </div>
-
-          {/* Recovery & Split Confirmation Banner */}
-          {showRecoverConfirm && (
-            <div className="bg-amber-950/60 border border-amber-500/70 rounded-2xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn">
-              <div className="text-xs text-amber-100 leading-relaxed">
-                <div className="font-black text-amber-300 text-sm flex items-center gap-1.5">
-                  <span>🛡️ ស្តាររូបភាពដើម Live ចាស់ & បំបែកស្តុកថ្ងៃនេះទៅ Live ថ្មី</span>
-                </div>
-                <p className="text-[11px] text-amber-200/90 mt-0.5">
-                  ប្រព័ន្ធនឹងទាញយករូបភាពដើមពីម្សិលមិញមកដាក់ក្នុង Live <span className="font-mono font-bold text-white">#{activeLiveId?.slice(-8)}</span> និងកន្ត្រកភ្ញៀវម្សិលមិញវិញ ហើយបំបែកកូដ/រូបភាព/តម្លៃដែលបាញ់ចូល Telegram ថ្ងៃនេះទៅកាន់វគ្គ Live ថ្មីរបស់ថ្ងៃនេះដោយស្វ័យប្រវត្តិ!
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 flex-shrink-0 w-full sm:w-auto">
-                <button
-                  type="button"
-                  disabled={recoveringSession}
-                  onClick={() => handleRecoverPreviousSession(false)}
-                  className="flex-1 sm:flex-initial px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs active:scale-95 transition-all cursor-pointer disabled:opacity-50 shadow-md"
-                >
-                  {recoveringSession ? '⏳ កំពុងស្តារ...' : '🛡️ ស្តាររូបដើម & បំបែកឥឡូវនេះ'}
-                </button>
-                <button
-                  type="button"
-                  disabled={recoveringSession}
-                  onClick={() => handleRecoverPreviousSession(true)}
-                  className="flex-1 sm:flex-initial px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs active:scale-95 transition-all cursor-pointer disabled:opacity-50 shadow-md"
-                >
-                  {recoveringSession ? '⏳...' : '⚡ បំបែក & ប្តូរទៅ Live ថ្ងៃនេះ'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowRecoverConfirm(false)}
-                  className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Row 2: Filter Tabs & Sort Control */}
           <div className="flex flex-wrap items-center justify-between gap-2 py-0.5">

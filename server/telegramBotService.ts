@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { invoices, products, activeLiveId, normalizeLiveId, resolveSafeTargetLiveForTelegram, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
+import { invoices, products, activeLiveId, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
 import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, type ExtractedSlipData } from './fastCheckRoutes.ts';
 import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode, addMediaToBuffer, recentTelegramMediaBuffer } from './telegramSync.ts';
 import { broadcastSSE } from './packingRoutes.ts';
@@ -153,10 +153,9 @@ async function handleIncomingStockItemPhoto(
   }
 
   const primaryItem = stockItems[0];
-  const { targetLiveId: targetLive } = resolveSafeTargetLiveForTelegram(activeLiveId, messageDate, true);
   let photoUrl: string | undefined = undefined;
   if (chosenPhoto?.file_id) {
-    photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, primaryItem.code, messageDate, true, targetLive);
+    photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, primaryItem.code, messageDate, true);
   }
 
   // Bulk import items into products database (handles persistence, active live sync, and IDs)
@@ -169,18 +168,15 @@ async function handleIncomingStockItemPhoto(
       image_file: photoUrl
     })),
     'merge',
-    { targetLiveId: targetLive }
+    { targetLiveId: activeLiveId }
   );
 
   for (const item of stockItems) {
     const upperCode = item.code.toUpperCase();
 
-    // Keep cachedTelegramItems in sync so Web OS StockSyncModal displays it instantly (scoped to targetLive)
-    const existingCached = cachedTelegramItems.find(
-      c => (!c.live_id || normalizeLiveId(c.live_id) === targetLive) && c.code.toUpperCase() === upperCode
-    );
+    // Keep cachedTelegramItems in sync so Web OS StockSyncModal displays it instantly
+    const existingCached = cachedTelegramItems.find(c => c.code.toUpperCase() === upperCode);
     if (existingCached) {
-      existingCached.live_id = targetLive;
       existingCached.price = item.price;
       existingCached.image_url = photoUrl || existingCached.image_url;
       if (item.name) existingCached.name = item.name;
@@ -190,7 +186,6 @@ async function handleIncomingStockItemPhoto(
         name: item.name || `កូដ ${upperCode}`,
         price: item.price,
         stock_qty: 200,
-        live_id: targetLive,
         chat_id: typeof chatId === 'number' ? chatId : undefined,
         message_date: new Date().toISOString(),
         original_text: caption,
@@ -234,33 +229,29 @@ async function handleIncomingPhotoWithoutCaption(
 
   if (!chosenPhoto?.file_id) return;
 
-  const { targetLiveId: targetLive } = resolveSafeTargetLiveForTelegram(activeLiveId, messageDate, true);
-  // Check if any recent items in cachedTelegramItems for THIS live session have no image
+  // Check if any recent items in cachedTelegramItems (added within last 30 mins) have no image
   const targetItem = cachedTelegramItems.find(c => {
-    if (c.live_id && normalizeLiveId(c.live_id) !== targetLive) return false;
     if (c.image_url) return false;
     if (chatId && c.chat_id && String(c.chat_id) !== String(chatId)) return false;
     return true;
   });
 
   if (targetItem) {
-    const photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, targetItem.code, messageDate, true, targetLive);
+    const photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, targetItem.code, messageDate, true);
     if (photoUrl) {
       targetItem.image_url = photoUrl;
 
-      // Update in products database STRICTLY for the current activeLiveId
-      const existingProduct = products.find(
-        p => normalizeLiveId(p.live_id || '') === targetLive && p.code.toUpperCase() === targetItem.code.toUpperCase()
-      );
+      // Update in products database
+      const existingProduct = products.find(p => p.code.toUpperCase() === targetItem.code.toUpperCase());
       if (existingProduct) {
         existingProduct.image_file = photoUrl;
-        syncAllActiveInvoicesWithStock(targetLive);
+        syncAllActiveInvoicesWithStock();
         saveDatabaseToDisk();
       }
 
-      broadcastSSE('stock_updated', { live_id: targetLive, codes: [targetItem.code] });
+      broadcastSSE('stock_updated', { live_id: activeLiveId, codes: [targetItem.code] });
       bumpDataRevision();
-      console.log(`[Telegram Stock Sync] Silently attached incoming photo to recent item ${targetItem.code} in Live #${targetLive}`);
+      console.log(`[Telegram Stock Sync] Silently attached incoming photo to recent item ${targetItem.code}`);
     }
   }
 }
@@ -519,10 +510,7 @@ ${!isPaid ? `\n👉 វាយ <code>/paid ${inv.basket_no || inv.invoice_id}</co
     }
 
     const cleanQ = query.toLowerCase();
-    const targetLive = normalizeLiveId(activeLiveId);
-    const found = products.filter(
-      p => normalizeLiveId(p.live_id || '') === targetLive && (p.code.toLowerCase().includes(cleanQ) || (p.name && p.name.toLowerCase().includes(cleanQ)))
-    );
+    const found = products.filter(p => p.code.toLowerCase().includes(cleanQ) || (p.name && p.name.toLowerCase().includes(cleanQ)));
 
     if (found.length === 0) {
       await sendTelegramMessage(token, chatId, `❌ រកមិនឃើញទំនិញដែលមានកូដ/ឈ្មោះ <b>"${query}"</b> ក្នុងស្តុកទេ!`, messageId);
@@ -645,12 +633,10 @@ async function startPollingLoop() {
             const rawCaption = msg.caption || '';
             const bestPhotoId = photoArray[photoArray.length - 1]?.file_id;
 
-            // Register photo into sliding media buffer (scoped to safe targetLive for message date)
+            // Register photo into sliding media buffer
             if (bestPhotoId) {
-              const { targetLiveId: safeMediaLive } = resolveSafeTargetLiveForTelegram(activeLiveId, msg.date, true);
               addMediaToBuffer({
                 file_id: bestPhotoId,
-                live_id: safeMediaLive,
                 chat_id: chatId,
                 chat_title: msg.chat?.title || 'Telegram Group',
                 sender_name: msg.from ? `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim() : 'Admin',
@@ -704,28 +690,25 @@ async function startPollingLoop() {
               const stockItems = parseLinesForStockItems(trimmed);
               if (stockItems.length > 0) {
                 telegramQueue.add(async () => {
-                  const { targetLiveId: targetLive } = resolveSafeTargetLiveForTelegram(activeLiveId, msg.date, true);
-                  // Find any recent unattached photo from this chat in sliding window (within 60 minutes & same Live session)
+                  // Find any recent unattached photo from this chat in sliding window (within 60 minutes)
                   const matchedPhoto = recentTelegramMediaBuffer.find(
-                    b => (!b.live_id || normalizeLiveId(b.live_id) === targetLive) &&
-                         (!chatId || !b.chat_id || String(b.chat_id) === String(chatId)) &&
+                    b => (!chatId || !b.chat_id || String(b.chat_id) === String(chatId)) &&
                          (!b.matched_codes || b.matched_codes.length === 0) &&
                          Math.abs((msg.date || Date.now() / 1000) - b.date_sec) < 3600
                   ) || recentTelegramMediaBuffer.find(
-                    b => (!b.live_id || normalizeLiveId(b.live_id) === targetLive) &&
-                         (!chatId || !b.chat_id || String(b.chat_id) === String(chatId)) &&
+                    b => (!chatId || !b.chat_id || String(b.chat_id) === String(chatId)) &&
                          Math.abs((msg.date || Date.now() / 1000) - b.date_sec) < 3600
                   );
 
                   let photoUrl: string | undefined = undefined;
                   if (matchedPhoto?.file_id) {
-                    photoUrl = await downloadTelegramPhoto(token, matchedPhoto.file_id, stockItems[0].code, msg.date, true, targetLive);
+                    photoUrl = await downloadTelegramPhoto(token, matchedPhoto.file_id, stockItems[0].code, msg.date, true);
                     matchedPhoto.matched_codes = matchedPhoto.matched_codes || [];
                     matchedPhoto.matched_codes.push(stockItems[0].code);
                   }
 
                   bulkImportStockItems(
-                    stockItems.map((item) => ({
+                    stockItems.map((item, itmIdx) => ({
                       code: item.code,
                       name: item.name,
                       price: item.price,
@@ -733,16 +716,13 @@ async function startPollingLoop() {
                       image_file: photoUrl
                     })),
                     'merge',
-                    { targetLiveId: targetLive }
+                    { targetLiveId: activeLiveId }
                   );
 
                   for (const item of stockItems) {
                     const upperCode = item.code.toUpperCase();
-                    const existingCached = cachedTelegramItems.find(
-                      c => (!c.live_id || normalizeLiveId(c.live_id) === targetLive) && c.code.toUpperCase() === upperCode
-                    );
+                    const existingCached = cachedTelegramItems.find(c => c.code.toUpperCase() === upperCode);
                     if (existingCached) {
-                      existingCached.live_id = targetLive;
                       existingCached.price = item.price;
                       if (photoUrl) existingCached.image_url = photoUrl;
                       if (item.name) existingCached.name = item.name;
@@ -752,7 +732,6 @@ async function startPollingLoop() {
                         name: item.name || `កូដ ${upperCode}`,
                         price: item.price,
                         stock_qty: 200,
-                        live_id: targetLive,
                         chat_id: typeof chatId === 'number' ? chatId : undefined,
                         message_date: new Date().toISOString(),
                         original_text: trimmed,
@@ -762,7 +741,7 @@ async function startPollingLoop() {
                     }
                   }
 
-                  broadcastSSE('stock_updated', { live_id: targetLive, codes: stockItems.map(s => s.code) });
+                  broadcastSSE('stock_updated', { live_id: activeLiveId, codes: stockItems.map(s => s.code) });
                   bumpDataRevision();
                   console.log(`[Telegram Stock Sync] Recorded text items ${stockItems.map(s => s.code).join(', ')} with photo ${photoUrl || '(none)'}`);
                 });

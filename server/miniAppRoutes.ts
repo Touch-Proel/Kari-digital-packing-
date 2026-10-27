@@ -2357,43 +2357,5 @@ router.post('/inquire', async (req: Request, res: Response) => {
   }
 });
 
-export function getMiniAppShareMetadata(codeParam?: string): {
-  title: string;
-  description: string;
-  imageUrl?: string;
-} | null {
-  try {
-    const storeName = miniAppDb?.config?.storeName || 'Kari Shop';
-    if (!codeParam) {
-      return {
-        title: `${storeName} — ហាងសម្លៀកបំពាក់អនឡាញ`,
-        description: miniAppDb?.config?.promoBannerText || 'កម្ម៉ង់ទិញរហ័សទាន់ចិត្ត • ស្កេន KHQR ឬ បង់ប្រាក់ពេលទទួលអីវ៉ាន់ (COD)',
-        imageUrl: miniAppDb?.config?.storeLogoUrl || undefined
-      };
-    }
-    const cleanCode = String(codeParam).trim().toUpperCase();
-    const product = (miniAppDb?.products || []).find(
-      p => String(p.code || '').trim().toUpperCase() === cleanCode
-    );
-    if (!product) return null;
-
-    const totalStock = (product.variants || []).reduce((s, v) => s + (Number(v.stock) || 0), 0);
-    const stockText = totalStock > 0 ? `មានក្នុងស្តុក ${totalStock} ឈុត` : 'អស់ស្តុកបណ្ដោះអាសន្ន';
-    const origText =
-      product.originalPrice > product.price ? ` (តម្លៃដើម $${product.originalPrice.toFixed(2)})` : '';
-    const primaryImg =
-      (Array.isArray(product.images) && product.images.length > 0 ? product.images[0] : product.imageUrl) || '';
-
-    return {
-      title: `[កូដ ${product.code}] ${product.name} — $${product.price.toFixed(2)} | ${storeName}`,
-      description: `តម្លៃពិសេស $${product.price.toFixed(2)}${origText} • ${stockText} • ចុចមើលរូបច្បាស់ៗ និងកម្ម៉ង់ទិញភ្លាមក្នុង ${storeName}`,
-      imageUrl: primaryImg && !primaryImg.startsWith('data:') ? primaryImg : undefined
-    };
-  } catch {
-    return null;
-  }
-}
-
 export default router;
-
 

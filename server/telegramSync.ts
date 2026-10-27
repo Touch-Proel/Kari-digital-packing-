@@ -1,21 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import {
-  products,
-  invoices,
-  activeLiveId,
-  normalizeLiveId,
-  setActiveLiveId,
-  getPhnomPenhDateKey,
-  getSessionOriginalDateKey,
-  isLiveSessionFromPreviousDay,
-  resolveSafeTargetLiveForTelegram,
-  recalculateInvoice,
-  settings,
-  saveDatabaseToDisk,
-  bumpDataRevision,
-  syncAllActiveInvoicesWithStock
-} from './db.ts';
+import { products, invoices, activeLiveId, recalculateInvoice, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
 import type { Product } from './types.ts';
 import { broadcastSSE } from './packingRoutes.ts';
 
@@ -26,7 +11,6 @@ export interface TelegramItemParsed {
   stock_qty: number;
   cost_price?: number;
   image_url?: string;
-  live_id?: string;
   chat_id?: number | string;
   chat_title?: string;
   sender_name?: string;
@@ -46,7 +30,6 @@ export interface TelegramBotInfo {
 
 export interface BufferedMediaItem {
   file_id: string;
-  live_id?: string;
   chat_id?: number | string;
   chat_title?: string;
   sender_name?: string;
@@ -162,17 +145,14 @@ export function extractBestPhotoFileId(msg: any): string | undefined {
   return undefined;
 }
 
-// 3. Helper to find existing product image on disk (strictly scoped to targetLive)
+// 3. Helper to find existing product image on disk
 export function findImageOnDiskForCode(code: string, liveId?: string): string | null {
   try {
     if (!code) return null;
     const clean = code.trim().toLowerCase();
-    const targetLive = normalizeLiveId(liveId || activeLiveId);
-    if (!targetLive) return null;
-
-    const existingProd = products.find(
-      p => normalizeLiveId(p.live_id || '') === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== ''
-    );
+    const targetLive = liveId || activeLiveId;
+    
+    const existingProd = products.find(p => p.live_id === targetLive && p.code && p.code.trim().toLowerCase() === clean && p.image_file && p.image_file.trim() !== '');
     if (existingProd?.image_file && existingProd.image_file.startsWith('/uploads/')) {
       const relPath = existingProd.image_file.replace(/^\//, '');
       if (fs.existsSync(path.join(process.cwd(), 'public', relPath)) || fs.existsSync(path.join(process.cwd(), 'dist', relPath))) {
@@ -183,27 +163,23 @@ export function findImageOnDiskForCode(code: string, liveId?: string): string | 
   return null;
 }
 
-// 4. Download and save Telegram photo with Live Session isolation in filename
+// 4. Download and save Telegram photo with HD 500x500 Sharp Progressive Optimization
 export async function downloadTelegramPhoto(
   token: string,
   fileId: string,
   codeHint: string,
   dateHint?: string | number,
-  forceFresh: boolean = false,
-  liveId?: string
+  forceFresh: boolean = false
 ): Promise<string | undefined> {
   const safeCode = codeHint ? codeHint.replace(/[^A-Za-z0-9_\u1780-\u17B3-]/g, '') : 'item';
-  const targetLive = normalizeLiveId(liveId || activeLiveId || 'live');
-  const safeLiveTag = targetLive.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8) || 'live';
   const cleanFileKey = fileId.replace(/[^a-zA-Z0-9]/g, '').slice(-16) || 'img';
-  const standardFilename = `tg_${safeLiveTag}_${safeCode}_${cleanFileKey}.jpg`;
-  const cacheKey = `${safeLiveTag}_${fileId}`;
+  const standardFilename = `tg_${safeCode}_${cleanFileKey}.jpg`;
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   const distUploadDir = path.join(process.cwd(), 'dist', 'uploads');
 
   if (!forceFresh) {
-    if (downloadedPhotoCache.has(cacheKey)) {
-      const cached = downloadedPhotoCache.get(cacheKey);
+    if (downloadedPhotoCache.has(fileId)) {
+      const cached = downloadedPhotoCache.get(fileId);
       if (cached) {
         const p1 = path.join(process.cwd(), 'public', cached.replace(/^\//, ''));
         const p2 = path.join(process.cwd(), 'dist', cached.replace(/^\//, ''));
@@ -220,7 +196,7 @@ export async function downloadTelegramPhoto(
         const stat = fs.statSync(existingPath);
         if (stat.size > 1000) {
           const cachedUrl = `/uploads/${standardFilename}`;
-          downloadedPhotoCache.set(cacheKey, cachedUrl);
+          downloadedPhotoCache.set(fileId, cachedUrl);
           return cachedUrl;
         }
       } catch {}
@@ -229,7 +205,7 @@ export async function downloadTelegramPhoto(
         const stat = fs.statSync(existingDistPath);
         if (stat.size > 1000) {
           const cachedUrl = `/uploads/${standardFilename}`;
-          downloadedPhotoCache.set(cacheKey, cachedUrl);
+          downloadedPhotoCache.set(fileId, cachedUrl);
           return cachedUrl;
         }
       } catch {}
@@ -272,7 +248,7 @@ export async function downloadTelegramPhoto(
     }
 
     const resultUrl = `/uploads/${filename}`;
-    downloadedPhotoCache.set(cacheKey, resultUrl);
+    downloadedPhotoCache.set(fileId, resultUrl);
     return resultUrl;
   } catch (err) {
     console.error(`[Telegram Photo Download Error for ${safeCode}]:`, err);
@@ -428,31 +404,11 @@ export function parseLinesForStockItems(rawText: string, defaultQty: number = 20
 
 // In-memory cache of scanned items to prevent losing data after Telegram offset acknowledgement
 export let cachedTelegramItems: TelegramItemParsed[] = [];
-let cachedTelegramLiveId: string = '';
 
 export function clearScannedTelegramCache() {
   cachedTelegramItems = [];
   lastScannedUpdateId = undefined;
   downloadedPhotoCache.clear();
-}
-
-/**
- * Reset Telegram in-memory cache and auto-sync target whenever switching or creating a new Live Session.
- * Prevents 100+ items from a previous Live session from leaking into the new Live session!
- */
-export function resetTelegramStateForNewLiveSession(newLiveId: string) {
-  const cleanNew = normalizeLiveId(newLiveId);
-  if (!cleanNew) return;
-  if (cachedTelegramLiveId !== cleanNew) {
-    cachedTelegramItems = cachedTelegramItems.filter(it => normalizeLiveId(it.live_id || '') === cleanNew);
-    for (let i = recentTelegramMediaBuffer.length - 1; i >= 0; i--) {
-      if (recentTelegramMediaBuffer[i].live_id && normalizeLiveId(recentTelegramMediaBuffer[i].live_id || '') !== cleanNew) {
-        recentTelegramMediaBuffer.splice(i, 1);
-      }
-    }
-    cachedTelegramLiveId = cleanNew;
-  }
-  tgAutoSyncState.targetLiveId = cleanNew;
 }
 
 // ----------------------------------------------------------------------
@@ -464,7 +420,6 @@ export async function fetchTelegramStockUpdates(options: {
   markRead?: boolean;
   clearCache?: boolean;
   limit?: number;
-  targetLiveId?: string;
 }): Promise<{
   success: boolean;
   bot?: TelegramBotInfo;
@@ -475,15 +430,6 @@ export async function fetchTelegramStockUpdates(options: {
   error?: string;
 }> {
   const token = (options.token || settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN || '').trim();
-  const resolvedLive = resolveSafeTargetLiveForTelegram(options.targetLiveId || activeLiveId, undefined, true);
-  const targetLive = resolvedLive.targetLiveId;
-  if (targetLive && cachedTelegramLiveId && cachedTelegramLiveId !== targetLive) {
-    resetTelegramStateForNewLiveSession(targetLive);
-  } else if (targetLive) {
-    cachedTelegramLiveId = targetLive;
-  }
-  const sessionCachedItems = cachedTelegramItems.filter(it => !it.live_id || normalizeLiveId(it.live_id) === targetLive);
-
   if (!token) {
     return {
       success: false,
@@ -504,9 +450,9 @@ export async function fetchTelegramStockUpdates(options: {
   if (!botRes.success || !botRes.bot) {
     return {
       success: false,
-      items: sessionCachedItems,
+      items: cachedTelegramItems,
       messagesScanned: 0,
-      totalFound: sessionCachedItems.length,
+      totalFound: cachedTelegramItems.length,
       error: botRes.error || 'Bot Token មិនត្រឹមត្រូវ'
     };
   }
@@ -619,11 +565,10 @@ export async function fetchTelegramStockUpdates(options: {
 
       messagesList.push(norm);
 
-      // Also register photo into media buffer (scoped to targetLive)
+      // Also register photo into media buffer
       if (photoFileId) {
         addMediaToBuffer({
           file_id: photoFileId,
-          live_id: targetLive,
           chat_id: msg.chat?.id,
           chat_title: chatTitle,
           sender_name: senderName,
@@ -642,17 +587,6 @@ export async function fetchTelegramStockUpdates(options: {
       if (a.date !== b.date) return a.date - b.date;
       return a.message_id - b.message_id;
     });
-
-    // Cross-Day Telegram Message Filter:
-    // Telegram getUpdates retains messages for 24 hours. If messagesList contains messages from multiple
-    // calendar days (e.g. yesterday AND today in Asia/Phnom_Penh), keep ONLY the messages matching
-    // the target Live session's calendar day (or the latest day in the batch) so yesterday's & today's stock never mix!
-    const targetSessionDateKey = getSessionOriginalDateKey(targetLive) || getPhnomPenhDateKey();
-    const sameDayMessages = messagesList.filter(m => !m.date || getPhnomPenhDateKey(m.date) === targetSessionDateKey);
-    if (sameDayMessages.length > 0 && sameDayMessages.length < messagesList.length) {
-      messagesList.length = 0;
-      messagesList.push(...sameDayMessages);
-    }
 
     // 4. Group by media_group_id (Albums)
     const mediaGroupMap = new Map<string, NormalizedMessage[]>();
@@ -710,7 +644,6 @@ export async function fetchTelegramStockUpdates(options: {
               name: lineItem.name || `កូដ ${lineItem.code}`,
               price: lineItem.price,
               stock_qty: defaultQty,
-              live_id: targetLive,
               chat_id: m.chat_id,
               chat_title: m.chat_title,
               sender_name: m.sender_name,
@@ -757,12 +690,10 @@ export async function fetchTelegramStockUpdates(options: {
         }
       }
 
-      // Tier 4: Sliding Window Media Buffer Fallback (strictly within same Live session)
+      // Tier 4: Sliding Window Media Buffer Fallback
       if (!assignedPhotoFileId) {
         const bufferedMatch = recentTelegramMediaBuffer.find(
-          b => (!b.live_id || normalizeLiveId(b.live_id) === targetLive) &&
-               (!m.chat_id || b.chat_id === m.chat_id) &&
-               Math.abs(m.date - b.date_sec) < 3600
+          b => (!m.chat_id || b.chat_id === m.chat_id) && Math.abs(m.date - b.date_sec) < 3600
         );
         if (bufferedMatch?.file_id) {
           assignedPhotoFileId = bufferedMatch.file_id;
@@ -771,14 +702,13 @@ export async function fetchTelegramStockUpdates(options: {
 
       // Record items
       for (const item of parsedLines) {
-        const existingDiskImage = findImageOnDiskForCode(item.code, targetLive);
+        const existingDiskImage = findImageOnDiskForCode(item.code);
 
         newlyParsedMap.set(item.code, {
           code: item.code,
           name: item.name || `កូដ ${item.code}`,
           price: item.price,
           stock_qty: defaultQty,
-          live_id: targetLive,
           chat_id: m.chat_id,
           chat_title: m.chat_title,
           sender_name: m.sender_name,
@@ -795,7 +725,7 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 6. Download fresh photos (scoped to targetLive)
+    // 6. Download fresh photos
     const downloadEntries = Array.from(photoToDownloadMap.entries());
     const concurrency = 2;
     for (let i = 0; i < downloadEntries.length; i += concurrency) {
@@ -803,7 +733,7 @@ export async function fetchTelegramStockUpdates(options: {
       await Promise.all(
         chunk.map(async ([code, { fileId, messageDate, isFresh }]) => {
           try {
-            const url = await downloadTelegramPhoto(token, fileId, code, messageDate, isFresh || !!options.clearCache, targetLive);
+            const url = await downloadTelegramPhoto(token, fileId, code, messageDate, isFresh || !!options.clearCache);
             const item = newlyParsedMap.get(code);
             if (item && url) {
               item.image_url = url;
@@ -818,12 +748,10 @@ export async function fetchTelegramStockUpdates(options: {
       }
     }
 
-    // 7. Merge ONLY with cached items belonging to this exact targetLive
+    // 7. Merge with cached items
     const combinedMap = new Map<string, TelegramItemParsed>();
     for (const it of cachedTelegramItems) {
-      if (!it.live_id || normalizeLiveId(it.live_id) === targetLive) {
-        combinedMap.set(it.code, { ...it, live_id: targetLive });
-      }
+      combinedMap.set(it.code, it);
     }
     for (const [code, it] of newlyParsedMap.entries()) {
       const existing = combinedMap.get(code);
@@ -831,11 +759,10 @@ export async function fetchTelegramStockUpdates(options: {
         combinedMap.set(code, {
           ...existing,
           ...it,
-          live_id: targetLive,
           image_url: it.image_url || existing.image_url
         });
       } else {
-        combinedMap.set(code, { ...it, live_id: targetLive });
+        combinedMap.set(code, it);
       }
     }
 
@@ -889,11 +816,11 @@ export function bulkImportStockItems(
     return { success: false, imported: 0, updated: 0, total: products.length };
   }
 
-  const targetLive = normalizeLiveId(options?.targetLiveId || activeLiveId);
+  const targetLive = options?.targetLiveId || activeLiveId;
 
   if (mode === 'replace') {
     for (let i = products.length - 1; i >= 0; i--) {
-      if (normalizeLiveId(products[i].live_id || '') === targetLive) {
+      if ((products[i].live_id || activeLiveId) === targetLive) {
         products.splice(i, 1);
       }
     }
@@ -907,37 +834,22 @@ export function bulkImportStockItems(
     const cleanCode = String(it.code).trim().toUpperCase();
     if (!cleanCode) continue;
 
-    const existing = products.find(p => normalizeLiveId(p.live_id || '') === targetLive && p.code.toUpperCase() === cleanCode);
+    const existing = products.find(p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase() === cleanCode);
     if (existing) {
       existing.live_id = targetLive;
-      const incomingPrice = (it.price !== undefined && it.price !== null) ? Number(it.price) : existing.price;
-      const incomingImg = (it.image_file && it.image_file.trim() !== '') ? it.image_file.trim() : existing.image_file;
-
-      // Save previous photo & price backup before overwriting so any accidental overwrite can be restored
-      if (incomingImg && existing.image_file && incomingImg !== existing.image_file) {
-        existing.previous_image_file = existing.image_file;
-      }
-      if (incomingPrice > 0 && existing.price > 0 && Math.abs(incomingPrice - existing.price) > 0.001) {
-        existing.previous_price = existing.price;
-      }
-      if (it.name && existing.name && it.name.trim() !== existing.name) {
-        existing.previous_name = existing.name;
-      }
-
       if (it.price !== undefined && it.price !== null) {
-        existing.price = incomingPrice;
+        existing.price = Number(it.price);
       }
       if (!keepStock && it.stock_qty !== undefined && it.stock_qty !== null) {
         existing.stock_qty = Number(it.stock_qty);
       }
       if (it.name && it.name !== `កូដ ${cleanCode}`) existing.name = it.name.trim();
       if (it.cost_price !== undefined) existing.cost_price = Number(it.cost_price);
-
+      
       // Always update image_file if provided from fresh scan
       if (it.image_file && it.image_file.trim() !== '') {
         existing.image_file = it.image_file.trim();
       }
-      existing.updated_at = new Date().toISOString();
       updatedCount++;
     } else {
       const resolvedImage = (it.image_file && it.image_file.trim() !== '')
@@ -945,7 +857,6 @@ export function bulkImportStockItems(
         : findImageOnDiskForCode(cleanCode, targetLive) || '';
 
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
-      const nowIso = new Date().toISOString();
       const newProd: Product = {
         id: nextId,
         live_id: targetLive,
@@ -954,9 +865,7 @@ export function bulkImportStockItems(
         price: Number(it.price || 0),
         stock_qty: Number(it.stock_qty !== undefined ? it.stock_qty : 200),
         cost_price: Number(it.cost_price || 0),
-        image_file: resolvedImage || '',
-        created_at: nowIso,
-        updated_at: nowIso
+        image_file: resolvedImage || ''
       };
       products.push(newProd);
       importedCount++;
@@ -1032,18 +941,11 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
   tgAutoSyncState.running = true;
 
   try {
-    const resolved = resolveSafeTargetLiveForTelegram(tgAutoSyncState.targetLiveId || activeLiveId, undefined, true);
-    const currentTargetLive = resolved.targetLiveId;
-    if (resolved.autoCreatedNewSession) {
-      tgAutoSyncState.targetLiveId = currentTargetLive;
-    }
-
     const res = await fetchTelegramStockUpdates({
       token: activeToken,
       defaultQty: 200,
       markRead: false,
-      clearCache: false,
-      targetLiveId: currentTargetLive
+      clearCache: false
     });
 
     if (!res.success) {
@@ -1052,13 +954,12 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
       return { success: false, imported: 0, scanned: 0, error: tgAutoSyncState.lastError };
     }
 
-    const sessionItems = res.items.filter(it => !it.live_id || normalizeLiveId(it.live_id) === currentTargetLive);
-    tgAutoSyncState.lastScannedCount = sessionItems.length;
+    tgAutoSyncState.lastScannedCount = res.items.length;
     tgAutoSyncState.lastSyncAt = new Date().toISOString();
     tgAutoSyncState.lastError = null;
 
-    if (sessionItems.length > 0) {
-      const itemsToImport = sessionItems.map(it => ({
+    if (res.items.length > 0) {
+      const itemsToImport = res.items.map(it => ({
         code: it.code,
         name: it.name,
         price: it.price,
@@ -1069,11 +970,11 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
 
       const importRes = bulkImportStockItems(itemsToImport, 'merge', {
         keepExistingStockQty: true,
-        targetLiveId: currentTargetLive
+        targetLiveId: tgAutoSyncState.targetLiveId || activeLiveId
       });
 
       tgAutoSyncState.lastImportedCount = importRes.imported + importRes.updated;
-      tgAutoSyncState.totalProductsCount = products.filter(p => normalizeLiveId(p.live_id || '') === currentTargetLive).length;
+      tgAutoSyncState.totalProductsCount = products.length;
 
       tgAutoSyncState.running = false;
       return {
@@ -1089,388 +990,6 @@ export async function executeTelegramAutoSyncOnce(force = false): Promise<{
     tgAutoSyncState.lastError = err.message || 'Auto-sync failed unexpectedly';
     tgAutoSyncState.running = false;
     return { success: false, imported: 0, scanned: 0, error: tgAutoSyncState.lastError };
-  }
-}
-
-export interface DiskPhotoEntry {
-  filename: string;
-  url: string;
-  code: string;
-  liveTag: string;
-  mtimeMs: number;
-  dateKey: string;
-}
-
-/**
- * Scans public/uploads (and dist/uploads) for all saved product photos matching a given liveId (or code).
- */
-export function scanUploadedPhotosForLive(liveId?: string): Map<string, DiskPhotoEntry[]> {
-  const result = new Map<string, DiskPhotoEntry[]>();
-  const targetLive = normalizeLiveId(liveId || activeLiveId);
-  const safeLiveTag = targetLive.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8) || 'live';
-  const dirs = [
-    path.join(process.cwd(), 'public', 'uploads'),
-    path.join(process.cwd(), 'dist', 'uploads')
-  ];
-
-  const seenFiles = new Set<string>();
-  for (const dir of dirs) {
-    if (!fs.existsSync(dir)) continue;
-    try {
-      const files = fs.readdirSync(dir);
-      for (const file of files) {
-        if (seenFiles.has(file)) continue;
-        // Match tg_<liveTag>_<code>_<fileKey>.jpg or code_<liveTag>_<code>_<ts>.jpg
-        const tgMatch = file.match(/^tg_([a-zA-Z0-9_-]+)_([A-Za-z0-9_\u1780-\u17B3-]+)_([a-zA-Z0-9]+)\.(?:jpg|jpeg|png|webp)$/i);
-        const codeMatch = !tgMatch
-          ? file.match(/^code_([a-zA-Z0-9_-]+)_([A-Za-z0-9_\u1780-\u17B3-]+)_(\d+)\.(?:jpg|jpeg|png|webp)$/i)
-          : null;
-        const m = tgMatch || codeMatch;
-        if (!m) continue;
-
-        const fileLiveTag = m[1];
-        const rawCode = m[2].toUpperCase();
-        if (liveId && fileLiveTag !== safeLiveTag) continue;
-
-        const fullPath = path.join(dir, file);
-        const stat = fs.statSync(fullPath);
-        if (stat.size < 500) continue;
-
-        seenFiles.add(file);
-        const entry: DiskPhotoEntry = {
-          filename: file,
-          url: `/uploads/${file}`,
-          code: rawCode,
-          liveTag: fileLiveTag,
-          mtimeMs: stat.mtimeMs,
-          dateKey: getPhnomPenhDateKey(stat.mtime)
-        };
-
-        if (!result.has(rawCode)) {
-          result.set(rawCode, []);
-        }
-        result.get(rawCode)!.push(entry);
-      }
-    } catch {}
-  }
-
-  for (const [, list] of result.entries()) {
-    list.sort((a, b) => a.mtimeMs - b.mtimeMs);
-  }
-  return result;
-}
-
-/**
- * Returns all historical photos on disk for a specific product code in a Live session
- */
-export function getProductPhotoHistoryOnDisk(code: string, liveId?: string): DiskPhotoEntry[] {
-  const cleanCode = String(code || '').trim().toUpperCase();
-  if (!cleanCode) return [];
-  const map = scanUploadedPhotosForLive(liveId);
-  return map.get(cleanCode) || [];
-}
-
-/**
- * FORENSIC RECOVERY & SPLIT ENGINE:
- * When today's Telegram photos/prices accidentally overwrote yesterday's Live Session (e.g. #18102916):
- * 1. Finds all products in `oldLiveId` that have photos uploaded TODAY (or `previous_image_file` / multiple disk photos across days).
- * 2. Copies today's new items (with today's photo & price) into today's new Live Session (`LIVE_YYYYMMDD`).
- * 3. Restores yesterday's original photo (`olderFiles` from disk or `previous_image_file`) and `previous_price` back onto `oldLiveId` products & customer baskets!
- * 4. Removes any purely-today items from `oldLiveId` that had no yesterday photo and were never ordered in any `oldLiveId` basket.
- */
-export function recoverOverwrittenLiveSessionStock(options?: {
-  oldLiveId?: string;
-  newTodayLiveId?: string;
-  switchToNewLive?: boolean;
-}): {
-  success: boolean;
-  oldLiveId: string;
-  newTodayLiveId: string;
-  restoredPhotosCount: number;
-  restoredPricesCount: number;
-  movedToTodayCount: number;
-  removedPureTodayFromOldCount: number;
-  updatedBasketsCount: number;
-  message: string;
-} {
-  const todayDateKey = getPhnomPenhDateKey();
-  const todayCompact = todayDateKey.replace(/-/g, '');
-  const oldLiveId = normalizeLiveId(options?.oldLiveId || activeLiveId);
-  const newTodayLiveId = normalizeLiveId(options?.newTodayLiveId || `LIVE_${todayCompact}`);
-
-  if (!oldLiveId || oldLiveId === newTodayLiveId) {
-    return {
-      success: false,
-      oldLiveId,
-      newTodayLiveId,
-      restoredPhotosCount: 0,
-      restoredPricesCount: 0,
-      movedToTodayCount: 0,
-      removedPureTodayFromOldCount: 0,
-      updatedBasketsCount: 0,
-      message: 'វគ្គ Live នេះគឺជាវគ្គថ្ងៃនេះរួចហើយ មិនចាំបាច់បំបែកទេ។'
-    };
-  }
-
-  const sessionOriginalDate = getSessionOriginalDateKey(oldLiveId) || '';
-  const diskPhotosByCode = scanUploadedPhotosForLive(oldLiveId);
-
-  // Collect all product codes that were actually ordered in oldLiveId customer baskets
-  const oldSessionInvoices = invoices.filter(
-    inv => normalizeLiveId(inv.live_id || '') === oldLiveId && inv.status !== 'Cancelled'
-  );
-  const codesOrderedInOldBaskets = new Set<string>();
-  const basketItemPriceFallback = new Map<string, number>();
-
-  for (const inv of oldSessionInvoices) {
-    for (const it of inv.items || []) {
-      const c = (it.product_code || '').trim().toUpperCase();
-      if (c) {
-        codesOrderedInOldBaskets.add(c);
-        // If a dispatched or paid basket has an older price, keep as reference
-        if ((inv.status === 'Dispatched' || inv.status === 'Paid') && it.price > 0) {
-          basketItemPriceFallback.set(c, it.price);
-        }
-      }
-    }
-  }
-
-  let restoredPhotosCount = 0;
-  let restoredPricesCount = 0;
-  let movedToTodayCount = 0;
-  let removedPureTodayFromOldCount = 0;
-
-  const oldSessionProducts = products.filter(p => normalizeLiveId(p.live_id || '') === oldLiveId);
-  const productsToRemoveFromOld = new Set<number>();
-
-  for (const prod of oldSessionProducts) {
-    const cleanCode = (prod.code || '').trim().toUpperCase();
-    if (!cleanCode) continue;
-
-    const codePhotos = diskPhotosByCode.get(cleanCode) || [];
-    // Photos from before today (yesterday or earlier)
-    const olderPhotos = codePhotos.filter(ph =>
-      sessionOriginalDate && sessionOriginalDate < todayDateKey
-        ? ph.dateKey <= sessionOriginalDate
-        : ph.dateKey < todayDateKey
-    );
-    // Photos downloaded today
-    const todayPhotos = codePhotos.filter(ph => ph.dateKey >= todayDateKey);
-
-    // Check if current prod.image_file is a file modified today
-    let currentImgIsFromToday = todayPhotos.length > 0;
-    let currentImgUrl = (prod.image_file || '').split('?')[0].trim();
-    if (!currentImgIsFromToday && currentImgUrl.startsWith('/uploads/')) {
-      try {
-        const fullP = path.join(process.cwd(), 'public', currentImgUrl.replace(/^\//, ''));
-        if (fs.existsSync(fullP)) {
-          const st = fs.statSync(fullP);
-          if (getPhnomPenhDateKey(st.mtime) >= todayDateKey) {
-            currentImgIsFromToday = true;
-          }
-        }
-      } catch {}
-    }
-
-    const wasUpdatedToday =
-      currentImgIsFromToday ||
-      Boolean(prod.previous_image_file) ||
-      Boolean(prod.previous_price !== undefined) ||
-      (prod.updated_at ? getPhnomPenhDateKey(prod.updated_at) >= todayDateKey : false);
-
-    if (!wasUpdatedToday) continue;
-
-    // 1. Copy/Update Today's Version into newTodayLiveId (`LIVE_YYYYMMDD`)
-    const todayPhotoUrl =
-      todayPhotos.length > 0
-        ? todayPhotos[todayPhotos.length - 1].url
-        : currentImgUrl;
-
-    const existingInToday = products.find(
-      p => normalizeLiveId(p.live_id || '') === newTodayLiveId && (p.code || '').trim().toUpperCase() === cleanCode
-    );
-    const nowIso = new Date().toISOString();
-
-    if (existingInToday) {
-      existingInToday.price = prod.price;
-      existingInToday.name = prod.name;
-      if (todayPhotoUrl) existingInToday.image_file = todayPhotoUrl;
-      existingInToday.updated_at = nowIso;
-    } else {
-      const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
-      products.push({
-        id: nextId,
-        live_id: newTodayLiveId,
-        code: cleanCode,
-        name: prod.name || `កូដ ${cleanCode}`,
-        price: prod.price,
-        stock_qty: 200,
-        cost_price: prod.cost_price || 0,
-        image_file: todayPhotoUrl || '',
-        created_at: nowIso,
-        updated_at: nowIso
-      });
-    }
-    movedToTodayCount++;
-
-    // 2. Restore Yesterday's Original Photo & Price on `oldLiveId`
-    let restoredOldPhoto: string | null = null;
-    if (olderPhotos.length > 0) {
-      restoredOldPhoto = olderPhotos[olderPhotos.length - 1].url;
-    } else if (prod.previous_image_file && prod.previous_image_file !== todayPhotoUrl) {
-      restoredOldPhoto = prod.previous_image_file;
-    } else if (codePhotos.length >= 2) {
-      // If multiple photos exist for this code in oldLiveId, pick the one before the latest overwrite
-      restoredOldPhoto = codePhotos[codePhotos.length - 2].url;
-    }
-
-    if (restoredOldPhoto) {
-      if (prod.image_file !== restoredOldPhoto) {
-        prod.image_file = restoredOldPhoto;
-        restoredPhotosCount++;
-      }
-      if (prod.previous_price !== undefined && prod.previous_price > 0 && prod.price !== prod.previous_price) {
-        prod.price = prod.previous_price;
-        restoredPricesCount++;
-      } else if (basketItemPriceFallback.has(cleanCode)) {
-        const fbPrice = basketItemPriceFallback.get(cleanCode)!;
-        if (fbPrice > 0 && prod.price !== fbPrice) {
-          prod.price = fbPrice;
-          restoredPricesCount++;
-        }
-      }
-      if (prod.previous_name) {
-        prod.name = prod.previous_name;
-      }
-      delete prod.previous_image_file;
-      delete prod.previous_price;
-      delete prod.previous_name;
-    } else if (!codesOrderedInOldBaskets.has(cleanCode)) {
-      // This code had NO yesterday photo AND was never ordered by any customer in yesterday's Live session!
-      // It is 100% a brand-new item uploaded today, so remove it from yesterday's session after moving to today's session.
-      productsToRemoveFromOld.add(prod.id);
-      removedPureTodayFromOldCount++;
-    }
-  }
-
-  if (productsToRemoveFromOld.size > 0) {
-    for (let i = products.length - 1; i >= 0; i--) {
-      if (productsToRemoveFromOld.has(products[i].id)) {
-        products.splice(i, 1);
-      }
-    }
-  }
-
-  // 3. Re-sync yesterday's customer baskets in `oldLiveId` so their photos & prices match yesterday's restored stock!
-  let updatedBasketsCount = 0;
-  for (const inv of oldSessionInvoices) {
-    let changed = false;
-    for (const item of inv.items || []) {
-      const cleanCode = (item.product_code || '').trim().toUpperCase();
-      if (!cleanCode) continue;
-
-      const prod = products.find(
-        p => normalizeLiveId(p.live_id || '') === oldLiveId && (p.code || '').trim().toUpperCase() === cleanCode
-      );
-      if (prod) {
-        if (prod.image_file && item.image_file !== prod.image_file) {
-          item.image_file = prod.image_file;
-          changed = true;
-        }
-        if (prod.price > 0 && Math.abs((item.price || 0) - prod.price) > 0.001 && restoredPricesCount > 0) {
-          item.price = prod.price;
-          changed = true;
-        }
-      } else {
-        // Also check disk olderPhotos directly
-        const codePhotos = diskPhotosByCode.get(cleanCode) || [];
-        const olderPhotos = codePhotos.filter(ph => ph.dateKey < todayDateKey);
-        if (olderPhotos.length > 0) {
-          const bestOldUrl = olderPhotos[olderPhotos.length - 1].url;
-          if (item.image_file !== bestOldUrl) {
-            item.image_file = bestOldUrl;
-            changed = true;
-          }
-        }
-      }
-    }
-    if (changed) {
-      recalculateInvoice(inv);
-      updatedBasketsCount++;
-    }
-  }
-
-  // Also move cachedTelegramItems from today into newTodayLiveId
-  for (const cItem of cachedTelegramItems) {
-    if (normalizeLiveId(cItem.live_id || '') === oldLiveId) {
-      cItem.live_id = newTodayLiveId;
-    }
-  }
-
-  if (options?.switchToNewLive) {
-    setActiveLiveId(newTodayLiveId);
-  }
-
-  bumpDataRevision();
-  saveDatabaseToDisk();
-  broadcastSSE('stock_updated', { live_id: oldLiveId, count: products.length });
-  broadcastSSE('stock_updated', { live_id: newTodayLiveId, count: products.length });
-
-  const message =
-    restoredPhotosCount > 0 || movedToTodayCount > 0
-      ? `✅ បានស្តាររូបភាពដើមរបស់ Live #${oldLiveId.slice(-8)} ចំនួន ${restoredPhotosCount} មុខ (កន្ត្រកភ្ញៀវ ${updatedBasketsCount}) និងបំបែកស្តុកថ្ងៃនេះចំនួន ${movedToTodayCount} មុខ ទៅកាន់ Live ថ្មី (${newTodayLiveId}) ជោគជ័យ!`
-      : `ℹ️ មិនរកឃើញរូបភាពជាន់គ្នាឆ្លងថ្ងៃក្នុង Live #${oldLiveId.slice(-8)} ទេ។`;
-
-  return {
-    success: true,
-    oldLiveId,
-    newTodayLiveId,
-    restoredPhotosCount,
-    restoredPricesCount,
-    movedToTodayCount,
-    removedPureTodayFromOldCount,
-    updatedBasketsCount,
-    message
-  };
-}
-
-/**
- * Automatically inspects all previous-day Live sessions on startup and heals any cross-day Telegram photo overwrites.
- */
-export function autoHealCrossDayTelegramOverwrites(): void {
-  try {
-    const todayDateKey = getPhnomPenhDateKey();
-    const allLiveIds = Array.from(
-      new Set([
-        ...invoices.map(i => normalizeLiveId(i.live_id || '')),
-        ...products.map(p => normalizeLiveId(p.live_id || ''))
-      ])
-    ).filter(Boolean);
-
-    for (const liveId of allLiveIds) {
-      if (!isLiveSessionFromPreviousDay(liveId, todayDateKey)) continue;
-
-      const diskMap = scanUploadedPhotosForLive(liveId);
-      let hasCrossDayOverwrite = false;
-      for (const [, photos] of diskMap.entries()) {
-        const hasOld = photos.some(p => p.dateKey < todayDateKey);
-        const hasToday = photos.some(p => p.dateKey >= todayDateKey);
-        if (hasOld && hasToday) {
-          hasCrossDayOverwrite = true;
-          break;
-        }
-      }
-
-      if (hasCrossDayOverwrite) {
-        const res = recoverOverwrittenLiveSessionStock({
-          oldLiveId: liveId,
-          switchToNewLive: false
-        });
-        console.log(`🛡️ [Auto-Heal Cross-Day Telegram Stock] ${res.message}`);
-      }
-    }
-  } catch (err) {
-    console.warn('[Auto-Heal Cross-Day Telegram Stock] Warning:', err);
   }
 }
 

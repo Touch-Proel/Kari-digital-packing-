@@ -12,9 +12,6 @@ import {
   settings,
   activeLiveId,
   setActiveLiveId,
-  normalizeLiveId,
-  getLinkedVideosForSession,
-  mergeLiveSessionsIntoPrimary,
   activeInvoiceLocks,
   cleanExpiredLocks,
   bumpDataRevision,
@@ -23,37 +20,25 @@ import {
   saveDatabaseToDisk,
   activeFacebookPage,
   syncAllActiveInvoicesWithStock,
-  stampInvoiceWorkflowUpdate,
-  loadDatabaseFromDisk
+  stampInvoiceWorkflowUpdate
 } from './db.ts';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite.ts';
-import { parseAndAllocateComment, clearProcessedCommentsForLive, syncProcessedCommentKeysWithInvoices, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment, findBestMatchingCommentForCode } from './parser.ts';
+import { parseAndAllocateComment, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment, findBestMatchingCommentForCode } from './parser.ts';
 import { detectDeliveryZone, extractCleanAddressFromComment, isPureContactOrInquiryComment } from './locationHelper.ts';
 import type { Invoice, Product, OrderItem } from './types.ts';
-import { sendFacebookReply, fetchFacebookComments, clearLiveStreamCache } from './fbAuth.ts';
+import { sendFacebookReply, fetchFacebookComments } from './fbAuth.ts';
 import { generateServerKHQRPNG } from './khqrServer.ts';
 import {
   testTelegramBotToken,
   fetchTelegramStockUpdates,
   clearScannedTelegramCache,
-  resetTelegramStateForNewLiveSession,
   bulkImportStockItems,
   startTelegramAutoSync,
   stopTelegramAutoSync,
   getTelegramAutoSyncStatus,
   executeTelegramAutoSyncOnce,
-  deleteTelegramWebhook,
-  recoverOverwrittenLiveSessionStock,
-  getProductPhotoHistoryOnDisk,
-  autoHealCrossDayTelegramOverwrites
+  deleteTelegramWebhook
 } from './telegramSync.ts';
-
-// Run automatic cross-day Telegram stock overwrite recovery once DB finishes loading
-loadDatabaseFromDisk().then(() => {
-  setTimeout(() => {
-    autoHealCrossDayTelegramOverwrites();
-  }, 500);
-}).catch(() => {});
 import {
   startLiveCommentsAutoSync,
   stopLiveCommentsAutoSync,
@@ -399,8 +384,8 @@ router.post(['/invoices/merge_baskets', '/api/invoices/merge_baskets', '/merge_i
 
 // GET /api/obs_data
 router.get('/obs_data', (req: Request, res: Response) => {
-  const targetLiveId = normalizeLiveId((req.query.live_id as string) || activeLiveId);
-  const liveProducts = products.filter(p => normalizeLiveId(p.live_id || '') === targetLiveId);
+  const targetLiveId = (req.query.live_id as string) || activeLiveId;
+  const liveProducts = products.filter(p => (p.live_id || activeLiveId) === targetLiveId);
   const topProducts = liveProducts.map(p => ({
     id: p.id,
     code: p.code,
@@ -413,7 +398,7 @@ router.get('/obs_data', (req: Request, res: Response) => {
   }));
 
   // Find recent winner
-  const liveInvoices = invoices.filter(inv => normalizeLiveId(inv.live_id || '') === targetLiveId);
+  const liveInvoices = invoices.filter(inv => inv.live_id === targetLiveId);
   const allItems = liveInvoices.flatMap(inv =>
     inv.items.map(it => ({
       customer_name: inv.facebook_name,
@@ -432,9 +417,9 @@ router.get('/obs_data', (req: Request, res: Response) => {
 
 // GET /api/products
 router.get('/products', (req: Request, res: Response) => {
-  const targetLiveId = normalizeLiveId((req.query.live_id as string) || activeLiveId);
+  const targetLiveId = (req.query.live_id as string) || activeLiveId;
   const liveProducts = products
-    .filter(p => normalizeLiveId(p.live_id || '') === targetLiveId)
+    .filter(p => (p.live_id || activeLiveId) === targetLiveId)
     .sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' }));
   res.json(liveProducts);
 });
@@ -446,13 +431,13 @@ router.post('/update_product_stock_price', async (req: Request, res: Response) =
     return res.status(400).json({ success: false, error: 'Code or product_id is required' });
   }
 
-  const targetLive = normalizeLiveId((live_id && String(live_id).trim()) || activeLiveId);
+  const targetLive = (live_id && String(live_id).trim()) || activeLiveId;
   const cleanCode = String(code || '').trim().toUpperCase();
   const rawCode = cleanCode.replace(/^\[|\]$/g, '').trim();
 
   let prod = products.find(p => {
-    if (normalizeLiveId(p.live_id || '') !== targetLive) return false;
     if (product_id && p.id === Number(product_id)) return true;
+    if ((p.live_id || activeLiveId) !== targetLive) return false;
     const pCode = (p.code || '').trim().toUpperCase();
     const pRaw = pCode.replace(/^\[|\]$/g, '').trim();
     return pCode === cleanCode || pRaw === rawCode;
@@ -513,7 +498,7 @@ router.post('/update_product_stock_price', async (req: Request, res: Response) =
     if (new_code && String(new_code).trim().toUpperCase() !== cleanCode) {
       const cleanNewCode = String(new_code).trim().toUpperCase().replace(/^\[|\]$/g, '');
       const existingNew = products.find(
-        p => normalizeLiveId(p.live_id || '') === targetLive && p.code.toUpperCase().replace(/^\[|\]$/g, '') === cleanNewCode && p.id !== prod?.id
+        p => (p.live_id || activeLiveId) === targetLive && p.code.toUpperCase().replace(/^\[|\]$/g, '') === cleanNewCode && p.id !== prod?.id
       );
       if (existingNew) {
         return res.status(400).json({ success: false, error: `កូដ [${cleanNewCode}] មានរួចហើយក្នុងស្តុក Live នេះ!` });
@@ -532,8 +517,8 @@ router.post('/update_product_stock_price', async (req: Request, res: Response) =
     }
   }
 
-  // Automatically cascade updated price/image/name to ALL active baskets in this live session (explicit manual edit)
-  syncAllActiveInvoicesWithStock(targetLive, true, { forceOverwriteExistingBaskets: true });
+  // Automatically cascade updated price/image/name to ALL active baskets in this live session
+  syncAllActiveInvoicesWithStock(targetLive);
 
   bumpDataRevision();
   saveDatabaseToDisk();
@@ -788,13 +773,12 @@ router.get('/public/order/:id', (req: Request, res: Response) => {
     return res.status(404).json({ success: false, error: 'រកមិនឃើញវិក្កយបត្រនេះទេ' });
   }
 
-  // Enrich items with product data (images, names, prices) strictly from the invoice's own Live session
-  const invLive = normalizeLiveId(inv.live_id || activeLiveId);
+  // Enrich items with product data (images, names, prices)
   const enrichedItems = (inv.items || []).map(it => {
     const prod = products.find(p => {
       const pCode = p.code.toUpperCase().trim().replace(/^\[|\]$/g, '');
       const itCode = it.product_code.toUpperCase().trim().replace(/^\[|\]$/g, '');
-      return pCode === itCode && normalizeLiveId(p.live_id || '') === invLive;
+      return pCode === itCode && (p.live_id || activeLiveId) === (inv.live_id || activeLiveId);
     });
 
     return {
@@ -975,12 +959,12 @@ router.post('/delete_product', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'Code is required' });
   }
 
-  const targetLive = normalizeLiveId(live_id || activeLiveId);
+  const targetLive = live_id || activeLiveId;
   const cleanCode = String(code).trim().toUpperCase();
   const withoutBrackets = cleanCode.replace(/^\[|\]$/g, '');
 
   const idx = products.findIndex(p => {
-    const isLiveMatch = normalizeLiveId(p.live_id || '') === targetLive;
+    const isLiveMatch = (p.live_id || activeLiveId) === targetLive;
     if (!isLiveMatch) return false;
     const pCode = p.code.toUpperCase().trim();
     return pCode === cleanCode || pCode === withoutBrackets || pCode.replace(/^\[|\]$/g, '') === withoutBrackets;
@@ -1041,7 +1025,7 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'No image data provided' });
     }
 
-    const targetLive = normalizeLiveId((live_id && String(live_id).trim()) || activeLiveId);
+    const targetLive = (live_id && String(live_id).trim()) || activeLiveId;
     const cleanCode = code ? String(code).trim().toUpperCase().replace(/^\[|\]$/g, '') : 'item';
     const safeCode = cleanCode.replace(/[^A-Za-z0-9_-]/g, '') || 'item';
     const uploadDir = path.join(process.cwd(), 'public', 'uploads');
@@ -1064,8 +1048,8 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
       if (image_data.startsWith('http://') || image_data.startsWith('https://')) {
         if (code || req.body.product_id) {
           const targetProd = products.find(p => {
-            if (normalizeLiveId(p.live_id || '') !== targetLive) return false;
             if (req.body.product_id && p.id === Number(req.body.product_id)) return true;
+            if ((p.live_id || activeLiveId) !== targetLive) return false;
             const pCode = (p.code || '').trim().toUpperCase().replace(/^\[|\]$/g, '');
             return pCode === cleanCode;
           });
@@ -1094,11 +1078,11 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
 
     const publicUrl = `/uploads/${filename}`;
 
-    // Automatically update product if code or product_id provided (strictly scoped to targetLive)
+    // Automatically update product if code or product_id provided
     if (code || req.body.product_id) {
       const targetProd = products.find(p => {
-        if (normalizeLiveId(p.live_id || '') !== targetLive) return false;
         if (req.body.product_id && p.id === Number(req.body.product_id)) return true;
+        if ((p.live_id || activeLiveId) !== targetLive) return false;
         const pCode = (p.code || '').trim().toUpperCase().replace(/^\[|\]$/g, '');
         return pCode === cleanCode;
       });
@@ -1106,7 +1090,7 @@ router.post('/upload_product_image', async (req: Request, res: Response) => {
         targetProd.image_file = publicUrl;
       }
       // Cascade to all active baskets in this target live session
-      syncAllActiveInvoicesWithStock(targetLive);
+      syncAllActiveInvoicesWithStock(targetProd?.live_id || targetLive);
       bumpDataRevision();
     }
 
@@ -1937,15 +1921,15 @@ router.post('/edit_basket_item_code', (req: Request, res: Response) => {
 
   // If changing to another code
   if (cleanOldCode !== cleanNewCode) {
-    const liveId = normalizeLiveId(inv.live_id || activeLiveId);
+    const liveId = inv.live_id || activeLiveId;
     // Return old product stock if tracked
-    const oldProd = products.find(p => normalizeLiveId(p.live_id || '') === liveId && p.code.toUpperCase() === cleanOldCode);
+    const oldProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanOldCode);
     if (oldProd) {
       oldProd.stock_qty += item.quantity;
     }
 
-    // Find or create new product strictly in this live session
-    let newProd = products.find(p => normalizeLiveId(p.live_id || '') === liveId && p.code.toUpperCase() === cleanNewCode);
+    // Find or create new product
+    let newProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanNewCode);
     if (!newProd) {
       const nextProdId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
       newProd = {
@@ -1976,9 +1960,9 @@ router.post('/edit_basket_item_code', (req: Request, res: Response) => {
       item.price = new_price;
     }
   } else {
-    // Same code: look up product in stock strictly for this live session and sync latest image, price, and name
-    const liveId = normalizeLiveId(inv.live_id || activeLiveId);
-    const sameProd = products.find(p => normalizeLiveId(p.live_id || '') === liveId && p.code.toUpperCase() === cleanNewCode);
+    // Same code: look up product in stock and sync latest image, price, and name
+    const liveId = inv.live_id || activeLiveId;
+    const sameProd = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanNewCode);
     if (sameProd) {
       if (sameProd.image_file && sameProd.image_file.trim() !== '') {
         item.image_file = sameProd.image_file.trim();
@@ -2042,8 +2026,8 @@ router.post('/set_item_qty_direct', (req: Request, res: Response) => {
   const currentItem = inv.items[itemIdx];
   const delta = targetQty - currentItem.quantity;
 
-  const liveId = normalizeLiveId(inv.live_id || activeLiveId);
-  const prod = products.find(p => normalizeLiveId(p.live_id || '') === liveId && p.code.toUpperCase() === cleanCode);
+  const liveId = inv.live_id || activeLiveId;
+  const prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
   if (prod) {
     if (delta > 0 && prod.stock_qty < delta) {
       return res.json({ success: false, message: `ខ្វះស្តុក (សល់តែ ${prod.stock_qty})` });
@@ -2088,7 +2072,7 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
     return res.status(404).json({ success: false, message: 'រកមិនឃើញវិក្កយបត្រ' });
   }
 
-  const liveId = normalizeLiveId(inv.live_id || activeLiveId);
+  const liveId = inv.live_id || activeLiveId;
   const rawItemList: { code: string; quantity: number }[] = [];
 
   if (Array.isArray(items) && items.length > 0) {
@@ -2114,7 +2098,7 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
     const addQty = it.quantity;
 
     if (CLOTHING_SIZES_SET.has(cleanCode) || NON_PRODUCT_CODES.has(cleanCode)) {
-      const existingInCatalog = products.find(p => normalizeLiveId(p.live_id || '') === liveId && p.code.toUpperCase() === cleanCode);
+      const existingInCatalog = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === cleanCode);
       if (!existingInCatalog) {
         return res.status(400).json({
           success: false,
@@ -2123,10 +2107,10 @@ router.post('/add_item_to_invoice', (req: Request, res: Response) => {
       }
     }
 
-    // Look for product strictly in current live session
+    // Look for product in current live first
     const rawCleanCode = cleanCode.replace(/^\[|\]$/g, '');
     let prod = products.find(p => {
-      if (normalizeLiveId(p.live_id || '') !== liveId) return false;
+      if ((p.live_id || activeLiveId) !== liveId) return false;
       const pCode = (p.code || '').trim().toUpperCase().replace(/^\[|\]$/g, '');
       return pCode === rawCleanCode;
     });
@@ -2293,8 +2277,8 @@ router.post('/ai_smart_parse_basket', async (req: Request, res: Response) => {
     });
   }
 
-  const liveId = normalizeLiveId(inv.live_id || activeLiveId);
-  const liveCatalog = products.filter(p => normalizeLiveId(p.live_id || '') === liveId && p.code && p.code.trim().length > 0);
+  const liveId = inv.live_id || activeLiveId;
+  const liveCatalog = products.filter(p => (p.live_id || activeLiveId) === liveId && p.code && p.code.trim().length > 0);
 
   const currentItemsSummary = (inv.items || []).map(it => ({
     code: it.product_code,
@@ -2467,10 +2451,10 @@ router.post('/delete_basket', (req: Request, res: Response) => {
 
   // If there are any items with quantity, restore stock
   if (targetInv.items && targetInv.items.length > 0) {
-    const liveId = normalizeLiveId(targetInv.live_id || activeLiveId);
+    const liveId = targetInv.live_id || activeLiveId;
     for (const it of targetInv.items) {
       if (it.quantity > 0) {
-        const prod = products.find(p => normalizeLiveId(p.live_id || '') === liveId && p.code.toUpperCase() === it.product_code.toUpperCase());
+        const prod = products.find(p => (p.live_id || activeLiveId) === liveId && p.code.toUpperCase() === it.product_code.toUpperCase());
         if (prod) {
           prod.stock_qty += it.quantity;
         }
@@ -2532,10 +2516,10 @@ router.post('/clean_empty_baskets', (req: Request, res: Response) => {
 
 // GET /api/picking_list - Warehouse Standard (Option 1: Remaining Unpicked Items Only with Images)
 router.get('/picking_list', (req: Request, res: Response) => {
-  const liveId = normalizeLiveId((req.query.live_id as string) || activeLiveId);
+  const liveId = (req.query.live_id as string) || activeLiveId;
   // Only calculate items that are NOT YET picked/staged (UNPICKED baskets)
   const targetInvoices = liveId
-    ? invoices.filter(i => normalizeLiveId(i.live_id || '') === liveId && i.status !== 'Cancelled' && i.packing_stage === 'UNPICKED' && i.status !== 'Dispatched' && i.status !== 'Packed')
+    ? invoices.filter(i => i.live_id === liveId && i.status !== 'Cancelled' && i.packing_stage === 'UNPICKED' && i.status !== 'Dispatched' && i.status !== 'Packed')
     : invoices.filter(i => i.status !== 'Cancelled' && i.packing_stage === 'UNPICKED' && i.status !== 'Dispatched' && i.status !== 'Packed');
 
   const summaryMap = new Map<string, {
@@ -2549,7 +2533,6 @@ router.get('/picking_list', (req: Request, res: Response) => {
   }>();
 
   for (const inv of targetInvoices) {
-    const invLive = normalizeLiveId(inv.live_id || liveId);
     for (const it of inv.items || []) {
       if (it.is_packed) continue; // Item already packed in this basket
       if (!it.quantity || it.quantity <= 0) continue;
@@ -2562,7 +2545,7 @@ router.get('/picking_list', (req: Request, res: Response) => {
         existing.total_qty += it.quantity;
       } else {
         const prod = products.find(p => {
-          if (normalizeLiveId(p.live_id || '') !== invLive) return false;
+          if ((p.live_id || activeLiveId) !== (inv.live_id || liveId)) return false;
           const pCode = (p.code || '').toUpperCase().trim();
           const cleanItCode = cleanCode.replace(/^\[|\]$/g, '');
           return pCode === cleanCode || pCode === cleanItCode || pCode.replace(/^\[|\]$/g, '') === cleanItCode;
@@ -2778,52 +2761,26 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
     return 0;
   };
 
-  // Collect all secondary video IDs that have already been linked into a primary session
-  const secondaryLinkedSet = new Set<string>();
-  const linkedMap = settings.linked_live_videos || {};
-  for (const [primaryKey, vids] of Object.entries(linkedMap)) {
-    if (Array.isArray(vids)) {
-      for (const v of vids) {
-        const cleanV = normalizeLiveId(v);
-        if (cleanV && cleanV !== normalizeLiveId(primaryKey)) {
-          secondaryLinkedSet.add(cleanV);
-        }
-      }
+  const uniqueLiveIds = allLiveIds.map(liveId => {
+    const sessionInvoices = invoices.filter(i => i.live_id === liveId);
+    let sessionDate = '';
+    if (sessionInvoices.length > 0) {
+      const dates = sessionInvoices.map(i => i.created_at).filter(Boolean).sort().reverse();
+      if (dates.length > 0) sessionDate = dates[0];
     }
-  }
-
-  const uniqueLiveIds = allLiveIds
-    .map(liveId => {
-      const sessionInvoices = invoices.filter(i => i.live_id === liveId);
-      let sessionDate = '';
-      if (sessionInvoices.length > 0) {
-        const dates = sessionInvoices.map(i => i.created_at).filter(Boolean).sort().reverse();
-        if (dates.length > 0) sessionDate = dates[0];
-      }
-      const sample = sessionInvoices[0];
-      const count = sessionInvoices.filter(i => i.status !== 'Cancelled').length;
-      const normId = normalizeLiveId(liveId);
-      const sessionProducts = products.filter(p => normalizeLiveId(p.live_id || '') === normId);
-      const unsoldProducts = sessionProducts.filter(p => p.stock_qty > 0);
-      const linkedVideos = getLinkedVideosForSession(liveId);
-      return {
-        live_id: liveId,
-        created_at: sessionDate || sample?.created_at || new Date().toISOString(),
-        basket_count: count,
-        product_count: sessionProducts.length,
-        unsold_product_count: unsoldProducts.length,
-        is_active: liveId === activeLiveId,
-        linked_videos: linkedVideos
-      };
-    })
-    .filter(item => {
-      // Hide empty secondary sessions that were already merged/linked into another primary session, as well as internal LEGACY_ISOLATED
-      if (item.live_id === 'LEGACY_ISOLATED') return false;
-      if (item.live_id !== activeLiveId && secondaryLinkedSet.has(normalizeLiveId(item.live_id)) && item.basket_count === 0 && item.product_count === 0) {
-        return false;
-      }
-      return true;
-    });
+    const sample = sessionInvoices[0];
+    const count = sessionInvoices.filter(i => i.status !== 'Cancelled').length;
+    const sessionProducts = products.filter(p => (p.live_id || activeLiveId) === liveId);
+    const unsoldProducts = sessionProducts.filter(p => p.stock_qty > 0);
+    return {
+      live_id: liveId,
+      created_at: sessionDate || sample?.created_at || new Date().toISOString(),
+      basket_count: count,
+      product_count: sessionProducts.length,
+      unsold_product_count: unsoldProducts.length,
+      is_active: liveId === activeLiveId
+    };
+  });
 
   // Sort:
   // 1. ACTIVE session ALWAYS goes to the very top (when active រត់ទៅ top)
@@ -2853,9 +2810,8 @@ router.get('/live_sessions', (_req: Request, res: Response) => {
 router.post('/set_active_live_id', (req: Request, res: Response) => {
   const { live_id } = req.body;
   if (live_id) {
-    const clean = normalizeLiveId(String(live_id).trim());
+    const clean = String(live_id).trim();
     setActiveLiveId(clean);
-    resetTelegramStateForNewLiveSession(clean);
     bumpDataRevision();
     return res.json({ success: true, active_live_id: clean });
   }
@@ -2868,15 +2824,15 @@ router.post('/create_live_session', (req: Request, res: Response) => {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
   const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-  const newId = normalizeLiveId((live_id && String(live_id).trim()) || `LIVE_${dateStr}_${timeStr}`);
+  const newId = (live_id && String(live_id).trim()) || `LIVE_${dateStr}_${timeStr}`;
 
-  const previousLiveId = normalizeLiveId(source_live_id || activeLiveId);
+  const previousLiveId = source_live_id || activeLiveId;
   let clonedCount = 0;
 
   if (mode === 'clone_unsold') {
-    // Clone unsold remaining products (stock_qty > 0) strictly from the specified previous live session
+    // Clone unsold remaining products (stock_qty > 0) from the previous live session
     const sourceProducts = products.filter(
-      p => normalizeLiveId(p.live_id || '') === previousLiveId && p.stock_qty > 0
+      p => (p.live_id || activeLiveId) === previousLiveId && p.stock_qty > 0
     );
     for (const sp of sourceProducts) {
       const nextId = products.length > 0 ? Math.max(...products.map(p => p.id || 0)) + 1 : 1;
@@ -2895,7 +2851,6 @@ router.post('/create_live_session', (req: Request, res: Response) => {
   }
 
   setActiveLiveId(newId);
-  resetTelegramStateForNewLiveSession(newId);
   bumpDataRevision();
   saveDatabaseToDisk();
 
@@ -2917,12 +2872,12 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'Missing live_id' });
   }
 
-  const cleanLiveId = normalizeLiveId(String(live_id).trim());
+  const cleanLiveId = String(live_id).trim();
 
   // Remove invoices for this live session
   const initialInvoiceCount = invoices.length;
   for (let i = invoices.length - 1; i >= 0; i--) {
-    if (normalizeLiveId(invoices[i].live_id || '') === cleanLiveId) {
+    if (invoices[i].live_id === cleanLiveId) {
       invoices.splice(i, 1);
     }
   }
@@ -2931,7 +2886,7 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
   // Remove products associated with this live session
   const initialProductCount = products.length;
   for (let i = products.length - 1; i >= 0; i--) {
-    if (normalizeLiveId(products[i].live_id || '') === cleanLiveId) {
+    if ((products[i].live_id || activeLiveId) === cleanLiveId) {
       products.splice(i, 1);
     }
   }
@@ -2941,24 +2896,6 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
   for (let i = rawComments.length - 1; i >= 0; i--) {
     if (rawComments[i].live_id === cleanLiveId) {
       rawComments.splice(i, 1);
-    }
-  }
-
-  // Clear in-memory processed comment keys and Facebook stream cache for this session and any linked videos
-  const linkedVids = getLinkedVideosForSession(cleanLiveId);
-  clearProcessedCommentsForLive(cleanLiveId);
-  for (const vid of linkedVids) {
-    clearProcessedCommentsForLive(vid);
-    clearLiveStreamCache(vid);
-  }
-  if (settings.linked_live_videos) {
-    delete settings.linked_live_videos[cleanLiveId];
-    const normClean = normalizeLiveId(cleanLiveId);
-    delete settings.linked_live_videos[normClean];
-    for (const [k, arr] of Object.entries(settings.linked_live_videos)) {
-      if (Array.isArray(arr)) {
-        settings.linked_live_videos[k] = arr.filter(v => v !== cleanLiveId && v !== normClean);
-      }
     }
   }
 
@@ -2994,50 +2931,17 @@ router.post('/delete_live_session', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/merge_live_sessions - Consolidate two Live Sessions (Part 1 + Part 2) into one Unified Session
-router.post('/merge_live_sessions', (req: Request, res: Response) => {
-  const { target_live_id, source_live_id } = req.body;
-  const targetId = normalizeLiveId(String(target_live_id || activeLiveId || ''));
-  const sourceId = normalizeLiveId(String(source_live_id || ''));
-
-  if (!targetId || !sourceId) {
-    return res.status(400).json({ success: false, error: 'សូមជ្រើសរើសវគ្គ Live ដែលត្រូវច្របាច់បញ្ចូលគ្នា!' });
-  }
-  if (targetId === sourceId) {
-    return res.status(400).json({ success: false, error: 'មិនអាចច្របាច់វគ្គ Live តែមួយចូលគ្នាបានទេ!' });
-  }
-
-  const stats = mergeLiveSessionsIntoPrimary(targetId, sourceId);
-  bumpDataRevision();
-  saveDatabaseToDisk();
-
-  const totalBaskets = invoices.filter(i => i.live_id === targetId && i.status !== 'Cancelled').length;
-  const linkedVideos = getLinkedVideosForSession(targetId);
-
-  return res.json({
-    success: true,
-    target_live_id: targetId,
-    source_live_id: sourceId,
-    merged_same_customer_count: stats.mergedSameCustomerCount,
-    moved_baskets_count: stats.movedBasketsCount,
-    moved_products_count: stats.movedProductsCount,
-    total_baskets: totalBaskets,
-    linked_videos: linkedVideos,
-    message: `🎉 បានច្របាច់ Live #${sourceId.slice(-8)} ចូលក្នុង Live #${targetId.slice(-8)} ជោគជ័យ! (រួមកន្ត្រកភ្ញៀវដូចគ្នា ${stats.mergedSameCustomerCount} កន្ត្រក និងផ្ទេរ ${stats.movedBasketsCount} កន្ត្រក)`
-  });
-});
-
 // POST /api/clear_live_stock - Wipe all products for a specific live session
 router.post('/clear_live_stock', (req: Request, res: Response) => {
   const { live_id, remove_from_baskets } = req.body;
-  const targetLive = normalizeLiveId((live_id && String(live_id).trim()) || activeLiveId);
+  const targetLive = (live_id && String(live_id).trim()) || activeLiveId;
   if (!targetLive) {
     return res.status(400).json({ success: false, error: 'Live ID is required' });
   }
 
   let deletedCount = 0;
   for (let i = products.length - 1; i >= 0; i--) {
-    if (normalizeLiveId(products[i].live_id || '') === targetLive) {
+    if ((products[i].live_id || activeLiveId) === targetLive) {
       products.splice(i, 1);
       deletedCount++;
     }
@@ -3320,17 +3224,14 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
           hasQuestion = true;
         }
 
-        // Check code pattern via full comment parser (scoped strictly to targetLiveId products)
-        const sessionProductsForCheck = targetLiveId
-          ? products.filter(p => normalizeLiveId(p.live_id || '') === targetLiveId)
-          : products.filter(p => normalizeLiveId(p.live_id || '') === normalizeLiveId(activeLiveId));
-        const parsedItems = extractCodeQtyPairsFromComment(txt, sessionProductsForCheck);
+        // Check code pattern via full comment parser
+        const parsedItems = extractCodeQtyPairsFromComment(txt, products);
         if (parsedItems && parsedItems.length > 0) {
           hasCodeAttempt = true;
           for (const itm of parsedItems) {
             potentialCodes.add(itm.code);
             const cleanCode = itm.code.toUpperCase().trim();
-            const prod = sessionProductsForCheck.find(p => p.code.toUpperCase() === cleanCode);
+            const prod = products.find(p => p.code.toUpperCase() === cleanCode);
             if (prod && prod.stock_qty <= 0) {
               isOutOfStock = true;
             }
@@ -3342,7 +3243,7 @@ router.get('/comments/non_basket_users', (req: Request, res: Response) => {
             for (const m of codeMatches) {
               potentialCodes.add(m.trim());
               const cleanCode = m.replace(/[^\w\u1780-\u17D2]/g, '').toUpperCase();
-              const prod = sessionProductsForCheck.find(p => p.code.toUpperCase() === cleanCode);
+              const prod = products.find(p => p.code.toUpperCase() === cleanCode);
               if (prod && prod.stock_qty <= 0) {
                 isOutOfStock = true;
               }
@@ -3539,13 +3440,12 @@ router.post('/comments/create_basket_for_user', (req: Request, res: Response) =>
   // Add items if provided
   if (Array.isArray(items) && items.length > 0) {
     let total = 0;
-    const normTargetLive = normalizeLiveId(targetLiveId);
     for (const itm of items) {
       const pCode = String(itm.product_code || '').trim().toUpperCase();
       const pQty = Number(itm.quantity) || 1;
-      const prod = products.find(p => normalizeLiveId(p.live_id || '') === normTargetLive && p.code.toUpperCase() === pCode);
+      const prod = products.find(p => p.code.toUpperCase() === pCode);
       const price = typeof itm.price === 'number' ? itm.price : (prod?.price || 10);
-      const name = prod?.name || `កូដ ${pCode}`;
+      const name = prod?.name || `ទំនិញ ${pCode}`;
 
       newInvoice.items.push({
         id: (newInvoice.items.length + 1),
@@ -3636,13 +3536,11 @@ router.post('/telegram/fetch_stock', async (req: Request, res: Response) => {
     saveDatabaseToDisk();
   }
 
-  const targetLive = normalizeLiveId((req.body.live_id as string) || activeLiveId);
   const result = await fetchTelegramStockUpdates({
     token: activeToken,
     defaultQty: Number(default_qty || 200),
     markRead: !!mark_read,
-    clearCache: !!req.body.clear_cache,
-    targetLiveId: targetLive
+    clearCache: !!req.body.clear_cache
   });
 
   if (!result.success) {
@@ -3651,6 +3549,7 @@ router.post('/telegram/fetch_stock', async (req: Request, res: Response) => {
 
   let importedCount = 0;
   if (auto_import && result.items.length > 0) {
+    const targetLive = (req.body.live_id as string) || activeLiveId;
     const importRes = bulkImportStockItems(result.items.map(it => ({
       code: it.code,
       name: it.name,
@@ -3808,7 +3707,7 @@ router.post('/stock/bulk_import', (req: Request, res: Response) => {
 // POST /api/stock/sync_baskets_price - Manually or automatically trigger sync of all active baskets with current stock prices
 router.post('/stock/sync_baskets_price', (req: Request, res: Response) => {
   const targetLive = (req.body.live_id as string) || activeLiveId;
-  const count = syncAllActiveInvoicesWithStock(targetLive, true, { forceOverwriteExistingBaskets: true });
+  const count = syncAllActiveInvoicesWithStock(targetLive);
   res.json({
     success: true,
     message: `បានធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញក្នុងកន្ត្រកចំនួន ${count} ដោយជោគជ័យ!`,
@@ -3816,34 +3715,10 @@ router.post('/stock/sync_baskets_price', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/stock/recover_previous_session - Split today's Telegram stock to new Live session & restore yesterday's original photos/prices
-router.post('/stock/recover_previous_session', (req: Request, res: Response) => {
-  const { live_id, new_today_live_id, switch_to_new_live } = req.body || {};
-  const result = recoverOverwrittenLiveSessionStock({
-    oldLiveId: live_id || activeLiveId,
-    newTodayLiveId: new_today_live_id,
-    switchToNewLive: Boolean(switch_to_new_live)
-  });
-  res.json(result);
-});
-
-// GET /api/stock/photo_history - Get all saved photos on disk for a specific product code in a Live session
-router.get('/stock/photo_history', (req: Request, res: Response) => {
-  const code = String(req.query.code || '').trim();
-  const liveId = String(req.query.live_id || activeLiveId || '').trim();
-  const photos = getProductPhotoHistoryOnDisk(code, liveId);
-  res.json({
-    success: true,
-    code,
-    live_id: liveId,
-    photos
-  });
-});
-
 // GET /api/stock/export_csv
 router.get('/stock/export_csv', (req: Request, res: Response) => {
-  const targetLive = normalizeLiveId((req.query.live_id as string) || activeLiveId);
-  const targetProducts = products.filter(p => normalizeLiveId(p.live_id || '') === targetLive);
+  const targetLive = (req.query.live_id as string) || activeLiveId;
+  const targetProducts = products.filter(p => (p.live_id || activeLiveId) === targetLive);
   // UTF-8 BOM for Excel compatibility with Khmer script
   const BOM = '\uFEFF';
   const header = 'Code,Name,Price,Stock_Qty,Cost_Price,Image_URL\n';
