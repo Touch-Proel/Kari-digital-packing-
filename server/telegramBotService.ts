@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { invoices, products, activeLiveId, normalizeLiveId, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
+import { invoices, products, activeLiveId, normalizeLiveId, resolveSafeTargetLiveForTelegram, settings, saveDatabaseToDisk, bumpDataRevision, syncAllActiveInvoicesWithStock } from './db.ts';
 import { getGemini, callGeminiSlipExtraction, matchInvoiceForSlip, type ExtractedSlipData } from './fastCheckRoutes.ts';
 import { deleteTelegramWebhook, parseLinesForStockItems, downloadTelegramPhoto, cachedTelegramItems, bulkImportStockItems, findImageOnDiskForCode, addMediaToBuffer, recentTelegramMediaBuffer } from './telegramSync.ts';
 import { broadcastSSE } from './packingRoutes.ts';
@@ -153,7 +153,7 @@ async function handleIncomingStockItemPhoto(
   }
 
   const primaryItem = stockItems[0];
-  const targetLive = normalizeLiveId(activeLiveId);
+  const { targetLiveId: targetLive } = resolveSafeTargetLiveForTelegram(activeLiveId, messageDate, true);
   let photoUrl: string | undefined = undefined;
   if (chosenPhoto?.file_id) {
     photoUrl = await downloadTelegramPhoto(token, chosenPhoto.file_id, primaryItem.code, messageDate, true, targetLive);
@@ -234,7 +234,7 @@ async function handleIncomingPhotoWithoutCaption(
 
   if (!chosenPhoto?.file_id) return;
 
-  const targetLive = normalizeLiveId(activeLiveId);
+  const { targetLiveId: targetLive } = resolveSafeTargetLiveForTelegram(activeLiveId, messageDate, true);
   // Check if any recent items in cachedTelegramItems for THIS live session have no image
   const targetItem = cachedTelegramItems.find(c => {
     if (c.live_id && normalizeLiveId(c.live_id) !== targetLive) return false;
@@ -645,11 +645,12 @@ async function startPollingLoop() {
             const rawCaption = msg.caption || '';
             const bestPhotoId = photoArray[photoArray.length - 1]?.file_id;
 
-            // Register photo into sliding media buffer (scoped to activeLiveId)
+            // Register photo into sliding media buffer (scoped to safe targetLive for message date)
             if (bestPhotoId) {
+              const { targetLiveId: safeMediaLive } = resolveSafeTargetLiveForTelegram(activeLiveId, msg.date, true);
               addMediaToBuffer({
                 file_id: bestPhotoId,
-                live_id: normalizeLiveId(activeLiveId),
+                live_id: safeMediaLive,
                 chat_id: chatId,
                 chat_title: msg.chat?.title || 'Telegram Group',
                 sender_name: msg.from ? `${msg.from.first_name || ''} ${msg.from.last_name || ''}`.trim() : 'Admin',
@@ -703,7 +704,7 @@ async function startPollingLoop() {
               const stockItems = parseLinesForStockItems(trimmed);
               if (stockItems.length > 0) {
                 telegramQueue.add(async () => {
-                  const targetLive = normalizeLiveId(activeLiveId);
+                  const { targetLiveId: targetLive } = resolveSafeTargetLiveForTelegram(activeLiveId, msg.date, true);
                   // Find any recent unattached photo from this chat in sliding window (within 60 minutes & same Live session)
                   const matchedPhoto = recentTelegramMediaBuffer.find(
                     b => (!b.live_id || normalizeLiveId(b.live_id) === targetLive) &&

@@ -23,7 +23,8 @@ import {
   saveDatabaseToDisk,
   activeFacebookPage,
   syncAllActiveInvoicesWithStock,
-  stampInvoiceWorkflowUpdate
+  stampInvoiceWorkflowUpdate,
+  loadDatabaseFromDisk
 } from './db.ts';
 import { getSqliteDatabaseBuffer, persistToSqlite } from './sqlite.ts';
 import { parseAndAllocateComment, clearProcessedCommentsForLive, syncProcessedCommentKeysWithInvoices, convertKhmerDigitsToArabic, CLOTHING_SIZES_SET, NON_PRODUCT_CODES, extractCodeQtyPairsFromComment, findBestMatchingCommentForCode } from './parser.ts';
@@ -41,8 +42,18 @@ import {
   stopTelegramAutoSync,
   getTelegramAutoSyncStatus,
   executeTelegramAutoSyncOnce,
-  deleteTelegramWebhook
+  deleteTelegramWebhook,
+  recoverOverwrittenLiveSessionStock,
+  getProductPhotoHistoryOnDisk,
+  autoHealCrossDayTelegramOverwrites
 } from './telegramSync.ts';
+
+// Run automatic cross-day Telegram stock overwrite recovery once DB finishes loading
+loadDatabaseFromDisk().then(() => {
+  setTimeout(() => {
+    autoHealCrossDayTelegramOverwrites();
+  }, 500);
+}).catch(() => {});
 import {
   startLiveCommentsAutoSync,
   stopLiveCommentsAutoSync,
@@ -521,8 +532,8 @@ router.post('/update_product_stock_price', async (req: Request, res: Response) =
     }
   }
 
-  // Automatically cascade updated price/image/name to ALL active baskets in this live session
-  syncAllActiveInvoicesWithStock(targetLive);
+  // Automatically cascade updated price/image/name to ALL active baskets in this live session (explicit manual edit)
+  syncAllActiveInvoicesWithStock(targetLive, true, { forceOverwriteExistingBaskets: true });
 
   bumpDataRevision();
   saveDatabaseToDisk();
@@ -3797,11 +3808,35 @@ router.post('/stock/bulk_import', (req: Request, res: Response) => {
 // POST /api/stock/sync_baskets_price - Manually or automatically trigger sync of all active baskets with current stock prices
 router.post('/stock/sync_baskets_price', (req: Request, res: Response) => {
   const targetLive = (req.body.live_id as string) || activeLiveId;
-  const count = syncAllActiveInvoicesWithStock(targetLive);
+  const count = syncAllActiveInvoicesWithStock(targetLive, true, { forceOverwriteExistingBaskets: true });
   res.json({
     success: true,
     message: `បានធ្វើបច្ចុប្បន្នភាពតម្លៃទំនិញក្នុងកន្ត្រកចំនួន ${count} ដោយជោគជ័យ!`,
     updated_invoices: count
+  });
+});
+
+// POST /api/stock/recover_previous_session - Split today's Telegram stock to new Live session & restore yesterday's original photos/prices
+router.post('/stock/recover_previous_session', (req: Request, res: Response) => {
+  const { live_id, new_today_live_id, switch_to_new_live } = req.body || {};
+  const result = recoverOverwrittenLiveSessionStock({
+    oldLiveId: live_id || activeLiveId,
+    newTodayLiveId: new_today_live_id,
+    switchToNewLive: Boolean(switch_to_new_live)
+  });
+  res.json(result);
+});
+
+// GET /api/stock/photo_history - Get all saved photos on disk for a specific product code in a Live session
+router.get('/stock/photo_history', (req: Request, res: Response) => {
+  const code = String(req.query.code || '').trim();
+  const liveId = String(req.query.live_id || activeLiveId || '').trim();
+  const photos = getProductPhotoHistoryOnDisk(code, liveId);
+  res.json({
+    success: true,
+    code,
+    live_id: liveId,
+    photos
   });
 });
 

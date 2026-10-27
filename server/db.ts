@@ -344,10 +344,212 @@ export function normalizeLiveId(id: string): string {
   return trimmed && trimmed.includes('_') && !trimmed.startsWith('LIVE_') ? trimmed.split('_').pop() || trimmed : trimmed;
 }
 
+/**
+ * Returns YYYY-MM-DD in Cambodia timezone (Asia/Phnom_Penh, UTC+7)
+ */
+export function getPhnomPenhDateKey(dateInput?: string | number | Date): string {
+  try {
+    let d: Date;
+    if (dateInput instanceof Date) {
+      d = dateInput;
+    } else if (typeof dateInput === 'number') {
+      // Handle Unix seconds vs milliseconds
+      d = new Date(dateInput < 10000000000 ? dateInput * 1000 : dateInput);
+    } else if (typeof dateInput === 'string' && dateInput.trim()) {
+      const raw = dateInput.trim();
+      const num = Number(raw);
+      if (!isNaN(num) && num > 100000000) {
+        d = new Date(num < 10000000000 ? num * 1000 : num);
+      } else {
+        d = new Date(raw);
+      }
+    } else {
+      d = new Date();
+    }
+    if (isNaN(d.getTime())) d = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Phnom_Penh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(d);
+    const y = parts.find(p => p.type === 'year')?.value || '2026';
+    const m = parts.find(p => p.type === 'month')?.value || '01';
+    const day = parts.find(p => p.type === 'day')?.value || '01';
+    return `${y}-${m}-${day}`;
+  } catch {
+    const fallback = new Date(Date.now() + 7 * 3600 * 1000);
+    return fallback.toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Determines the primary calendar date (YYYY-MM-DD in Asia/Phnom_Penh) of a Live Session
+ * based on its customer baskets (invoices), explicit LIVE_YYYYMMDD name, or earliest product photo on disk.
+ */
+export function getSessionOriginalDateKey(liveId: string): string | null {
+  const normId = normalizeLiveId(liveId);
+  if (!normId) return null;
+
+  // 1. Check explicit date in LIVE_YYYYMMDD...
+  const nameMatch = normId.match(/(\d{4})(\d{2})(\d{2})/);
+  if (nameMatch) {
+    return `${nameMatch[1]}-${nameMatch[2]}-${nameMatch[3]}`;
+  }
+
+  // 2. Check customer baskets (invoices) in this session (excluding sample test basket 860 if real baskets exist)
+  const sessionInvs = invoices.filter(
+    inv => normalizeLiveId(inv.live_id || '') === normId && inv.status !== 'Cancelled'
+  );
+  const realInvs = sessionInvs.filter(inv => inv.facebook_user_id !== 'TEST_USER_1' && inv.invoice_id !== 860);
+  const targetInvs = realInvs.length > 0 ? realInvs : sessionInvs;
+
+  if (targetInvs.length > 0) {
+    const dateCounts = new Map<string, number>();
+    for (const inv of targetInvs) {
+      if (inv.created_at) {
+        const dk = getPhnomPenhDateKey(inv.created_at);
+        dateCounts.set(dk, (dateCounts.get(dk) || 0) + 1);
+      }
+    }
+    if (dateCounts.size > 0) {
+      // Return the dominant (or earliest) basket creation date for this session
+      const sortedDates = Array.from(dateCounts.entries()).sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0].localeCompare(b[0]);
+      });
+      return sortedDates[0][0];
+    }
+  }
+
+  // 3. Check products in this session that have created_at or uploaded photos on disk
+  const sessionProds = products.filter(p => normalizeLiveId(p.live_id || '') === normId);
+  const prodDates: string[] = [];
+  for (const p of sessionProds) {
+    if (p.created_at) {
+      prodDates.push(getPhnomPenhDateKey(p.created_at));
+    } else if (p.image_file && p.image_file.startsWith('/uploads/')) {
+      try {
+        const cleanRel = p.image_file.split('?')[0].replace(/^\//, '');
+        const fullP = path.join(process.cwd(), 'public', cleanRel);
+        if (fs.existsSync(fullP)) {
+          const st = fs.statSync(fullP);
+          prodDates.push(getPhnomPenhDateKey(st.mtime));
+        }
+      } catch {}
+    }
+  }
+  if (prodDates.length > 0) {
+    prodDates.sort();
+    return prodDates[0]; // Earliest product creation/photo date
+  }
+
+  return null;
+}
+
+/**
+ * Returns true if the given Live Session belongs to an earlier calendar day than the incoming message / today.
+ */
+export function isLiveSessionFromPreviousDay(liveId: string, incomingDateInput?: string | number | Date): boolean {
+  const normId = normalizeLiveId(liveId);
+  if (!normId) return false;
+  const incomingDateKey = getPhnomPenhDateKey(incomingDateInput);
+  const sessionDateKey = getSessionOriginalDateKey(normId);
+  if (!sessionDateKey) return false;
+  return sessionDateKey < incomingDateKey;
+}
+
+/**
+ * CRITICAL SAFETY GUARD FOR TELEGRAM STOCK SYNC:
+ * When staff sends new product codes/photos/prices to Telegram TODAY, but hasn't manually created
+ * today's Live Session yet (so `activeLiveId` is still pointing to yesterday's Live Session like #18102916):
+ * NEVER overwrite yesterday's Live Session stock or customer baskets!
+ * Automatically isolate today's Telegram stock into a new daily Live Session (`LIVE_YYYYMMDD`).
+ */
+export function resolveSafeTargetLiveForTelegram(
+  preferredLiveId?: string,
+  incomingMsgDateInput?: string | number | Date,
+  autoSwitchActiveLive: boolean = true
+): {
+  targetLiveId: string;
+  autoCreatedNewSession: boolean;
+  previousLiveId?: string;
+} {
+  const baseLive = normalizeLiveId(preferredLiveId || activeLiveId);
+  const msgDateKey = getPhnomPenhDateKey(incomingMsgDateInput);
+  const todayDateKey = getPhnomPenhDateKey();
+
+  // Only trigger new-day isolation when the message is from today (or no date provided)
+  // and the target Live Session belongs to a previous calendar day (e.g., yesterday's Live with customer baskets).
+  if (msgDateKey >= todayDateKey && isLiveSessionFromPreviousDay(baseLive, msgDateKey)) {
+    const todayCompact = todayDateKey.replace(/-/g, '');
+    const defaultTodayLiveId = `LIVE_${todayCompact}`;
+
+    // Check if there is already a Live Session created today
+    const allLiveIds = Array.from(
+      new Set([
+        ...invoices.map(i => normalizeLiveId(i.live_id || '')),
+        ...products.map(p => normalizeLiveId(p.live_id || ''))
+      ])
+    ).filter(Boolean);
+
+    let todayLiveId = allLiveIds.find(id => id !== baseLive && getSessionOriginalDateKey(id) === todayDateKey);
+    if (!todayLiveId) {
+      todayLiveId = defaultTodayLiveId;
+    }
+
+    if (autoSwitchActiveLive && normalizeLiveId(activeLiveId) === baseLive) {
+      activeLiveId = todayLiveId;
+      saveDatabaseToDisk();
+      console.log(
+        `🛡️ [Telegram Cross-Day Protection] Prevented overwriting previous day's Live #${baseLive}! Auto-switched activeLiveId to today's session: ${todayLiveId}`
+      );
+    }
+
+    return {
+      targetLiveId: todayLiveId,
+      autoCreatedNewSession: true,
+      previousLiveId: baseLive
+    };
+  }
+
+  return {
+    targetLiveId: baseLive,
+    autoCreatedNewSession: false
+  };
+}
+
 export function setActiveLiveId(id: string) {
   const cleanId = normalizeLiveId(id);
   if (!cleanId) return;
+  const previousActive = normalizeLiveId(activeLiveId);
   activeLiveId = cleanId;
+
+  // Smart Pre-Staged Stock Adoption:
+  // If today's Telegram stock was automatically staged into `LIVE_YYYYMMDD` before the user started/selected
+  // their new Facebook Live video (`cleanId`), and `cleanId` is a brand-new session with 0 products and 0 baskets
+  // from previous days, automatically transfer today's pre-staged `LIVE_YYYYMMDD` stock into `cleanId`!
+  const todayCompact = getPhnomPenhDateKey().replace(/-/g, '');
+  const todayStagingId = `LIVE_${todayCompact}`;
+  if (
+    cleanId !== todayStagingId &&
+    !isLiveSessionFromPreviousDay(cleanId) &&
+    products.filter(p => normalizeLiveId(p.live_id || '') === cleanId).length === 0
+  ) {
+    const stagedProds = products.filter(p => normalizeLiveId(p.live_id || '') === todayStagingId);
+    const stagedInvs = invoices.filter(
+      inv => normalizeLiveId(inv.live_id || '') === todayStagingId && inv.status !== 'Cancelled'
+    );
+    if (stagedProds.length > 0 && stagedInvs.length === 0) {
+      for (const sp of stagedProds) {
+        sp.live_id = cleanId;
+      }
+      console.log(
+        `✨ [Pre-Staged Stock Adopted] Automatically moved ${stagedProds.length} pre-uploaded Telegram stock items from ${todayStagingId} into new Live #${cleanId} (prev=${previousActive})!`
+      );
+    }
+  }
+
   // Safety: If cleanId was accidentally listed as a secondary linked video inside an older session,
   // detach it from that older session so selecting a Live post as Primary is 100% isolated.
   if (settings.linked_live_videos && typeof settings.linked_live_videos === 'object') {
@@ -973,8 +1175,14 @@ export function recalculateInvoice(inv: Invoice) {
 // Auto-Sync Active (Non-Dispatched) Basket Items with Stock Catalog
 // Ensures that whenever stock prices/photos change, all active baskets reflect real prices immediately!
 // -------------------------------------------------------------
-export function syncAllActiveInvoicesWithStock(targetLiveId?: string, persist = true): number {
+export function syncAllActiveInvoicesWithStock(
+  targetLiveId?: string,
+  persist = true,
+  options?: { forceOverwriteExistingBaskets?: boolean }
+): number {
   let updatedInvoicesCount = 0;
+  const todayDateKey = getPhnomPenhDateKey();
+  const forceOverwrite = options?.forceOverwriteExistingBaskets === true;
 
   for (const inv of invoices) {
     const invLive = normalizeLiveId(inv.live_id || activeLiveId);
@@ -982,6 +1190,9 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string, persist = 
 
     // Only cascade to active, non-dispatched invoices (never alter historic dispatched packages)
     if (inv.status !== 'Dispatched' && inv.packing_stage !== 'DISPATCHED') {
+      const invDateKey = inv.created_at ? getPhnomPenhDateKey(inv.created_at) : todayDateKey;
+      const isOlderDayBasket = invDateKey < todayDateKey;
+
       let invChanged = false;
       for (const item of inv.items) {
         // STRICT SESSION ISOLATION: Look up product ONLY in this exact live session (never pull price/photo/code from other live sessions!)
@@ -993,13 +1204,19 @@ export function syncAllActiveInvoicesWithStock(targetLiveId?: string, persist = 
         );
 
         if (prod) {
+          // Protect older-day baskets from accidental background overwrites unless explicitly forced by user
+          const canUpdatePrice =
+            forceOverwrite || !isOlderDayBasket || !item.price || item.price <= 0;
+          const canUpdatePhoto =
+            forceOverwrite || !isOlderDayBasket || !item.image_file || item.image_file.trim() === '';
+
           // Auto-sync price if stock price is positive and differs
-          if (typeof prod.price === 'number' && prod.price > 0 && Math.abs((item.price || 0) - prod.price) > 0.001) {
+          if (canUpdatePrice && typeof prod.price === 'number' && prod.price > 0 && Math.abs((item.price || 0) - prod.price) > 0.001) {
             item.price = prod.price;
             invChanged = true;
           }
           // Auto-sync photo if stock has photo and item does not match latest stock photo
-          if (prod.image_file && prod.image_file.trim() !== '' && item.image_file !== prod.image_file.trim()) {
+          if (canUpdatePhoto && prod.image_file && prod.image_file.trim() !== '' && item.image_file !== prod.image_file.trim()) {
             item.image_file = prod.image_file.trim();
             invChanged = true;
           }

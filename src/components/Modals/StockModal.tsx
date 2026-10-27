@@ -34,6 +34,7 @@ export function StockModal({
   const [uploading, setUploading] = useState<boolean>(false);
   const [confirmDelete, setConfirmDelete] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
+  const [photoHistory, setPhotoHistory] = useState<Array<{ filename: string; url: string; dateKey: string; mtimeMs: number }>>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -45,6 +46,20 @@ export function StockModal({
       setPrice(product.price ?? 5.0);
       setImageFile(product.image_file || '');
       setUrlInput(product.image_file || '');
+
+      const targetLive = activeLiveId || product.live_id || '';
+      if (product.code) {
+        fetch(`/api/stock/photo_history?code=${encodeURIComponent(product.code)}&live_id=${encodeURIComponent(targetLive)}`)
+          .then(r => r.json())
+          .then(d => {
+            if (d?.success && Array.isArray(d.photos)) {
+              setPhotoHistory(d.photos);
+            } else {
+              setPhotoHistory([]);
+            }
+          })
+          .catch(() => setPhotoHistory([]));
+      }
     } else {
       setCode('');
       setName('');
@@ -52,10 +67,11 @@ export function StockModal({
       setPrice(5.0);
       setImageFile('');
       setUrlInput('');
+      setPhotoHistory([]);
     }
     setConfirmDelete(false);
     setShowUrlInput(false);
-  }, [product, isAddingNew, isOpen]);
+  }, [product, isAddingNew, isOpen, activeLiveId]);
 
   if (!isOpen) return null;
 
@@ -387,6 +403,44 @@ export function StockModal({
                 </span>
               </div>
             </div>
+
+            {/* Historical Photos on Disk for this Code (1-Tap Restore) */}
+            {photoHistory.length > 1 && (
+              <div className="mt-2.5 p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/40">
+                <div className="text-[11px] font-bold text-amber-300 mb-1.5 flex items-center justify-between">
+                  <span>🕰️ រូបភាពមុនៗរបស់កូដ [{code}] ក្នុងប្រព័ន្ធ ({photoHistory.length} រូប)៖</span>
+                  <span className="text-[10px] text-amber-200/80">ចុចរើសរូបដើមវិញ</span>
+                </div>
+                <div className="flex gap-2 overflow-x-auto py-1">
+                  {photoHistory.map((ph, idx) => {
+                    const cleanCurrent = (imageFile || '').split('?')[0];
+                    const isSelected = cleanCurrent === ph.url;
+                    return (
+                      <button
+                        key={ph.filename || idx}
+                        type="button"
+                        onClick={() => {
+                          setImageFile(ph.url);
+                          setUrlInput(ph.url);
+                          if (idx === 0 && product?.previous_price && product.previous_price > 0) {
+                            setPrice(product.previous_price);
+                          }
+                          onShowToast(`📸 បានជ្រើសរូបភាពកាលបរិច្ឆេទ ${ph.dateKey} (សូមចុចរក្សាទុក)`);
+                        }}
+                        className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 flex-shrink-0 transition-all cursor-pointer ${
+                          isSelected ? 'border-cyan-400 ring-2 ring-cyan-400/50 scale-105' : 'border-slate-700 opacity-80 hover:opacity-100'
+                        }`}
+                      >
+                        <img src={ph.url} alt={ph.dateKey} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[9px] font-mono font-bold text-amber-300 text-center py-0.5">
+                          {ph.dateKey.slice(5)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="h-[1px] bg-slate-800/80 my-0.5"></div>
