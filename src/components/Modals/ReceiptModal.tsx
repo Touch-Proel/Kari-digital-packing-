@@ -32,6 +32,11 @@ interface ReceiptModalProps {
   myPackerName: string;
   onShowToast: (msg: string, type?: 'success' | 'error') => void;
   onStagePackSuccess?: () => void;
+  onVipStatusChange?: (
+    invoiceId: number,
+    msgStatus: 'SENT' | 'FAILED',
+    msgDeliveryMethod?: 'SEND_API' | 'PRIVATE_REPLY' | 'MANUAL_COPIED'
+  ) => void;
   onOptimisticStageTransition?: (
     invoiceId: number,
     targetStage: 'STAGED' | 'PAID' | 'DISPATCHED' | 'UNPICKED',
@@ -48,10 +53,12 @@ export function ReceiptModal({
   myPackerName,
   onShowToast,
   onStagePackSuccess,
+  onVipStatusChange,
   onOptimisticStageTransition
 }: ReceiptModalProps) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const offscreenRenderRef = useRef<HTMLDivElement>(null);
+  const autoVipSentForInvoiceRef = useRef<number | null>(null);
 
   // Preferred print mode (Default: Shop Agent)
   const [printMode, setPrintMode] = useState<PrintMode>(() => {
@@ -291,19 +298,22 @@ export function ReceiptModal({
   };
 
   useEffect(() => {
-    if (isOpen) {
-      setIsBtConnected(isBluetoothPrinterConnected());
-      setBtDeviceName(getSavedBluetoothPrinterName());
-      checkAgentStatus();
-
-      // Poll agent heartbeat every 6 seconds while modal is open
-      const pollTimer = setInterval(() => {
-        checkAgentStatus();
-      }, 6000);
-
-      return () => clearInterval(pollTimer);
+    if (!isOpen) {
+      autoVipSentForInvoiceRef.current = null;
+      return;
     }
-  }, [isOpen]);
+    autoVipSentForInvoiceRef.current = null;
+    setIsBtConnected(isBluetoothPrinterConnected());
+    setBtDeviceName(getSavedBluetoothPrinterName());
+    checkAgentStatus();
+
+    // Poll agent heartbeat every 6 seconds while modal is open
+    const pollTimer = setInterval(() => {
+      checkAgentStatus();
+    }, 6000);
+
+    return () => clearInterval(pollTimer);
+  }, [isOpen, invoice?.invoice_id]);
 
   if (!isOpen || !invoice) return null;
 
@@ -332,8 +342,65 @@ export function ReceiptModal({
     hour12: true
   });
 
+  // Non-blocking background VIP Messenger invoice delivery when staff actually prints
+  const triggerAutoVipSend = () => {
+    if (!invoice) return;
+    // Do NOT resend if already delivered successfully
+    if (invoice.msg_status === 'SENT') return;
+    // Do NOT send if basket has no items
+    if (!invoice.items || invoice.items.length === 0) return;
+    // Prevent duplicate fire during the same print modal session
+    if (autoVipSentForInvoiceRef.current === invoice.invoice_id) return;
+    autoVipSentForInvoiceRef.current = invoice.invoice_id;
+
+    const targetCid = (invoice.last_comment_id || (invoice.comment_ids && invoice.comment_ids[0]) || '').trim();
+    const targetInvoiceId = invoice.invoice_id;
+    const targetName = invoice.facebook_name;
+    const targetTotal = invoice.total_amount;
+    const targetCommentIds = targetCid
+      ? [targetCid, ...(invoice.comment_ids || [])]
+      : (invoice.comment_ids || []);
+
+    fetch('/api/send_vip_invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoice_id: targetInvoiceId,
+        facebook_name: targetName,
+        total_amount: targetTotal,
+        comment_id: targetCid,
+        comment_ids: targetCommentIds
+      }),
+      keepalive: true
+    })
+      .then(parseResponseJson)
+      .then((data: any) => {
+        if (!data) return;
+        if (data.success) {
+          invoice.msg_status = 'SENT';
+          if (data.msg_delivery_method) {
+            invoice.msg_delivery_method = data.msg_delivery_method;
+          }
+          onVipStatusChange?.(targetInvoiceId, 'SENT', data.msg_delivery_method);
+          onStagePackSuccess?.();
+          const methodTag = data.method_title ? `[${data.method_title}] ` : '';
+          onShowToast(`✉️ ${methodTag}បានផ្ញើវិក្កយបត្រ VIP ទៅ ${targetName} ស្វ័យប្រវត្តិជោគជ័យ!`, 'success');
+        } else {
+          invoice.msg_status = 'FAILED';
+          invoice.msg_delivery_method = 'MANUAL_COPIED';
+          onVipStatusChange?.(targetInvoiceId, 'FAILED', 'MANUAL_COPIED');
+          onStagePackSuccess?.();
+          onShowToast(`⚠️ ព្រីនរួច តែផ្ញើ VIP ទៅ ${targetName} មិនបានស្វ័យប្រវត្តិ ➔ ចុច Copy លើកាត!`, 'error');
+        }
+      })
+      .catch(() => {
+        // Keep printing completely unaffected on network hiccup
+      });
+  };
+
   // Handle Stage Pack workflow transition (UNPICKED -> STAGED / រង់ចាំលុយ) with 0ms Optimistic Transition
   const triggerStagePack = async (source = 'RawBT') => {
+    triggerAutoVipSend();
     if (invoice.packing_stage === 'UNPICKED' || !invoice.packing_stage) {
       if (onOptimisticStageTransition) {
         await onOptimisticStageTransition(invoice.invoice_id, 'STAGED', {

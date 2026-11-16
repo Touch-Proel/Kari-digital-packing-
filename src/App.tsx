@@ -2397,6 +2397,18 @@ export default function App() {
           fetchInvoices();
           fetchPackerStats();
         }}
+        onVipStatusChange={(invId, msgStatus, msgDeliveryMethod) => {
+          setInvoices(prev => prev.map(inv => inv.invoice_id === invId ? {
+            ...inv,
+            msg_status: msgStatus,
+            ...(msgDeliveryMethod ? { msg_delivery_method: msgDeliveryMethod } : {})
+          } : inv));
+          setReceiptInvoice(prev => (prev && prev.invoice_id === invId) ? {
+            ...prev,
+            msg_status: msgStatus,
+            ...(msgDeliveryMethod ? { msg_delivery_method: msgDeliveryMethod } : {})
+          } : prev);
+        }}
         onOptimisticStageTransition={handleOptimisticStageTransition}
       />
 

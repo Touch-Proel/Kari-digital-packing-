@@ -1404,10 +1404,18 @@ export function loadDatabaseFromDisk(): Promise<void> {
         }
       }
 
-      // Sanitize existing address: strip accidental product codes, phone numbers, sizes, colors, or chat questions
+      // Sanitize existing address: strip accidental weights, sizes, product codes, phone numbers, colors, or chat questions
       if (inv.address) {
-        if (isQuestionOrLiveChatter(inv.address) || /(?:ខោជើងប៉ាត|160m|ពាក់បានអត់|ពាក់បានទេ|លក់ម៉េច|ប៉ុន្មាន|បងមាន|ចែមាន|មានសំពត់|សំពត់ក្មេង|លើកសំពត់|លើកឈុត|មានពណ៌|តើអី|បងលើក|ចែលើក)/i.test(inv.address)) {
-          inv.address = '';
+        if (
+          isQuestionOrLiveChatter(inv.address) ||
+          /(?:គីឡូ|គឺឡូ|កីឡូ|គក|គឺទូ|kg|kilo|gk)\s*[:=\-_/]?\s*(?:[3-9]\d|1[0-5]\d)/i.test(inv.address) ||
+          /(?<!\d)(?:[3-9]\d|1[0-5]\d)\s*(?:kg|kilo|gk|គីឡូ|គឺឡូ|កីឡូ|គក|គឺទូ)/i.test(inv.address) ||
+          /(?:ចង្កេះ|ចង្កះ|ចង្កែះ|size|សាយ|ទំហំ|ស្លឹក|លេខ)\s*[:=\-_/]?\s*(?:2[4-9]|3[0-9]|4[0-6])/i.test(inv.address) ||
+          /(?:លេខធំ|សាយធំ|ចង្កេះធំ|លេខកណ្តាល|លេខតូច)/i.test(inv.address) ||
+          /(?:ខោជើងប៉ាត|160m|ពាក់បានអត់|ពាក់បានទេ|លក់ម៉េច|ប៉ុន្មាន|បងមាន|ចែមាន|មានសំពត់|សំពត់ក្មេង|លើកសំពត់|លើកឈុត|មានពណ៌|តើអី|បងលើក|ចែលើក)/i.test(inv.address)
+        ) {
+          const cleaned = extractCleanAddressFromComment(inv.address);
+          inv.address = cleaned || '';
         } else if (/(?:(?<=[^\w\u1780-\u17D2]|^)[A-Za-z0-9]{1,5}\s*[:=/\-_*xX»]+\s*[\*\-_=A-Za-z0-9]*)|(?:\b(?:XXS|XXL|6XL|5XL|4XL|3XL|2XL|XL|XS|[SML]|FS)\b)|(?:ពណ៌|ពណ៍)\s*[\u1780-\u17D2]+|(?:\b0\d{8,9}\b)|(?:\*+)/i.test(inv.address)) {
           const cleaned = extractCleanAddressFromComment(inv.address);
           inv.address = cleaned || '';

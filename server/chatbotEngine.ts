@@ -4,6 +4,7 @@ import { broadcastSSE } from './packingRoutes.ts';
 import type { Invoice } from './types.ts';
 import { isReceiverAccountName, sanitizeCustomerName, matchInvoiceForSlip, callGeminiSlipExtraction, getGemini, evaluateSlipFraudAndDuplicates } from './fastCheckRoutes.ts';
 import { computeImageHash, getCachedOcr, setCachedOcr } from './ocrCache.ts';
+import { detectDeliveryZone } from './locationHelper.ts';
 import fs from 'fs';
 import path from 'path';
 
@@ -594,8 +595,8 @@ Return ONLY valid JSON.`;
     const phone = phoneMatch ? phoneMatch[0].replace(/[\s.-]/g, '') : '';
     let address = text.replace(/(?:0\d{2}[\s.-]?\d{3}[\s.-]?\d{3,4}|0\d{8,9}|\+855\d{8,9})/, '').trim();
     if (!address) address = text.trim();
-    const isPP = /ភ្នំពេញ|pp|phnom penh|ចាក់អង្រែ|ទួលគោក|បឹងកេងកង|សែនសុខ|មានជ័យ|ដង្កោ|ច្បារអំពៅ|ឫស្សីកែវ|ជ្រោយចង្វារ|ពោធិ៍សែនជ័យ|កំបូល|ព្រែកព្នៅ/i.test(text);
-    const zone = isPP ? 'PHNOM_PENH' : 'PROVINCE';
+    const zoneRes = detectDeliveryZone(text);
+    const zone = zoneRes.zone === 'PP' ? 'PHNOM_PENH' : 'PROVINCE';
 
     if (phone || (address && address.length > 2)) {
       extracted = {
