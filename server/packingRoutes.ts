@@ -168,7 +168,7 @@ const walkieClips = new Map<string, WalkieClipEntry>();
 const walkiePresence = new Map<string, WalkiePresenceEntry>();
 const MAX_WALKIE_CLIPS = 30;
 const WALKIE_CLIP_TTL_MS = 120 * 1000;
-const WALKIE_PRESENCE_TTL_MS = 95 * 1000;
+const WALKIE_PRESENCE_TTL_MS = 150 * 1000;
 const MAX_WALKIE_BYTES = 2.5 * 1024 * 1024;
 
 const IGNORED_SYSTEM_PACKER_NAMES = new Set([
@@ -230,9 +230,9 @@ function getWalkieRoster() {
     addKnownStaffName(byName, entry.name, true);
   }
 
-  // 2. Staff currently holding active basket locks
+  // 2. Staff currently holding active basket locks (actively packing right now)
   for (const lock of activeInvoiceLocks.values()) {
-    addKnownStaffName(byName, lock.packer_name, false);
+    addKnownStaffName(byName, lock.packer_name, true);
   }
 
   // 3. Historical packerLogs (same source #1 as Leaderboard)

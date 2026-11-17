@@ -186,14 +186,20 @@ export function WalkieTalkieBar({ userRole, packerName, onShowToast }: WalkieTal
     };
 
     sendPresence();
-    const timer = setInterval(() => {
+    const onFocusOrVisible = () => {
       if (typeof document === 'undefined' || !document.hidden) {
         sendPresence();
       }
-    }, 45000);
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+
+    const timer = setInterval(onFocusOrVisible, 45000);
 
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
       clearInterval(timer);
     };
   }, [packerName, userRole]);
@@ -670,7 +676,11 @@ export function WalkieTalkieBar({ userRole, packerName, onShowToast }: WalkieTal
           }`}
           title="ជ្រើសនិយាយរួម ឬចំឈ្មោះម្នាក់ៗ"
         >
-          <option value="all">📢 ទាំងអស់</option>
+          <option value="all">
+            {userRole === 'admin'
+              ? `📢 ទាំងអស់${staffList.some(s => s.online) ? ` (🟢 ${staffList.filter(s => s.online).length})` : ''}`
+              : '📢 ទាំងអស់'}
+          </option>
           {userRole === 'admin' ? (
             staffList.map(st => (
               <option key={st.name} value={`staff:${st.name}`}>
