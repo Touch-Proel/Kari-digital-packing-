@@ -148,6 +148,253 @@ router.get(['/tts', '/api/tts'], async (req: Request, res: Response) => {
   }
 });
 
+// ==========================================
+// 🎙️ REAL-TIME WALKIE-TALKIE & COACH WHISTLE (RAM-ONLY, ZERO DB TOUCH)
+// ==========================================
+interface WalkieClipEntry {
+  buffer: Buffer;
+  contentType: string;
+  createdAt: number;
+}
+
+interface WalkiePresenceEntry {
+  clientId: string;
+  name: string;
+  role: 'admin' | 'staff';
+  lastSeen: number;
+}
+
+const walkieClips = new Map<string, WalkieClipEntry>();
+const walkiePresence = new Map<string, WalkiePresenceEntry>();
+const MAX_WALKIE_CLIPS = 30;
+const WALKIE_CLIP_TTL_MS = 120 * 1000;
+const WALKIE_PRESENCE_TTL_MS = 95 * 1000;
+const MAX_WALKIE_BYTES = 2.5 * 1024 * 1024;
+
+const IGNORED_SYSTEM_PACKER_NAMES = new Set([
+  'admin (messenger table)',
+  'shop agent web',
+  'អ្នកគ្រប់គ្រង (backlog dispatch)',
+  'admin'
+]);
+
+function pruneWalkieClips() {
+  const now = Date.now();
+  for (const [key, entry] of walkieClips.entries()) {
+    if (now - entry.createdAt > WALKIE_CLIP_TTL_MS) {
+      walkieClips.delete(key);
+    }
+  }
+  while (walkieClips.size > MAX_WALKIE_CLIPS) {
+    const oldestKey = walkieClips.keys().next().value;
+    if (!oldestKey) break;
+    walkieClips.delete(oldestKey);
+  }
+}
+
+function pruneWalkiePresence() {
+  const now = Date.now();
+  for (const [cid, entry] of walkiePresence.entries()) {
+    if (now - entry.lastSeen > WALKIE_PRESENCE_TTL_MS) {
+      walkiePresence.delete(cid);
+    }
+  }
+}
+
+function getWalkieRoster() {
+  pruneWalkiePresence();
+  const byName = new Map<string, { name: string; online: boolean; role: 'admin' | 'staff' }>();
+
+  // 1. Currently online staff tabs (live RAM presence)
+  for (const entry of walkiePresence.values()) {
+    if (entry.role !== 'staff') continue;
+    const trimmed = entry.name.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    byName.set(key, { name: trimmed, online: true, role: 'staff' });
+  }
+
+  // 2. Known packer names from recent logs (shown as offline/recent so Admin can always pick)
+  for (const log of packerLogs) {
+    const trimmed = String(log.packer_name || '').trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (IGNORED_SYSTEM_PACKER_NAMES.has(key)) continue;
+    if (!byName.has(key)) {
+      byName.set(key, { name: trimmed, online: false, role: 'staff' });
+    }
+  }
+
+  const staffList = Array.from(byName.values()).sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    return a.name.localeCompare(b.name, 'km');
+  });
+
+  const onlineStaffCount = staffList.filter(s => s.online).length;
+  return { staffList, onlineStaffCount };
+}
+
+router.post(['/walkie/presence', '/api/walkie/presence'], (req: Request, res: Response) => {
+  const { clientId = '', name = '', role = 'staff' } = req.body || {};
+  const cid = String(clientId || '').trim().slice(0, 64);
+  if (!cid) {
+    return res.status(400).json({ success: false, error: 'Missing clientId' });
+  }
+
+  const safeRole: 'admin' | 'staff' = role === 'admin' ? 'admin' : 'staff';
+  const safeName = String(name || '').trim().slice(0, 40);
+
+  const prev = walkiePresence.get(cid);
+  const changed = !prev || prev.name !== safeName || prev.role !== safeRole;
+
+  walkiePresence.set(cid, {
+    clientId: cid,
+    name: safeName,
+    role: safeRole,
+    lastSeen: Date.now()
+  });
+
+  const roster = getWalkieRoster();
+  if (changed) {
+    broadcastSSE('walkie:roster', roster);
+  }
+
+  return res.json({ success: true, ...roster });
+});
+
+router.get(['/walkie/roster', '/api/walkie/roster'], (_req: Request, res: Response) => {
+  return res.json({ success: true, ...getWalkieRoster() });
+});
+
+router.post(['/walkie/send', '/api/walkie/send'], (req: Request, res: Response) => {
+  try {
+    pruneWalkieClips();
+
+    const {
+      audioBase64,
+      contentType = 'audio/webm',
+      senderName = 'Staff',
+      senderRole = 'staff',
+      senderClientId = '',
+      targetType = 'all',
+      targetName = '',
+      whistleFirst = false,
+      durationMs = 0
+    } = req.body || {};
+
+    if (!audioBase64 || typeof audioBase64 !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing audioBase64' });
+    }
+
+    const cleanedBase64 = audioBase64.includes(',') ? audioBase64.split(',').pop() || '' : audioBase64;
+    const buffer = Buffer.from(cleanedBase64, 'base64');
+
+    if (buffer.length === 0) {
+      return res.status(400).json({ success: false, error: 'Empty audio buffer' });
+    }
+    if (buffer.length > MAX_WALKIE_BYTES) {
+      return res.status(413).json({ success: false, error: 'Voice clip exceeds 2.5MB limit' });
+    }
+
+    const safeContentType =
+      typeof contentType === 'string' && contentType.startsWith('audio/')
+        ? contentType.split(';')[0].trim()
+        : 'audio/webm';
+
+    const clipId = `wk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const createdAt = Date.now();
+
+    walkieClips.set(clipId, {
+      buffer,
+      contentType: safeContentType,
+      createdAt
+    });
+    pruneWalkieClips();
+
+    const safeRole = senderRole === 'admin' ? 'admin' : 'staff';
+    const safeName = String(senderName || (safeRole === 'admin' ? 'Admin' : 'Staff')).slice(0, 40);
+    const safeTargetType = targetType === 'admin' || targetType === 'staff' ? targetType : 'all';
+    const safeTargetName = safeTargetType === 'staff' ? String(targetName || '').trim().slice(0, 40) : '';
+
+    broadcastSSE('walkie:voice', {
+      clipId,
+      senderName: safeName,
+      senderRole: safeRole,
+      senderClientId: String(senderClientId || ''),
+      targetType: safeTargetType,
+      targetName: safeTargetName,
+      whistleFirst: Boolean(whistleFirst),
+      durationMs: Math.max(0, Math.min(30000, Number(durationMs) || 0)),
+      createdAt
+    });
+
+    return res.json({ success: true, clipId, createdAt });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Walkie send failed' });
+  }
+});
+
+router.get(['/walkie/audio/:clipId', '/api/walkie/audio/:clipId'], (req: Request, res: Response) => {
+  pruneWalkieClips();
+  const clip = walkieClips.get(String(req.params.clipId || ''));
+  if (!clip) {
+    return res.status(404).json({ success: false, error: 'Audio clip expired or not found' });
+  }
+
+  const total = clip.buffer.length;
+  res.setHeader('Content-Type', clip.contentType);
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  const range = req.headers.range;
+  if (range && range.startsWith('bytes=')) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? Math.min(parseInt(parts[1], 10), total - 1) : total - 1;
+    if (!Number.isNaN(start) && start >= 0 && start < total && end >= start) {
+      const chunk = clip.buffer.subarray(start, end + 1);
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+      res.setHeader('Content-Length', String(chunk.length));
+      return res.end(chunk);
+    }
+  }
+
+  res.setHeader('Content-Length', String(total));
+  return res.end(clip.buffer);
+});
+
+router.post(['/walkie/whistle', '/api/walkie/whistle'], (req: Request, res: Response) => {
+  const {
+    senderName = 'Admin',
+    senderRole = 'admin',
+    senderClientId = '',
+    targetType = 'all',
+    targetName = '',
+    message = ''
+  } = req.body || {};
+
+  const safeRole = senderRole === 'admin' ? 'admin' : 'staff';
+  const safeName = String(senderName || 'Admin').slice(0, 40);
+  const safeTargetType = targetType === 'staff' ? 'staff' : 'all';
+  const safeTargetName = safeTargetType === 'staff' ? String(targetName || '').trim().slice(0, 40) : '';
+  const id = `wh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const createdAt = Date.now();
+
+  broadcastSSE('walkie:whistle', {
+    id,
+    senderName: safeName,
+    senderRole: safeRole,
+    senderClientId: String(senderClientId || ''),
+    targetType: safeTargetType,
+    targetName: safeTargetName,
+    message: String(message || '').slice(0, 120),
+    createdAt
+  });
+
+  return res.json({ success: true, id, createdAt });
+});
+
 let cachedMergeRevision = -1;
 let cachedUserMap = new Map<string, Invoice[]>();
 let cachedNameMap = new Map<string, Invoice[]>();

@@ -8,6 +8,7 @@ import {
 import { Header } from './components/Header';
 import { StockDock } from './components/StockDock';
 import { GamifiedHud } from './components/GamifiedHud';
+import { WalkieTalkieBar } from './components/WalkieTalkieBar';
 import { WorkflowTabs } from './components/WorkflowTabs';
 import { BasketCard } from './components/BasketCard';
 import { LiveCommentStream } from './components/LiveCommentStream';
@@ -1363,6 +1364,27 @@ export default function App() {
           } catch {}
         });
 
+        eventSource.addEventListener('walkie:voice', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('walkie:voice', { detail: data }));
+          } catch {}
+        });
+
+        eventSource.addEventListener('walkie:whistle', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('walkie:whistle', { detail: data }));
+          } catch {}
+        });
+
+        eventSource.addEventListener('walkie:roster', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            window.dispatchEvent(new CustomEvent('walkie:roster', { detail: data }));
+          } catch {}
+        });
+
         eventSource.onerror = () => {
           if (eventSource) {
             eventSource.close();
@@ -1990,6 +2012,13 @@ export default function App() {
           onOpenNoBasketModal={() => setIsNoBasketModalOpen(true)}
           onOpenFastCheck={() => setIsFastCheckModalOpen(true)}
           onOpenBacklog={() => setIsBacklogModalOpen(true)}
+        />
+
+        {/* 4. 2-Way Walkie-Talkie & Admin Coach Whistle */}
+        <WalkieTalkieBar
+          userRole={userRole}
+          packerName={packerName}
+          onShowToast={showToast}
         />
 
         {/* 5. Workflow Tabs & Sub-Filters & Search Bar */}
