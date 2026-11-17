@@ -175,7 +175,9 @@ const IGNORED_SYSTEM_PACKER_NAMES = new Set([
   'admin (messenger table)',
   'shop agent web',
   'អ្នកគ្រប់គ្រង (backlog dispatch)',
-  'admin'
+  'admin',
+  'បុគ្គលិក',
+  'មិនទាន់កំណត់'
 ]);
 
 function pruneWalkieClips() {
@@ -201,6 +203,23 @@ function pruneWalkiePresence() {
   }
 }
 
+function addKnownStaffName(
+  byName: Map<string, { name: string; online: boolean; role: 'admin' | 'staff' }>,
+  rawName: unknown,
+  online = false
+) {
+  const trimmed = String(rawName || '').trim();
+  if (!trimmed) return;
+  const key = trimmed.toLowerCase();
+  if (IGNORED_SYSTEM_PACKER_NAMES.has(key)) return;
+  const existing = byName.get(key);
+  if (!existing) {
+    byName.set(key, { name: trimmed, online, role: 'staff' });
+  } else if (online && !existing.online) {
+    existing.online = true;
+  }
+}
+
 function getWalkieRoster() {
   pruneWalkiePresence();
   const byName = new Map<string, { name: string; online: boolean; role: 'admin' | 'staff' }>();
@@ -208,21 +227,24 @@ function getWalkieRoster() {
   // 1. Currently online staff tabs (live RAM presence)
   for (const entry of walkiePresence.values()) {
     if (entry.role !== 'staff') continue;
-    const trimmed = entry.name.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    byName.set(key, { name: trimmed, online: true, role: 'staff' });
+    addKnownStaffName(byName, entry.name, true);
   }
 
-  // 2. Known packer names from recent logs (shown as offline/recent so Admin can always pick)
+  // 2. Staff currently holding active basket locks
+  for (const lock of activeInvoiceLocks.values()) {
+    addKnownStaffName(byName, lock.packer_name, false);
+  }
+
+  // 3. Historical packerLogs (same source #1 as Leaderboard)
   for (const log of packerLogs) {
-    const trimmed = String(log.packer_name || '').trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (IGNORED_SYSTEM_PACKER_NAMES.has(key)) continue;
-    if (!byName.has(key)) {
-      byName.set(key, { name: trimmed, online: false, role: 'staff' });
-    }
+    addKnownStaffName(byName, log.packer_name, false);
+  }
+
+  // 4. Staged / Dispatched names from invoices (same source #2 as Leaderboard)
+  for (const inv of invoices) {
+    if (inv.status === 'Cancelled' || (inv as any).is_merged) continue;
+    addKnownStaffName(byName, inv.staged_by, false);
+    addKnownStaffName(byName, (inv as any).dispatched_by, false);
   }
 
   const staffList = Array.from(byName.values()).sort((a, b) => {
